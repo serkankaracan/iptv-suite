@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>IptvSuite.Infrastructure</RootNamespace>
+    <AssemblyName>IptvSuite.Infrastructure</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IptvSuite.Application\IptvSuite.Application.csproj" />
+  </ItemGroup>
+</Project>

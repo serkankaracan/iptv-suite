@@ -1,0 +1,64 @@
+# Risk kaydı
+
+**Tarih:** 2026-08-09
+
+**Durum:** Phase 0 baseline
+
+**Ölçek:** Olasılık ve etki: Düşük / Orta / Yüksek. “Owner” rolü gösterir; ekip ataması değildir.
+
+## Değerlendirme kuralı
+
+- **Yüksek etki:** release/Store'u durdurur; credential/content hakkı ihlali, ciddi güvenlik olayı veya ana playback zinciri kaybı.
+- **Orta etki:** önemli feature/platform kapsamını, performansı ya da takvimi etkiler; geçici fallback vardır.
+- **Düşük etki:** lokal çözüm/known issue ile MVP çıkarılabilir.
+- Yüksek etki + orta/yüksek olasılıklı risk acceptance criteria olmadan ileri milestone'a taşınmaz.
+- Hukuki risklerin sahibi mühendislik değildir; engineering evidence üretir, uzman/iş kararı gate'i kapatır.
+
+## Aktif riskler
+
+| ID | Risk | Olasılık | Etki | Erken uyarı işareti | Azaltma / contingency | Owner veya doğrulama milestone'u |
+|---|---|---|---|---|---|---|
+| R01 | Codec/container/protocol kombinasyonları OS, player, plugin, GPU ve driver'a göre çalışmaz | Yüksek | Yüksek | Tier A/B fixture'da black frame, software-only decode, audio yok veya cihazlar arası farklı sonuç | “Supported” tuple olarak tutulur; M10 clean-device matrix; Tier A hard gate; native dar fallback veya scope daraltma | Playback owner / M10 |
+| R02 | Xtream-compatible provider'lar endpoint, auth ve JSON alanlarında uyumsuzdur | Yüksek | Yüksek | Contract fixture dışı null/string/number, 200 içinde auth fail, duplicate ID, cookie veya sıra dışı path talebi | Adapter boundary; Live-only çağrı; sentetik variant corpus; tolerant reader + strict budgets; workaround registry değil versioned contract | Provider owner / M5–M7 |
+| R03 | libVLC/FFmpeg/mpv exact binary setinde GPL/nonfree veya eksik redistribution yükümlülüğü bulunur | Orta | Yüksek | GPL plugin/DLL, source mapping veya notice üretilememesi; package metadata ile binary farkı | Yalnız non-GPL package; exact SBOM/binary-to-source/notices; license scan; uzman OSS review; gate kapanmazsa dağıtma | Architecture/Legal / M10–M15 |
+| R04 | H.264/HEVC/AAC/AC-3/E-AC-3 codec patent yükümlülükleri iş modelini veya ülkeleri etkiler | Orta | Yüksek | Hukuk danışmanı royalty/izin veya ülke kısıtı bildirir; bundled decoder listesi büyür | OSS lisansından ayrı exact codec/binary/envanter; hedef ülke/gelir modeliyle IP hukuk görüşü; native codec veya format kapsamı contingency | Product/Legal / M10–M15 |
+| R05 | Microsoft Store BYO IPTV, third-party service/content veya privacy/testability incelemesini geçmez | Orta | Yüksek | Partner Center preflight sorusu, çalışır test account talebi, listing rejection | Player-only/authorized-source metadata; sentetik hakları temiz reviewer service; privacy/support; private submission erken; Store dışı dağıtım ancak yeni business/legal kararı | Product/Legal / M15 |
+| R06 | Samsung Türkiye dağıtımı Partner Seller, Content Manager veya offline sözleşme nedeniyle açılamaz | Yüksek | Yüksek | Samsung yazılı ülke/partner onayı vermez; sözleşme kapsamı Türkiye'yi içermez | Tizen engineering'den önce business preflight; BYO modelini yazılı anlat; onay yoksa Samsung milestone'u başlamaz/ülke kapsamı değiştirilir | Business/Product / Tizen P0 |
+| R07 | Samsung model/Tizen/Chromium/AVPlay parçalanması ortak support sözünü bozar | Yüksek | Yüksek | 2018/orta/2023-upgrade/current cihaz sonuçları ayrışır; emulator geçip TV fail olur | Minimum 2018/Tizen 4; transpile/polyfill baseline; gerçek cihaz matrisi; model-year capability table; simulator gate sayılmaz | Samsung owner / ADR-006 spike |
+| R08 | 50.000+ playlist parse/protection/persistence süresi veya memory bütçesini aşar | Orta | Yüksek | Superlinear süre/allocation, LOH/GC pause, DPAPI aşamasında bottleneck, cancellation >250 ms | Streaming parser; bounded batch; index/staging; stage metrics; 5k–50k benchmark; DPAPI layout contingency | Data/Performance / M7–M8, M14 |
+| R09 | Logo/image yükü UI'ı, ağı veya diski tüketir; malicious image local network probe/decompression bomb üretir | Yüksek | Orta | 50k request kuyruğu, scroll jank, private IP hit, cache büyümesi, decode exception | Lazy visible-window fetch; concurrency 4; no auth/cookie/referer; address/MIME/byte/pixel cap; 32/200 MiB LRU; cancellation | UI/Security / M9, M14 |
+| R10 | Player/UI/dependency terk edilir veya kritik CVE patch'i ürün SLA'sını aşar | Orta | Yüksek | Release cadence durur, unpatched CVE, WASDK servicing sonu yaklaşır, LibVLC 3 EOL | Stable-only exact lock; quarterly health review; CVE/SBOM; servicing tarihinden 90 gün önce upgrade; adapter fallback; withdrawal/forced-update plan | Architecture/Security / sürekli, M15 |
+| R11 | Native playback motoru MSIX, plugin discovery, package size veya ARM64'i geçmez | Orta | Yüksek | Unpackaged çalışıp packaged fail; plugin path hatası; WACK failure; x64-only DLL | M10 packaged spike; install dir read-only; package content/architecture tests; x64 scope açık; ARM64 yalnız native chain geçerse | Playback/Release / M10, M15 |
+| R12 | Credential/query token log, DB, crash dump veya support artifact'ına sızar | Orta | Yüksek | Canary scan hit'i, raw URI/native log, provider'ın secret echo etmesi | Opaque refs; central typed redaction; no raw body/native log/full dump; binary scans; release hard gate ve incident response | Security / M3–M5, M10, M16 |
+| R13 | DPAPI/LocalCache lifecycle veya 50k protected locator tasarımı beklenen güvenlik/performansı vermez | Orta | Yüksek | Reset/update/uninstall testinde orphan; wrong identity; import >budget | ADR-003 Proposed; packaged lifecycle + throughput fault tests; reviewed DPAPI-wrapped per-source DEK/vetted encrypted DB contingency | Security/Data / M4, M8 |
+| R14 | Pazarın önemli kısmı credential-bearing HTTP ister; TLS hard gate compatibility'yi düşürür | Yüksek | Orta | Connection probe'ların çoğu HTTP-only; support/market feedback | Credential-bearing HTTP reddi korunur; ölçümlü ürün kararı; yalnız anonymous HTTP için ayrı ADR, explicit opt-in/warning ve Store review | Product/Security / M5, post-MVP |
+| R15 | Native player uzun yayında leak, deadlock, ghost audio veya reconnect storm üretir | Orta | Yüksek | Working set/handle monotonic artar; stop sonrası callback/audio; repeated retry session | App-owned state machine; bounded retry; stale session IDs; 100/200 switch; 8/24h soak; crash/metric capture | Playback/Quality / M10–M16 |
+| R16 | “IPTV Suite” codename marka, domain veya Store identity açısından kullanılamaz | Orta | Orta | Trademark/domain/store search conflict; legal itiraz | Codename only; logo/public package/store identity yok; trademark/legal clearance M15'ten önce; rename-friendly internal identifiers | Product/Legal / M15 öncesi |
+| R17 | WinUI virtualization/search/image pipeline UI thread'i bloke eder | Orta | Orta | 50k control realize, >200 ms stall, scroll dropped frame >%1, collection reset | Indexed windowed query; ItemsRepeater/ListView virtualization; background work; image cancellation; ETW M9/M14 | Windows UI / M9, M14 |
+| R18 | Platformlar terminology/provider davranışında ayrışır veya shared alan runtime utility çöplüğüne dönüşür | Orta | Orta | Aynı fixture farklı output; undocumented fields; cross-language package coupling | Versioned schemas/error registry/golden vectors; consumer contract tests; runtime UI/player paylaşmama; semantic version | Architecture / her platform bootstrap |
+| R19 | KVKK/privacy rolü, retention veya yurt dışı aktarım sınıflandırması yanlış yapılır | Orta | Yüksek | Counsel/store farklı beyan ister; privacy text ile davranış uyuşmaz; telemetry planı | Data inventory; cihaz-içi/direct-provider açıklaması; delete controls; aydınlatma/rıza ayrımı; TR hukuk görüşü; telemetry eklenirse reopen | Product/Privacy/Legal / M15 |
+| R20 | Test/certification için gerçek credential veya yetkisiz content kullanılır | Düşük | Yüksek | Fixture'da gerçek host/channel/secret; reviewer'a müşteri hesabı verilmesi | Sentetik geliştirici-owned service; provenance manifest; secret scan; gerçek capture yasak; contributor review | Quality/Legal / M2, M10, M15 |
+| R21 | VOD/Series/EPG/UI polish temel Live TV zincirinden önce scope'a girer | Yüksek | Orta | M1–M13 issue'larında gelecekteki entity/table/screen/dependency | M16'ya kadar açık out-of-scope; milestone acceptance; future models specification-only; Product approval + yeni ADR | Product/Tech lead / tüm MVP |
+| R22 | Microsoft Store reviewer source olmadan ürünü test edemez veya fixture sertifikasyon süresince çalışmaz | Orta | Yüksek | Certification notes'ta gerçek/çalışır account yok, network dependency kapanır | Deterministic hosted synthetic service + offline-safe catalog where policy permits; monitoring/ownership; fake credential; rehearsal | Release/Product / M15 |
+| R23 | Package identity/signing erken marka adına kilitlenir ya da update lineage bozulur | Orta | Orta | Codename public identity'de görünür; publisher/identity değişimi protected data/update'i kırar | M1 disposable local identity + non-exportable ephemeral cert + exact cleanup tamamlandı; Store association fail; public reservation ve identity migration/lifecycle M15 legal clearance sonrası | Release/Product / M1 PASS, M15 |
+| R24 | Accessibility, keyboard veya TV remote/focus sonradan eklendiği için temel navigation yeniden yazılır | Orta | Orta | Keyboard focus kaybolur; UIA name yok; Samsung focus trap/Back yanlış | M2 UIA smoke, M9 keyboard/Narrator; TV design'da focus graph ve gerçek remote başlangıçtan; accessibility acceptance | UI/Samsung / M2, M9, Tizen spike |
+| R25 | App-generated request, logo veya redirect yerel ağ kaynaklarını probe eder | Orta | Orta | Playlist logo URL'si loopback/private IP'ye gider; DNS rebinding | Default private/link-local/loopback deny; final DNS/redirect recheck; same-origin private source için explicit policy | Security/Networking / M5, M9 |
+
+## En yüksek öncelikli gate'ler
+
+1. **M4/M8:** protected storage güvenlik ve 50k throughput.
+2. **M10:** libVLC compatibility, stability, MSIX ve exact license inventory.
+3. **M15:** Microsoft Store private preflight, privacy, SBOM ve codec/IP hukuk incelemesi.
+4. **Samsung başlamadan:** Partner Seller/Content Manager/Türkiye yazılı business onayı.
+5. **Her release:** credential canary scan ve critical dependency/CVE incelemesi.
+
+## Review cadence
+
+- Her milestone başlangıcında ilgili riskler ve acceptance criteria gözden geçirilir.
+- Olasılık/etki veya owner değişirse tarihli kayıt/ADR güncellenir.
+- Yeni dependency, Store ülkesi, backend/telemetry, HTTP exception, DRM/recording ya da yeni player bir risk-review tetikleyicisidir.
+- Kapanan risk silinmez; kanıt linki, tarih ve residual risk ile “Closed/Accepted” bölümüne taşınır.
+
+## Kaynaklar
+
+[Araştırma kaynakları](../research/SOURCES.md), [Security Baseline](../security/SECURITY_AND_PRIVACY_BASELINE.md), [Quality Strategy](../quality/QUALITY_AND_PERFORMANCE_STRATEGY.md)

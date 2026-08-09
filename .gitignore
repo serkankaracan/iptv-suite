@@ -1,0 +1,58 @@
+# Build outputs
+**/bin/
+**/obj/
+artifacts/
+.artifacts/
+TestResults/
+coverage/
+*.trx
+
+# IDE and user state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Windows packaging outputs and signing material
+AppPackages/
+BundleArtifacts/
+*.appx
+*.appxbundle
+*.appinstaller
+*.msix
+*.msixbundle
+*.appxupload
+*.msixupload
+*.appxsym
+*.msixsym
+*.cer
+*.pfx
+*.p12
+*.pvk
+*.key
+*.pem
+*.snk
+*.publishsettings
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+secrets.json
+appsettings.*.local.json
+
+# Logs and crash artifacts
+*.log
+*.dmp
+*.dump
+*.mdmp
+*.etl
+*.binlog
+
+# Operating-system files
+Thumbs.db
+Desktop.ini
+.DS_Store
