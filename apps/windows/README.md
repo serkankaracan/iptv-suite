@@ -1,6 +1,6 @@
-# Windows development ve M2 test bootstrap
+# Windows development, quality gate ve M3 domain
 
-Bu klasör M1 kapsamındaki tek platform uygulamasını ve M2 test scaffold'unu içerir. M2 mühendislik kabulü **PASS, 2026-08-09** durumundadır: local iki-run quality gate ve commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` için [hosted run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270) geçmiştir. Uygulama hâlâ yalnız gerçek assembly/package sürümünü, build configuration'ını ve process architecture'ını gösteren boş development shell'dir; test fake'leri ürün özelliği veya production adapter değildir.
+Bu klasör Windows uygulamasını, M2 test scaffold'unu ve M3 saf domain/validation çekirdeğini içerir. M2 hosted kabulü ve M3 local mühendislik kabulü **PASS, 2026-08-09** durumundadır. M3 sonrası gate 105/105 testi iki koşuda geçmiştir. Uygulama hâlâ yalnız gerçek assembly/package sürümünü, build configuration'ını ve process architecture'ını gösteren development shell'dir; M3 kullanıcı formu, network/provider, secure storage, parser, database veya playback özelliği değildir.
 
 ## Toolchain
 
@@ -32,6 +32,14 @@ Build içindeki analyzers/code-style denetimi lint gate'idir; ayrı bir linter d
 
 Yeni package sürümü bilinçli değiştirildiğinde önce normal restore ile lock dosyaları güncellenir, diff incelenir ve ardından yukarıdaki `--locked-mode` akışı tekrar çalıştırılır.
 
+## M3 domain ve güvenli validation
+
+- `ContentSource`, `PlaylistSnapshot`, `ChannelCategory`, `LiveChannel`, typed ID ve versioned `ChannelStableKey` contract'ları `IptvSuite.Domain` içindedir. `LiveChannel` tam bir oynatma kaynağı olarak ya typed provider item key ya da protected locator reference taşır; M3U `tvg-id` tek başına oynatılabilir sayılmaz.
+- Xtream-compatible ve remote playlist girdileri yalnız HTTPS kabul eder. `SafeEndpoint` yalnız IDNA host, scheme ve effective port taşır; raw path/query/user-info/fragment taşımaz.
+- Başarılı sonuç username, password veya full locator döndürmez; yalnız random opaque `SecretReference` ya da `ProtectedLocatorReference` içerir. Bunların platform-protected persistence'ı M4 kapsamıdır.
+- Source adı 100, locator 4096, username 256 ve password 1024 Unicode scalar ile sınırlıdır; NFC, invalid UTF-16, control/NUL ve IDNA/IPv4/IPv6 vakaları table testlerindedir.
+- URI/header/untrusted-text diagnostics policy'si raw input'u geri üretmez. `.m3u8` uzantısı catalog/HLS kararı vermez; bounded content-prefix classifier kullanılır, gerçek incremental parser M7'ye kalır.
+
 ## M2 iki-run quality gate
 
 Repository kökünde tek quality komutunu çalıştırın:
@@ -40,7 +48,7 @@ Repository kökünde tek quality komutunu çalıştırın:
 .\eng\Invoke-WindowsQualityGate.ps1
 ```
 
-`Invoke-WindowsQualityGate.ps1`; `global.json` içindeki exact SDK/`rollForward: disable` kuralını doğrular, locked restore yapar, Debug ve Release x64 build'lerini çalıştırır, architecture/unit/integration projelerini Release'te ayrı TRX dosyalarıyla iki kez koşar ve iki koşunun sıralanmış `testName|Passed` setlerini karşılaştırır. Her test host'unda iki dakikalık hang timeout vardır; secret taşıyabilecek dump üretilmez. TRX dosyaları timestamp ve execution order nedeniyle byte-identical olmak zorunda değildir.
+`Invoke-WindowsQualityGate.ps1`; `global.json` içindeki exact SDK/`rollForward: disable` kuralını doğrular, locked restore yapar, Debug ve Release x64 build'lerini tek MSBuild node ile çalıştırır, architecture/unit/integration projelerini Release'te ayrı TRX dosyalarıyla iki kez koşar ve iki koşunun sıralanmış `testName|Passed` setlerini karşılaştırır. Tek-node sınırı high-core Windows host'larında restore/build process fan-out'unu sınırlar; method-level paralel test izolasyonu korunur. Her test host'unda iki dakikalık hang timeout vardır; secret taşıyabilecek dump üretilmez. TRX dosyaları timestamp ve execution order nedeniyle byte-identical olmak zorunda değildir.
 
 Betik fixture'ı iki ayrı dizinde üretip `records.json` ile `fixture-manifest.json` SHA-256 değerlerinin eşitliğini denetler. Sonra `Invoke-QualityGateSelfTest.ps1` aracılığıyla `IPTV_SUITE_ARM_QUALITY_GATE_SENTINEL=1` iken hedef testin gerçekten başarısız, değişken kaldırılınca yeniden başarılı olduğunu kanıtlar; process'in önceki environment değerini `finally` içinde geri yükler. Quality artifact'larını summary yazılmadan önce ve sonra canary marker'ı için tarar.
 

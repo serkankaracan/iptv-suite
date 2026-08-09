@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\IptvSuite.Domain\IptvSuite.Domain.csproj" />
     <ProjectReference Include="..\IptvSuite.Testing\IptvSuite.Testing.csproj" />
   </ItemGroup>
 </Project>

@@ -1,12 +1,14 @@
 # Domain ve veri contract'ları
 
-**Durum:** Phase 0 specification
+**Durum:** M3 Windows contract implementation completed; persistence/provider/parser davranışı specification
 
 **Tarih:** 2026-08-09
 
 **Kapsam:** Windows Live TV MVP terminology; gelecek kavramlar yalnız specification
 
 ## 1. Tasarım kuralları
+
+Windows M3 implementation'ı bu belgedeki Live TV terminology'sinin ilk saf `net10.0` karşılığını içerir. Source adı 100, locator 4096, username 256 ve password 1024 Unicode scalar ile sınırlıdır. `SafeEndpoint`, opaque references, stable errors, source/snapshot/category/channel invariant'ları ve content-based catalog/HLS karar contract'ı test edilmiştir. Network, protected persistence, provider mapping, incremental parser ve database bu uygulama iddiasının dışındadır.
 
 - Domain dili provider endpoint'ini veya player library'sini değil, ürünü anlatır.
 - Provider payload'ı güvenilmeyen external contract'tır. Adapter sınırında çevrilir; doğrudan presentation veya persistence'e geçmez.
@@ -84,11 +86,12 @@ Bu tablolar language-neutral contract'tır; code-generation talimatı değildir.
 | `stableKey` | `ChannelStableKey` | Refresh boyunca favorite reconciliation; source-scoped. |
 | `snapshotId` | `SnapshotId` | Required. |
 | `categoryId` | `CategoryId` | Missing group synthetic category'ye map edilir. |
-| `providerKey` | optional bounded text | Xtream stream ID veya M3U `tvg-id`; source-scoped. |
+| `providerKey` | optional bounded text | Identity metadata; örneğin M3U `tvg-id`. Tek başına playback kaynağı değildir. |
+| `providerPlaybackKey` | optional typed `ProviderItemKey` | Xtream-compatible item key; locator biçimi kabul etmez ve `ToString` değeri açmaz. |
 | `name` | non-empty display text | Control removed, length-bound. |
 | `number` | optional positive integer | Geçerliyse provider/M3U number. |
 | `logoReference` | optional opaque cache/locator ref | UI raw remote URL görmez. |
-| `streamReference` | `ProtectedLocatorReference` veya provider item key | Raw stream URL log/view state'e girmez. |
+| `streamReference` | optional `ProtectedLocatorReference` | Raw stream URL log/view state'e girmez. `providerPlaybackKey` ile tam olarak biri bulunur. |
 | `containerHint` | optional enum | `Hls` veya `MpegTs` gibi hint; codec support kanıtı değildir. |
 | `isAdultHint` | optional boolean | Provider hint; policy ayrı product decision. |
 | `normalizationWarnings` | bounded flag set | Invalid number, missing group, duplicate provider ID gibi. |
@@ -113,11 +116,12 @@ Refresh favorite'ı eşleyemezse onu benzer isimli kanala sessizce bağlamak yer
 | `SafeEndpoint` | Yalnız normalized scheme, IDNA host ve port; diagnostics/UI için raw secret'tan ayrı. |
 | `SecretReference` | Secret'ı reveal veya stringify edemeyen opaque lookup token. |
 | `ProtectedLocatorReference` | Encrypted stream/logo locator'a opaque reference. |
+| `ProviderItemKey` | Locator biçimini reddeden bounded provider playback identifier; M3U identity metadata'sından ayrıdır. |
 | `ContentHash` | Cache equality için fixed-size validated digest. |
-| `DomainError` | Stable code + retryability + safe context; original exception infrastructure-only. |
+| `DomainError` | Stable code + retryability + resource key; M3 arbitrary context yüzeyi taşımaz, original exception infrastructure-only kalır. |
 | `PlaybackCapability` | Protocol/container/codecs/tracks/player/OS/device sonucu; global support boolean'ı değil. |
 
-Bu type'ların serialization ve string-format davranışı explicit olmalıdır. Secret ref veya untrusted display string diagnostic scope'a otomatik girmez.
+Bu type'ların serialization ve string-format davranışı explicit olmalıdır. M3'te opaque reference ve stable error JSON contract'ları explicit'tir; aggregate, typed ID, `SafeEndpoint` ve stable-key için varsayılan `System.Text.Json` round-trip bir persistence contract'ı değildir ve M8 mapping kararı öncesi kullanılmaz. Secret ref veya untrusted display string diagnostic scope'a otomatik girmez.
 
 ## 5. Provider adapter sınırı
 
@@ -175,7 +179,7 @@ Kurallar:
 4. En az `tvg-id`, `tvg-name`, `tvg-logo`, `group-title` ve common number hint tanınır. Attribute adı case-insensitive, value Unicode normalization sonrası korunur.
 5. Unknown directive/attribute davranış için ignored, diagnostics için bounded count'tur; raw unbounded payload tutulmaz.
 6. Text/line/attribute/item/total byte maksimumları vardır. NUL/control, oversized line veya budget breach policy'ye göre reject/quarantine olur.
-7. Relative locator final authorized playlist URI'ına resolve edilir. `file`, `javascript`, `data`, `ftp`, `smb` ve unknown scheme reddedilir.
+7. Relative locator final authorized playlist URI'ına resolve edilir. `file`, `javascript`, `data`, `ftp`, `smb` ve unknown scheme reddedilir. Parser locator'ı identity metadata olan `providerKey`/`tvg-id` alanına map etmez.
 8. Bilinen token key görünmese bile locator sensitive kabul edilir; persistence `ProtectedLocatorReference` kullanır.
 9. Parse/staging bounded aralıklarla cancellation check eder. Cancellation active snapshot'ı değiştirmez.
 10. HLS master/media manifest channel catalog değildir. Content sniffing onu single-stream source yoluna route eder; malformed veya desteklenmeyen manifest typed `UnsupportedPlaylistFormat` sonucu verir.

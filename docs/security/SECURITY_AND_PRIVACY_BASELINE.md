@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 baseline; exact protected-storage layout M4 spike'ı sonrası kabul edilir
+**Durum:** M3 validation/redaction contract'ı implemented; exact protected-storage layout M4 spike'ı sonrası kabul edilir
 
 **Kapsam:** Windows MVP; platformlar aynı ilkeleri kendi güvenli API'leriyle uygular
 
@@ -18,6 +18,10 @@ Baseline hedefleri:
 - local data minimum süre tutulur, kullanıcı tarafından silinebilir ve migration sırasında açığa çıkmaz;
 - exact native/OSS dependency seti izlenir ve güvenlik güncellemesi alır;
 - uygulama content/provider sağlamaz, erişim kontrolü veya DRM aşmaz.
+
+M3 local kabulü; raw locator/credential döndürmeyen source validation, scheme+IDNA host+effective port ile sınırlı `SafeEndpoint`, random opaque references, registry-only stable safe errors ve provider host'unu default gizleyen pure URI/header/untrusted-text redaction contract'ını 105 testlik iki-run gate içinde doğrulamıştır. Henüz production persistence veya log sink implementation'ı yoktur; DPAPI koruması, restart/wrong-user, delete/reconciliation, DB/WAL/SHM taraması ve retention enforcement M4'e kadar `UNVERIFIED` kalır.
+
+M3 opaque reference'ın temsilini doğrular, fakat protected record ile `SafeEndpoint`/source/purpose binding'ini kanıtlamaz. M4'te store-write + purpose-namespaced reference issuance + configuration creation tek application operation olur; M5'te resolve edilen locator yeniden HTTPS validation'dan geçirilip beklenen endpoint/source ile eşleştirilir. Cross-source, stream/logo purpose-swap, reference-swap ve missing-reference testleri geçmeden opaque ID tek başına authorization veya origin kanıtı sayılmaz.
 
 ## 2. Veri sınıflandırması
 

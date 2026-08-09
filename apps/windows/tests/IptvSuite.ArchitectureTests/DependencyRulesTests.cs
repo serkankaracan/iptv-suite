@@ -55,7 +55,7 @@ public sealed class DependencyRulesTests
         new(
             "IptvSuite.UnitTests",
             "apps/windows/tests/IptvSuite.UnitTests/IptvSuite.UnitTests.csproj",
-            ["IptvSuite.Testing"],
+            ["IptvSuite.Domain", "IptvSuite.Testing"],
             [],
             ["MSTest"]),
         new(
@@ -273,6 +273,48 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void DomainRemainsPureAndMvpScoped()
+    {
+        string domainRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src", "IptvSuite.Domain");
+        string[] sourceFiles = Directory.EnumerateFiles(domainRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !IsBuildOutputPath(domainRoot, path))
+            .ToArray();
+        string combinedSource = string.Join('\n', sourceFiles.Select(File.ReadAllText));
+        string[] forbiddenRuntimeSymbols =
+        [
+            "System.IO",
+            "System.Net.Http",
+            "HttpClient",
+            "HttpRequestMessage",
+            "WebRequest",
+            "System.Net.Sockets",
+            "Microsoft.Data.Sqlite",
+            "ProtectedData",
+            "PasswordVault",
+            "LocalCache",
+            "Microsoft.UI",
+            "Windows.Storage",
+            "ISecretStore",
+            "IPlayer",
+        ];
+
+        foreach (string forbiddenSymbol in forbiddenRuntimeSymbols)
+        {
+            Assert.IsFalse(
+                combinedSource.Contains(forbiddenSymbol, StringComparison.Ordinal),
+                $"M3 Domain must not contain runtime/infrastructure symbol {forbiddenSymbol}.");
+        }
+
+        string[] futureTypes = ["Movie", "Series", "Season", "Episode", "EpgProgramme"];
+        foreach (string futureType in futureTypes)
+        {
+            Assert.IsFalse(
+                Regex.IsMatch(combinedSource, $@"\b(?:class|record|struct)\s+{futureType}\b"),
+                $"Future type {futureType} must not be added before its milestone.");
+        }
+    }
+
+    [TestMethod]
     public void CiWorkflowIsLeastPrivilegePinnedAndAlwaysTriggered()
     {
         string workflowPath = Path.Combine(RepositoryRoot, ".github", "workflows", "windows-quality.yml");
@@ -312,6 +354,16 @@ public sealed class DependencyRulesTests
     {
         string path = Path.Combine(RepositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
         return XDocument.Load(path, LoadOptions.PreserveWhitespace);
+    }
+
+    private static bool IsBuildOutputPath(string projectRoot, string path)
+    {
+        string relativePath = Path.GetRelativePath(projectRoot, path);
+        int separatorIndex = relativePath.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        ReadOnlySpan<char> firstSegment = separatorIndex < 0
+            ? relativePath.AsSpan()
+            : relativePath.AsSpan(0, separatorIndex);
+        return firstSegment.SequenceEqual("bin") || firstSegment.SequenceEqual("obj");
     }
 
     private static string[] GetIncludes(XDocument project, string itemName)

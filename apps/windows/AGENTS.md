@@ -4,13 +4,24 @@ Bu dosya `apps/windows/` ağacı için kök `AGENTS.md` kurallarını daraltır.
 
 ## Proje sınırları
 
-- `IptvSuite.Domain`: plain `net10.0`, project/package dependency yok.
+- `IptvSuite.Domain`: plain `net10.0`, project/package dependency yok; M3 terminology, pure validation, safe error ve redaction contract'ları burada kalır.
 - `IptvSuite.Application`: yalnız `IptvSuite.Domain` project reference'ı.
 - `IptvSuite.Infrastructure`: yalnız `IptvSuite.Application` project reference'ı; WinUI tipi yok.
 - `IptvSuite.Windows`: tek Presentation/composition root; yalnız Application ve Infrastructure'a bağlı.
 - `IptvSuite.Testing`: yalnız test destek executable/library'si; production proje reference'ı yoktur ve production tarafından referans alınamaz.
-- `IptvSuite.UnitTests` ve `IptvSuite.IntegrationTests`: yalnız `IptvSuite.Testing` ile MSTest'e bağlı M2 harness testleridir; architecture test ayrı kalır.
-- M2 test double'ları production `IPlayer`, `ISecretStore` veya provider contract'ı değildir. Ürün player/provider/parser/HTTP/database/secret-store mantığı, DI/MVVM paketi ve feature navigation ekleme.
+- `IptvSuite.UnitTests`: `IptvSuite.Domain`, `IptvSuite.Testing` ve MSTest'e bağlıdır; M3 domain table testleri ile M2 harness testlerini içerir. `IptvSuite.IntegrationTests` yalnız `IptvSuite.Testing` ile MSTest'e bağlıdır; architecture test ayrı kalır.
+- M2 test double'ları production `IPlayer`, `ISecretStore` veya provider contract'ı değildir. M3'te ürün player/provider/parser/HTTP/database/secret-store mantığı, DI/MVVM paketi ve feature navigation ekleme.
+
+## M3 domain güvenlik sınırı
+
+- `SafeEndpoint` yalnız HTTPS scheme, IDNA host ve effective port taşır; raw path, query, fragment veya user-info'dan locator üretmez.
+- Username, password ve full remote locator yalnız validation çağrısının kısa ömürlü girdisidir; başarılı domain sonucu yalnız opaque `SecretReference`/`ProtectedLocatorReference` taşır.
+- Domain error yalnız stable code, retryability ve resource key taşır; exception, provider text veya raw input context'i ekleme.
+- `LiveChannel` playback için typed `ProviderItemKey` ile `ProtectedLocatorReference` alanlarından tam olarak birini taşır; identity metadata olan M3U `tvg-id` tek başına playback reference değildir.
+- HTTP ETag opaque validator'dır; trim, Unicode normalization veya case dönüşümü uygulama.
+- Source display name sınırı 100 Unicode scalar; locator 4096, username 256 ve password 1024 scalar'dır. Sınırı değiştirirsen contract testlerini ve ilgili mimari belgeyi birlikte güncelle.
+- M3U/HLS ayrımı uzantıdan yapılmaz. M3 yalnız bounded content-prefix karar contract'ıdır; gerçek incremental parser M7'ye aittir.
+- Movie, Series, Season, Episode ve EPG production type'larını ilgili post-MVP milestone'dan önce ekleme.
 
 ## Zorunlu doğrulama
 

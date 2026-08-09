@@ -19,6 +19,8 @@ $fixtureRoot = Join-Path $qualityRoot "fixtures"
 $evidenceRoot = Join-Path $qualityRoot "evidence"
 $summaryPath = Join-Path $evidenceRoot "quality-summary.json"
 $selfTestScript = Join-Path $PSScriptRoot "Invoke-QualityGateSelfTest.ps1"
+# A single MSBuild node keeps the gate reliable on high-core Windows hosts and bounds process memory.
+$maximumBuildNodes = 1
 
 $testProjects = [ordered]@{
     architecture = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.ArchitectureTests\IptvSuite.ArchitectureTests.csproj"
@@ -193,6 +195,7 @@ function Invoke-TestRun {
             "--blame-hang",
             "--blame-hang-timeout", "2m",
             "--blame-hang-dump-type", "none",
+            "-maxcpucount:$maximumBuildNodes",
             "--nologo"
         )
     }
@@ -245,6 +248,7 @@ Invoke-CheckedDotNet -FailureMessage "Locked restore failed." -ArgumentList @(
     "--locked-mode",
     "--configfile", $nuGetConfigPath,
     "-p:Platform=x64",
+    "--disable-parallel",
     "--nologo"
 )
 
@@ -255,6 +259,7 @@ foreach ($configuration in @("Debug", "Release")) {
         "-c", $configuration,
         "-p:Platform=x64",
         "--no-restore",
+        "-maxcpucount:$maximumBuildNodes",
         "--nologo"
     )
 }
@@ -297,9 +302,15 @@ Invoke-CheckedDotNet -FailureMessage "Artifact canary scan failed before summary
 )
 
 $fixtureSpecification = Get-Content -Raw -LiteralPath $fixtureSpecificationPath | ConvertFrom-Json
+$commitSha = $null
+if ($env:GITHUB_SHA -match '\A[0-9a-fA-F]{40}\z') {
+    $commitSha = $env:GITHUB_SHA.ToLowerInvariant()
+}
+
 $summary = [ordered]@{
     schemaVersion = 1
-    milestone = "M2"
+    milestone = "M3"
+    commitSha = $commitSha
     sdkVersion = $actualSdk
     configuration = "Debug+Release"
     platform = "x64"
@@ -330,5 +341,5 @@ Invoke-CheckedDotNet -FailureMessage "Final artifact canary scan failed." -Argum
     "QUALITY_ARTIFACTS"
 )
 
-Write-Host "M2 Windows quality gates passed: $($runOneResults.Count) tests x 2 deterministic runs."
+Write-Host "M3 Windows quality gates passed: $($runOneResults.Count) tests x 2 deterministic runs."
 Write-Host "Evidence: $summaryPath"

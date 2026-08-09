@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 implementation plan; M1 ve M2 completed
+**Durum:** Phase 0 implementation plan; M1, M2 ve M3 completed
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -124,6 +124,8 @@ Bu kanıtla M2 mühendislik kabulü `Completed` ve yeşil pipeline demo çıktı
 
 ## M3 — Domain terminology, validation ve safe errors
 
+**Implementation status:** Completed — 2026-08-09; local acceptance PASS
+
 ### Amaç
 
 Provider/UI/player'dan bağımsız, tek ve güvenli Live TV domain dilini ve input validation'ı uygulamak.
@@ -164,6 +166,15 @@ URL canonicalization'ın provider locator'ını bozması veya “safe” display
 ### Demo çıktısı
 
 Sentetik Xtream/M3U configuration'larının güvenli kabul/ret ve localized error-key sonucunu gösteren test report/harness.
+
+### Uygulama kanıtı
+
+- Plain `net10.0` Domain; typed ID'ler, immutable Live TV contract'ları, exactly-one provider-item/protected-locator playback reference, versioned/source-scoped stable key, stable error/retry/resource-key registry ve typed result içerir; project/package/framework bağımlılığı yoktur.
+- Xtream ve remote playlist validation HTTPS hard gate, NFC/Unicode scalar sınırları, invalid UTF-16/control/NUL, IDNA/IPv4/IPv6 ve opaque reference kurallarını uygular. Başarılı config raw username/password/path/query/user-info/locator döndürmez.
+- Pure URI/header/untrusted-text redaction ile same/cross-origin redirect target policy'si network çağrısı yapmadan doğrulanır. Bounded content classifier `.m3u`/`.m3u8` uzantısını karar girdisi almaz ve catalog/HLS master/HLS media ayrımını içerikten yapar; gerçek parser M7'ye bırakılmıştır.
+- Exact SDK locked gate Debug/Release x64 build'i sıfır warning/error ile tamamladı; architecture 9, unit 91 ve integration 5 olmak üzere **105/105 test**, iki ayrı koşuda aynı `Passed` setini verdi. Sentinel fail/recovery, deterministic fixture hashleri ve artifact canary scan de geçti.
+- Network/provider, DPAPI/secret persistence, database, UI form ve playback eklenmedi; bunlar M4+ kapsamında açık kalır.
+- Opaque reference ile protected record/source/endpoint binding'i M3 kanıtı değildir; issuance M4'te atomikleşir, resolved locator origin equality ve ref-swap testleri M5'te hard gate olur.
 
 ## M4 — Secure credential storage ve merkezi redaction
 

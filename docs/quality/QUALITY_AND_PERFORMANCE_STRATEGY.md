@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 test/ölçüm sözleşmesi; bütçeler M14 kanıtıyla kalibre edilir
+**Durum:** M2 quality infrastructure ve M3 domain gate implemented; performans bütçeleri M14 kanıtıyla kalibre edilir
 
 ## 1. İlke
 
@@ -52,6 +52,8 @@ M2 fixture specification'ı generator `1.0.0`, algorithm version `1`, seed `2026
 Canary açıkça test-only marker'dır. Scanner marker'ın UTF-8, UTF-16LE/BE, URI-escaped ve alignment-safe Base64 varyantlarını scope'tan bağımsız ve chunk boundary boyunca arar; marker taşıyan artifact path'ini fingerprint ile redakte eder. Library corpus'una ek olarak CLI, kontamine artifact'ta exact exit `2`, cleanup sonrası temiz artifact'ta `0` vermelidir. Bu kontrol genel secret discovery/redaction doğruluğu veya production artifact güvenliği iddiası değildir. GitHub job logları artifact scan kapsamına girmez ve canary sonucu `UNVERIFIED` kalır. Hang timeout'ta full/minidump üretilmez; test host `dump-type none` ile sonlandırılır.
 
 Local M2 gate'i `eng/Invoke-WindowsQualityGate.ps1` komutudur. Exact SDK `10.0.302` (`rollForward: disable`, prerelease kapalı), locked restore, Debug/Release x64 build, aynı full suite'in ayrı TRX dizinlerinde iki ardışık geçişi, exact sentinel TRX'inde armed `Failed`/disarmed `Passed`, scanner CLI exit `2`/`0`, fixture byte/SHA-256 eşitliği ve quality-artifact canary taramasını tek akışta doğrular. TRX byte eşitliği beklenmez; sıralanmış `testName|Passed` seti karşılaştırılır. Sanitized local özet `.artifacts/quality-gates/evidence/quality-summary.json` altında üretilir.
+
+M3 sonrası aynı gate high-core host restore/build process fan-out'unu sınırlamak için MSBuild node sayısını bire sabitler; method-level paralel unit/integration isolation davranışını değiştirmez. M3 summary'si hosted koşuda doğrulanmış 40-hex `GITHUB_SHA`, local koşuda `null` commit alanı taşır; dirty local değişikliği yanlış bir commit'e bağlamaz. 2026-08-09 local koşusunda architecture 9, unit 91 ve integration 5 olmak üzere 105/105 test iki kez aynı `Passed` setini üretmiş; sentinel, fixture ve canary kontrolleri de geçmiştir. Bu local sonuç hosted/package M3 kanıtı değildir ve M2'nin tarihsel 22-test artifact'ını değiştirmez.
 
 Hosted `windows-quality.yml` bütün pull request, `merge_group`, `main` push ve manual dispatch olaylarında `windows-2025-vs2026` üzerinde exact SDK ile quality gate'i çalıştırır; package job'u quality başarısına bağlıdır. `always()` coordinator'ı quality fail veya package skip/fail sonucunu tek `Required Windows gate` check'inde kırmızıya çevirir. Workflow düzeyinde path filter bilerek yoktur, çünkü filtre nedeniyle skip edilen required check `Pending` kalıp merge'i engelleyebilir [S81]. Raw TRX upload edilmez; scanner'dan geçmiş minimal summary, manifest + license sidecar ve package success evidence yedi gün tutulur. Yeşil hosted package job'u yalnız o commit/runner için signed x64 MSIX'in hedefli test-payload/canary inspection, install, visible launch, normal close ve exact cleanup zincirini kanıtlar. Workflow source'u, başarılı run/artifact olmadan kanıt değildir. Bu smoke; feature UI/UIA/accessibility, update/migration, WACK/Store, non-admin veya clean-machine matrisi, gerçek provider/internet, player/codec/HW decode, ARM64 ve genel credential yokluğu kanıtı değildir.
 
@@ -319,7 +321,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 |---|---|
 | M1 | PASS: clean temp workspace + empty-cache locked restore, Debug/Release x64 build, 6/6 boundaries/toolchain/manifest, negative gate, signed install/launch/normal-close/uninstall |
 | M2 | PASS, 2026-08-09: local exact-SDK iki-run 22/22, fixture/canary CLI/sentinel exact-TRX; hosted quality + signed packaged-smoke + coordinator success ve iki doğrulanmış sanitized artifact |
-| M3 | Validation, terminology, redaction unit corpus |
+| M3 | PASS, 2026-08-09: local exact-SDK iki-run 105/105; domain invariants, terminology, safe endpoint/configuration, opaque references, bounded playlist-kind decision, redirect policy ve redaction corpus |
 | M4 | Packaged secret-store + canary artifact scan |
 | M5 | HTTP fault/redirect/TLS/timeout/cancel suite |
 | M6 | Xtream Live contract variants |
