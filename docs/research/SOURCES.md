@@ -1,6 +1,6 @@
 # Araştırma kaynakları
 
-**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency yeniden doğrulaması 2026-08-10
+**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency ve VS packaged-launch yeniden doğrulaması 2026-08-10
 
 **Kapsam:** Phase 0 mimari, playback, güvenlik, mağaza ve platform kararları
 
@@ -43,7 +43,7 @@
 |---|---|---|---|---|---|---|
 | S70 | Windows SDK BuildTools | Microsoft / NuGet | [Resmî paket](https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools/10.0.26100.8249) | Visual Studio kurulumu olmadan Windows SDK/MSIX build araçlarının exact stable paketi | 10.0.26100.8249, 2026-05-26 | 2026-08-09 |
 | S71 | MSTest | Microsoft / NuGet | [Resmî paket](https://www.nuget.org/packages/MSTest/4.3.3) | .NET 10 uyumlu Microsoft-supported test metapaketinin current stable sürümü | 4.3.3, 2026-07-28 | 2026-08-09 |
-| S72 | Single-project MSIX | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/single-project-msix) | Ayrı `.wapproj` olmadan packaged WinUI ve `GenerateAppxPackageOnBuild` yolu | Güncel | 2026-08-09 |
+| S72 | Single-project MSIX | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/single-project-msix) | Ayrı `.wapproj` olmadan packaged WinUI; Visual Studio F5 için `launchSettings.json` içinde `MsixPackage` profili | VS 2026 güncel belge | 2026-08-10 |
 | S73 | Create a package-signing certificate | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/msix/package/create-certificate-package-signing) | Publisher/Subject eşitliği, code-signing EKU ve local test trust-store gereksinimi | Güncelleme 2025-04-22 | 2026-08-09 |
 | S74 | MSIX signing overview | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/msix/package/signing-package-overview) | Signed ve trusted MSIX install zorunluluğu; self-signed local test ile Store signing ayrımı | Güncelleme 2026-04-15 | 2026-08-09 |
 | S75 | Windows App Development CLI | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/) | `winapp` CLI'nin public preview olması; M1 stable-only build zincirine alınmama gerekçesi | Public preview, 2026 | 2026-08-09 |

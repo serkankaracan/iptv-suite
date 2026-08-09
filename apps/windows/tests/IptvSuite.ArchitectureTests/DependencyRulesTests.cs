@@ -208,6 +208,31 @@ public sealed class DependencyRulesTests
                 Assert.IsNull(enableMsixTooling, $"MSIX tooling leaked into {rule.Name}.");
             }
         }
+
+        using JsonDocument launchSettings = LoadJson(
+            "apps/windows/src/IptvSuite.Windows/Properties/launchSettings.json");
+        JsonProperty[] profiles = launchSettings.RootElement
+            .GetProperty("profiles")
+            .EnumerateObject()
+            .ToArray();
+
+        Assert.HasCount(1, profiles);
+        Assert.AreEqual("IptvSuite.Windows (Package)", profiles[0].Name);
+        Assert.HasCount(3, profiles[0].Value.EnumerateObject().ToArray());
+        Assert.AreEqual("MsixPackage", profiles[0].Value.GetProperty("commandName").GetString());
+        Assert.IsFalse(profiles[0].Value.GetProperty("alwaysReinstallApp").GetBoolean());
+        Assert.IsFalse(profiles[0].Value.GetProperty("nativeDebugging").GetBoolean());
+
+        string solution = File.ReadAllText(
+            Path.Combine(RepositoryRoot, "apps", "windows", "IptvSuite.Windows.sln"));
+        const string windowsProjectGuid = "{1D606C2E-0328-4C4C-9DFE-383651FC0CD1}";
+
+        foreach (string configuration in new[] { "Debug", "Release" })
+        {
+            StringAssert.Contains(
+                solution,
+                $"{windowsProjectGuid}.{configuration}|x64.Deploy.0 = {configuration}|x64");
+        }
     }
 
     [TestMethod]
@@ -355,6 +380,12 @@ public sealed class DependencyRulesTests
     {
         string path = Path.Combine(RepositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
         return XDocument.Load(path, LoadOptions.PreserveWhitespace);
+    }
+
+    private static JsonDocument LoadJson(string relativePath)
+    {
+        string path = Path.Combine(RepositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        return JsonDocument.Parse(File.ReadAllText(path));
     }
 
     private static bool IsBuildOutputPath(string projectRoot, string path)

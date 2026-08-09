@@ -33,6 +33,14 @@ Build içindeki analyzers/code-style denetimi lint gate'idir; ayrı bir linter d
 
 Yeni package sürümü bilinçli değiştirildiğinde önce normal restore ile lock dosyaları güncellenir, diff incelenir ve ardından yukarıdaki `--locked-mode` akışı tekrar çalıştırılır.
 
+## Visual Studio'da çalıştırma
+
+1. `apps/windows/IptvSuite.Windows.sln` dosyasını açın ve solution platformunu `x64`, configuration'ı `Debug` seçin. **Build > Configuration Manager** içindeki `IptvSuite.Windows` satırında `Build` ve `Deploy` işaretli olmalıdır; solution bu eşlemeleri Debug/Release için source-control altında taşır.
+2. `IptvSuite.Windows` projesini **Başlangıç Projesi Olarak Ayarla** seçeneğiyle işaretleyin.
+3. Debug target listesinden **IptvSuite.Windows (Package)** profilini seçip `F5` kullanın.
+
+Source-controlled `Properties/launchSettings.json`, Visual Studio'ya packaged single-project MSIX deploy/launch yolu için `MsixPackage` komutunu verir. Profil görünmezse solution'ı kapatıp yeniden açın veya projeyi unload/reload edin. `IptvSuite.Windows (Package)` yerine unpackaged/Project profili eklemeyin; uygulamanın identity ve `LocalCache` davranışı packaged modele bağlıdır.
+
 ## M3 domain ve güvenli validation
 
 - `ContentSource`, `PlaylistSnapshot`, `ChannelCategory`, `LiveChannel`, typed ID ve versioned `ChannelStableKey` contract'ları `IptvSuite.Domain` içindedir. `LiveChannel` tam bir oynatma kaynağı olarak ya typed provider item key ya da protected locator reference taşır; M3U `tvg-id` tek başına oynatılabilir sayılmaz.

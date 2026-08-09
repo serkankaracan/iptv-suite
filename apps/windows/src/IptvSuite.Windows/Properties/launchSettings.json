@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "IptvSuite.Windows (Package)": {
+      "commandName": "MsixPackage",
+      "alwaysReinstallApp": false,
+      "nativeDebugging": false
+    }
+  }
+}
