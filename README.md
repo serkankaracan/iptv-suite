@@ -1,6 +1,6 @@
 # IPTV Suite
 
-`IPTV Suite` henüz doğrulanmamış bir iç proje adıdır. **M1 — reproducible bootstrap** tamamlanmıştır; **M2 — test altyapısı ve quality gates** implementation in progress durumundadır. M2 test scaffold'u ürün özelliği değildir: repository hâlâ provider/parser mantığı, veritabanı, production credential store ve gerçek player içermez.
+`IPTV Suite` henüz doğrulanmamış bir iç proje adıdır. **M1 — reproducible bootstrap** ve **M2 — test altyapısı ve quality gates** mühendislik kabulleri tamamlanmıştır. M2 test scaffold'u ürün özelliği değildir: repository hâlâ provider/parser mantığı, veritabanı, production credential store ve gerçek player içermez.
 
 Windows uygulaması C# / .NET 10 LTS, WinUI 3 ve framework-dependent MSIX kullanır. Production bağımlılık yönü şöyledir:
 
@@ -34,7 +34,7 @@ M2'nin exact-SDK restore/build ve iki ardışık unit/integration/architecture k
 .\eng\Invoke-WindowsQualityGate.ps1
 ```
 
-Betik yalnız `10.0.302` SDK ile çalışır; locked restore, Debug/Release x64 build, ayrı TRX dizinlerinde iki test koşusu, fixture hash karşılaştırması, negatif sentinel fail/recovery provası ve quality-artifact canary taramasını tek gate'te yürütür. Özet kanıtı `.artifacts/quality-gates/evidence/quality-summary.json` altında üretir. Local gate 2026-08-09'da isolated exact SDK ile 22/22 testi iki koşuda geçmiştir; M2, hosted packaged-smoke gerçekten başarılı olup kanıt artifact'ı kaydedilene kadar tamamlanmış sayılmaz.
+Betik yalnız `10.0.302` SDK ile çalışır; locked restore, Debug/Release x64 build, ayrı TRX dizinlerinde iki test koşusu, fixture hash karşılaştırması, negatif sentinel fail/recovery provası ve quality-artifact canary taramasını tek gate'te yürütür. Özet kanıtı `.artifacts/quality-gates/evidence/quality-summary.json` altında üretir. Local gate 2026-08-09'da isolated exact SDK ile 22/22 testi iki koşuda geçmiştir; aynı gün [hosted run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270) commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` için quality, signed packaged-smoke ve birleşik Windows gate işlerini başarıyla tamamlamıştır. Kalıcı kanıt özeti [M2 completion evidence](docs/quality/M2_COMPLETION_EVIDENCE.md) belgesindedir.
 
 Restore, build ve test için Visual Studio gerekmez; Windows SDK build araçları exact stable NuGet paketiyle gelir. İmzalı gerçek MSIX install/launch/uninstall provası yönetici PowerShell'i gerektirir:
 

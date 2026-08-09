@@ -69,6 +69,7 @@ Kurallar:
 ## Validation plan
 
 - M1'de yalnız Windows paths ve docs için gerçek minimal yapı; hayali gelecek platform scaffold'u yok.
+- M2 — **PASS, 2026-08-09:** [hosted run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270) quality, package-smoke ve `Required Windows gate` coordinator işlerini geçirdi. Üst seviye path filter yoktur ve `merge_group` sonucu üretilir; ancak mevcut private-repository planında branch protection etkin olmadığı için check merge policy tarafından required değildir.
 - İlk shared contract'ta semantic version, schema validation ve Windows consumer testi.
 - Her yeni platform bootstrap'ında required check'i `Pending` bırakmayan platform seçimli CI ve bağımsız release dry run.
 - Repository boyutu, checkout süresi ve cross-platform CI süresi üç ayda bir ölçülür.
@@ -87,4 +88,4 @@ Bölünmede tarafsız `contracts-and-test-vectors` repository'si semantic versio
 
 ## References
 
-[DOMAIN_AND_DATA_CONTRACTS](../architecture/DOMAIN_AND_DATA_CONTRACTS.md), [S81](../research/SOURCES.md)
+[DOMAIN_AND_DATA_CONTRACTS](../architecture/DOMAIN_AND_DATA_CONTRACTS.md), [S81–S84](../research/SOURCES.md)

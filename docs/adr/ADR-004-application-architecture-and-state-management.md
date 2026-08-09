@@ -77,7 +77,7 @@ M2 implementation test seam'lerini production contract'larından ayırır. `Iptv
 ## Validation plan
 
 - M1 — **PASS, 2026-08-09:** 6 project/package/toolchain/WinUI/manifest kuralı yeşil; Domain'e geçici yasak reference eklendiğinde gate'in kırıldığı doğrulandı.
-- M2 — **IN PROGRESS:** fake time/transport/test secret store/passive player, loopback fixture server, temp/timeout isolation, deterministic fixture/canary ve production→test dependency yasağı mevcut. Exact-SDK local iki-run/sentinel/fixture/canary gate'i 2026-08-09'da 22/22 PASS verdi; başarılı hosted packaged-smoke artifact'ı bekleniyor. Test doubles ürün contract'ı değildir; workflow source'u da PASS kanıtı değildir.
+- M2 — **PASS, 2026-08-09:** fake time/transport/test secret store/passive player, loopback fixture server, temp/timeout isolation, deterministic fixture/canary ve production→test dependency yasağı mevcut. Exact-SDK local iki-run/sentinel/fixture/canary gate'i 22/22; commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` için [hosted run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270) quality, packaged-smoke ve coordinator işlerini geçti. Test doubles ürün contract'ı değildir; run sınırları ve artifact doğrulaması [M2 completion evidence](../quality/M2_COMPLETION_EVIDENCE.md) belgesindedir.
 - M3 domain invariant/table tests.
 - M5–M8 adapter contract ve cancellation/fault-injection testleri.
 - M9 view-model + UI automation/virtualization testleri.

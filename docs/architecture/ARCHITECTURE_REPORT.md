@@ -14,7 +14,7 @@ Geniş IPTV compatibility için birincil playback adayı **non-GPL libVLC + LibV
 
 Platformlar aynı UI/player implementation'ını paylaşmayacaktır. Samsung ayrı Tizen Web + AVPlay, Android Kotlin + Media3, Apple Swift + AVFoundation/AVKit yönündedir. Paylaşım; versioned terminology, contracts, error codes ve sentetik test vectors ile sınırlıdır. İlk organizasyon modeli, platform sınırları kesin bir monorepo'dur.
 
-M1 bootstrap tamamlanmıştır. M2 test scaffold'u ve exact-SDK local iki-run quality gate'i geçmiştir; hosted packaged-host kanıtı henüz alınmadığı için M2 **implementation in progress** durumundadır. Test-only fake clock/transport/secret store/player üretim contract'ı veya ürün davranışı değildir; gerçek provider, parser, database ve playback implementation'ı hâlâ yoktur.
+M1 bootstrap ve M2 test/quality altyapısı mühendislik kabulleri tamamlanmıştır. M2 exact-SDK local iki-run gate'i ile commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` üzerindeki [hosted run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270) quality, signed packaged-host ve coordinator işlerini geçmiştir. Test-only fake clock/transport/secret store/player üretim contract'ı veya ürün davranışı değildir; gerçek provider, parser, database ve playback implementation'ı hâlâ yoktur.
 
 ## A. Gereksinim analizi
 
@@ -323,9 +323,9 @@ Production projects -X-> any test project
 
 Generator `1.0.0` / algorithm `1` / seed `20260809` ile byte-identical sentetik record ve SHA-256/provenance manifesti üretir. Corpus gerçek provider/account/credential/playlist/medya içermez. Internal `LicenseRef-IPTVSuite-Synthetic-Test-Only` durumu `UNVERIFIED` olduğundan public paylaşım hakkı değildir. Canary de gerçek secret değil, bilinen marker sızıntısını kanıtlayan test girdisidir; genel credential/redaction kanıtı sayılmaz.
 
-Local `Invoke-WindowsQualityGate.ps1`; exact SDK locked restore, Debug/Release x64 build, full suite'in ayrı TRX dizinlerinde iki ardışık yeşil koşusu ve eşit sonuç seti, fixture SHA-256 eşitliği, armed sentinel non-zero/recovery ve artifact canary kontrollerini birleştirir. Hosted workflow bütün PR'larda exact SDK ile bu gate'i çalıştırır; required check'in path filter nedeniyle `Pending` kalmaması için üst seviye path filter yoktur. Quality sonrasındaki package job'u signed x64 MSIX'i hedefli test-payload/canary sızıntısına karşı inceler, kurar, görünür AUMID launch yapar, normal kapatır ve exact cleanup uygular.
+Local `Invoke-WindowsQualityGate.ps1`; exact SDK locked restore, Debug/Release x64 build, full suite'in ayrı TRX dizinlerinde iki ardışık yeşil koşusu ve eşit sonuç seti, fixture SHA-256 eşitliği, armed sentinel non-zero/recovery ve artifact canary kontrollerini birleştirir. Hosted workflow bütün PR, `merge_group`, `main` push ve manual dispatch olaylarında exact SDK ile bu gate'i çalıştırır; required check'in path filter nedeniyle `Pending` kalmaması için üst seviye path filter yoktur. Quality sonrasındaki package job'u signed x64 MSIX'i hedefli test-payload/canary sızıntısına karşı inceler, kurar, görünür AUMID launch yapar, normal kapatır ve exact cleanup uygular. `always()` coordinator'ı quality fail veya package skip/fail durumunu tek `Required Windows gate` sonucuna taşır.
 
-Bir local/hosted komut tanımının varlığı başarılı run kanıtı değildir. Local exact-SDK gate 2026-08-09'da 22 testi iki koşuda geçmiştir. Artifact taraması GitHub job logunu kapsamaz; log canary sonucu `UNVERIFIED` kalır. Yeşil hosted smoke yalnız çalıştığı runner ve commit için package zincirini kanıtlar; feature UI/UIA/accessibility, update/migration, WACK/Store, gerçek provider/player/codec, genel secret yokluğu, ARM64 veya cihaz matrisi pass'i değildir. Başarılı hosted artifact kaydı alınana kadar M2 durumu `In progress` kalır.
+Bir local/hosted komut tanımının varlığı başarılı run kanıtı değildir. Local exact-SDK gate 2026-08-09'da 22 testi iki koşuda geçmiştir. Aynı gün hosted run `31327398270` üç işi de geçirmiş; iki sanitized artifact'ın commit bağı, quality şekli, fixture hashleri, signature, capability allowlist'i ve package smoke sonuçları `14/14` assertion ile doğrulanmıştır. Artifact taraması GitHub job logunu kapsamaz; log canary sonucu `UNVERIFIED` kalır. Yeşil hosted smoke yalnız çalıştığı runner ve commit için package zincirini kanıtlar; feature UI/UIA/accessibility, update/migration, WACK/Store, gerçek provider/player/codec, genel secret yokluğu, ARM64 veya cihaz matrisi pass'i değildir. Branch policy enforcement mevcut private-repository planında etkin değildir. Ayrıntılı kalıcı kayıt [M2 completion evidence](../quality/M2_COMPLETION_EVIDENCE.md) belgesindedir.
 
 ## F. Repository stratejisi
 
@@ -408,7 +408,7 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 | O10 | UNVERIFIED | Cihaz-içi modelde KVKK rolü ve aktarım sorumluluğu nedir? | Privacy counsel | Product/Legal / M15 |
 | O11 | Assumption | İlk MVP analytics, backend ve DRM içermez. | Scope review; değişirse ADR/security reopen | Product |
 | O12 | Assumption | Test verisi sentetik, third-party içeriksiz ve credentials sahtedir; public redistribution lisansı ayrıca doğrulanır. | Fixture provenance/license manifest; paylaşım öncesi legal review | Quality/Legal |
-| O13 | IN PROGRESS | M2 scaffold'u exact-SDK iki-run quality gate ve hosted packaged-smoke'u deterministik geçiyor mu? | Local sıfır exit code + minimal summary ve ephemeral TRX set karşılaştırması; hosted green jobs + taranmış `last-success.json`; exact sentinel/scanner fail-recovery | Quality / M2 |
+| O13 | VERIFIED / CLOSED, 2026-08-09 | M2 scaffold'u exact-SDK iki-run quality gate ve hosted packaged-smoke'u deterministik geçiyor mu? | Local sıfır exit code + minimal summary ve ephemeral TRX set karşılaştırması; hosted run `31327398270` üç green job + iki doğrulanmış sanitized artifact; exact sentinel/scanner fail-recovery | Quality / M2 |
 
 ## İlişkili kararlar
 

@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 implementation plan; M1 completed; M2 implementation in progress
+**Durum:** Phase 0 implementation plan; M1 ve M2 completed
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -65,7 +65,7 @@ Clean workspace'ten belgelenen komutla derlenip kurulan, build bilgisini göster
 
 ## M2 — Test altyapısı ve quality gates
 
-**Implementation status:** In progress — local acceptance PASS; hosted packaged-smoke evidence pending
+**Implementation status:** Completed, 2026-08-09 — local ve hosted acceptance PASS
 
 ### Amaç
 
@@ -112,15 +112,15 @@ Flaky UI/network testlerinin gate güvenini azaltması veya test helper'ın prod
 
 Unit + integration + UI smoke sonuçları ve tamamen sentetik fixture manifesti olan yeşil pipeline.
 
-### Mevcut uygulama ve bekleyen kanıt
+### Mevcut uygulama ve completion evidence
 
 - **Scaffold mevcut:** Resmî `FakeTimeProvider`, scripted transport, in-memory test secret store, passive fake player, loopback-only Kestrel, guarded temp directory, timeout helper, canary scanner ve deterministic generator eklendi.
 - **Fixture kaydı mevcut:** Generator `1.0.0`, algorithm version `1`, seed `20260809`, SHA-256/provenance ve internal-only `UNVERIFIED` LicenseRef specification'da sabittir; gerçek provider/account/credential/playlist/medya yoktur.
 - **Test sınırı mevcut:** Unit ve integration assembly'leri method-level parallel; OS-seçimli port/temp path isolation ve canary detect/non-detect testleri tanımlıdır. Test projelerinin production tarafından referans alınmaması architecture allowlist'ine eklenmiştir.
-- **Local gate PASS — 2026-08-09:** isolated exact SDK `10.0.302` ile locked restore ve Debug/Release x64 build sıfır warning/error; architecture 8, unit 9 ve integration 5 test iki ayrı koşuda aynı 22/22 `Passed` setini verdi. Sentinel exact TRX'te armed `Failed`, disarmed `Passed` oldu; scanner CLI kontamine artifact'ta exit `2`, cleanup sonrası `0` verdi. Geçici production→test reference mutation'ı architecture gate'i kırdı ve cleanup sonrası 8/8'e döndü. Fixture iki output root'ta byte-identical üretildi (`records` SHA-256 `1da91c57da1f704076600aab29cdd938851d75f765679ac2b79dc9cb9e908020`, manifest SHA-256 `b1f1513e786f3176c7275af927c4c93c847d0476858fe56701d2054128818438`); final artifact-file canary scan geçti. Job log canary kapsamı `UNVERIFIED` kalır.
-- **Hosted tanım mevcut, run kanıtı pending:** `windows-quality.yml` her PR, `merge_group`, `main` push ve manual dispatch'te çalışır; required check'in path filter nedeniyle `Pending` kalmaması için üst seviye path filter bilerek yoktur. `always()` coordinator'ı quality fail veya package skip/fail sonucunu `Required Windows gate` altında kırmızıya çevirir; ruleset'te required seçimi repository dışı ayardır. Quality job'undan sonra hosted signed MSIX payload-inspection/install/visible-launch/normal-close/uninstall job'u tanımlıdır, fakat başarılı hosted run ve yüklenmiş artifact henüz M2 kanıtı değildir.
+- **Local gate PASS — 2026-08-09:** isolated exact SDK `10.0.302` ile locked restore ve Debug/Release x64 build sıfır warning/error; architecture 8, unit 9 ve integration 5 test iki ayrı koşuda aynı 22/22 `Passed` setini verdi. Sentinel exact TRX'te armed `Failed`, disarmed `Passed` oldu; scanner CLI kontamine artifact'ta exit `2`, cleanup sonrası `0` verdi. Fixture iki output root'ta byte-identical üretildi (`records` SHA-256 `1da91c57da1f704076600aab29cdd938851d75f765679ac2b79dc9cb9e908020`, manifest SHA-256 `b1f1513e786f3176c7275af927c4c93c847d0476858fe56701d2054128818438`); final artifact-file canary scan geçti. Job log canary kapsamı `UNVERIFIED` kalır.
+- **Hosted gate PASS — 2026-08-09:** [Run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270), commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` üzerinde `Locked build and test gate`, `Packaged install and launch smoke` ve `Required Windows gate` işlerinin üçünü de başarıyla tamamladı. Sanitized quality artifact'ı iki koşuda 22/22 sonucu ve local ile aynı fixture hash'lerini; packaged-smoke artifact'ı valid signature, yalnız `runFullTrust`, payload leak gate, visible launch/normal close ve exact package cleanup sonucunu taşıdı. Package SHA-256 `e04a7db236a263641e56e6c33fac4987ca774ba7a9af1bb963632ad8d1df8a2c`; artifact/alan doğrulama kaydı [M2 completion evidence](../quality/M2_COMPLETION_EVIDENCE.md) belgesindedir.
 
-Hosted packaged-smoke kanıtı kapanmadan M2 `Completed` yapılmaz ve “yeşil pipeline” demo çıktısı elde edilmiş sayılmaz.
+Bu kanıtla M2 mühendislik kabulü `Completed` ve yeşil pipeline demo çıktısı elde edilmiştir. `Required Windows gate` coordinator'ı sonuç üretse de 2026-08-09 GitHub preflight'ında mevcut private-repository planı branch protection için `403` döndürmüştür; merge enforcement ancak uygun plan veya repository visibility kararı sonrasında açılabilir ve M2 PASS iddiasına dahil değildir.
 
 ## M3 — Domain terminology, validation ve safe errors
 

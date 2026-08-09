@@ -34,7 +34,7 @@ Her production defect, uygun katmanda önce sentetik ve secret-free regression f
 
 ### 2.1 M2 test harness baseline'ı
 
-**Implementation status:** In progress; local exact-SDK iki-run 22/22 PASS, başarılı hosted packaged-host artifact kanıtı bekleniyor.
+**Implementation status:** Completed / PASS, 2026-08-09; local exact-SDK iki-run 22/22 ve hosted packaged-host acceptance geçti.
 
 M2 katmanları şu concrete sınırı kullanır:
 
@@ -53,7 +53,9 @@ Canary açıkça test-only marker'dır. Scanner marker'ın UTF-8, UTF-16LE/BE, U
 
 Local M2 gate'i `eng/Invoke-WindowsQualityGate.ps1` komutudur. Exact SDK `10.0.302` (`rollForward: disable`, prerelease kapalı), locked restore, Debug/Release x64 build, aynı full suite'in ayrı TRX dizinlerinde iki ardışık geçişi, exact sentinel TRX'inde armed `Failed`/disarmed `Passed`, scanner CLI exit `2`/`0`, fixture byte/SHA-256 eşitliği ve quality-artifact canary taramasını tek akışta doğrular. TRX byte eşitliği beklenmez; sıralanmış `testName|Passed` seti karşılaştırılır. Sanitized local özet `.artifacts/quality-gates/evidence/quality-summary.json` altında üretilir.
 
-Hosted `windows-quality.yml` bütün pull request, `merge_group`, `main` push ve manual dispatch olaylarında `windows-2025-vs2026` üzerinde exact SDK ile quality gate'i çalıştırır; package job'u quality başarısına bağlıdır. `always()` coordinator'ı quality fail veya package skip/fail sonucunu tek `Required Windows gate` check'inde kırmızıya çevirir. Workflow düzeyinde path filter bilerek yoktur, çünkü filtre nedeniyle skip edilen required check `Pending` kalıp merge'i engelleyebilir [S81]. Ruleset/branch protection içinde bu check'in gerçekten required seçilmesi repository dışı ayardır ve source ağacından doğrulanamaz. Raw TRX upload edilmez; scanner'dan geçmiş minimal summary, manifest + license sidecar ve package success evidence yedi gün tutulur. Yeşil hosted package job'u yalnız o commit/runner için signed x64 MSIX'in hedefli test-payload/canary inspection, install, visible launch, normal close ve exact cleanup zincirini kanıtlar. Workflow source'u, başarılı run/artifact olmadan kanıt değildir. Bu smoke; feature UI/UIA/accessibility, update/migration, WACK/Store, non-admin veya clean-machine matrisi, gerçek provider/internet, player/codec/HW decode, ARM64 ve genel credential yokluğu kanıtı değildir.
+Hosted `windows-quality.yml` bütün pull request, `merge_group`, `main` push ve manual dispatch olaylarında `windows-2025-vs2026` üzerinde exact SDK ile quality gate'i çalıştırır; package job'u quality başarısına bağlıdır. `always()` coordinator'ı quality fail veya package skip/fail sonucunu tek `Required Windows gate` check'inde kırmızıya çevirir. Workflow düzeyinde path filter bilerek yoktur, çünkü filtre nedeniyle skip edilen required check `Pending` kalıp merge'i engelleyebilir [S81]. Raw TRX upload edilmez; scanner'dan geçmiş minimal summary, manifest + license sidecar ve package success evidence yedi gün tutulur. Yeşil hosted package job'u yalnız o commit/runner için signed x64 MSIX'in hedefli test-payload/canary inspection, install, visible launch, normal close ve exact cleanup zincirini kanıtlar. Workflow source'u, başarılı run/artifact olmadan kanıt değildir. Bu smoke; feature UI/UIA/accessibility, update/migration, WACK/Store, non-admin veya clean-machine matrisi, gerçek provider/internet, player/codec/HW decode, ARM64 ve genel credential yokluğu kanıtı değildir.
+
+[Run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270), commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` için quality, packaged-smoke ve `Required Windows gate` işlerini başarıyla tamamladı; indirilen iki allowlist'li artifact `14/14` alan/hash assertion'ını geçti. Kalıcı değerler [M2 completion evidence](M2_COMPLETION_EVIDENCE.md) belgesindedir. Coordinator'ın yeşil olması merge policy enforcement kanıtı değildir: 2026-08-09 preflight'ında mevcut private-repository planı branch protection endpoint'inde `403` verdiği için check henüz branch policy tarafından required değildir.
 
 ## 3. Feature test planı
 
@@ -316,7 +318,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | Milestone | Minimum green evidence |
 |---|---|
 | M1 | PASS: clean temp workspace + empty-cache locked restore, Debug/Release x64 build, 6/6 boundaries/toolchain/manifest, negative gate, signed install/launch/normal-close/uninstall |
-| M2 | IN PROGRESS: local exact-SDK iki-run 22/22 PASS, fixture/canary CLI/sentinel exact-TRX ve negative architecture mutation PASS; başarılı hosted packaged-smoke artifact'ı bekleniyor |
+| M2 | PASS, 2026-08-09: local exact-SDK iki-run 22/22, fixture/canary CLI/sentinel exact-TRX; hosted quality + signed packaged-smoke + coordinator success ve iki doğrulanmış sanitized artifact |
 | M3 | Validation, terminology, redaction unit corpus |
 | M4 | Packaged secret-store + canary artifact scan |
 | M5 | HTTP fault/redirect/TLS/timeout/cancel suite |
