@@ -309,7 +309,7 @@ if ($env:GITHUB_SHA -match '\A[0-9a-fA-F]{40}\z') {
 
 $summary = [ordered]@{
     schemaVersion = 1
-    milestone = "M3"
+    milestone = "M4-foundation"
     commitSha = $commitSha
     sdkVersion = $actualSdk
     configuration = "Debug+Release"
@@ -341,5 +341,5 @@ Invoke-CheckedDotNet -FailureMessage "Final artifact canary scan failed." -Argum
     "QUALITY_ARTIFACTS"
 )
 
-Write-Host "M3 Windows quality gates passed: $($runOneResults.Count) tests x 2 deterministic runs."
+Write-Host "M4 foundation Windows quality gates passed: $($runOneResults.Count) tests x 2 deterministic runs."
 Write-Host "Evidence: $summaryPath"

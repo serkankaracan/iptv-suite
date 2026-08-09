@@ -140,8 +140,15 @@
       "iptvsuite.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "IptvSuite.Application": "[1.0.0, )"
+          "IptvSuite.Application": "[1.0.0, )",
+          "System.Security.Cryptography.ProtectedData": "[10.0.10, )"
         }
+      },
+      "System.Security.Cryptography.ProtectedData": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.10, )",
+        "resolved": "10.0.10",
+        "contentHash": "BKt0SQgq2lq3ESE68jkeLwv95ypANrPDtkTOIFGcnhg2aRUeUUBDrQlkVDZctrg1WenVcvn5P5XZnuYI7q6rFQ=="
       }
     },
     "net10.0-windows10.0.26100/win-x64": {

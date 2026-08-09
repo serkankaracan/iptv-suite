@@ -33,7 +33,7 @@ public sealed class DependencyRulesTests
             "apps/windows/src/IptvSuite.Infrastructure/IptvSuite.Infrastructure.csproj",
             ["IptvSuite.Application"],
             [],
-            []),
+            ["System.Security.Cryptography.ProtectedData"]),
         new(
             "IptvSuite.Windows",
             "apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj",
@@ -55,13 +55,13 @@ public sealed class DependencyRulesTests
         new(
             "IptvSuite.UnitTests",
             "apps/windows/tests/IptvSuite.UnitTests/IptvSuite.UnitTests.csproj",
-            ["IptvSuite.Domain", "IptvSuite.Testing"],
+            ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Testing"],
             [],
             ["MSTest"]),
         new(
             "IptvSuite.IntegrationTests",
             "apps/windows/tests/IptvSuite.IntegrationTests/IptvSuite.IntegrationTests.csproj",
-            ["IptvSuite.Testing"],
+            ["IptvSuite.Application", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
             [],
             ["MSTest"]),
     ];
@@ -141,6 +141,7 @@ public sealed class DependencyRulesTests
             ["Microsoft.Windows.SDK.BuildTools"] = "10.0.26100.8249",
             ["Microsoft.Extensions.TimeProvider.Testing"] = "10.8.0",
             ["MSTest"] = "4.3.3",
+            ["System.Security.Cryptography.ProtectedData"] = "10.0.10",
         };
 
         CollectionAssert.AreEquivalent(expected.Keys.ToArray(), actual.Keys.ToArray());

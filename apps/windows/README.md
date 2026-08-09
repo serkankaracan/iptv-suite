@@ -1,6 +1,6 @@
-# Windows development, quality gate ve M3 domain
+# Windows development, quality gate ve M4 secure-storage foundation
 
-Bu klasör Windows uygulamasını, M2 test scaffold'unu ve M3 saf domain/validation çekirdeğini içerir. M2 hosted kabulü ve M3 local mühendislik kabulü **PASS, 2026-08-09** durumundadır. M3 sonrası gate 105/105 testi iki koşuda geçmiştir. Uygulama hâlâ yalnız gerçek assembly/package sürümünü, build configuration'ını ve process architecture'ını gösteren development shell'dir; M3 kullanıcı formu, network/provider, secure storage, parser, database veya playback özelliği değildir.
+Bu klasör Windows uygulamasını, M2 test scaffold'unu, M3 saf domain/validation çekirdeğini ve M4'ün ilk protected-storage dilimini içerir. M2 hosted kabulü ve M3 local mühendislik kabulü **PASS, 2026-08-09** durumundadır. M4 foundation `IN PROGRESS`; 2026-08-10 local gate'i 130/130 testi iki koşuda geçmiştir. Uygulama UI'sı hâlâ yalnız gerçek assembly/package sürümünü, build configuration'ını ve process architecture'ını gösteren development shell'dir; source formu, network/provider, parser, database veya playback özelliği henüz yoktur.
 
 ## Toolchain
 
@@ -10,6 +10,7 @@ Bu klasör Windows uygulamasını, M2 test scaffold'unu ve M3 saf domain/validat
 | .NET runtime/reference pack | `10.0.10` |
 | Windows App SDK | `2.3.1` stable |
 | Windows SDK BuildTools | `10.0.26100.8249` stable |
+| ProtectedData | `System.Security.Cryptography.ProtectedData` `10.0.10` stable, Infrastructure-only |
 | Fake time test paketi | `Microsoft.Extensions.TimeProvider.Testing` `10.8.0` stable, test-only |
 | MSTest | `4.3.3` stable |
 | OS / architecture | Windows 11 `10.0.26100+`, x64 |
@@ -40,6 +41,15 @@ Yeni package sürümü bilinçli değiştirildiğinde önce normal restore ile l
 - Source adı 100, locator 4096, username 256 ve password 1024 Unicode scalar ile sınırlıdır; NFC, invalid UTF-16, control/NUL ve IDNA/IPv4/IPv6 vakaları table testlerindedir.
 - URI/header/untrusted-text diagnostics policy'si raw input'u geri üretmez. `.m3u8` uzantısı catalog/HLS kararı vermez; bounded content-prefix classifier kullanılır, gerçek incremental parser M7'ye kalır.
 
+## M4 protected-storage foundation — IN PROGRESS
+
+- `IptvSuite.Application`, arbitrary string key taşımayan typed `ISecretStore` portunu; source/purpose/reference binding'ini; dispose sırasında owned buffer'ı sıfırlayan ve JSON/debug çıktısında `[SENSITIVE]` dışında veri vermeyen `SecretLease`i içerir.
+- `IptvSuite.Infrastructure`, stable `System.Security.Cryptography.ProtectedData 10.0.10` ile yalnız `DataProtectionScope.CurrentUser` kullanan Windows adapter'ını içerir. Bounded v1 binary envelope source, purpose, reference kind ve opaque record ID'yi hem entropy'ye hem korunan içeriğe bağlar.
+- Yazım aynı dizinde `CreateNew` temp + `WriteThrough` + `Flush(true)` + overwrite rename ile yapılır; yalnız transient Windows access/share/lock kodları bounded retry alır. Raw path, exception mesajı veya secret result'a taşınmaz.
+- M4 fake contract testleri ve gerçek Windows DPAPI testleri CRUD/update, adapter restart, idempotent delete, pre-cancel, concurrent create, aynı süreçte iki adapter instance'ı arasında same-key update/read/delete sıralaması, ciphertext swap/corruption/oversize, zeroization ve canary-at-rest taramasını kapsar.
+- Bu kanıt normal MSTest process'i ve temp root içindir. Packaged `LocalCache` two-launch/update/reset/uninstall, gerçek ikinci Windows user, source-deletion reconciliation, 5k–50k layout/performance ve ADR-003 final kararı açık hard-gate'tir.
+- Managed containment/reparse kontrolleri path tabanlı TOCTOU yarışını bütünüyle kapatmaz; handle-relative Windows hardening ve silinemeyen protected temp orphan reconciliation M4 acceptance öncesi açık kalır.
+
 ## M2 iki-run quality gate
 
 Repository kökünde tek quality komutunu çalıştırın:
@@ -59,11 +69,11 @@ Her çağrı yalnız exact `.artifacts/quality-gates` alt ağacını temizleyip 
 | Katman | M2'de kanıtladığı | Kanıtlamadığı |
 |---|---|---|
 | Unit | Fake time advance, scripted transport, in-memory fake secret store, passive fake player, fixture/canary helper | Gerçek timer/network, DPAPI, codec veya ürün state policy'si |
-| Integration | Loopback Kestrel, OS-seçimli port, HTTP byte response, timeout, paralel temp/port isolation ve cleanup | Gerçek provider, internet, TLS policy, database veya Store lifecycle |
+| Integration | Loopback Kestrel, OS-seçimli port, timeout/isolation; M4 fake contract ve normal Windows host'ta gerçek CurrentUser DPAPI | Gerçek provider/internet/TLS, packaged LocalCache lifecycle, second-user, database veya Store lifecycle |
 | Architecture | Production/test project ve package/framework reference allowlist'i | Runtime davranışı |
 | Packaged-host smoke | Signed development MSIX install, AUMID launch, görünür boş shell, normal close ve exact cleanup | Feature UI, UIA/accessibility, provider/player/codec, update veya Store kabulü |
 
-`IptvSuite.Testing`, `IptvSuite.UnitTests` ve `IptvSuite.IntegrationTests` production graph'ına girmez. Fake secret store/player, M4/M11'de tanımlanacak production contract'ları erkenden dondurmaz.
+`IptvSuite.Testing`, `IptvSuite.UnitTests` ve `IptvSuite.IntegrationTests` production graph'ına girmez. M2 fake secret store/player production port'u değildir; IntegrationTests içindeki M4 fake yalnız gerçek `ISecretStore` contract senaryosudur ve DPAPI/package kanıtı yerine geçmez.
 
 ## Sentetik fixture ve canary
 

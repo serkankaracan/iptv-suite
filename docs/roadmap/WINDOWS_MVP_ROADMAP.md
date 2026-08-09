@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 implementation plan; M1, M2 ve M3 completed
+**Durum:** Phase 0 implementation plan; M1, M2 ve M3 completed, M4 foundation in progress
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -178,9 +178,15 @@ Sentetik Xtream/M3U configuration'larının güvenli kabul/ret ve localized erro
 
 ## M4 — Secure credential storage ve merkezi redaction
 
+**Implementation status:** IN PROGRESS — 2026-08-10 local foundation gate PASS; milestone acceptance pending
+
 ### Amaç
 
 Credential ve token-bearing locator'ları plaintext persistence/log/artifact'tan çıkarmak; ADR-003'ün exact layout kararını ölçümle kapatmak.
+
+Mevcut dilim; typed Application `ISecretStore`, zeroing `SecretLease`, merkezi sanitizer, `ProtectedData 10.0.10`/CurrentUser adapter, packaged `LocalCache` factory ve fake/gerçek contract testlerini içerir. Local exact-SDK gate architecture 9, unit 99 ve integration 22 olmak üzere 130/130 testi iki kez aynı setle geçirmiş; source/purpose/reference'a bağlı kriptografik context, restart edilen adapter instance'ı, CRUD/update/delete, işlem başlamadan iptal edilmiş çağrıların mutation yapmaması, birbirinden bağımsız kayıtların concurrent create'i, aynı süreçte iki adapter instance'ı için same-key update/read/delete sıralaması, ciphertext swap/corruption ve canary-at-rest davranışı doğrulanmıştır. Arbitrary mid-I/O cancellation/interleaving ve cross-process sıralama bu kanıtın parçası değildir; sonuç packaged process/lifecycle veya gerçek wrong-user testi de değildir.
+
+M4'ü açık tutan hard-gate'ler: source disable + in-flight operation drain + source-wide deletion + `DeletionPending` orchestration ve startup record/temp orphan reconciliation; aynı source/purpose içindeki referansı gerçek configuration/channel/endpoint owner'ına bağlayan semantic ref-swap politikası; store initialization exception'larını raw path/message taşımayan typed sonuca çevirme; handle-relative path/reparse hardening veya açık threat-model kararı; installed package two-launch/update/reset/uninstall; ikinci gerçek Windows user; 5k/10k/20k/50k ölçümü ve buna bağlı ADR-003 kararı. Tamamlanıp caller'a verilmiş bir plaintext lease delete ile geriye dönük revoke edilmez; lifecycle koordinatörü yeni resolve'ları durdurup aktif operasyonların kapanmasını beklemelidir. Bu kanıtlar olmadan aşağıdaki milestone acceptance maddeleri `UNVERIFIED` kalır.
 
 ### Kapsam
 

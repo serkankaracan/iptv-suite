@@ -9,8 +9,16 @@ Bu dosya `apps/windows/` ağacı için kök `AGENTS.md` kurallarını daraltır.
 - `IptvSuite.Infrastructure`: yalnız `IptvSuite.Application` project reference'ı; WinUI tipi yok.
 - `IptvSuite.Windows`: tek Presentation/composition root; yalnız Application ve Infrastructure'a bağlı.
 - `IptvSuite.Testing`: yalnız test destek executable/library'si; production proje reference'ı yoktur ve production tarafından referans alınamaz.
-- `IptvSuite.UnitTests`: `IptvSuite.Domain`, `IptvSuite.Testing` ve MSTest'e bağlıdır; M3 domain table testleri ile M2 harness testlerini içerir. `IptvSuite.IntegrationTests` yalnız `IptvSuite.Testing` ile MSTest'e bağlıdır; architecture test ayrı kalır.
-- M2 test double'ları production `IPlayer`, `ISecretStore` veya provider contract'ı değildir. M3'te ürün player/provider/parser/HTTP/database/secret-store mantığı, DI/MVVM paketi ve feature navigation ekleme.
+- `IptvSuite.UnitTests`: `IptvSuite.Application`, `IptvSuite.Domain`, `IptvSuite.Testing` ve MSTest'e bağlıdır; pure Application/Domain testleri ile M2 harness testlerini içerir. `IptvSuite.IntegrationTests`, yalnız test yönünde Application, Infrastructure ve Testing'e bağlıdır; architecture test ayrı kalır.
+- M2 test double'ları production `IPlayer`, `ISecretStore` veya provider contract'ı değildir. IntegrationTests içindeki M4 fake production `ISecretStore` contract senaryosudur, fakat gerçek DPAPI veya packaged lifecycle kanıtı değildir. M4 boyunca player/provider/parser/HTTP/database, DI/MVVM paketi ve feature navigation ekleme.
+
+## M4 protected-storage sınırı
+
+- `ISecretStore` Application'da, Windows DPAPI adapter'ı Infrastructure'da, packaged `LocalCache` path seçimi yalnız Windows composition root'ta kalır. Domain'e IO/crypto/storage tipi ekleme.
+- Yalnız `DataProtectionScope.CurrentUser`; `LocalMachine`, PasswordVault bulk store veya ad-hoc crypto kullanma.
+- Protected record source + purpose + typed opaque reference ile bağlanır. Raw locator, username, password, endpoint veya display name dosya adı/path/log/result içine girmez.
+- Plaintext owned buffer'ları ve lease'leri `CryptographicOperations.ZeroMemory` ile best-effort sıfırla; `ToString`, debugger ve JSON yüzeyleri sensitive değeri döndürmesin.
+- Normal test-host CRUD/restart sonucu packaged `LocalCache`, update/reset/uninstall veya gerçek wrong-user kanıtı değildir. 50k spike ve bu lifecycle matrisi geçmeden ADR-003/M4 `Completed` yazma.
 
 ## M3 domain güvenlik sınırı
 

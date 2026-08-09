@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M3 validation/redaction contract'ı implemented; exact protected-storage layout M4 spike'ı sonrası kabul edilir
+**Durum:** M3 validation/redaction contract'ı implemented; M4 CurrentUser protected-storage foundation local PASS, exact layout/lifecycle acceptance pending
 
 **Kapsam:** Windows MVP; platformlar aynı ilkeleri kendi güvenli API'leriyle uygular
 
@@ -19,9 +19,13 @@ Baseline hedefleri:
 - exact native/OSS dependency seti izlenir ve güvenlik güncellemesi alır;
 - uygulama content/provider sağlamaz, erişim kontrolü veya DRM aşmaz.
 
-M3 local kabulü; raw locator/credential döndürmeyen source validation, scheme+IDNA host+effective port ile sınırlı `SafeEndpoint`, random opaque references, registry-only stable safe errors ve provider host'unu default gizleyen pure URI/header/untrusted-text redaction contract'ını 105 testlik iki-run gate içinde doğrulamıştır. Henüz production persistence veya log sink implementation'ı yoktur; DPAPI koruması, restart/wrong-user, delete/reconciliation, DB/WAL/SHM taraması ve retention enforcement M4'e kadar `UNVERIFIED` kalır.
+M3 local kabulü; raw locator/credential döndürmeyen source validation, scheme+IDNA host+effective port ile sınırlı `SafeEndpoint`, random opaque references, registry-only stable safe errors ve provider host'unu default gizleyen pure URI/header/untrusted-text redaction contract'ını 105 testlik iki-run gate içinde doğrulamıştır. M3 kapsamı production persistence veya log sink implementation'ı içermiyordu; sonradan eklenen M4 protected-storage foundation aşağıda ayrı kanıt ve sınırlarıyla kaydedilir. Wrong-user, source deletion/reconciliation, DB/WAL/SHM taraması ve retention enforcement hâlâ `UNVERIFIED` durumdadır.
 
-M3 opaque reference'ın temsilini doğrular, fakat protected record ile `SafeEndpoint`/source/purpose binding'ini kanıtlamaz. M4'te store-write + purpose-namespaced reference issuance + configuration creation tek application operation olur; M5'te resolve edilen locator yeniden HTTPS validation'dan geçirilip beklenen endpoint/source ile eşleştirilir. Cross-source, stream/logo purpose-swap, reference-swap ve missing-reference testleri geçmeden opaque ID tek başına authorization veya origin kanıtı sayılmaz.
+M3 opaque reference'ın temsilini doğrular, fakat protected record binding'ini kanıtlamaz. M4 foundation store-owned issuance ile kriptografik source/purpose/reference context binding'ini ekler; store-write + configuration creation'ın tek application operation olması henüz pending'dir. Aynı source/purpose içindeki referansın configuration/channel/endpoint owner'ına bağlanması ve semantic ref-swap reddi de kanıtlanmamıştır. M5'te resolve edilen locator yeniden HTTPS validation'dan geçirilip beklenen endpoint/source ile eşleştirilir. Cross-source, stream/logo purpose-swap, same-source owner/ref-swap ve missing-reference testleri geçmeden opaque ID tek başına authorization veya origin kanıtı sayılmaz.
+
+2026-08-10 M4 foundation; store-owned reference issuance, source/purpose/reference-bound DPAPI CurrentUser envelope, bounded input/record, owned-buffer zeroization, store-operation safe failure mapping ve central sanitizer'ı uygular. Local fake + gerçek Windows testleri CRUD/update/restart, idempotent delete, işlem başlamadan iptal edilmiş çağrıların mutation yapmaması, birbirinden bağımsız kayıtların concurrent create'i, aynı süreçte iki adapter instance'ı için same-key update/read/delete sıralaması, ciphertext swap/corruption/oversize ve protected-root canary taramasını geçmiştir. Arbitrary mid-I/O cancellation/interleaving ve cross-process sıralama kanıtı yoktur. SafeEndpoint/origin equality M5; installed package lifecycle, second-user, source-deletion reconciliation ve 50k layout kararı ise açık M4 hard-gate'tir.
+
+Mevcut managed containment + `ReparsePoint` kontrolleri check-to-use yarışını tamamen kapatmaz; aynı-user arbitrary path mutation hardening'i handle-relative Windows I/O veya açık threat-model kararı gerektirir. Hata sırasında silinemeyen ciphertext temp dosyalarının ve metadata referansı kaybolmuş source record'larının source-wide startup reconciliation'ı da henüz uygulanmamıştır. Factory/constructor initialization hataları typed store result sınırının dışındadır; composition wiring öncesi raw path/message taşımayan safe initialization sonucu gerekir. Process-local gate yalnız çakışan store operasyonlarını sıralar; caller'a daha önce teslim edilmiş plaintext lease geriye dönük revoke edilmez. Source deletion coordinator yeni resolve'ları durdurup in-flight operasyonların/lease kullanımının kapanmasını beklemelidir. Bunlar plaintext sızıntı kanıtı değildir, fakat M4 `Completed` öncesi çözülmesi gereken orphan/DoS/diagnostic/lifecycle yüzeyleridir.
 
 ## 2. Veri sınıflandırması
 
@@ -65,7 +69,7 @@ Not protected against: fully compromised Windows user/admin/kernel, screen captu
 - Xtream stream URL'si mümkünse provider key + source secret'tan just-in-time oluşturulur;
 - M3U stream locator'ı protected reference ile çözülür.
 
-Credential Locker primary değildir: credential amaçlı olsa da 20 kayıt sınırı, Microsoft-account roaming ve on binlerce locator problemi vardır. `LocalMachine` kapsamı kullanılmaz. Kendi master-key/crypto formatı tasarlanmaz.
+Credential Locker primary değildir: roaming/bulk-locator uyumsuzluğuna ek olarak full-trust non-AppContainer process'te user locker isolation'ı beklenmemelidir. Belgelenen 20-record sınırı UWP/AppContainer desktop bağlamına özgüdür; mevcut full-trust package için otomatik gerekçe sayılmaz ve 20/21 probe'u açık kalır. `LocalMachine` kapsamı kullanılmaz. Kendi master-key/crypto formatı tasarlanmaz.
 
 DPAPI-per-locator 50k bütçeyi geçmezse yeni security decision gerekir. Muhtemel seçenek yalnız standard authenticated encryption kullanan, per-source DEK'i DPAPI ile saran envelope modelidir. Nonce uniqueness, rotation, crash consistency, key deletion ve migration review edilmeden uygulanmaz.
 
@@ -165,7 +169,7 @@ Logo fetch player request'inden ayrıdır:
 | Upgrade/migration | Plaintext temp yok | Forward migration + backup/recovery policy | Version invalidation | Schema version only |
 | Reset/uninstall | Platform davranışı M4/M15'te doğrulanır | MSIX app data temizliği doğrulanır | Temizlenir | Temizlenir |
 
-Silme kısmi başarısızsa source `DeletionPending` ve network/playback-disabled olur. Startup reconciliation, DB refs ile protected records arasındaki orphan'ları idempotent temizler. Secret silmeden katalog kaydını yok ederek ulaşılamaz secret bırakılmaz.
+Bu tablo hedef lifecycle policy'sidir; mevcut M4 foundation source-wide deletion, `DeletionPending` orchestration veya startup record/temp orphan reconciliation uygulamaz. Tamamlandığında silme kısmi başarısızsa source `DeletionPending` ve network/playback-disabled olur; startup reconciliation DB refs ile protected records arasındaki orphan'ları idempotent temizler. Secret silmeden katalog kaydını yok ederek ulaşılamaz secret bırakılmaz.
 
 Snapshot retention provisional olarak active + bir önceki complete snapshot'tır; eski snapshot protected locator'ları pruning işleminde silinir. Favorites ve recently-played için retention/privacy product kararı gerekir; recently-played MVP'de zorunlu değildir.
 
@@ -247,6 +251,10 @@ KVKK'da saklama ve koruma veri işleme kapsamına girebilir. Aydınlatma ile aç
 ## 12. UNVERIFIED ve reopen tetikleri
 
 - DPAPI-per-locator throughput ve exact envelope layout.
+- Source-wide deletion, `DeletionPending` ve startup record/temp orphan reconciliation.
+- Same-source/same-purpose reference'ın configuration/channel/endpoint owner binding'i ve semantic ref-swap reddi.
+- Store initialization için raw path/message taşımayan typed failure sonucu.
+- Handle-relative path/reparse hardening veya aynı-user path mutation için açık threat-model acceptance.
 - Credential Locker/AppData/WidgetData uninstall/reset/update sonucu.
 - Microsoft/Samsung Store'un genel BYO IPTV acceptance sonucu.
 - Codec patent sonucu ve exact license obligations.

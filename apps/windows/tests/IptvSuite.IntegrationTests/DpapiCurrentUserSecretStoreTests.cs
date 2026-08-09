@@ -1,0 +1,412 @@
+using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Text;
+using IptvSuite.Application;
+using IptvSuite.Domain;
+using IptvSuite.Infrastructure;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace IptvSuite.IntegrationTests;
+
+[TestClass]
+[DoNotParallelize]
+[SupportedOSPlatform("windows")]
+public sealed class DpapiCurrentUserSecretStoreTests
+{
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task CredentialsSurviveAdapterRestartAndNeverPersistPlaintext()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-restart");
+        TestCanary canary = TestCanary.Create("M4", "DPAPI-RESTART");
+        TestCanary updatedCanary = TestCanary.Create("M4", "DPAPI-UPDATED");
+        byte[] payload = CreateCanaryPayload(canary);
+        byte[] updated = CreateCanaryPayload(updatedCanary);
+        SourceId sourceId = SourceId.Generate();
+
+        try
+        {
+            var firstInstance = new DpapiCurrentUserSecretStore(temporary.FullPath);
+            SecretReferenceCreationResult created = await firstInstance.CreateCredentialsAsync(sourceId, payload);
+            Assert.IsTrue(created.IsSuccess);
+            Assert.IsNotNull(created.Reference);
+            Assert.HasCount(0, ArtifactCanaryScanner.Scan(temporary.FullPath, canary));
+
+            var restartedInstance = new DpapiCurrentUserSecretStore(temporary.FullPath);
+            SecretStoreReadResult restartedRead = await restartedInstance.ReadCredentialsAsync(
+                sourceId,
+                created.Reference);
+            AssertLeaseMatches(restartedRead, payload);
+
+            ReadOnlyMemory<byte> expectedAfterUpdates = default;
+            for (int iteration = 0; iteration < 8; iteration++)
+            {
+                expectedAfterUpdates = iteration % 2 == 0 ? updated : payload;
+                SecretStoreOperationResult updatedResult = await restartedInstance.UpdateCredentialsAsync(
+                    sourceId,
+                    created.Reference,
+                    expectedAfterUpdates);
+                Assert.IsTrue(
+                    updatedResult.IsSuccess,
+                    $"Bounded update iteration {iteration} failed with {updatedResult.Failure}.");
+            }
+
+            AssertLeaseMatches(
+                await firstInstance.ReadCredentialsAsync(sourceId, created.Reference),
+                expectedAfterUpdates.Span);
+            Assert.HasCount(0, ArtifactCanaryScanner.Scan(temporary.FullPath, canary));
+            Assert.HasCount(0, ArtifactCanaryScanner.Scan(temporary.FullPath, updatedCanary));
+
+            Assert.IsTrue((await restartedInstance.DeleteCredentialsAsync(sourceId, created.Reference)).IsSuccess);
+            Assert.IsTrue((await restartedInstance.DeleteCredentialsAsync(sourceId, created.Reference)).IsSuccess);
+            AssertUnavailable(await firstInstance.ReadCredentialsAsync(sourceId, created.Reference));
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").ToArray());
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+            CryptographicOperations.ZeroMemory(updated);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task SwappedCiphertextsFailClosedAcrossPurposeAndReferenceBindings()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-binding");
+        var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        SourceId sourceId = SourceId.Generate();
+        byte[] firstPayload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-BINDING-A"));
+        byte[] secondPayload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-BINDING-B"));
+        byte[]? firstCiphertext = null;
+        byte[]? secondCiphertext = null;
+
+        try
+        {
+            ProtectedLocatorReferenceCreationResult first = await store.CreateLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                firstPayload);
+            Assert.IsNotNull(first.Reference);
+            string firstPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").Single();
+
+            ProtectedLocatorReferenceCreationResult second = await store.CreateLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelLogoLocator,
+                secondPayload);
+            Assert.IsNotNull(second.Reference);
+            string secondPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi")
+                .Single(path => !string.Equals(path, firstPath, StringComparison.OrdinalIgnoreCase));
+
+            firstCiphertext = await File.ReadAllBytesAsync(firstPath);
+            secondCiphertext = await File.ReadAllBytesAsync(secondPath);
+            await File.WriteAllBytesAsync(firstPath, secondCiphertext);
+            await File.WriteAllBytesAsync(secondPath, firstCiphertext);
+
+            AssertUnavailable(await store.ReadLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                first.Reference));
+            AssertUnavailable(await store.ReadLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelLogoLocator,
+                second.Reference));
+            AssertUnavailable(await store.ReadLocatorAsync(
+                SourceId.Generate(),
+                ProtectedValuePurpose.ChannelStreamLocator,
+                first.Reference));
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(firstPayload);
+            CryptographicOperations.ZeroMemory(secondPayload);
+            if (firstCiphertext is not null)
+            {
+                CryptographicOperations.ZeroMemory(firstCiphertext);
+            }
+
+            if (secondCiphertext is not null)
+            {
+                CryptographicOperations.ZeroMemory(secondCiphertext);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task CorruptTruncatedAndOversizedRecordsAreUnavailableWithoutSecretEcho()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-corrupt");
+        var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        SourceId sourceId = SourceId.Generate();
+        TestCanary canary = TestCanary.Create("M4", "DPAPI-CORRUPT");
+        byte[] payload = CreateCanaryPayload(canary);
+
+        try
+        {
+            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, payload);
+            Assert.IsNotNull(created.Reference);
+            string recordPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").Single();
+
+            await File.WriteAllBytesAsync(recordPath, [0x01, 0x02, 0x03]);
+            SecretStoreReadResult corrupt = await store.ReadCredentialsAsync(sourceId, created.Reference);
+            AssertUnavailable(corrupt);
+            string sensitiveText = Encoding.UTF8.GetString(payload);
+            Assert.IsFalse(corrupt.ToString().Contains(sensitiveText, StringComparison.Ordinal));
+
+            byte[] oversizedCiphertext = new byte[(128 * 1024) + 1];
+            try
+            {
+                await File.WriteAllBytesAsync(recordPath, oversizedCiphertext);
+                AssertUnavailable(await store.ReadCredentialsAsync(sourceId, created.Reference));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(oversizedCiphertext);
+            }
+
+            Assert.IsTrue((await store.DeleteCredentialsAsync(sourceId, created.Reference)).IsSuccess);
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task PreCancelledOperationsDoNotCreateUpdateOrDeleteRecords()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-cancel");
+        var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        SourceId sourceId = SourceId.Generate();
+        byte[] payload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-CANCEL"));
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+
+        try
+        {
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
+                await store.CreateCredentialsAsync(sourceId, payload, cancellation.Token));
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").ToArray());
+
+            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, payload);
+            Assert.IsNotNull(created.Reference);
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
+                await store.UpdateCredentialsAsync(sourceId, created.Reference, payload, cancellation.Token));
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
+                await store.DeleteCredentialsAsync(sourceId, created.Reference, cancellation.Token));
+            AssertLeaseMatches(await store.ReadCredentialsAsync(sourceId, created.Reference), payload);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task ConcurrentCreatesRemainIndependentlyBoundAndReadable()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-concurrent");
+        var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        SourceId sourceId = SourceId.Generate();
+        TestCanary[] canaries = Enumerable.Range(0, 8)
+            .Select(index => TestCanary.Create("M4", $"DPAPI-CONCURRENT-{index}"))
+            .ToArray();
+        byte[][] payloads = canaries.Select(CreateCanaryPayload).ToArray();
+
+        try
+        {
+            Task<ProtectedLocatorReferenceCreationResult>[] operations = payloads
+                .Select(payload => store.CreateLocatorAsync(
+                    sourceId,
+                    ProtectedValuePurpose.ChannelStreamLocator,
+                    payload).AsTask())
+                .ToArray();
+            ProtectedLocatorReferenceCreationResult[] created = await Task.WhenAll(operations);
+
+            Assert.IsTrue(created.All(result => result.IsSuccess && result.Reference is not null));
+            for (int index = 0; index < created.Length; index++)
+            {
+                AssertLeaseMatches(
+                    await store.ReadLocatorAsync(
+                        sourceId,
+                        ProtectedValuePurpose.ChannelStreamLocator,
+                        created[index].Reference!),
+                    payloads[index]);
+                Assert.HasCount(0, ArtifactCanaryScanner.Scan(temporary.FullPath, canaries[index]));
+            }
+        }
+        finally
+        {
+            foreach (byte[] payload in payloads)
+            {
+                CryptographicOperations.ZeroMemory(payload);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task SameKeyUpdateReadAndDeleteAreSerializedAcrossAdapterInstances()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-key-gate");
+        var firstInstance = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        var secondInstance = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        SourceId sourceId = SourceId.Generate();
+        byte[] initial = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-GATE-INITIAL"));
+        byte[] updated = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-GATE-UPDATED"));
+
+        try
+        {
+            SecretReferenceCreationResult created = await firstInstance.CreateCredentialsAsync(sourceId, initial);
+            Assert.IsNotNull(created.Reference);
+            string recordPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").Single();
+            using CancellationTokenSource readCancellation = new();
+            using var readPhaseBlocker = new FileStream(
+                recordPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read);
+            Task<SecretStoreOperationResult> readPhaseUpdateTask = secondInstance.UpdateCredentialsAsync(
+                sourceId,
+                created.Reference,
+                updated).AsTask();
+            await WaitForTemporaryRecordAsync(temporary.FullPath);
+            Task<SecretStoreReadResult> blockedReadTask = firstInstance.ReadCredentialsAsync(
+                sourceId,
+                created.Reference,
+                readCancellation.Token).AsTask();
+
+            await Task.Delay(25);
+            bool readWaited = !blockedReadTask.IsCompleted;
+            await Task.WhenAll(
+                Task.Run(readCancellation.Cancel),
+                Task.Run(readPhaseBlocker.Dispose));
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
+                await blockedReadTask);
+            SecretStoreOperationResult readPhaseUpdate = await readPhaseUpdateTask;
+
+            Assert.IsTrue(readWaited, "The same-key read bypassed an in-flight update.");
+            Assert.IsTrue(
+                readPhaseUpdate.IsSuccess,
+                $"The serialized read-phase update failed with {readPhaseUpdate.Failure}.");
+            AssertLeaseMatches(
+                await firstInstance.ReadCredentialsAsync(sourceId, created.Reference),
+                updated);
+
+            Task<SecretStoreOperationResult> deletePhaseUpdateTask;
+            Task<SecretStoreOperationResult> blockedDeleteTask;
+            bool deleteWaited;
+
+            using (var deletePhaseBlocker = new FileStream(
+                recordPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read))
+            {
+                deletePhaseUpdateTask = firstInstance.UpdateCredentialsAsync(
+                    sourceId,
+                    created.Reference,
+                    initial).AsTask();
+                await WaitForTemporaryRecordAsync(temporary.FullPath);
+                blockedDeleteTask = secondInstance.DeleteCredentialsAsync(
+                    sourceId,
+                    created.Reference).AsTask();
+
+                await Task.Delay(25);
+                deleteWaited = !blockedDeleteTask.IsCompleted;
+            }
+
+            SecretStoreOperationResult deletePhaseUpdate = await deletePhaseUpdateTask;
+            SecretStoreOperationResult delete = await blockedDeleteTask;
+
+            Assert.IsTrue(deleteWaited, "The same-key delete bypassed an in-flight update.");
+            Assert.IsTrue(
+                deletePhaseUpdate.IsSuccess,
+                $"The serialized delete-phase update failed with {deletePhaseUpdate.Failure}.");
+            Assert.IsTrue(delete.IsSuccess, $"The serialized delete failed with {delete.Failure}.");
+            AssertUnavailable(await secondInstance.ReadCredentialsAsync(sourceId, created.Reference));
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").ToArray());
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(initial);
+            CryptographicOperations.ZeroMemory(updated);
+        }
+    }
+
+    private static byte[] CreateCanaryPayload(TestCanary canary)
+    {
+        using MemoryStream stream = new();
+        canary.WriteTo(stream, TestCanaryEncoding.Utf8);
+        return stream.ToArray();
+    }
+
+    private static async Task WaitForTemporaryRecordAsync(string rootPath)
+    {
+        for (int attempt = 0; attempt < 200; attempt++)
+        {
+            if (Directory.EnumerateFiles(rootPath, "*.tmp").Any())
+            {
+                return;
+            }
+
+            await Task.Delay(5);
+        }
+
+        Assert.Fail("The bounded update did not reach its temporary-record stage.");
+    }
+
+    private static void AssertLeaseMatches(SecretStoreReadResult result, ReadOnlySpan<byte> expected)
+    {
+        Assert.IsTrue(result.IsSuccess);
+        Assert.IsNotNull(result.Lease);
+        using (result.Lease)
+        {
+            Assert.IsTrue(CryptographicOperations.FixedTimeEquals(expected, result.Lease.Value.Span));
+        }
+    }
+
+    private static void AssertUnavailable(SecretStoreReadResult result)
+    {
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(SecretStoreFailure.ProtectedRecordUnavailable, result.Failure);
+        Assert.IsNull(result.Lease);
+    }
+}

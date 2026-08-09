@@ -12,6 +12,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\IptvSuite.Application\IptvSuite.Application.csproj" />
+    <ProjectReference Include="..\..\src\IptvSuite.Infrastructure\IptvSuite.Infrastructure.csproj" />
     <ProjectReference Include="..\IptvSuite.Testing\IptvSuite.Testing.csproj" />
   </ItemGroup>
 </Project>

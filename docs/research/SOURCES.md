@@ -1,6 +1,6 @@
 # Araştırma kaynakları
 
-**Araştırma tarihi / son erişim:** 2026-08-09
+**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency yeniden doğrulaması 2026-08-10
 
 **Kapsam:** Phase 0 mimari, playback, güvenlik, mağaza ve platform kararları
 
@@ -83,7 +83,7 @@
 
 | ID | Kaynak | Kurum/proje | Bağlantı | Kararı destekleyen bilgi | Sürüm/tarih | Erişim |
 |---|---|---|---|---|---|---|
-| S33 | Credential Locker | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/develop/security/credential-locker) | Credential amaçlı kullanım, roaming ve uygulama başına 20 kayıt sınırı | Güncelleme 2026-04-04 | 2026-08-09 |
+| S33 | Credential Locker / PasswordVault | Microsoft | [Rehber](https://learn.microsoft.com/en-us/windows/apps/develop/security/credential-locker), [PasswordVault API](https://learn.microsoft.com/en-us/uwp/api/windows.security.credentials.passwordvault?view=winrt-26100), [`Add` sınırı](https://learn.microsoft.com/en-us/uwp/api/windows.security.credentials.passwordvault.add?view=winrt-26100) | Credential amaçlı kullanım/roaming; 20-record sınırının UWP/AppContainer desktop'a özgü olması ve non-AppContainer user-locker isolation caveat'ı | Güncelleme 2026-04-04 | 2026-08-10 |
 | S34 | Windows Data Protection | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/develop/security/data-protection) | LOCAL=user kapsamlı data protection | Güncelleme 2026-07-17 | 2026-08-09 |
 | S35 | .NET ProtectedData | Microsoft | [Resmî API](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.protecteddata?view=windowsdesktop-10.0) | DPAPI CurrentUser ile secret koruma | .NET 10 | 2026-08-09 |
 | S36 | Windows app data | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/design/app-settings/store-and-retrieve-app-data) | LocalCache/LocalState yaşam döngüsü ve roaming ayrımı | Güncel | 2026-08-09 |
@@ -92,6 +92,7 @@
 | S39 | HttpClient guidelines | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/dotnet/fundamentals/networking/http/httpclient-guidelines) | Uzun ömürlü/pooled client, DNS yenileme ve connection lifetime | .NET 10 | 2026-08-09 |
 | S40 | HTTP resilience | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/dotnet/core/resilience/http-resilience) | Retry/timeout/circuit davranışlarını sınırlama | .NET 10 | 2026-08-09 |
 | S41 | Data redaction | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/dotnet/core/extensions/data-redaction) | Merkezî sınıflandırma/redaction ilkeleri | .NET 10 | 2026-08-09 |
+| S85 | System.Security.Cryptography.ProtectedData | Microsoft / NuGet | [Resmî paket](https://www.nuget.org/packages/System.Security.Cryptography.ProtectedData/10.0.10), [API](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.protecteddata?view=windowsdesktop-10.0) | Windows DPAPI CurrentUser adapter'ının exact stable package/API yüzeyi | 10.0.10 stable, 2026-07-14 | 2026-08-10 |
 
 ## Samsung TV / Tizen
 

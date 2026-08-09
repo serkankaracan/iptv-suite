@@ -34,6 +34,8 @@ public sealed class SecretReference : IEquatable<SecretReference>
 
     public override string ToString() => "[SECRET-REFERENCE]";
 
+    internal Guid Identifier => _identifier;
+
     internal string ToOpaqueIdentifier() => $"{Prefix}{_identifier:N}";
 
     private static bool TryParseIdentifier(string? value, out Guid identifier)
@@ -76,6 +78,8 @@ public sealed class ProtectedLocatorReference : IEquatable<ProtectedLocatorRefer
     public override int GetHashCode() => _identifier.GetHashCode();
 
     public override string ToString() => "[PROTECTED-LOCATOR-REFERENCE]";
+
+    internal Guid Identifier => _identifier;
 
     internal string ToOpaqueIdentifier() => $"{Prefix}{_identifier:N}";
 
