@@ -1,0 +1,149 @@
+name: Windows quality
+
+on:
+  merge_group:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  quality:
+    name: Locked build and test gate
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install exact .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.302"
+          cache: true
+          cache-dependency-path: apps/windows/**/packages.lock.json
+
+      - name: Verify exact .NET SDK
+        shell: pwsh
+        run: |
+          $actualSdk = (dotnet --version).Trim()
+          if ($actualSdk -ne "10.0.302") {
+            throw "Expected .NET SDK 10.0.302, received '$actualSdk'."
+          }
+
+      - name: Run Windows quality gate and artifact scanner
+        shell: pwsh
+        run: .\eng\Invoke-WindowsQualityGate.ps1
+
+      - name: Upload sanitized quality evidence
+        if: ${{ success() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-quality-evidence
+          path: |
+            .artifacts/quality-gates/evidence/quality-summary.json
+            .artifacts/quality-gates/fixtures/run-1/fixture-manifest.json
+            .artifacts/quality-gates/fixtures/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+  package-smoke:
+    name: Packaged install and launch smoke
+    needs: quality
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install exact .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.302"
+          cache: true
+          cache-dependency-path: apps/windows/**/packages.lock.json
+
+      - name: Verify exact .NET SDK
+        shell: pwsh
+        run: |
+          $actualSdk = (dotnet --version).Trim()
+          if ($actualSdk -ne "10.0.302") {
+            throw "Expected .NET SDK 10.0.302, received '$actualSdk'."
+          }
+
+      - name: Restore locked dependencies
+        shell: pwsh
+        run: >-
+          dotnet restore .\apps\windows\IptvSuite.Windows.sln
+          --locked-mode
+          --configfile .\NuGet.config
+          -p:Platform=x64
+          --nologo
+
+      - name: Build, scan, install, launch, and remove signed MSIX
+        shell: powershell
+        run: .\eng\Invoke-WindowsPackageSmoke.ps1 -Configuration Release
+
+      - name: Scan packaged-smoke evidence
+        shell: pwsh
+        run: |
+          dotnet build .\apps\windows\tests\IptvSuite.Testing\IptvSuite.Testing.csproj `
+            -c Release `
+            --no-restore `
+            --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "The packaged-smoke evidence scanner build failed."
+          }
+          dotnet .\apps\windows\tests\IptvSuite.Testing\bin\Release\net10.0\IptvSuite.Testing.dll `
+            scan-artifacts .\.artifacts\msix-smoke CI PACKAGE_EVIDENCE
+          if ($LASTEXITCODE -ne 0) {
+            throw "The packaged-smoke evidence scan failed."
+          }
+
+      - name: Upload sanitized packaged smoke evidence
+        if: ${{ success() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-msix-smoke-evidence
+          path: .artifacts/msix-smoke/last-success.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+  required-gate:
+    name: Required Windows gate
+    if: ${{ always() }}
+    needs:
+      - quality
+      - package-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every Windows job to pass
+        shell: bash
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          PACKAGE_SMOKE_RESULT: ${{ needs.package-smoke.result }}
+        run: |
+          test "$QUALITY_RESULT" = "success"
+          test "$PACKAGE_SMOKE_RESULT" = "success"

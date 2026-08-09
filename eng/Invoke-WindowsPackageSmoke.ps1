@@ -8,10 +8,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
 
 $expectedName = "IptvSuite.LocalDev.6f0d9a64"
 $expectedPublisher = "CN=IptvSuite Local Development"
 $expectedApplicationId = "App"
+$testCanaryMarker = "IPTVSUITE_TEST_ONLY_CANARY_V1"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"
 $sourceManifestPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\Package.appxmanifest"
@@ -25,7 +27,12 @@ $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
 $certificate = $null
 $installedPackage = $null
 $launchedProcess = $null
+$installAttempted = $false
 $environmentBackup = @{}
+$primaryFailure = $null
+$successEvidence = $null
+$successMessage = $null
+$cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
     AppxBundle                    = "Never"
     AppxPackageDir                = "$packageOutput\"
@@ -101,6 +108,431 @@ function Assert-BuiltManifestPolicy {
     }
 }
 
+function Expand-MsixForInspection {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackagePath,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationPath
+    )
+
+    $packageFullPath = [System.IO.Path]::GetFullPath($PackagePath)
+    $destinationFullPath = [System.IO.Path]::GetFullPath($DestinationPath)
+    if (-not [System.IO.File]::Exists($packageFullPath)) {
+        throw "The MSIX inspection input does not exist."
+    }
+
+    if (Test-Path -LiteralPath $destinationFullPath) {
+        throw "The MSIX inspection destination already exists."
+    }
+
+    [System.IO.Directory]::CreateDirectory($destinationFullPath) | Out-Null
+    if (([System.IO.File]::GetAttributes($destinationFullPath) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The MSIX inspection destination must not be a reparse point."
+    }
+
+    $directorySeparator = [System.IO.Path]::DirectorySeparatorChar
+    $destinationPrefix = $destinationFullPath
+    if (-not $destinationPrefix.EndsWith($directorySeparator)) {
+        $destinationPrefix += $directorySeparator
+    }
+
+    $seenTargets = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    $maximumEntryCount = 25000
+    [long]$maximumExtractedBytes = 2147483648
+    [long]$totalExtractedBytes = 0
+    $packageStream = $null
+    $archive = $null
+
+    try {
+        $packageStream = [System.IO.File]::Open(
+            $packageFullPath,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::Read)
+        $archive = [System.IO.Compression.ZipArchive]::new(
+            $packageStream,
+            [System.IO.Compression.ZipArchiveMode]::Read,
+            $false)
+
+        if ($archive.Entries.Count -gt $maximumEntryCount) {
+            throw "The MSIX contains too many entries for safe inspection."
+        }
+
+        foreach ($entry in $archive.Entries) {
+            if ($entry.Length -gt ($maximumExtractedBytes - $totalExtractedBytes)) {
+                throw "The MSIX exceeds the safe inspection size limit."
+            }
+            $totalExtractedBytes += $entry.Length
+
+            $normalizedEntryName = $entry.FullName.Replace('\', '/')
+            if ([string]::IsNullOrWhiteSpace($normalizedEntryName) -or
+                $normalizedEntryName.StartsWith('/')) {
+                throw "The MSIX contains an invalid archive path."
+            }
+
+            $isDirectory = $normalizedEntryName.EndsWith('/')
+            $segments = @(
+                $normalizedEntryName.Split(
+                    [char]'/',
+                    [System.StringSplitOptions]::RemoveEmptyEntries)
+            )
+            if ($segments.Count -eq 0) {
+                throw "The MSIX contains an empty archive path."
+            }
+
+            foreach ($segment in $segments) {
+                $deviceName = $segment.Split('.')[0]
+                if ($segment -in @('.', '..') -or
+                    $segment.IndexOf(':') -ge 0 -or
+                    $segment.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
+                    $segment.EndsWith('.') -or
+                    $segment.EndsWith(' ') -or
+                    $deviceName -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') {
+                    throw "The MSIX contains an unsafe archive path segment."
+                }
+            }
+
+            $relativePath = [string]::Join([string]$directorySeparator, [string[]]$segments)
+            $targetPath = [System.IO.Path]::GetFullPath(
+                [System.IO.Path]::Combine($destinationFullPath, $relativePath))
+            if (-not $targetPath.StartsWith(
+                    $destinationPrefix,
+                    [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "The MSIX archive path escapes the inspection directory."
+            }
+
+            if (-not $seenTargets.Add($targetPath)) {
+                throw "The MSIX contains duplicate or case-colliding archive paths."
+            }
+
+            if ($isDirectory) {
+                if ($entry.Length -ne 0) {
+                    throw "The MSIX contains a directory entry with data."
+                }
+                [System.IO.Directory]::CreateDirectory($targetPath) | Out-Null
+                continue
+            }
+
+            $targetDirectory = [System.IO.Path]::GetDirectoryName($targetPath)
+            [System.IO.Directory]::CreateDirectory($targetDirectory) | Out-Null
+            if (([System.IO.File]::GetAttributes($targetDirectory) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "The MSIX extraction target must not be a reparse point."
+            }
+
+            $entryStream = $null
+            $outputStream = $null
+            try {
+                $entryStream = $entry.Open()
+                $outputStream = [System.IO.FileStream]::new(
+                    $targetPath,
+                    [System.IO.FileMode]::CreateNew,
+                    [System.IO.FileAccess]::Write,
+                    [System.IO.FileShare]::None,
+                    81920,
+                    [System.IO.FileOptions]::SequentialScan)
+                $copyBuffer = New-Object byte[] 81920
+                [long]$written = 0
+                while (($read = $entryStream.Read($copyBuffer, 0, $copyBuffer.Length)) -gt 0) {
+                    if ($written -gt ($entry.Length - $read)) {
+                        throw "An MSIX entry expanded beyond its declared size."
+                    }
+                    $outputStream.Write($copyBuffer, 0, $read)
+                    $written += $read
+                }
+
+                if ($written -ne $entry.Length) {
+                    throw "An MSIX entry did not match its declared size."
+                }
+            }
+            finally {
+                if ($null -ne $outputStream) {
+                    $outputStream.Dispose()
+                }
+                if ($null -ne $entryStream) {
+                    $entryStream.Dispose()
+                }
+            }
+        }
+    }
+    finally {
+        if ($null -ne $archive) {
+            $archive.Dispose()
+        }
+        if ($null -ne $packageStream) {
+            $packageStream.Dispose()
+        }
+    }
+}
+
+function Test-FileContainsByteSequence {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [byte[]]$Sequence
+    )
+
+    if ($Sequence.Length -eq 0) {
+        throw "The payload scan sequence must not be empty."
+    }
+
+    $prefixTable = New-Object int[] $Sequence.Length
+    $prefixLength = 0
+    for ($index = 1; $index -lt $Sequence.Length; $index++) {
+        while ($prefixLength -gt 0 -and $Sequence[$index] -ne $Sequence[$prefixLength]) {
+            $prefixLength = $prefixTable[$prefixLength - 1]
+        }
+
+        if ($Sequence[$index] -eq $Sequence[$prefixLength]) {
+            $prefixLength++
+            $prefixTable[$index] = $prefixLength
+        }
+    }
+
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open(
+            $Path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::Read)
+        $buffer = New-Object byte[] 65536
+        $matched = 0
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            for ($index = 0; $index -lt $read; $index++) {
+                $current = $buffer[$index]
+                while ($matched -gt 0 -and $current -ne $Sequence[$matched]) {
+                    $matched = $prefixTable[$matched - 1]
+                }
+
+                if ($current -eq $Sequence[$matched]) {
+                    $matched++
+                    if ($matched -eq $Sequence.Length) {
+                        return $true
+                    }
+                }
+            }
+        }
+
+        return $false
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Assert-ProductionPackagePayload {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackagePath
+    )
+
+    $inspectionId = [Guid]::NewGuid().ToString('N')
+    $inspectionLeaf = "IptvSuite-MsixInspection-$inspectionId"
+    $temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+    $inspectionRoot = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($temporaryRoot, $inspectionLeaf))
+    $expectedParent = [System.IO.Path]::GetDirectoryName($inspectionRoot)
+    if (-not $expectedParent.Equals(
+            $temporaryRoot.TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar),
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The MSIX inspection directory is outside the operating-system temp root."
+    }
+
+    $markerUtf8 = [System.Text.Encoding]::UTF8.GetBytes($testCanaryMarker)
+    $base64StablePrefixLength = $testCanaryMarker.Length - ($testCanaryMarker.Length % 3)
+    $base64StablePrefix = $testCanaryMarker.Substring(0, $base64StablePrefixLength)
+    $markerPatterns = @(
+        [pscustomobject]@{ Name = 'UTF-8'; Bytes = $markerUtf8 },
+        [pscustomobject]@{ Name = 'UTF-16LE'; Bytes = [System.Text.Encoding]::Unicode.GetBytes($testCanaryMarker) },
+        [pscustomobject]@{ Name = 'UTF-16BE'; Bytes = [System.Text.Encoding]::BigEndianUnicode.GetBytes($testCanaryMarker) },
+        [pscustomobject]@{
+            Name = 'Base64 UTF-8 prefix'
+            Bytes = [System.Text.Encoding]::ASCII.GetBytes(
+                [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($base64StablePrefix)))
+        }
+    )
+
+    try {
+        Expand-MsixForInspection -PackagePath $PackagePath -DestinationPath $inspectionRoot
+
+        $payloadEntries = @(
+            Get-ChildItem -LiteralPath $inspectionRoot -Force -Recurse |
+                Sort-Object -Property FullName
+        )
+        if ($payloadEntries.Count -eq 0) {
+            throw "The MSIX inspection produced an empty payload."
+        }
+
+        foreach ($entry in $payloadEntries) {
+            if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "The extracted MSIX payload contains a reparse point."
+            }
+
+            $relativeEntryPath = $entry.FullName.Substring($inspectionRoot.Length).TrimStart('\', '/')
+            if ($relativeEntryPath.IndexOf(
+                    $testCanaryMarker,
+                    [System.StringComparison]::Ordinal) -ge 0) {
+                throw "Test canary marker detected in a production payload path."
+            }
+
+            if ($entry.PSIsContainer -and
+                $entry.Name -match '^(?i:testdata|fixtures?)$') {
+                throw "Forbidden test-data directory in production payload: $relativeEntryPath"
+            }
+        }
+
+        $payloadFiles = @($payloadEntries | Where-Object { -not $_.PSIsContainer })
+        foreach ($file in $payloadFiles) {
+            $relativePath = $file.FullName.Substring($inspectionRoot.Length).TrimStart('\', '/')
+            if ($file.Name -match '(?i)(?:Tests|Testing)(?:\.[A-Za-z0-9_-]+)*\.(?:dll|exe|pdb|json)$' -or
+                $file.Name -match '^(?i:MSTest(?:\..+)?|testhost(?:\..+)?|Microsoft\.VisualStudio\.TestPlatform\..+|Microsoft\.TestPlatform\..+|Microsoft\.Testing\..+)$' -or
+                $file.Name -match '^(?i:fixture-manifest(?:\.schema)?\.json)$') {
+                throw "Forbidden test infrastructure in production payload: $relativePath"
+            }
+
+            foreach ($pattern in $markerPatterns) {
+                if (Test-FileContainsByteSequence -Path $file.FullName -Sequence $pattern.Bytes) {
+                    throw "Test canary marker detected in production payload: $relativePath ($($pattern.Name))."
+                }
+            }
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $inspectionRoot) {
+            $cleanupPath = [System.IO.Path]::GetFullPath($inspectionRoot)
+            if (-not $cleanupPath.Equals($inspectionRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [System.IO.Path]::GetFileName($cleanupPath) -ne $inspectionLeaf -or
+                ([System.IO.File]::GetAttributes($cleanupPath) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing unsafe MSIX inspection-directory cleanup."
+            }
+
+            Remove-Item -LiteralPath $cleanupPath -Recurse -Force
+        }
+    }
+}
+
+function Invoke-CleanupStep {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.List[string]]$Failures,
+
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$Action
+    )
+
+    try {
+        & $Action
+    }
+    catch {
+        $message = $_.Exception.Message -replace '[\r\n]+', ' '
+        $Failures.Add(("{0}: {1}" -f $Name, $message)) | Out-Null
+    }
+}
+
+function Remove-ExactPackageOutput {
+    if (-not [System.Text.RegularExpressions.Regex]::IsMatch($runId, '\A[0-9a-f]{32}\z')) {
+        throw "Refusing package-output cleanup because the run id is invalid."
+    }
+
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($artifactRoot)
+    $resolvedPackagesRoot = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($resolvedArtifactRoot, 'packages'))
+    $resolvedPackageOutput = [System.IO.Path]::GetFullPath($packageOutput)
+    $expectedPackageOutput = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($resolvedPackagesRoot, $runId))
+    $packageOutputParent = [System.IO.Directory]::GetParent($resolvedPackageOutput)
+
+    if (-not $resolvedPackageOutput.Equals(
+            $expectedPackageOutput,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        $null -eq $packageOutputParent -or
+        -not $packageOutputParent.FullName.Equals(
+            $resolvedPackagesRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        [System.IO.Path]::GetFileName($resolvedPackageOutput) -ne $runId) {
+        throw "Refusing cleanup of an unexpected package-output directory."
+    }
+
+    if (-not (Test-Path -LiteralPath $resolvedPackageOutput)) {
+        return
+    }
+
+    foreach ($protectedPath in @($resolvedArtifactRoot, $resolvedPackagesRoot, $resolvedPackageOutput)) {
+        if (-not (Test-Path -LiteralPath $protectedPath -PathType Container)) {
+            throw "Refusing package-output cleanup because an expected directory is missing."
+        }
+
+        if (([System.IO.File]::GetAttributes($protectedPath) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing package-output cleanup through a reparse point."
+        }
+    }
+
+    Remove-Item -LiteralPath $resolvedPackageOutput -Recurse -Force -ErrorAction Stop
+}
+
+function Write-JsonAtomically {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Value,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationPath
+    )
+
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($artifactRoot)
+    $resolvedDestination = [System.IO.Path]::GetFullPath($DestinationPath)
+    $allowedDestinations = @(
+        [System.IO.Path]::GetFullPath($evidencePath),
+        [System.IO.Path]::GetFullPath($failureEvidencePath)
+    )
+    if ($allowedDestinations -notcontains $resolvedDestination -or
+        -not [System.IO.Directory]::GetParent($resolvedDestination).FullName.Equals(
+            $resolvedArtifactRoot,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to write evidence outside the exact artifact root."
+    }
+
+    if (Test-Path -LiteralPath $resolvedDestination) {
+        throw "Refusing to overwrite an existing evidence file."
+    }
+
+    $temporaryPath = "$resolvedDestination.$runId.tmp"
+    if (-not [System.IO.Directory]::GetParent($temporaryPath).FullName.Equals(
+            $resolvedArtifactRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        [System.IO.Path]::GetFileName($temporaryPath) -ne
+            "$([System.IO.Path]::GetFileName($resolvedDestination)).$runId.tmp") {
+        throw "Refusing to use an unexpected evidence temporary path."
+    }
+
+    if (Test-Path -LiteralPath $temporaryPath) {
+        throw "The evidence temporary path already exists."
+    }
+
+    try {
+        $Value | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+        [System.IO.File]::Move($temporaryPath, $resolvedDestination)
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction Stop
+        }
+    }
+}
+
 function Remove-ExactDevelopmentPackage {
     $packages = @(
         Get-AppxPackage -Name $expectedName -ErrorAction SilentlyContinue |
@@ -117,14 +549,16 @@ function Remove-ExactDevelopmentPackage {
 }
 
 try {
+    foreach ($staleEvidencePath in @($evidencePath, $failureEvidencePath)) {
+        if (Test-Path -LiteralPath $staleEvidencePath) {
+            Remove-Item -LiteralPath $staleEvidencePath -Force -ErrorAction Stop
+        }
+    }
+
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $currentPrincipal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
     if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw "Run this smoke test from an elevated PowerShell session so the temporary public certificate can be trusted and removed."
-    }
-
-    if (Test-Path -LiteralPath $failureEvidencePath) {
-        Remove-Item -LiteralPath $failureEvidencePath -Force
     }
 
     $expectedSdk = (Get-Content -Raw (Join-Path $repositoryRoot "global.json") | ConvertFrom-Json).sdk.version
@@ -210,7 +644,11 @@ try {
         throw "The generated MSIX signature failed integrity validation: $($signature.Status)."
     }
 
+    $packageSha256 = (Get-FileHash -LiteralPath $packages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-ProductionPackagePayload -PackagePath $packages[0].FullName
+
     Remove-ExactDevelopmentPackage
+    $installAttempted = $true
     Add-AppxPackage -Path $packages[0].FullName -DependencyPath $runtimeDependencies[0].FullName
 
     $installedPackages = @(
@@ -260,12 +698,14 @@ try {
     }
 
     $packageFamilyName = $installedPackage.PackageFamilyName
+    $packageFileName = $packages[0].Name
     Remove-ExactDevelopmentPackage
-    $installedPackage = $null
 
     if (Get-AppxPackage -Name $expectedName -ErrorAction SilentlyContinue) {
         throw "The development package is still registered after uninstall."
     }
+    $installedPackage = $null
+    $installAttempted = $false
 
     $appDataPath = Join-Path $env:LOCALAPPDATA "Packages\$packageFamilyName"
     $cleanupDeadline = (Get-Date).AddSeconds(10)
@@ -276,60 +716,139 @@ try {
         throw "Package app-data remains after uninstall: $appDataPath"
     }
 
-    [ordered]@{
+    $successEvidence = [ordered]@{
+        RunId             = $runId
         CompletedAt       = (Get-Date).ToUniversalTime().ToString("O")
         Configuration     = $Configuration
         DotNetSdk         = $actualSdk
-        PackageFile       = $packages[0].Name
+        PackageFile       = $packageFileName
+        PackageSha256     = $packageSha256
         PackageName       = $expectedName
         PackagePublisher  = $expectedPublisher
         PackageFamilyName = $packageFamilyName
         Architecture      = "x64"
         Capabilities      = @("runFullTrust")
         SignatureStatus   = $signature.Status.ToString()
+        PayloadLeakGate   = $true
         NormalClose       = $true
         PackageRemoved    = $true
-    } | ConvertTo-Json | Set-Content -Path $evidencePath -Encoding UTF8
+    }
+    $githubSha = [Environment]::GetEnvironmentVariable("GITHUB_SHA", "Process")
+    if (-not [string]::IsNullOrWhiteSpace($githubSha) -and
+        [System.Text.RegularExpressions.Regex]::IsMatch($githubSha, '\A[0-9a-fA-F]{40}\z')) {
+        $successEvidence.CommitSha = $githubSha.ToLowerInvariant()
+    }
 
-    Write-Host "MSIX smoke passed: signed, installed, launched, closed, and uninstalled $($packages[0].Name)."
+    $successMessage = "MSIX smoke passed: signed, installed, launched, closed, and uninstalled $packageFileName."
 }
 catch {
-    [ordered]@{
-        FailedAt      = (Get-Date).ToUniversalTime().ToString("O")
-        Configuration = $Configuration
-        Error         = $_.Exception.Message
-    } | ConvertTo-Json | Set-Content -Path $failureEvidencePath -Encoding UTF8
-
-    throw
+    $primaryFailure = $_
 }
 finally {
-    if ($null -ne $launchedProcess -and -not $launchedProcess.HasExited) {
-        Stop-Process -Id $launchedProcess.Id -Force -ErrorAction SilentlyContinue
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Stop launched application" -Action {
+        if ($null -ne $launchedProcess -and -not $launchedProcess.HasExited) {
+            Stop-Process -Id $launchedProcess.Id -Force -ErrorAction Stop
+        }
     }
 
-    if ($null -ne $installedPackage) {
-        Remove-ExactDevelopmentPackage
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact development package" -Action {
+        if ($installAttempted -or $null -ne $installedPackage) {
+            Remove-ExactDevelopmentPackage
+        }
     }
 
-    foreach ($entry in $environmentBackup.GetEnumerator()) {
-        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    foreach ($environmentEntry in @($environmentBackup.GetEnumerator())) {
+        $environmentName = [string]$environmentEntry.Key
+        $previousEnvironmentValue = $environmentEntry.Value
+        Invoke-CleanupStep -Failures $cleanupFailures -Name "Restore process environment '$environmentName'" -Action {
+            [Environment]::SetEnvironmentVariable(
+                $environmentName,
+                $previousEnvironmentValue,
+                "Process")
+        }
     }
 
     if ($null -ne $certificate) {
-        foreach ($store in @("Cert:\LocalMachine\TrustedPeople", "Cert:\CurrentUser\My")) {
-            $certificatePath = "$store\$($certificate.Thumbprint)"
-            $candidate = Get-Item -LiteralPath $certificatePath -ErrorAction SilentlyContinue
-            if ($null -ne $candidate) {
-                if ($candidate.Subject -ne $expectedPublisher) {
-                    throw "Refusing certificate cleanup because the subject does not match."
-                }
+        foreach ($certificateStore in @("Cert:\LocalMachine\TrustedPeople", "Cert:\CurrentUser\My")) {
+            $store = $certificateStore
+            Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact certificate from '$store'" -Action {
+                $certificatePath = "$store\$($certificate.Thumbprint)"
+                $candidate = Get-Item -LiteralPath $certificatePath -ErrorAction SilentlyContinue
+                if ($null -ne $candidate) {
+                    if ($candidate.Subject -ne $expectedPublisher) {
+                        throw "Refusing certificate cleanup because the subject does not match."
+                    }
 
-                Remove-Item -LiteralPath $certificatePath -Force
+                    Remove-Item -LiteralPath $certificatePath -Force -ErrorAction Stop
+                }
             }
         }
     }
 
-    if (Test-Path -LiteralPath $publicCertificatePath) {
-        Remove-Item -LiteralPath $publicCertificatePath -Force
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exported public certificate" -Action {
+        if (Test-Path -LiteralPath $publicCertificatePath) {
+            Remove-Item -LiteralPath $publicCertificatePath -Force -ErrorAction Stop
+        }
+    }
+
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact package-output directory" -Action {
+        Remove-ExactPackageOutput
     }
 }
+
+if ($null -ne $primaryFailure -or $cleanupFailures.Count -ne 0) {
+    $failureMessage = if ($null -ne $primaryFailure) {
+        $primaryFailure.Exception.Message
+    }
+    else {
+        "Cleanup failed after an otherwise successful MSIX smoke."
+    }
+    $failureEvidence = [ordered]@{
+        RunId         = $runId
+        FailedAt      = (Get-Date).ToUniversalTime().ToString("O")
+        Configuration = $Configuration
+        Error         = $failureMessage
+    }
+    if ($cleanupFailures.Count -ne 0) {
+        $failureEvidence.CleanupFailures = @($cleanupFailures)
+    }
+    Write-JsonAtomically -Value $failureEvidence -DestinationPath $failureEvidencePath
+
+    if ($cleanupFailures.Count -ne 0) {
+        $aggregateMessage = "Cleanup failures: $($cleanupFailures -join ' | ')"
+        if ($null -ne $primaryFailure) {
+            throw [System.InvalidOperationException]::new(
+                "MSIX smoke failed: $failureMessage. $aggregateMessage",
+                $primaryFailure.Exception)
+        }
+
+        throw [System.InvalidOperationException]::new($aggregateMessage)
+    }
+
+    throw $primaryFailure
+}
+
+try {
+    Write-JsonAtomically -Value $successEvidence -DestinationPath $evidencePath
+}
+catch {
+    $successEvidenceFailure = $_
+    $failureEvidence = [ordered]@{
+        RunId         = $runId
+        FailedAt      = (Get-Date).ToUniversalTime().ToString("O")
+        Configuration = $Configuration
+        Error         = "Atomic success-evidence write failed: $($_.Exception.Message)"
+    }
+    try {
+        Write-JsonAtomically -Value $failureEvidence -DestinationPath $failureEvidencePath
+    }
+    catch {
+        throw [System.InvalidOperationException]::new(
+            "Success evidence and failure evidence could not be written atomically.",
+            $successEvidenceFailure.Exception)
+    }
+
+    throw $successEvidenceFailure
+}
+
+Write-Host $successMessage

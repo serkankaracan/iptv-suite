@@ -45,7 +45,7 @@ Kurallar:
 - Platformlar arası zorunlu paylaşım yalnız versioned terminology, JSON Schema/contract, error registry, sentetik provider fixture'ları, M3U golden corpus ve playback matrix manifestidir.
 - Windows C#, Tizen JavaScript/TypeScript, Android Kotlin ve Apple Swift arasında runtime domain/UI/player kodu zorla paylaşılmaz.
 - Apple hedefleri kendi içinde Swift Package; gelecekte .NET hedefleri yalnız ölçülmüş yararla C# package paylaşabilir.
-- CI path-filtered çalışır; her platformın release artifact'i bağımsızdır.
+- CI işleri platform-scoped kalır; ancak required-check workflow'u path filter nedeniyle skip edilip `Pending` kalmamak için her PR/`merge_group` olayında sonuç üretir. Bağımlı job skip/fail durumları `always()` coordinator ile tek required sonuca çevrilir; ruleset seçimi ayrıca yönetilir. Her platformın release artifact'i bağımsızdır.
 - Store/signing credential'ları repository'ye girmez. CODEOWNERS review sahipliği sağlar ama path-level erişim gizliliği sağlamaz.
 - Shared contract değişikliği semantic version ve bütün consumer contract testleriyle yapılır.
 
@@ -56,7 +56,7 @@ Kurallar:
 - Toolchain'ler ortak pipeline içine zorlanmaz.
 - Clone/CI boyutu platform sayısıyla büyüyebilir.
 - Repository düzeyi erişim, vendor/compliance izolasyonuna yetmez.
-- Bağımsız platform release'leri için path-filter, CODEOWNERS ve branch disiplini gerekir.
+- Bağımsız platform release'leri için job içi değişiklik seçimi veya her zaman sonuç üreten coordinator, CODEOWNERS ve branch disiplini gerekir; required workflow'a üst seviye path filter konmaz.
 
 ## Risks
 
@@ -70,7 +70,7 @@ Kurallar:
 
 - M1'de yalnız Windows paths ve docs için gerçek minimal yapı; hayali gelecek platform scaffold'u yok.
 - İlk shared contract'ta semantic version, schema validation ve Windows consumer testi.
-- Her yeni platform bootstrap'ında path-filter CI ve bağımsız release dry run.
+- Her yeni platform bootstrap'ında required check'i `Pending` bırakmayan platform seçimli CI ve bağımsız release dry run.
 - Repository boyutu, checkout süresi ve cross-platform CI süresi üç ayda bir ölçülür.
 - CODEOWNERS ve CI secret scope security review'dan geçer.
 
@@ -87,4 +87,4 @@ Bölünmede tarafsız `contracts-and-test-vectors` repository'si semantic versio
 
 ## References
 
-[DOMAIN_AND_DATA_CONTRACTS](../architecture/DOMAIN_AND_DATA_CONTRACTS.md), [SOURCES](../research/SOURCES.md)
+[DOMAIN_AND_DATA_CONTRACTS](../architecture/DOMAIN_AND_DATA_CONTRACTS.md), [S81](../research/SOURCES.md)

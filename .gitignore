@@ -6,6 +6,15 @@ artifacts/
 TestResults/
 coverage/
 *.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+*.sarif
+*.junit.xml
+*.received.*
+BenchmarkDotNet.Artifacts/
 
 # IDE and user state
 .vs/
@@ -15,6 +24,9 @@ coverage/
 *.user
 *.userosscache
 *.sln.docstates
+*.pubxml
+*.user.props
+*.runsettings.user
 
 # Windows packaging outputs and signing material
 AppPackages/

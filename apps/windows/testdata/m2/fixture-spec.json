@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "fixtureSetId": "m2-harness-v1",
+  "generatorName": "IptvSuite.Testing.SyntheticFixtureGenerator",
+  "generatorVersion": "1.0.0",
+  "algorithmVersion": 1,
+  "seed": 20260809,
+  "recordCount": 16,
+  "containsThirdPartyContent": false,
+  "containsPersonalData": false,
+  "containsRealCredentials": false,
+  "containsUnauthorizedMedia": false,
+  "license": {
+    "expression": "LicenseRef-IPTVSuite-Synthetic-Test-Only",
+    "status": "UNVERIFIED",
+    "file": "../LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt"
+  }
+}

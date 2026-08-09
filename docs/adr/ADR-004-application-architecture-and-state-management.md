@@ -55,6 +55,8 @@ Dependency injection composition root'ta kullanılır. Interface yalnız gerçek
 
 Configuration strongly typed ve secretsizdir. Environment/appsettings içine credential konmaz. Kullanıcıya giden metin resource key üzerinden yerelleştirilir; domain error kodu sabit, presentation metni locale'e göre değişir.
 
+M2 implementation test seam'lerini production contract'larından ayırır. `IptvSuite.Testing`, unit ve integration projeleri production graph'ının dışında kalır; production projeleri test assembly'sine referans veremez. Fake time resmî `TimeProvider` test implementation'ını, scripted transport yalnız in-process request/response'u, in-memory secret store yalnız test bytes'ını ve fake player yalnız explicit command/state recording'i sağlar. Bunlar provider/retry policy, DPAPI veya gerçek player state/codec davranışı uygulamaz. Loopback Kestrel yalnız integration harness'idir; production transport değildir.
+
 ## Consequences and trade-offs
 
 - İş kuralları WinUI ve native player olmadan test edilir.
@@ -75,7 +77,7 @@ Configuration strongly typed ve secretsizdir. Environment/appsettings içine cre
 ## Validation plan
 
 - M1 — **PASS, 2026-08-09:** 6 project/package/toolchain/WinUI/manifest kuralı yeşil; Domain'e geçici yasak reference eklendiğinde gate'in kırıldığı doğrulandı.
-- M2 fake clock/transport/player ve local fixture server.
+- M2 — **IN PROGRESS:** fake time/transport/test secret store/passive player, loopback fixture server, temp/timeout isolation, deterministic fixture/canary ve production→test dependency yasağı mevcut. Exact-SDK local iki-run/sentinel/fixture/canary gate'i 2026-08-09'da 22/22 PASS verdi; başarılı hosted packaged-smoke artifact'ı bekleniyor. Test doubles ürün contract'ı değildir; workflow source'u da PASS kanıtı değildir.
 - M3 domain invariant/table tests.
 - M5–M8 adapter contract ve cancellation/fault-injection testleri.
 - M9 view-model + UI automation/virtualization testleri.
@@ -92,4 +94,4 @@ Configuration strongly typed ve secretsizdir. Environment/appsettings içine cre
 
 ## References
 
-[DOMAIN_AND_DATA_CONTRACTS](../architecture/DOMAIN_AND_DATA_CONTRACTS.md), [S37–S41](../research/SOURCES.md)
+[DOMAIN_AND_DATA_CONTRACTS](../architecture/DOMAIN_AND_DATA_CONTRACTS.md), [S37–S41, S76–S79](../research/SOURCES.md)

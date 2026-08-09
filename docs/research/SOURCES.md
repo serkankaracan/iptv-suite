@@ -48,6 +48,20 @@
 | S74 | MSIX signing overview | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/msix/package/signing-package-overview) | Signed ve trusted MSIX install zorunluluğu; self-signed local test ile Store signing ayrımı | Güncelleme 2026-04-15 | 2026-08-09 |
 | S75 | Windows App Development CLI | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/) | `winapp` CLI'nin public preview olması; M1 stable-only build zincirine alınmama gerekçesi | Public preview, 2026 | 2026-08-09 |
 
+### M2 test altyapısı kaynakları
+
+| ID | Kaynak | Kurum/proje | Bağlantı | Kararı destekleyen bilgi | Sürüm/tarih | Erişim |
+|---|---|---|---|---|---|---|
+| S76 | FakeTimeProvider ile test | Microsoft / .NET | [Resmî belge](https://learn.microsoft.com/en-us/dotnet/core/extensions/timeprovider-testing), [resmî paket](https://www.nuget.org/packages/Microsoft.Extensions.TimeProvider.Testing/10.8.0) | `TimeProvider` bağımlı kodda wall-clock beklemeden deterministic time advance/timer testi; test-only exact paket | 10.8.0 stable, MIT, 2026-07-14 | 2026-08-09 |
+| S77 | MSTest execution control | Microsoft / .NET | [Resmî belge](https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-mstest-writing-tests-controlling-execution) | Method/class parallelization, worker sayısı, timeout ve cooperative cancellation sınırları | MSTest 4.x güncel belge | 2026-08-09 |
+| S78 | Kestrel endpoint configuration | Microsoft / ASP.NET Core | [Resmî belge](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel/endpoints?view=aspnetcore-10.0) | `IPAddress.Loopback` bind ve port `0` ile OS-seçimli local fixture port'u; `ListenLocalhost(0)` kısıtı | ASP.NET Core 10, güncel | 2026-08-09 |
+| S79 | `dotnet test` with VSTest | Microsoft / .NET | [Resmî belge](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-vstest) | TRX results directory/logger ve hang timeout; `--blame-hang-dump-type none` ile dump toplamadan host termination | .NET 10 SDK, güncel | 2026-08-09 |
+| S80 | `global.json` overview | Microsoft / .NET | [Resmî belge](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json) | Exact SDK version, `allowPrerelease: false`; `rollForward: disable` ile exact match ve lockfile graph'ıyla lockstep önerisi | Güncelleme 2026 | 2026-08-09 |
+| S81 | Required status check troubleshooting | GitHub | [Resmî belge](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks) | Path/branch filter nedeniyle skip edilen required workflow check'inin `Pending` kalıp merge'i engelleyebilmesi; required workflow'u üst seviyede skip etmeme gerekçesi | Güncel | 2026-08-09 |
+| S82 | Secure use of GitHub Actions | GitHub | [Resmî belge](https://docs.github.com/en/actions/reference/security/secure-use) | Action'ları full commit SHA ile pinleme, untrusted input ve `pull_request_target` riskleri; least-privilege workflow sınırı | Güncel | 2026-08-09 |
+| S83 | GitHub-hosted runners | GitHub | [Resmî belge](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) | Her job için yeni hosted VM; Windows runner'da administrator/UAC sınırı ve self-hosted olmayan untrusted-PR lane gerekçesi | Güncel | 2026-08-09 |
+| S84 | setup-dotnet cache davranışı | GitHub / actions | [Resmî action belgesi](https://github.com/actions/setup-dotnet#caching-nuget-packages) | Lockfile tabanlı global-packages cache ve implicit NuGet fallback klasörünü kapatma gereksinimi | `setup-dotnet` v6, 2026 | 2026-08-09 |
+
 ## Windows media ve player adayları
 
 | ID | Kaynak | Kurum/proje | Bağlantı | Kararı destekleyen bilgi | Sürüm/tarih | Erişim |

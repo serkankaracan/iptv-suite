@@ -32,6 +32,29 @@ Test verisi:
 
 Her production defect, uygun katmanda önce sentetik ve secret-free regression fixture'a dönüştürülür. Gerçek payload ancak hak/mahremiyet kontrolünden sonra tamamen sanitize ve küçültülmüş biçimde kullanılabilir.
 
+### 2.1 M2 test harness baseline'ı
+
+**Implementation status:** In progress; local exact-SDK iki-run 22/22 PASS, başarılı hosted packaged-host artifact kanıtı bekleniyor.
+
+M2 katmanları şu concrete sınırı kullanır:
+
+| M2 katmanı | Proje/host | İzin verilen seam | Bu katmanın kanıtlamadığı |
+|---|---|---|---|
+| Unit | `IptvSuite.UnitTests` → `IptvSuite.Testing` | Resmî fake time, scripted transport, in-memory test secret store, passive fake player, generator/canary | Gerçek timer/network, DPAPI, ürün state policy'si, codec |
+| Integration | `IptvSuite.IntegrationTests` → `IptvSuite.Testing` | Loopback Kestrel, OS-seçimli port, gerçek temp filesystem, timeout/cancellation/cleanup | Gerçek provider/internet, TLS policy, SQLite, packaged lifecycle |
+| Architecture | `IptvSuite.ArchitectureTests` | Project/package/framework allowlist ve production→test yasağı | Runtime davranışı |
+| Packaged launch | `Invoke-WindowsPackageSmoke.ps1` ile installed MSIX | Çalıştığı hostta sign, targeted production-payload inspection, install, AUMID visible launch, normal close, exact cleanup | Feature UI/UIA, update, WACK/Store, provider/player/codec, ARM64, host/device matrisi |
+
+Test fake'leri production contract değildir. Özellikle fake secret store M4 DPAPI kanıtı, fake player M11 adapter/codec kanıtı ve scripted transport M5 HTTP güvenlik politikası yerine kullanılamaz. Local HTTP server yalnız `IPAddress.Loopback` ve port `0` ile çalışır; gerçek provider host'u fixture testine sokulmaz.
+
+M2 fixture specification'ı generator `1.0.0`, algorithm version `1`, seed `20260809`, record count, provenance flag'leri ve output SHA-256'sını manifestte taşır. `LicenseRef-IPTVSuite-Synthetic-Test-Only` durumu `UNVERIFIED` ve internal-only'dir; public redistribution izni değildir. Deterministik fixture manifestine timestamp, absolute path veya makine bilgisi girmez; bunlar ayrı run evidence'ına aittir.
+
+Canary açıkça test-only marker'dır. Scanner marker'ın UTF-8, UTF-16LE/BE, URI-escaped ve alignment-safe Base64 varyantlarını scope'tan bağımsız ve chunk boundary boyunca arar; marker taşıyan artifact path'ini fingerprint ile redakte eder. Library corpus'una ek olarak CLI, kontamine artifact'ta exact exit `2`, cleanup sonrası temiz artifact'ta `0` vermelidir. Bu kontrol genel secret discovery/redaction doğruluğu veya production artifact güvenliği iddiası değildir. GitHub job logları artifact scan kapsamına girmez ve canary sonucu `UNVERIFIED` kalır. Hang timeout'ta full/minidump üretilmez; test host `dump-type none` ile sonlandırılır.
+
+Local M2 gate'i `eng/Invoke-WindowsQualityGate.ps1` komutudur. Exact SDK `10.0.302` (`rollForward: disable`, prerelease kapalı), locked restore, Debug/Release x64 build, aynı full suite'in ayrı TRX dizinlerinde iki ardışık geçişi, exact sentinel TRX'inde armed `Failed`/disarmed `Passed`, scanner CLI exit `2`/`0`, fixture byte/SHA-256 eşitliği ve quality-artifact canary taramasını tek akışta doğrular. TRX byte eşitliği beklenmez; sıralanmış `testName|Passed` seti karşılaştırılır. Sanitized local özet `.artifacts/quality-gates/evidence/quality-summary.json` altında üretilir.
+
+Hosted `windows-quality.yml` bütün pull request, `merge_group`, `main` push ve manual dispatch olaylarında `windows-2025-vs2026` üzerinde exact SDK ile quality gate'i çalıştırır; package job'u quality başarısına bağlıdır. `always()` coordinator'ı quality fail veya package skip/fail sonucunu tek `Required Windows gate` check'inde kırmızıya çevirir. Workflow düzeyinde path filter bilerek yoktur, çünkü filtre nedeniyle skip edilen required check `Pending` kalıp merge'i engelleyebilir [S81]. Ruleset/branch protection içinde bu check'in gerçekten required seçilmesi repository dışı ayardır ve source ağacından doğrulanamaz. Raw TRX upload edilmez; scanner'dan geçmiş minimal summary, manifest + license sidecar ve package success evidence yedi gün tutulur. Yeşil hosted package job'u yalnız o commit/runner için signed x64 MSIX'in hedefli test-payload/canary inspection, install, visible launch, normal close ve exact cleanup zincirini kanıtlar. Workflow source'u, başarılı run/artifact olmadan kanıt değildir. Bu smoke; feature UI/UIA/accessibility, update/migration, WACK/Store, non-admin veya clean-machine matrisi, gerçek provider/internet, player/codec/HW decode, ARM64 ve genel credential yokluğu kanıtı değildir.
+
 ## 3. Feature test planı
 
 ### 3.1 Validation ve endpoint construction
@@ -293,7 +316,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | Milestone | Minimum green evidence |
 |---|---|
 | M1 | PASS: clean temp workspace + empty-cache locked restore, Debug/Release x64 build, 6/6 boundaries/toolchain/manifest, negative gate, signed install/launch/normal-close/uninstall |
-| M2 | Unit/integration/UI smoke + deterministic fixtures |
+| M2 | IN PROGRESS: local exact-SDK iki-run 22/22 PASS, fixture/canary CLI/sentinel exact-TRX ve negative architecture mutation PASS; başarılı hosted packaged-smoke artifact'ı bekleniyor |
 | M3 | Validation, terminology, redaction unit corpus |
 | M4 | Packaged secret-store + canary artifact scan |
 | M5 | HTTP fault/redirect/TLS/timeout/cancel suite |
@@ -326,8 +349,8 @@ Otomasyon şunların yerini tutmaz:
 - Tier B hangi kombinasyonların marketing support matrix'ine gireceği M10 + hukuk sonucudur.
 - Engineering minimum M1'de Windows 11 build 10.0.26100/x64 olarak pinlendi; product support minimumu, ARM64 ve reference hardware M15'te kapanacak.
 - Player A/V sync için sayısal ölçüm düzeneği M10'da seçilecek; yalnız “gözle iyi” kabul değildir.
-- UI automation aracının exact seçimi M2'de bakım/flakiness spike'ı ile yapılacak.
+- M2 yalnız packaged visible-launch smoke kullanır. Feature-level UIA aracının exact seçimi M9/M12 öncesi bakım/flakiness spike'ıyla yapılacak; launch smoke UIA/accessibility kanıtı değildir.
 
 ## Kaynaklar
 
-[S14–S16, S21–S32, S33–S41](../research/SOURCES.md)
+[S14–S16, S21–S32, S33–S41, S76–S84](../research/SOURCES.md)

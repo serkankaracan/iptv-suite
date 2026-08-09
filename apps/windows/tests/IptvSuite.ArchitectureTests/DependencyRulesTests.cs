@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -19,25 +20,48 @@ public sealed class DependencyRulesTests
             "IptvSuite.Domain",
             "apps/windows/src/IptvSuite.Domain/IptvSuite.Domain.csproj",
             [],
+            [],
             []),
         new(
             "IptvSuite.Application",
             "apps/windows/src/IptvSuite.Application/IptvSuite.Application.csproj",
             ["IptvSuite.Domain"],
+            [],
             []),
         new(
             "IptvSuite.Infrastructure",
             "apps/windows/src/IptvSuite.Infrastructure/IptvSuite.Infrastructure.csproj",
             ["IptvSuite.Application"],
+            [],
             []),
         new(
             "IptvSuite.Windows",
             "apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj",
             ["IptvSuite.Application", "IptvSuite.Infrastructure"],
+            [],
             ["Microsoft.Windows.SDK.BuildTools", "Microsoft.WindowsAppSDK"]),
         new(
             "IptvSuite.ArchitectureTests",
             "apps/windows/tests/IptvSuite.ArchitectureTests/IptvSuite.ArchitectureTests.csproj",
+            [],
+            [],
+            ["MSTest"]),
+        new(
+            "IptvSuite.Testing",
+            "apps/windows/tests/IptvSuite.Testing/IptvSuite.Testing.csproj",
+            [],
+            ["Microsoft.AspNetCore.App"],
+            ["Microsoft.Extensions.TimeProvider.Testing"]),
+        new(
+            "IptvSuite.UnitTests",
+            "apps/windows/tests/IptvSuite.UnitTests/IptvSuite.UnitTests.csproj",
+            ["IptvSuite.Testing"],
+            [],
+            ["MSTest"]),
+        new(
+            "IptvSuite.IntegrationTests",
+            "apps/windows/tests/IptvSuite.IntegrationTests/IptvSuite.IntegrationTests.csproj",
+            ["IptvSuite.Testing"],
             [],
             ["MSTest"]),
     ];
@@ -57,6 +81,15 @@ public sealed class DependencyRulesTests
             string[] expected = rule.ProjectReferences.Order(StringComparer.Ordinal).ToArray();
 
             CollectionAssert.AreEqual(expected, actual, $"Unexpected project reference in {rule.Name}.");
+
+            string[] actualFrameworks = GetIncludes(project, "FrameworkReference")
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            string[] expectedFrameworks = rule.FrameworkReferences.Order(StringComparer.Ordinal).ToArray();
+            CollectionAssert.AreEqual(
+                expectedFrameworks,
+                actualFrameworks,
+                $"Unexpected framework reference in {rule.Name}.");
             graph.Add(rule.Name, actual);
         }
 
@@ -106,6 +139,7 @@ public sealed class DependencyRulesTests
         {
             ["Microsoft.WindowsAppSDK"] = "2.3.1",
             ["Microsoft.Windows.SDK.BuildTools"] = "10.0.26100.8249",
+            ["Microsoft.Extensions.TimeProvider.Testing"] = "10.8.0",
             ["MSTest"] = "4.3.3",
         };
 
@@ -126,7 +160,7 @@ public sealed class DependencyRulesTests
         JsonElement sdk = globalJson.RootElement.GetProperty("sdk");
 
         Assert.AreEqual("10.0.302", sdk.GetProperty("version").GetString());
-        Assert.AreEqual("latestPatch", sdk.GetProperty("rollForward").GetString());
+        Assert.AreEqual("disable", sdk.GetProperty("rollForward").GetString());
         Assert.IsFalse(sdk.GetProperty("allowPrerelease").GetBoolean());
 
         XDocument buildProperties = LoadXml("Directory.Build.props");
@@ -139,6 +173,7 @@ public sealed class DependencyRulesTests
             ["Deterministic"] = "true",
             ["RestorePackagesWithLockFile"] = "true",
             ["RestoreUseStaticGraphEvaluation"] = "true",
+            ["DisableImplicitNuGetFallbackFolder"] = "true",
         };
 
         foreach ((string propertyName, string expectedValue) in expectedBuildProperties)
@@ -200,6 +235,77 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             Directory.EnumerateFiles(appsRoot, "Package.StoreAssociation.xml", SearchOption.AllDirectories).Any(),
             "Store association is forbidden for the disposable M1 identity.");
+    }
+
+    [TestMethod]
+    public void TestInfrastructureCannotLeakIntoProduction()
+    {
+        string solution = File.ReadAllText(Path.Combine(RepositoryRoot, "apps", "windows", "IptvSuite.Windows.sln"));
+        foreach (ProjectRule rule in ProjectRules)
+        {
+            const string solutionRoot = "apps/windows/";
+            Assert.IsTrue(rule.RelativePath.StartsWith(solutionRoot, StringComparison.Ordinal));
+            string solutionRelativePath = rule.RelativePath[solutionRoot.Length..].Replace('/', '\\');
+            StringAssert.Contains(solution, solutionRelativePath);
+        }
+
+        string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
+        string[] sourceFiles = Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetExtension(path) is ".cs" or ".csproj" or ".xaml" or ".xml" or ".manifest")
+            .ToArray();
+
+        foreach (string sourceFile in sourceFiles)
+        {
+            string content = File.ReadAllText(sourceFile);
+            Assert.IsFalse(
+                content.Contains("IptvSuite.Testing", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.UnitTests", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.IntegrationTests", StringComparison.Ordinal) ||
+                content.Contains("Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal) ||
+                content.Contains("Microsoft.AspNetCore.App", StringComparison.Ordinal) ||
+                content.Contains("IPTVSUITE_TEST_ONLY_CANARY_V1", StringComparison.Ordinal),
+                $"Test infrastructure leaked into production source: {Path.GetRelativePath(RepositoryRoot, sourceFile)}");
+        }
+
+        XDocument testingProject = LoadXml("apps/windows/tests/IptvSuite.Testing/IptvSuite.Testing.csproj");
+        Assert.AreEqual("false", GetProperty(testingProject, "IsPackable"));
+        Assert.AreEqual("false", GetProperty(testingProject, "IsPublishable"));
+    }
+
+    [TestMethod]
+    public void CiWorkflowIsLeastPrivilegePinnedAndAlwaysTriggered()
+    {
+        string workflowPath = Path.Combine(RepositoryRoot, ".github", "workflows", "windows-quality.yml");
+        string workflow = File.ReadAllText(workflowPath).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        StringAssert.Contains(workflow, "  pull_request:\n");
+        StringAssert.Contains(workflow, "on:\n  merge_group:\n  pull_request:\n");
+        StringAssert.Contains(workflow, "push:\n    branches:\n      - main\n");
+        StringAssert.Contains(workflow, "workflow_dispatch:");
+        StringAssert.Contains(workflow, "permissions:\n  contents: read\n");
+        StringAssert.Contains(workflow, "runs-on: windows-2025-vs2026");
+        StringAssert.Contains(workflow, "persist-credentials: false");
+        StringAssert.Contains(workflow, "dotnet-version: \"10.0.302\"");
+        StringAssert.Contains(workflow, "shell: powershell\n        run: .\\eng\\Invoke-WindowsPackageSmoke.ps1");
+        StringAssert.Contains(workflow, "name: Required Windows gate");
+        StringAssert.Contains(workflow, "if: ${{ always() }}");
+        StringAssert.Contains(workflow, "scan-artifacts .\\.artifacts\\msix-smoke CI PACKAGE_EVIDENCE");
+        StringAssert.Contains(workflow, "fixtures/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt");
+        Assert.IsFalse(workflow.Contains("test-results/**/*.trx", StringComparison.Ordinal));
+
+        Assert.IsFalse(workflow.Contains("pull_request_target", StringComparison.Ordinal));
+        Assert.IsFalse(workflow.Contains("secrets.", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(workflow.Contains("continue-on-error", StringComparison.Ordinal));
+        Assert.IsFalse(
+            Regex.IsMatch(workflow, @"(?m)^\s+paths(?:-ignore)?:"),
+            "A required workflow must not be skipped by top-level path filters.");
+
+        MatchCollection allUses = Regex.Matches(workflow, @"(?m)^\s*uses:\s*");
+        MatchCollection pinnedUses = Regex.Matches(
+            workflow,
+            @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
+        Assert.HasCount(6, allUses);
+        Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
     }
 
     private static XDocument LoadXml(string relativePath)
@@ -280,5 +386,6 @@ public sealed class DependencyRulesTests
         string Name,
         string RelativePath,
         string[] ProjectReferences,
+        string[] FrameworkReferences,
         string[] PackageReferences);
 }

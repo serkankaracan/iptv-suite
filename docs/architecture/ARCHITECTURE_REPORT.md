@@ -14,6 +14,8 @@ Geniş IPTV compatibility için birincil playback adayı **non-GPL libVLC + LibV
 
 Platformlar aynı UI/player implementation'ını paylaşmayacaktır. Samsung ayrı Tizen Web + AVPlay, Android Kotlin + Media3, Apple Swift + AVFoundation/AVKit yönündedir. Paylaşım; versioned terminology, contracts, error codes ve sentetik test vectors ile sınırlıdır. İlk organizasyon modeli, platform sınırları kesin bir monorepo'dur.
 
+M1 bootstrap tamamlanmıştır. M2 test scaffold'u ve exact-SDK local iki-run quality gate'i geçmiştir; hosted packaged-host kanıtı henüz alınmadığı için M2 **implementation in progress** durumundadır. Test-only fake clock/transport/secret store/player üretim contract'ı veya ürün davranışı değildir; gerçek provider, parser, database ve playback implementation'ı hâlâ yoktur.
+
 ## A. Gereksinim analizi
 
 ### A.1 Ürün ve güven sınırı
@@ -153,7 +155,7 @@ WPF aktif ve güçlü fallback'tir; deprecated değildir. WinUI surface hard gat
 
 ### C.3 OS, architecture ve Store baseline
 
-- M1 baseline: .NET SDK 10.0.302 / runtime 10.0.10 LTS, WASDK stable 2.3.1, Windows SDK BuildTools 10.0.26100.8249.
+- M1 baseline: .NET SDK 10.0.302 / runtime 10.0.10 LTS, WASDK stable 2.3.1, Windows SDK BuildTools 10.0.26100.8249. M2'de SDK resolution `global.json` ile `rollForward: disable` ve `allowPrerelease: false` olarak exact hale getirilmiştir.
 - Preview/Experimental dependency yoktur.
 - Engineering baseline: x64 Windows 11 build 10.0.26100+. Nihai product support alt sınırı M15 market/Store/clean-device verisiyle yeniden doğrulanır.
 - x64 ilk hedef; ARM64 yalnız bütün native DLL/plugin ve performance gate'leri geçerse.
@@ -305,6 +307,26 @@ Test sınırları:
 - gerçek device/driver/store;
 - 8/24 saat playback soak.
 
+M2 concrete graph'ı production graph'ından tek yönlü ayrıdır:
+
+```text
+IptvSuite.ArchitectureTests -> MSTest
+IptvSuite.UnitTests --------> IptvSuite.Testing + MSTest
+IptvSuite.IntegrationTests -> IptvSuite.Testing + MSTest
+IptvSuite.Testing ----------> Microsoft.Extensions.TimeProvider.Testing
+                              Microsoft.AspNetCore.App (test-only Kestrel)
+
+Production projects -X-> any test project
+```
+
+`IptvSuite.Testing`; deterministic fake time, scripted in-process transport, in-memory test secret store, passive player double, loopback Kestrel, guarded temp directory, timeout, canary scan ve fixture generator içerir. Fake'ler application/domain port'u tanımlamaz ve production tarafından referans alınmaz. Unit process-içi seam davranışını; integration yalnız loopback socket/temp/timeout/cleanup davranışını; architecture dependency allowlist'ini doğrular. Signed installed MSIX smoke ayrı, seri ve elevated interactive host lane'idir.
+
+Generator `1.0.0` / algorithm `1` / seed `20260809` ile byte-identical sentetik record ve SHA-256/provenance manifesti üretir. Corpus gerçek provider/account/credential/playlist/medya içermez. Internal `LicenseRef-IPTVSuite-Synthetic-Test-Only` durumu `UNVERIFIED` olduğundan public paylaşım hakkı değildir. Canary de gerçek secret değil, bilinen marker sızıntısını kanıtlayan test girdisidir; genel credential/redaction kanıtı sayılmaz.
+
+Local `Invoke-WindowsQualityGate.ps1`; exact SDK locked restore, Debug/Release x64 build, full suite'in ayrı TRX dizinlerinde iki ardışık yeşil koşusu ve eşit sonuç seti, fixture SHA-256 eşitliği, armed sentinel non-zero/recovery ve artifact canary kontrollerini birleştirir. Hosted workflow bütün PR'larda exact SDK ile bu gate'i çalıştırır; required check'in path filter nedeniyle `Pending` kalmaması için üst seviye path filter yoktur. Quality sonrasındaki package job'u signed x64 MSIX'i hedefli test-payload/canary sızıntısına karşı inceler, kurar, görünür AUMID launch yapar, normal kapatır ve exact cleanup uygular.
+
+Bir local/hosted komut tanımının varlığı başarılı run kanıtı değildir. Local exact-SDK gate 2026-08-09'da 22 testi iki koşuda geçmiştir. Artifact taraması GitHub job logunu kapsamaz; log canary sonucu `UNVERIFIED` kalır. Yeşil hosted smoke yalnız çalıştığı runner ve commit için package zincirini kanıtlar; feature UI/UIA/accessibility, update/migration, WACK/Store, gerçek provider/player/codec, genel secret yokluğu, ARM64 veya cihaz matrisi pass'i değildir. Başarılı hosted artifact kaydı alınana kadar M2 durumu `In progress` kalır.
+
 ## F. Repository stratejisi
 
 **Accepted:** Başlangıçta platform sınırları belirgin monorepo. Phase 0'da bu path'ler scaffold edilmez:
@@ -320,7 +342,7 @@ docs
 tools
 ```
 
-Her app'in toolchain, lockfile, player, secure-storage, signing ve release workflow'u ayrıdır. Shared alan yalnız language-neutral contract ve fixture içerir. CI path-filtered; contract değişikliği consumer contract testlerini tetikler. Store secret/signing material repo dışıdır.
+Her app'in toolchain, lockfile, player, secure-storage, signing ve release workflow'u ayrıdır. Shared alan yalnız language-neutral contract ve fixture içerir. Platform işleri mantıksal olarak ayrıdır; required-check workflow'u skip/pending bırakmamak için her PR'da sonuç üretir, ilerideki platform seçimi job içinde yapılır. Contract değişikliği consumer contract testlerini tetikler. Store secret/signing material repo dışıdır.
 
 Multirepo tetikleri: bağımsız ekip/release, vendor erişim izolasyonu, compliance/sözleşme, repository/CI performansı veya platform devri. CODEOWNERS path-level gizlilik sağlamaz. Bölünürse contracts/test-vectors ayrı semantic-versioned repository olur.
 
@@ -385,7 +407,8 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 | O9 | UNVERIFIED | Legacy M3U encoding ve stable-key başarı oranı nedir? | Versioned corpus + refresh reconciliation | Parser / M7–M8 |
 | O10 | UNVERIFIED | Cihaz-içi modelde KVKK rolü ve aktarım sorumluluğu nedir? | Privacy counsel | Product/Legal / M15 |
 | O11 | Assumption | İlk MVP analytics, backend ve DRM içermez. | Scope review; değişirse ADR/security reopen | Product |
-| O12 | Assumption | Test verisi sentetik, hakları temiz ve credentials sahtedir. | Fixture provenance manifest | Quality |
+| O12 | Assumption | Test verisi sentetik, third-party içeriksiz ve credentials sahtedir; public redistribution lisansı ayrıca doğrulanır. | Fixture provenance/license manifest; paylaşım öncesi legal review | Quality/Legal |
+| O13 | IN PROGRESS | M2 scaffold'u exact-SDK iki-run quality gate ve hosted packaged-smoke'u deterministik geçiyor mu? | Local sıfır exit code + minimal summary ve ephemeral TRX set karşılaştırması; hosted green jobs + taranmış `last-success.json`; exact sentinel/scanner fail-recovery | Quality / M2 |
 
 ## İlişkili kararlar
 

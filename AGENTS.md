@@ -22,7 +22,7 @@ Bu dosya repository kökünün tamamı için geçerlidir. Daha derindeki bir `AG
 
 ## Güvenlik ve araştırma
 
-- Gerçek credential, token, kullanıcı playlist'i veya yetkisiz servis URL'si kullanma ya da commit etme. Test verileri sentetik, lisanslı ve sahte olmalıdır.
+- Gerçek credential, token, kullanıcı playlist'i veya yetkisiz servis URL'si kullanma ya da commit etme. Test verileri tamamen sentetik olmalı; seed/generator/provenance ve lisans durumu manifestte açıkça kaydedilmelidir. `UNVERIFIED` fixture lisansı yalnız internal test içindir ve public paylaşım hakkı sayılmaz.
 - Password, token, `Authorization`/`Cookie` başlıkları ve credential içerebilen tam URL'ler log, telemetry, snapshot veya hata mesajına giremez. TLS doğrulamasını kapatma ve “accept all certificates” uygulama.
 - Zamanla değişebilen teknik/policy kararlarında önce resmi platform belgesi, standart, resmi repository/release note ve lisansı kullan; erişim tarihini ISO biçiminde kaydet.
 - Kanıtı `VERIFIED`, mühendislik yorumunu `INFERENCE`, doğrulanmamış maddeyi `UNVERIFIED` olarak ayır. Lisans/patent değerlendirmesi hukuki görüş değildir; gerekli yerde uzman incelemesi iste.
@@ -44,4 +44,10 @@ dotnet build .\apps\windows\IptvSuite.Windows.sln -c Release -p:Platform=x64 --n
 dotnet test .\apps\windows\tests\IptvSuite.ArchitectureTests\IptvSuite.ArchitectureTests.csproj -c Release --no-build --no-restore
 ```
 
-Warnings-as-errors, SDK analyzers ve code-style denetimi build sırasında lint gate'ini oluşturur. MSIX smoke yalnız package/manifest etkileyen değişiklikte, `apps/windows/README.md` güvenlik akışıyla yönetici PowerShell'de çalıştırılır.
+`global.json` exact SDK `10.0.302`, `rollForward: disable` ve `allowPrerelease: false` ister. Yukarıdaki M1 akışını değiştirmeden, M2 quality gate'i locked restore, Debug/Release x64 build, unit/integration/architecture suite'lerinin iki koşusu, fixture determinism, sentinel fail/recovery ve artifact canary kontrollerini yürütür:
+
+```powershell
+.\eng\Invoke-WindowsQualityGate.ps1
+```
+
+Warnings-as-errors, SDK analyzers ve code-style denetimi build sırasında lint gate'ini oluşturur. Testlerde gerçek provider/internet/account/medya kullanılmaz; yalnız loopback ve sentetik fixture kullanılır. MSIX smoke yalnız package/manifest etkileyen değişiklikte, `apps/windows/README.md` güvenlik akışıyla yönetici PowerShell'de çalıştırılır.

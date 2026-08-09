@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 implementation plan; M1 completed
+**Durum:** Phase 0 implementation plan; M1 completed; M2 implementation in progress
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -65,6 +65,8 @@ Clean workspace'ten belgelenen komutla derlenip kurulan, build bilgisini göster
 
 ## M2 — Test altyapısı ve quality gates
 
+**Implementation status:** In progress — local acceptance PASS; hosted packaged-smoke evidence pending
+
 ### Amaç
 
 Sonraki her milestone'u gerçek provider/internet olmadan deterministik doğrulayacak test ve fixture altyapısı kurmak.
@@ -74,8 +76,10 @@ Sonraki her milestone'u gerçek provider/internet olmadan deterministik doğrula
 - Unit, integration, architecture ve packaged UI launch smoke test sınırları.
 - Fake clock, transport, secret store ve player.
 - Local HTTP fixture server ve deterministic sentetik fixture generator/provenance manifesti.
-- CI restore/build/test, test artifact ve timeout; path yalnız Windows/docs.
+- CI restore/build/test, test artifact ve timeout; required-check sonucu üretmek için workflow bütün PR'larda çalışır ve üst seviye path filter kullanmaz.
 - Secret-canary scan için test helper; production secret değil.
+
+Mevcut scaffold; production graph'ından bağımsız `IptvSuite.Testing`, `IptvSuite.UnitTests` ve `IptvSuite.IntegrationTests` projelerini kullanır. `IptvSuite.ArchitectureTests` M1'den korunur; packaged UI launch için yeni UI automation dependency'si yerine mevcut signed MSIX smoke seri lane olarak kalır.
 
 ### Kapsam dışı
 
@@ -83,12 +87,15 @@ Sonraki her milestone'u gerçek provider/internet olmadan deterministik doğrula
 
 ### Acceptance criteria
 
-- Failing test pipeline'ı durdurur; iki ardışık clean run aynı sonucu verir.
+- Failing test pipeline'ı durdurur; fresh quality-artifact kökünde aynı built test binaries'inin iki ardışık koşusu aynı test sonuç setini verir.
 - Testler internet, gerçek account ve yetkisiz media olmadan çalışır.
 - UI launch smoke packaged host'ta geçer.
 - Fixture seed/version/provenance kaydedilir.
 - Log/artifact canary taraması test edilebilir durumdadır.
 - Repository M1 komutlarıyla build/test edilebilir kalır.
+- Exact SDK `10.0.302`, `rollForward: disable` ve `allowPrerelease: false` ile seçilir; başka SDK veya prerelease'e sessiz fallback olmaz.
+- Unit/integration/architecture suite'i ayrı TRX dizinleriyle iki ardışık koşuda aynı discovered/pass/fail sonucunu verir.
+- Başarılı packaged-host run'ı yalnız çalıştığı host/commit için signed payload-inspection/install/visible-launch/normal-close/uninstall kanıtıdır; UIA, Store, update, provider/player/codec veya cihaz matrisi kanıtı olarak yorumlanmaz.
 
 ### Testler / doğrulama
 
@@ -104,6 +111,16 @@ Flaky UI/network testlerinin gate güvenini azaltması veya test helper'ın prod
 ### Demo çıktısı
 
 Unit + integration + UI smoke sonuçları ve tamamen sentetik fixture manifesti olan yeşil pipeline.
+
+### Mevcut uygulama ve bekleyen kanıt
+
+- **Scaffold mevcut:** Resmî `FakeTimeProvider`, scripted transport, in-memory test secret store, passive fake player, loopback-only Kestrel, guarded temp directory, timeout helper, canary scanner ve deterministic generator eklendi.
+- **Fixture kaydı mevcut:** Generator `1.0.0`, algorithm version `1`, seed `20260809`, SHA-256/provenance ve internal-only `UNVERIFIED` LicenseRef specification'da sabittir; gerçek provider/account/credential/playlist/medya yoktur.
+- **Test sınırı mevcut:** Unit ve integration assembly'leri method-level parallel; OS-seçimli port/temp path isolation ve canary detect/non-detect testleri tanımlıdır. Test projelerinin production tarafından referans alınmaması architecture allowlist'ine eklenmiştir.
+- **Local gate PASS — 2026-08-09:** isolated exact SDK `10.0.302` ile locked restore ve Debug/Release x64 build sıfır warning/error; architecture 8, unit 9 ve integration 5 test iki ayrı koşuda aynı 22/22 `Passed` setini verdi. Sentinel exact TRX'te armed `Failed`, disarmed `Passed` oldu; scanner CLI kontamine artifact'ta exit `2`, cleanup sonrası `0` verdi. Geçici production→test reference mutation'ı architecture gate'i kırdı ve cleanup sonrası 8/8'e döndü. Fixture iki output root'ta byte-identical üretildi (`records` SHA-256 `1da91c57da1f704076600aab29cdd938851d75f765679ac2b79dc9cb9e908020`, manifest SHA-256 `b1f1513e786f3176c7275af927c4c93c847d0476858fe56701d2054128818438`); final artifact-file canary scan geçti. Job log canary kapsamı `UNVERIFIED` kalır.
+- **Hosted tanım mevcut, run kanıtı pending:** `windows-quality.yml` her PR, `merge_group`, `main` push ve manual dispatch'te çalışır; required check'in path filter nedeniyle `Pending` kalmaması için üst seviye path filter bilerek yoktur. `always()` coordinator'ı quality fail veya package skip/fail sonucunu `Required Windows gate` altında kırmızıya çevirir; ruleset'te required seçimi repository dışı ayardır. Quality job'undan sonra hosted signed MSIX payload-inspection/install/visible-launch/normal-close/uninstall job'u tanımlıdır, fakat başarılı hosted run ve yüklenmiş artifact henüz M2 kanıtı değildir.
+
+Hosted packaged-smoke kanıtı kapanmadan M2 `Completed` yapılmaz ve “yeşil pipeline” demo çıktısı elde edilmiş sayılmaz.
 
 ## M3 — Domain terminology, validation ve safe errors
 

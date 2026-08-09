@@ -41,7 +41,7 @@ Windows istemcisi:
 
 ile geliştirilecektir.
 
-2026-08-09 M1 baseline'ı .NET SDK `10.0.302` / runtime `10.0.10`, Windows App SDK `2.3.1` ve Windows SDK BuildTools `10.0.26100.8249`'dur. SDK `global.json`, direct paketler central versions ve bütün transitive graph `packages.lock.json` ile pinlenir; Preview/Experimental dependency alınmaz. Public preview durumundaki `winapp` CLI/package build veya launch zincirinde kullanılmaz.
+2026-08-09 M1 baseline'ı .NET SDK `10.0.302` / runtime `10.0.10`, Windows App SDK `2.3.1` ve Windows SDK BuildTools `10.0.26100.8249`'dur. SDK `global.json` içinde `rollForward: disable` ve `allowPrerelease: false` ile exact seçilir; direct paketler central versions ve bütün transitive graph `packages.lock.json` ile pinlenir. Preview/Experimental dependency alınmaz. Public preview durumundaki `winapp` CLI/package build veya launch zincirinde kullanılmaz.
 
 Domain, application, provider ve player sözleşmeleri WinUI tiplerine bağımlı olmayan düz .NET projelerinde kalır. WinUI yalnız presentation/composition ve Windows lifecycle işlerini üstlenir. UI ve playback kararları ayrı ADR'lerde tutulur.
 
@@ -69,7 +69,7 @@ M1 implementation, ayrı `.wapproj` içermeyen single-project, framework-depende
 ## Validation plan
 
 - M1 — **PASS, 2026-08-09:** build çıktısı/.git içermeyen ayrı temp workspace ve boş NuGet cache üzerinde locked restore; Debug/Release x64 sıfır warning build; 6/6 dependency/toolchain/manifest test; geçici yasak kenarla doğrulanmış red gate; ephemeral signed MSIX install → AUMID launch → normal close → uninstall/cert cleanup. Kurulan manifest x64, yalnız `runFullTrust` ve framework dependency `Microsoft.WindowsAppRuntime.2` minimum `2.3.1.0` olarak doğrulandı.
-- M2: UI launch ve keyboard/UI Automation smoke altyapısı.
+- M2 — **IN PROGRESS:** test-only unit/integration/architecture scaffold'u ve exact-SDK local gate 2026-08-09'da iki koşuda 22/22 PASS verdi. Başarılı hosted package artifact'ı alınmadan M2 tamamlanmış sayılmaz. Başarılı smoke yalnız o hostta targeted production-payload inspection, install, visible launch, normal close ve cleanup'ı kanıtlar; keyboard/UIA/accessibility, update/migration, WACK/Store, provider/player/codec, ARM64 veya cihaz matrisi kanıtı değildir. Workflow source'u tek başına PASS değildir.
 - M9: 50.000 sentetik kanalda virtualization, arama, focus ve accessibility.
 - M10: gerçek player surface ile resize, fullscreen, DPI, multi-monitor, overlay, minimize/restore ve soak.
 - M15: framework-dependent MSIX, clean install/update/uninstall, x64/ARM64 kararı, WACK ve private Store preflight.
@@ -85,4 +85,4 @@ M1 implementation, ayrı `.wapproj` içermeyen single-project, framework-depende
 
 ## References
 
-[S01–S09, S14–S20](../research/SOURCES.md)
+[S01–S09, S14–S20, S70–S75, S80–S81](../research/SOURCES.md)
