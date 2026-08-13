@@ -27,6 +27,29 @@ internal static class SourceDraftTestFixtures
             : throw new InvalidOperationException("A synthetic protected source draft could not be created.");
     }
 
+    internal static ValidatedSourceDraft CreateXtreamDraft(
+        SourceId sourceId,
+        string displayName = "Synthetic Account",
+        string locator = "https://fixtures.invalid/api",
+        string username = "synthetic-user",
+        string password = "synthetic-password")
+    {
+        var service = new SourceDraftProtectionService(new ReferenceIssuingSecretStore());
+        DomainResult<ValidatedSourceDraft> result = service.ProtectXtreamAsync(
+                sourceId,
+                displayName,
+                locator,
+                username,
+                password)
+            .AsTask()
+            .GetAwaiter()
+            .GetResult();
+
+        return result.IsSuccess
+            ? result.Value!
+            : throw new InvalidOperationException("A synthetic protected source draft could not be created.");
+    }
+
     private static SecretReference ParseSecretReference(string value)
     {
         DomainResult<SecretReference> result = SecretReference.Parse(value);
