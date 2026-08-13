@@ -49,6 +49,8 @@ Application `ISecretStore` contract'ı ile Infrastructure `System.Security.Crypt
 
 Bu ara sonuç ADR'yi `Accepted` yapmaz. Packaged lifecycle, wrong-user ve 5k–50k karşılaştırmalı ölçüme ek olarak; source-wide delete/startup protected-record orphan reconciliation, aynı source/purpose referansını configuration/channel/endpoint owner'ına bağlayan semantic ref-swap politikası ve check-to-use yarışını kapatan handle-relative path/reparse kararı henüz yoktur.
 
+Opt-in `IptvSuite.SecretStoreSpike` scaffold'u Release x64 üzerinde sentetik 256-byte locator workload'u için per-record DPAPI create, adapter restart, bounded read, delete ve cancellation-boundary ölçümlerini aggregate-only/canary-scanned evidence'a dönüştürür. 1.000 kayıtlık tek-tur smoke harness zincirini doğrulamıştır; dirty worktree sonucu decision-eligible değildir ve performans kararı sayılmaz. Sabit 5k/10k/20k/50k × 20 `Decision` koşusu clean commit üzerinde ayrıca çalıştırılmadan v1 file-per-record layout kabul edilmez. Spike unpackaged temp-root kullanır; packaged `LocalCache`, parser/normalize/index ve lifecycle maliyetlerini kapsamaz.
+
 ## Consequences and trade-offs
 
 - Katalog normal SQL ile hızlı aranır; secret material ayrı güvenlik sınırında kalır.

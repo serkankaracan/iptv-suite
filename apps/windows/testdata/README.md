@@ -1,4 +1,4 @@
-# M2 sentetik test verisi
+# Sentetik test verisi
 
 `m2/fixture-spec.json`, yalnız test-kit altyapısını doğrulayan küçük ve tamamen sentetik veri kümesinin sabit girdisidir. Gerçek provider cevabı, kullanıcı hesabı, credential, playlist veya medya içermez.
 
@@ -18,3 +18,9 @@ dotnet run --project .\apps\windows\tests\IptvSuite.Testing\IptvSuite.Testing.cs
 ```
 
 Bu dizilimde manifestin `../LICENSES/...` referansı kopyalanan sidecar'a çözülür. Manifestte generator `1.0.0`, algorithm version `1`, seed `20260809`, record file length/SHA-256 ve bütün provenance flag'leri bulunur. Bu M2 smoke corpus'u provider/parser/player uyumluluğu kanıtlamaz.
+
+## M4 protected-store performans girdisi
+
+`m4/secret-store-spike-spec.json`, yalnız opt-in protected-store performans spike'ının sabit ve sentetik girdisini tanımlar. Gerçek provider, kullanıcı account'u, credential, playlist veya medya içermez. Spike'ın ürettiği locator-benzeri byte dizileri yalnız `.invalid` test alanını ve deterministic seed'i kullanır; raw değerler, opaque referanslar ve absolute path'ler kanıt dosyasına yazılmaz.
+
+`Smoke` modu en fazla 1.000 kayıtla tek tur geliştirici doğrulamasıdır ve mimari karar kanıtı değildir. `Decision` modu 5k/10k/20k/50k matrisini sabit 20 turla ölçer; opt-in çalışır, normal quality/CI akışına bağlı değildir ve sonuç tek başına 5 saniyelik bütün import bütçesini kanıtlamaz. Üretilen evidence `.artifacts/m4-secret-store-spike` altında kalır ve Git'e girmez.

@@ -10,6 +10,7 @@ Bu dosya `apps/windows/` ağacı için kök `AGENTS.md` kurallarını daraltır.
 - `IptvSuite.Windows`: tek Presentation/composition root; yalnız Application ve Infrastructure'a bağlı.
 - `IptvSuite.Testing`: yalnız test destek executable/library'si; production proje reference'ı yoktur ve production tarafından referans alınamaz.
 - `IptvSuite.UnitTests`: `IptvSuite.Application`, `IptvSuite.Domain`, `IptvSuite.Testing` ve MSTest'e bağlıdır; pure Application/Domain testleri ile M2 harness testlerini içerir. `IptvSuite.IntegrationTests`, yalnız test yönünde Application, Infrastructure ve Testing'e bağlıdır; architecture test ayrı kalır.
+- `IptvSuite.SecretStoreSpike`: yalnız opt-in M4 ölçüm executable'ıdır; Application/Domain/Infrastructure ve test-only canary scanner'a bağlıdır. Quality/CI tarafından çalıştırılmaz, production payload'a giremez ve ağır `Decision` modu açık onay olmadan başlatılmaz.
 - M2 test double'ları production `IPlayer`, `ISecretStore` veya provider contract'ı değildir. IntegrationTests içindeki M4 fake production `ISecretStore` contract senaryosudur, fakat gerçek DPAPI veya packaged lifecycle kanıtı değildir. M4 boyunca player/provider/parser/HTTP/database, DI/MVVM paketi ve feature navigation ekleme.
 
 ## M4 protected-storage sınırı

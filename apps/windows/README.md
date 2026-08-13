@@ -60,6 +60,26 @@ Source-controlled `Properties/launchSettings.json`, Visual Studio'ya packaged si
 - Bu kanıt normal MSTest process'i ve temp root içindir. Packaged `LocalCache` two-launch/update/reset/uninstall, gerçek ikinci Windows user, source-deletion reconciliation, 5k–50k layout/performance ve ADR-003 final kararı açık hard-gate'tir.
 - Managed containment/reparse kontrolleri path tabanlı TOCTOU yarışını bütünüyle kapatmaz; cleanup non-adversarial filesystem yarışlarında fail-closed/best-effort sınırındadır. Handle-relative Windows hardening ile `.dpapi` source-wide deletion/record reconciliation M4 acceptance öncesi açık kalır.
 
+### M4 opt-in secret-store spike
+
+`IptvSuite.SecretStoreSpike`, production payload'a girmeyen ve normal quality/CI tarafından çalıştırılmayan Release x64 ölçüm executable'ıdır. Tamamen sentetik 256-byte locator-benzeri değerleri gerçek CurrentUser DPAPI adapter'ına yazar; ölçüm dışı kısa warmup ardından create, restart, bounded read probe, delete ve cancellation-boundary ölçümlerini aggregate-only evidence olarak `.artifacts/m4-secret-store-spike/evidence` altına kaydeder. Raw payload/reference/path, kullanıcı veya makine adı evidence'a yazılmaz; warmup, measured ve cancellation protected root'ları silinmeden önce, evidence ise izole staging dizininde taranıp yalnız temizse atomik olarak yayımlanır. Cancellation kaydı request→completion latency'yi, iptal anındaki committed alt sınırını, iptal sonrası commit üst sınırını ve completion sonrası yeni mutation olmadığını ayrı alanlarda taşır.
+
+Hafif harness kontrolü:
+
+```powershell
+.\eng\Invoke-WindowsSecretStoreSpike.ps1 -Mode Smoke
+```
+
+`Smoke`, 1.000 kayıt ve tek turdur; performans kabulü veya ADR kararı değildir. `Decision`, sabit 5k/10k/20k/50k matrisini her ölçek için 20 tur ve 20 cancellation örneğiyle çalıştırır. Yoğun ve uzun disk yazımı nedeniyle otomatik başlatılmaz; clean worktree üzerinde bilinçli olarak şu komut gerekir:
+
+```powershell
+.\eng\Invoke-WindowsSecretStoreSpike.ps1 -Mode Decision -AllowDecision
+```
+
+Evidence dosyasının varlığı tek başına başarılı run anlamına gelmez: başarısız yeni çağrı önceki temiz summary'yi koruyabilir. Yalnız betiğin sıfır exit code'u ile bitmesi ve summary içindeki commit, runner assembly, spec ve workload hash'lerinin değerlendirilen koşuyla eşleşmesi PASS sayılır. Runner assembly hash'i dependency setinin veya reproducible-build eşitliğinin kanıtı değildir.
+
+Bu unpackaged test-host sonucu bile packaged `LocalCache`, gerçek ikinci kullanıcı, source lifecycle, parser/normalize/index maliyeti veya 5 saniyelik uçtan uca import bütçesi değildir. `Decision` sonucu yalnız ADR-003 girdisidir; layout seçimi ayrıca güvenlik/lifecycle incelemesi ister.
+
 ## M2 iki-run quality gate
 
 Repository kökünde tek quality komutunu çalıştırın:
@@ -83,7 +103,7 @@ Her çağrı yalnız exact `.artifacts/quality-gates` alt ağacını temizleyip 
 | Architecture | Production/test project ve package/framework reference allowlist'i | Runtime davranışı |
 | Packaged-host smoke | Signed development MSIX install, AUMID launch, görünür boş shell, normal close ve exact cleanup | Feature UI, UIA/accessibility, provider/player/codec, update veya Store kabulü |
 
-`IptvSuite.Testing`, `IptvSuite.UnitTests` ve `IptvSuite.IntegrationTests` production graph'ına girmez. M2 fake secret store/player production port'u değildir; IntegrationTests içindeki M4 fake yalnız gerçek `ISecretStore` contract senaryosudur ve DPAPI/package kanıtı yerine geçmez.
+`IptvSuite.Testing`, `IptvSuite.UnitTests`, `IptvSuite.IntegrationTests` ve opt-in `IptvSuite.SecretStoreSpike` production graph'ına girmez. M2 fake secret store/player production port'u değildir; IntegrationTests içindeki M4 fake yalnız gerçek `ISecretStore` contract senaryosudur ve DPAPI/package kanıtı yerine geçmez.
 
 ## Sentetik fixture ve canary
 

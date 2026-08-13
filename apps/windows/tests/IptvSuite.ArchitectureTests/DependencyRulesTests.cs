@@ -64,6 +64,12 @@ public sealed class DependencyRulesTests
             ["IptvSuite.Application", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
             [],
             ["MSTest"]),
+        new(
+            "IptvSuite.SecretStoreSpike",
+            "apps/windows/tests/IptvSuite.SecretStoreSpike/IptvSuite.SecretStoreSpike.csproj",
+            ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
+            [],
+            []),
     ];
 
     [TestMethod]
@@ -287,6 +293,7 @@ public sealed class DependencyRulesTests
                 content.Contains("IptvSuite.Testing", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.UnitTests", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.IntegrationTests", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.SecretStoreSpike", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.AspNetCore.App", StringComparison.Ordinal) ||
                 content.Contains("IPTVSUITE_TEST_ONLY_CANARY_V1", StringComparison.Ordinal),
@@ -296,6 +303,19 @@ public sealed class DependencyRulesTests
         XDocument testingProject = LoadXml("apps/windows/tests/IptvSuite.Testing/IptvSuite.Testing.csproj");
         Assert.AreEqual("false", GetProperty(testingProject, "IsPackable"));
         Assert.AreEqual("false", GetProperty(testingProject, "IsPublishable"));
+
+        XDocument spikeProject = LoadXml(
+            "apps/windows/tests/IptvSuite.SecretStoreSpike/IptvSuite.SecretStoreSpike.csproj");
+        Assert.AreEqual("Exe", GetProperty(spikeProject, "OutputType"));
+        Assert.AreEqual("false", GetProperty(spikeProject, "IsTestProject"));
+        Assert.AreEqual("false", GetProperty(spikeProject, "IsPackable"));
+        Assert.AreEqual("false", GetProperty(spikeProject, "IsPublishable"));
+        Assert.AreEqual("x64", GetProperty(spikeProject, "Platforms"));
+        Assert.AreEqual("x64", GetProperty(spikeProject, "PlatformTarget"));
+
+        string packageSmoke = File.ReadAllText(
+            Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageSmoke.ps1"));
+        StringAssert.Contains(packageSmoke, "IptvSuite\\.SecretStoreSpike(?:\\..*)?");
     }
 
     [TestMethod]

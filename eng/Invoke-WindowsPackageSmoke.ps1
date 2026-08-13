@@ -388,6 +388,10 @@ function Assert-ProductionPackagePayload {
                 $entry.Name -match '^(?i:testdata|fixtures?)$') {
                 throw "Forbidden test-data directory in production payload: $relativeEntryPath"
             }
+
+            if ($entry.Name -match '^(?i:IptvSuite\.SecretStoreSpike(?:\..*)?)$') {
+                throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
+            }
         }
 
         $payloadFiles = @($payloadEntries | Where-Object { -not $_.PSIsContainer })

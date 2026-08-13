@@ -1,6 +1,6 @@
 IPTV Suite synthetic test-data notice
 
-The M2 fixture generator creates these records entirely from deterministic project code.
+The M2 fixture generator and M4 secret-store spike create their records entirely from deterministic project code.
 They contain no third-party content, personal data, real credentials, provider captures, or media.
 
 Use is currently limited to internal development and testing of this private repository.

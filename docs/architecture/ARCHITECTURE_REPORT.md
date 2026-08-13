@@ -314,12 +314,13 @@ IptvSuite.ArchitectureTests -> MSTest
 IptvSuite.UnitTests --------> IptvSuite.Testing + MSTest
 IptvSuite.IntegrationTests -> IptvSuite.Testing + MSTest
 IptvSuite.Testing ----------> Microsoft.Extensions.TimeProvider.Testing
+IptvSuite.SecretStoreSpike -> Application + Domain + Infrastructure + Testing
                               Microsoft.AspNetCore.App (test-only Kestrel)
 
 Production projects -X-> any test project
 ```
 
-`IptvSuite.Testing`; deterministic fake time, scripted in-process transport, M2 in-memory test secret store, passive player double, loopback Kestrel, guarded temp directory, timeout, canary scan ve fixture generator içerir. Bu M2 fake'leri application/domain port'u tanımlamaz ve production tarafından referans alınmaz. M4-specific fake ve gerçek DPAPI senaryoları `IptvSuite.IntegrationTests` içindedir; test projesi Application/Infrastructure'a yalnız test yönünde referans verir. Unit pure Application/Domain ve harness davranışını; integration loopback/temp/DPAPI contract davranışını; architecture dependency allowlist'ini doğrular. Signed installed MSIX smoke ayrı, seri ve elevated interactive host lane'idir.
+`IptvSuite.Testing`; deterministic fake time, scripted in-process transport, M2 in-memory test secret store, passive player double, loopback Kestrel, guarded temp directory, timeout, canary scan ve fixture generator içerir. Bu M2 fake'leri application/domain port'u tanımlamaz ve production tarafından referans alınmaz. M4-specific fake ve gerçek DPAPI senaryoları `IptvSuite.IntegrationTests` içindedir; test projesi Application/Infrastructure'a yalnız test yönünde referans verir. `IptvSuite.SecretStoreSpike` yalnız opt-in Release x64 ölçüm executable'ıdır; production package veya normal quality/CI runtime'ına girmez. Unit pure Application/Domain ve harness davranışını; integration loopback/temp/DPAPI contract davranışını; architecture dependency allowlist'ini doğrular. Signed installed MSIX smoke ayrı, seri ve elevated interactive host lane'idir.
 
 Generator `1.0.0` / algorithm `1` / seed `20260809` ile byte-identical sentetik record ve SHA-256/provenance manifesti üretir. Corpus gerçek provider/account/credential/playlist/medya içermez. Internal `LicenseRef-IPTVSuite-Synthetic-Test-Only` durumu `UNVERIFIED` olduğundan public paylaşım hakkı değildir. Canary de gerçek secret değil, bilinen marker sızıntısını kanıtlayan test girdisidir; genel credential/redaction kanıtı sayılmaz.
 
