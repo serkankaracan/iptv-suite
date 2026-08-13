@@ -8,21 +8,21 @@ namespace IptvSuite.Infrastructure;
 [SupportedOSPlatform("windows")]
 internal static class DpapiProtectedEnvelopeCodec
 {
-    private const byte EnvelopeVersion = 1;
+    private const byte EnvelopeVersion = 2;
     private const int GuidSize = 16;
-    private const int ContextSize = 4 + (2 * GuidSize);
+    private const int ContextSize = 4 + (3 * GuidSize);
     private const int PayloadLengthSize = sizeof(int);
     private const int EnvelopeHeaderSize = 8 + ContextSize + PayloadLengthSize;
 
     internal const int MaxProtectedRecordBytes = 128 * 1024;
 
-    private static ReadOnlySpan<byte> EnvelopeMagic => "SRCSEC01"u8;
+    private static ReadOnlySpan<byte> EnvelopeMagic => "SRCSEC02"u8;
 
     private static ReadOnlySpan<byte> EntropyDomain =>
-        "protected-source-store/dpapi-current-user/entropy/v1"u8;
+        "protected-source-store/dpapi-current-user/entropy/v2"u8;
 
     private static ReadOnlySpan<byte> FileNameDomain =>
-        "protected-source-store/dpapi-current-user/file-name/v1"u8;
+        "protected-source-store/dpapi-current-user/file-name/v2"u8;
 
     internal static byte[] Protect(SecretStoreKey key, ReadOnlySpan<byte> value)
     {
@@ -108,7 +108,7 @@ internal static class DpapiProtectedEnvelopeCodec
 
         try
         {
-            return $"record-v1-{Convert.ToHexString(digest)}.dpapi";
+            return $"record-v2-{Convert.ToHexString(digest)}.dpapi";
         }
         finally
         {
@@ -211,9 +211,10 @@ internal static class DpapiProtectedEnvelopeCodec
         destination[0] = EnvelopeVersion;
         destination[1] = (byte)key.ReferenceKind;
         destination[2] = (byte)key.Purpose;
-        destination[3] = 0;
+        destination[3] = (byte)key.OwnerKind;
         WriteGuid(key.SourceId.Value, destination.Slice(4, GuidSize));
-        WriteGuid(key.RecordIdentifier, destination.Slice(4 + GuidSize, GuidSize));
+        WriteGuid(key.OwnerIdentifier, destination.Slice(4 + GuidSize, GuidSize));
+        WriteGuid(key.RecordIdentifier, destination.Slice(4 + (2 * GuidSize), GuidSize));
     }
 
     private static void WriteGuid(Guid value, Span<byte> destination)
@@ -233,9 +234,19 @@ internal static class DpapiProtectedEnvelopeCodec
             key.ReferenceKind is ProtectedReferenceKind.Locator &&
             key.Purpose is not ProtectedValuePurpose.SourceCredentials &&
             Enum.IsDefined(key.Purpose);
+        bool validSourceConfigurationOwner =
+            (key.Purpose is ProtectedValuePurpose.SourceCredentials or
+                ProtectedValuePurpose.RemotePlaylistLocator) &&
+            key.OwnerKind is ProtectedRecordOwnerKind.SourceConfiguration;
+        bool validChannelOwner =
+            (key.Purpose is ProtectedValuePurpose.ChannelStreamLocator or
+                ProtectedValuePurpose.ChannelLogoLocator) &&
+            key.OwnerKind is ProtectedRecordOwnerKind.Channel;
 
-        if (key.SourceId.IsEmpty || key.RecordIdentifier == Guid.Empty ||
-            (!validCredentialsKey && !validLocatorKey))
+        if (key.SourceId.IsEmpty || key.OwnerIdentifier == Guid.Empty ||
+            key.RecordIdentifier == Guid.Empty ||
+            (!validCredentialsKey && !validLocatorKey) ||
+            (!validSourceConfigurationOwner && !validChannelOwner))
         {
             throw new ArgumentException("The protected-store key is invalid.", nameof(key));
         }

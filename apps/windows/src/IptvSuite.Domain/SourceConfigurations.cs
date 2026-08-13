@@ -13,12 +13,25 @@ public enum SourceKind
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public abstract class SourceConfiguration
 {
-    private protected SourceConfiguration(SourceKind kind, SafeEndpoint safeEndpoint)
+    private protected SourceConfiguration(
+        SourceConfigurationId configurationId,
+        SourceKind kind,
+        SafeEndpoint safeEndpoint)
     {
+        if (configurationId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A non-empty source configuration identifier is required.",
+                nameof(configurationId));
+        }
+
         ArgumentNullException.ThrowIfNull(safeEndpoint);
+        ConfigurationId = configurationId;
         Kind = kind;
         SafeEndpoint = safeEndpoint;
     }
+
+    public SourceConfigurationId ConfigurationId { get; }
 
     public SourceKind Kind { get; }
 
@@ -31,8 +44,11 @@ public abstract class SourceConfiguration
 
 public sealed class XtreamSourceConfiguration : SourceConfiguration
 {
-    internal XtreamSourceConfiguration(SafeEndpoint safeEndpoint, SecretReference credentialsReference)
-        : base(SourceKind.XtreamCompatible, safeEndpoint)
+    internal XtreamSourceConfiguration(
+        SourceConfigurationId configurationId,
+        SafeEndpoint safeEndpoint,
+        SecretReference credentialsReference)
+        : base(configurationId, SourceKind.XtreamCompatible, safeEndpoint)
     {
         ArgumentNullException.ThrowIfNull(credentialsReference);
         CredentialsReference = credentialsReference;
@@ -44,9 +60,10 @@ public sealed class XtreamSourceConfiguration : SourceConfiguration
 public sealed class RemotePlaylistSourceConfiguration : SourceConfiguration
 {
     internal RemotePlaylistSourceConfiguration(
+        SourceConfigurationId configurationId,
         SafeEndpoint safeEndpoint,
         ProtectedLocatorReference locatorReference)
-        : base(SourceKind.RemotePlaylist, safeEndpoint)
+        : base(configurationId, SourceKind.RemotePlaylist, safeEndpoint)
     {
         ArgumentNullException.ThrowIfNull(locatorReference);
         LocatorReference = locatorReference;

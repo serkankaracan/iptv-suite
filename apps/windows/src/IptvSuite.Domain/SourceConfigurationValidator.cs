@@ -61,6 +61,7 @@ public static class SourceConfigurationValidator
 
     internal static ValidatedSourceDraft CompleteXtream(
         SourceId sourceId,
+        SourceConfigurationId configurationId,
         PreparedXtreamSourceDraft prepared,
         SecretReference credentialsReference)
     {
@@ -69,9 +70,17 @@ public static class SourceConfigurationValidator
             throw new ArgumentException("A non-empty source identifier is required.", nameof(sourceId));
         }
 
+        if (configurationId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A non-empty source configuration identifier is required.",
+                nameof(configurationId));
+        }
+
         ArgumentNullException.ThrowIfNull(prepared);
         ArgumentNullException.ThrowIfNull(credentialsReference);
         var configuration = new XtreamSourceConfiguration(
+            configurationId,
             prepared.SafeEndpoint,
             credentialsReference);
         return new ValidatedSourceDraft(sourceId, prepared.NormalizedDisplayName, configuration);
@@ -79,6 +88,7 @@ public static class SourceConfigurationValidator
 
     internal static ValidatedSourceDraft CompleteRemotePlaylist(
         SourceId sourceId,
+        SourceConfigurationId configurationId,
         PreparedRemotePlaylistSourceDraft prepared,
         ProtectedLocatorReference locatorReference)
     {
@@ -87,9 +97,17 @@ public static class SourceConfigurationValidator
             throw new ArgumentException("A non-empty source identifier is required.", nameof(sourceId));
         }
 
+        if (configurationId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A non-empty source configuration identifier is required.",
+                nameof(configurationId));
+        }
+
         ArgumentNullException.ThrowIfNull(prepared);
         ArgumentNullException.ThrowIfNull(locatorReference);
         var configuration = new RemotePlaylistSourceConfiguration(
+            configurationId,
             prepared.SafeEndpoint,
             locatorReference);
         return new ValidatedSourceDraft(sourceId, prepared.NormalizedDisplayName, configuration);

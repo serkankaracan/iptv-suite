@@ -866,7 +866,7 @@ try {
     try {
         $protectedStorePath = Join-Path `
             $env:LOCALAPPDATA `
-            "Packages\$packageFamilyName\LocalCache\ProtectedStore\v1"
+            "Packages\$packageFamilyName\LocalCache\ProtectedStore\v2"
         $protectedStoreDirectoryExists = Test-Path `
             -LiteralPath $protectedStorePath `
             -PathType Container

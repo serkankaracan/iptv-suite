@@ -17,7 +17,7 @@ Bu dosya `apps/windows/` ağacı için kök `AGENTS.md` kurallarını daraltır.
 
 - `ISecretStore` Application'da, Windows DPAPI adapter'ı Infrastructure'da, packaged `LocalCache` path seçimi yalnız Windows composition root'ta kalır. Domain'e IO/crypto/storage tipi ekleme.
 - Yalnız `DataProtectionScope.CurrentUser`; `LocalMachine`, PasswordVault bulk store veya ad-hoc crypto kullanma.
-- Protected record source + purpose + typed opaque reference ile bağlanır. Raw locator, username, password, endpoint veya display name dosya adı/path/log/result içine girmez.
+- Protected record source + purpose + semantic owner + typed opaque reference ile bağlanır. Source credential/remote playlist owner'ı `SourceConfigurationId`, channel stream/logo owner'ı `ChannelId`dir. Raw locator, username, password, endpoint veya display name dosya adı/path/log/result içine girmez.
 - Plaintext owned buffer'ları ve lease'leri `CryptographicOperations.ZeroMemory` ile best-effort sıfırla; `ToString`, debugger ve JSON yüzeyleri sensitive değeri döndürmesin.
 - Normal test-host CRUD/restart sonucu packaged `LocalCache`, update/reset/uninstall veya gerçek wrong-user kanıtı değildir. 50k spike ve bu lifecycle matrisi geçmeden ADR-003/M4 `Completed` yazma.
 

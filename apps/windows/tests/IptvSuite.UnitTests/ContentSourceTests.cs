@@ -31,6 +31,10 @@ public sealed class ContentSourceTests
         Assert.AreEqual("Caf\u00E9 Source", source.DisplayName);
         Assert.AreEqual(SourceKind.RemotePlaylist, source.Kind);
         Assert.AreSame(sourceDraft.Configuration, source.Configuration);
+        Assert.IsFalse(source.Configuration.ConfigurationId.IsEmpty);
+        Assert.AreEqual(
+            sourceDraft.Configuration.ConfigurationId,
+            source.Configuration.ConfigurationId);
         Assert.AreSame(sourceDraft.Configuration.SafeEndpoint, source.SafeEndpoint);
         Assert.AreEqual(TimeSpan.Zero, source.CreatedAt.Offset);
         Assert.AreEqual(TimeSpan.Zero, source.UpdatedAt.Offset);

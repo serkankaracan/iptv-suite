@@ -320,7 +320,7 @@ public sealed class DependencyRulesTests
             "Path.Combine(\n" +
             "                localCachePath,\n" +
             "                \"ProtectedStore\",\n" +
-            "                \"v1\")";
+            "                \"v2\")";
 
         StringAssert.Contains(app, "private ISecretStore? _secretStore;");
         StringAssert.Contains(app, compositionSequence);
@@ -336,13 +336,13 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             factory.Contains("localCachePath,\n                \"IptvSuite\"", StringComparison.Ordinal),
             "The unverified codename must not become part of the persisted protected-store path.");
-        StringAssert.Contains(protectedEnvelopeCodec, "\"SRCSEC01\"u8");
+        StringAssert.Contains(protectedEnvelopeCodec, "\"SRCSEC02\"u8");
         StringAssert.Contains(
             protectedEnvelopeCodec,
-            "\"protected-source-store/dpapi-current-user/entropy/v1\"u8");
+            "\"protected-source-store/dpapi-current-user/entropy/v2\"u8");
         StringAssert.Contains(
             protectedEnvelopeCodec,
-            "\"protected-source-store/dpapi-current-user/file-name/v1\"u8");
+            "\"protected-source-store/dpapi-current-user/file-name/v2\"u8");
         Assert.IsFalse(
             Regex.IsMatch(
                 protectedEnvelopeCodec,
@@ -409,7 +409,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "Start-Sleep -Seconds 2");
         StringAssert.Contains(packageSmoke, "$null -eq $exitCode");
         StringAssert.Contains(packageSmoke, "[int]$exitCode -ne 0");
-        StringAssert.Contains(packageSmoke, "LocalCache\\ProtectedStore\\v1");
+        StringAssert.Contains(packageSmoke, "LocalCache\\ProtectedStore\\v2");
         StringAssert.Contains(
             packageSmoke,
             "ProtectedStoreDirectoryInitialized = $protectedStoreDirectoryInitialized");

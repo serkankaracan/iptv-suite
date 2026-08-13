@@ -11,7 +11,7 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
     private const int FileBufferSize = 4096;
     private const int MaxMoveAttempts = 8;
     private const int MaxStartupTemporaryEntries = 1024;
-    private const string TemporaryFilePrefix = "temporary-v1-";
+    private const string TemporaryFilePrefix = "temporary-v2-";
     private const string TemporaryFileSuffix = ".tmp";
     private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromHours(24);
     // Coordinates adapter instances in this process; this is not a cross-process lock.
@@ -77,11 +77,12 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
 
     public async ValueTask<SecretReferenceCreationResult> CreateCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
         ValidateValue(value);
-        (SecretReference reference, SecretStoreKey key) = SecretStoreKey.IssueCredentials(sourceId);
+        (SecretReference reference, SecretStoreKey key) = SecretStoreKey.IssueCredentials(sourceId, owner);
         cancellationToken.ThrowIfCancellationRequested();
         SecretReferenceCreationResult success = SecretReferenceCreationResult.Succeeded(reference);
 
@@ -107,11 +108,13 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
     public async ValueTask<ProtectedLocatorReferenceCreationResult> CreateLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
         ValidateValue(value);
-        (ProtectedLocatorReference reference, SecretStoreKey key) = SecretStoreKey.IssueLocator(sourceId, purpose);
+        (ProtectedLocatorReference reference, SecretStoreKey key) =
+            SecretStoreKey.IssueLocator(sourceId, purpose, owner);
         cancellationToken.ThrowIfCancellationRequested();
         ProtectedLocatorReferenceCreationResult success =
             ProtectedLocatorReferenceCreationResult.Succeeded(reference);
@@ -137,62 +140,68 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
 
     public ValueTask<SecretStoreReadResult> ReadCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         CancellationToken cancellationToken = default)
     {
-        SecretStoreKey key = SecretStoreKey.ForCredentials(sourceId, reference);
+        SecretStoreKey key = SecretStoreKey.ForCredentials(sourceId, owner, reference);
         return ReadRecordAsync(key, cancellationToken);
     }
 
     public ValueTask<SecretStoreReadResult> ReadLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         CancellationToken cancellationToken = default)
     {
-        SecretStoreKey key = SecretStoreKey.ForLocator(sourceId, purpose, reference);
+        SecretStoreKey key = SecretStoreKey.ForLocator(sourceId, purpose, owner, reference);
         return ReadRecordAsync(key, cancellationToken);
     }
 
     public ValueTask<SecretStoreOperationResult> UpdateCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
         ValidateValue(value);
-        SecretStoreKey key = SecretStoreKey.ForCredentials(sourceId, reference);
+        SecretStoreKey key = SecretStoreKey.ForCredentials(sourceId, owner, reference);
         return UpdateRecordAsync(key, value, cancellationToken);
     }
 
     public ValueTask<SecretStoreOperationResult> UpdateLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
         ValidateValue(value);
-        SecretStoreKey key = SecretStoreKey.ForLocator(sourceId, purpose, reference);
+        SecretStoreKey key = SecretStoreKey.ForLocator(sourceId, purpose, owner, reference);
         return UpdateRecordAsync(key, value, cancellationToken);
     }
 
     public ValueTask<SecretStoreOperationResult> DeleteCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         CancellationToken cancellationToken = default)
     {
-        SecretStoreKey key = SecretStoreKey.ForCredentials(sourceId, reference);
+        SecretStoreKey key = SecretStoreKey.ForCredentials(sourceId, owner, reference);
         return DeleteRecordAsync(key, cancellationToken);
     }
 
     public ValueTask<SecretStoreOperationResult> DeleteLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         CancellationToken cancellationToken = default)
     {
-        SecretStoreKey key = SecretStoreKey.ForLocator(sourceId, purpose, reference);
+        SecretStoreKey key = SecretStoreKey.ForLocator(sourceId, purpose, owner, reference);
         return DeleteRecordAsync(key, cancellationToken);
     }
 

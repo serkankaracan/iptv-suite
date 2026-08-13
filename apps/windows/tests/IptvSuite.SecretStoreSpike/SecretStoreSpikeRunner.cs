@@ -119,6 +119,8 @@ internal static class SecretStoreSpikeRunner
         try
         {
             SourceId sourceId = SourceId.Generate();
+            ProtectedRecordOwner recordOwner =
+                ProtectedRecordOwner.ForChannel(ChannelId.Generate());
             var references = new List<ProtectedLocatorReference>(warmupRecordCount);
             var store = new DpapiCurrentUserSecretStore(storeDirectory, cancellationToken);
 
@@ -133,6 +135,7 @@ internal static class SecretStoreSpikeRunner
                 ProtectedLocatorReferenceCreationResult created = await store.CreateLocatorAsync(
                     sourceId,
                     ProtectedValuePurpose.ChannelStreamLocator,
+                    recordOwner,
                     payload,
                     cancellationToken).ConfigureAwait(false);
                 if (!created.IsSuccess || created.Reference is null)
@@ -155,6 +158,7 @@ internal static class SecretStoreSpikeRunner
                 SecretStoreReadResult read = await store.ReadLocatorAsync(
                     sourceId,
                     ProtectedValuePurpose.ChannelStreamLocator,
+                    recordOwner,
                     references[ordinal],
                     cancellationToken).ConfigureAwait(false);
                 using SecretLease? lease = read.Lease;
@@ -176,6 +180,7 @@ internal static class SecretStoreSpikeRunner
                 SecretStoreOperationResult deleted = await store.DeleteLocatorAsync(
                     sourceId,
                     ProtectedValuePurpose.ChannelStreamLocator,
+                    recordOwner,
                     reference,
                     cancellationToken).ConfigureAwait(false);
                 if (!deleted.IsSuccess)
@@ -224,6 +229,8 @@ internal static class SecretStoreSpikeRunner
             try
             {
                 SourceId sourceId = SourceId.Generate();
+                ProtectedRecordOwner recordOwner =
+                    ProtectedRecordOwner.ForChannel(ChannelId.Generate());
                 var store = new DpapiCurrentUserSecretStore(storeDirectory, cancellationToken);
                 bool cancellationObserved = false;
                 writer = Task.Run(async () =>
@@ -241,6 +248,7 @@ internal static class SecretStoreSpikeRunner
                             ProtectedLocatorReferenceCreationResult result = await store.CreateLocatorAsync(
                                 sourceId,
                                 ProtectedValuePurpose.ChannelStreamLocator,
+                                recordOwner,
                                 payload,
                                 probeCancellation.Token).ConfigureAwait(false);
                             if (!result.IsSuccess || result.Reference is null)
@@ -290,7 +298,7 @@ internal static class SecretStoreSpikeRunner
                 postCompletionMutationCount += Math.Max(0, countAfterDelay - countAtCompletion);
                 temporaryArtifactCount += Directory.EnumerateFiles(
                     storeDirectory,
-                    "temporary-v1-*.tmp",
+                    "temporary-v2-*.tmp",
                     SearchOption.TopDirectoryOnly).Count();
                 IReadOnlyList<CanaryFinding> findings = ArtifactCanaryScanner.Scan(storeDirectory, canary);
                 if (findings.Count != 0)
@@ -303,6 +311,7 @@ internal static class SecretStoreSpikeRunner
                     SecretStoreOperationResult deleted = await store.DeleteLocatorAsync(
                         sourceId,
                         ProtectedValuePurpose.ChannelStreamLocator,
+                        recordOwner,
                         reference,
                         cancellationToken).ConfigureAwait(false);
                     if (!deleted.IsSuccess)
@@ -357,7 +366,7 @@ internal static class SecretStoreSpikeRunner
     private static int CountProtectedRecords(string storeDirectory) =>
         Directory.EnumerateFiles(
             storeDirectory,
-            "record-v1-*.dpapi",
+            "record-v2-*.dpapi",
             SearchOption.TopDirectoryOnly).Count();
 
     private static async Task<ScaleEvidence> RunScaleAsync(
@@ -385,6 +394,8 @@ internal static class SecretStoreSpikeRunner
             try
             {
                 SourceId sourceId = SourceId.Generate();
+                ProtectedRecordOwner recordOwner =
+                    ProtectedRecordOwner.ForChannel(ChannelId.Generate());
                 var references = new List<ProtectedLocatorReference>(recordCount);
                 ISecretStore store = new DpapiCurrentUserSecretStore(storeDirectory, cancellationToken);
 
@@ -403,6 +414,7 @@ internal static class SecretStoreSpikeRunner
                         ProtectedLocatorReferenceCreationResult result = await store.CreateLocatorAsync(
                             sourceId,
                             ProtectedValuePurpose.ChannelStreamLocator,
+                            recordOwner,
                             payload,
                             cancellationToken).ConfigureAwait(false);
                         if (!result.IsSuccess || result.Reference is null)
@@ -442,6 +454,7 @@ internal static class SecretStoreSpikeRunner
                         SecretStoreReadResult result = await store.ReadLocatorAsync(
                             sourceId,
                             ProtectedValuePurpose.ChannelStreamLocator,
+                            recordOwner,
                             references[index],
                             cancellationToken).ConfigureAwait(false);
                         using SecretLease? lease = result.Lease;
@@ -461,6 +474,7 @@ internal static class SecretStoreSpikeRunner
                         SecretStoreOperationResult result = await store.DeleteLocatorAsync(
                             sourceId,
                             ProtectedValuePurpose.ChannelStreamLocator,
+                            recordOwner,
                             reference,
                             cancellationToken).ConfigureAwait(false);
                         if (!result.IsSuccess)
@@ -470,7 +484,7 @@ internal static class SecretStoreSpikeRunner
                     }
                 }).ConfigureAwait(false));
 
-                if (Directory.EnumerateFiles(storeDirectory, "record-v1-*.dpapi", SearchOption.TopDirectoryOnly).Any())
+                if (Directory.EnumerateFiles(storeDirectory, "record-v2-*.dpapi", SearchOption.TopDirectoryOnly).Any())
                 {
                     throw new IOException("Protected records remained after the delete phase.");
                 }

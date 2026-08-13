@@ -33,6 +33,8 @@ public sealed class SourceDraftProtectionService
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        SourceConfigurationId configurationId = SourceConfigurationId.Generate();
+        ProtectedRecordOwner owner = ProtectedRecordOwner.ForSourceConfiguration(configurationId);
         byte[]? payload = null;
         try
         {
@@ -42,6 +44,7 @@ public sealed class SourceDraftProtectionService
                 password!);
             SecretReferenceCreationResult created = await _secretStore.CreateCredentialsAsync(
                 sourceId,
+                owner,
                 payload,
                 cancellationToken).ConfigureAwait(false);
             if (!created.IsSuccess || created.Reference is null)
@@ -54,6 +57,7 @@ public sealed class SourceDraftProtectionService
             // successful result must retain the store-issued reference and source.
             ValidatedSourceDraft draft = SourceConfigurationValidator.CompleteXtream(
                 sourceId,
+                configurationId,
                 prepared.Value!,
                 created.Reference);
             return DomainResult.Success(draft);
@@ -83,6 +87,8 @@ public sealed class SourceDraftProtectionService
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        SourceConfigurationId configurationId = SourceConfigurationId.Generate();
+        ProtectedRecordOwner owner = ProtectedRecordOwner.ForSourceConfiguration(configurationId);
         byte[]? payload = null;
         try
         {
@@ -90,6 +96,7 @@ public sealed class SourceDraftProtectionService
             ProtectedLocatorReferenceCreationResult created = await _secretStore.CreateLocatorAsync(
                 sourceId,
                 ProtectedValuePurpose.RemotePlaylistLocator,
+                owner,
                 payload,
                 cancellationToken).ConfigureAwait(false);
             if (!created.IsSuccess || created.Reference is null)
@@ -101,6 +108,7 @@ public sealed class SourceDraftProtectionService
             // directly awaited result must retain the committed record's binding.
             ValidatedSourceDraft draft = SourceConfigurationValidator.CompleteRemotePlaylist(
                 sourceId,
+                configurationId,
                 prepared.Value!,
                 created.Reference);
             return DomainResult.Success(draft);

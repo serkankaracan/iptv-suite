@@ -18,7 +18,7 @@ internal static class WindowsSecretStoreFactory
             string protectedStorePath = Path.Combine(
                 localCachePath,
                 "ProtectedStore",
-                "v1");
+                "v2");
             var store = new DpapiCurrentUserSecretStore(protectedStorePath, cancellationToken);
             return SecretStoreInitializationResult.Succeeded(store);
         }

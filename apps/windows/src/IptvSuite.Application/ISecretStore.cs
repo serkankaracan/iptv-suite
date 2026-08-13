@@ -1,5 +1,15 @@
 namespace IptvSuite.Application;
 
+/// <summary>
+/// Stores bounded protected values under typed source, purpose, semantic-owner, and reference keys.
+/// </summary>
+/// <remarks>
+/// <see cref="ProtectedValuePurpose.SourceCredentials"/> and
+/// <see cref="ProtectedValuePurpose.RemotePlaylistLocator"/> require a source-configuration owner;
+/// channel stream and logo locators require a channel owner. The owner is integrity-binding context,
+/// not an authorization principal. Every read, update, and delete must repeat the owner derived from
+/// the authoritative containing domain entity.
+/// </remarks>
 public interface ISecretStore
 {
     /// <summary>
@@ -14,9 +24,10 @@ public interface ISecretStore
     /// </para>
     /// <para>
     /// A successful result is the logical commit boundary. Its store-issued reference identifies
-    /// the final protected record bound to the exact source, credentials purpose, and reference
-    /// kind. Once that record is committed, cancellation requested concurrently must not change
-    /// the outcome to a failed result or <see cref="OperationCanceledException"/>.
+    /// the final protected record bound to the exact source, semantic <paramref name="owner"/>,
+    /// credentials purpose, and reference kind. Once that record is committed, cancellation
+    /// requested concurrently must not change the outcome to a failed result or
+    /// <see cref="OperationCanceledException"/>.
     /// </para>
     /// <para>
     /// A returned failed result, or <see cref="OperationCanceledException"/> observed by the
@@ -33,6 +44,7 @@ public interface ISecretStore
     /// </remarks>
     ValueTask<SecretReferenceCreationResult> CreateCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default);
 
@@ -48,9 +60,10 @@ public interface ISecretStore
     /// </para>
     /// <para>
     /// A successful result is the logical commit boundary. Its store-issued reference identifies
-    /// the final protected record bound to the exact source, <paramref name="purpose"/>, and
-    /// reference kind. Once that record is committed, cancellation requested concurrently must not
-    /// change the outcome to a failed result or <see cref="OperationCanceledException"/>.
+    /// the final protected record bound to the exact source, <paramref name="purpose"/>, semantic
+    /// <paramref name="owner"/>, and reference kind. Once that record is committed, cancellation
+    /// requested concurrently must not change the outcome to a failed result or
+    /// <see cref="OperationCanceledException"/>.
     /// </para>
     /// <para>
     /// A returned failed result, or <see cref="OperationCanceledException"/> observed by the
@@ -68,11 +81,12 @@ public interface ISecretStore
     ValueTask<ProtectedLocatorReferenceCreationResult> CreateLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Reads the protected credentials bound to the exact source and opaque reference.
+    /// Reads the protected credentials bound to the exact source, semantic owner, and opaque reference.
     /// </summary>
     /// <remarks>
     /// A successful result transfers ownership of exactly one plaintext <see cref="SecretLease"/>
@@ -84,11 +98,12 @@ public interface ISecretStore
     /// </remarks>
     ValueTask<SecretStoreReadResult> ReadCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Reads the protected locator bound to the exact source, purpose, and opaque reference.
+    /// Reads the protected locator bound to the exact source, purpose, semantic owner, and opaque reference.
     /// </summary>
     /// <remarks>
     /// A successful result transfers ownership of exactly one plaintext <see cref="SecretLease"/>
@@ -101,11 +116,12 @@ public interface ISecretStore
     ValueTask<SecretStoreReadResult> ReadLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Replaces the credentials record bound to the exact source and reference.
+    /// Replaces the credentials record bound to the exact source, semantic owner, and reference.
     /// </summary>
     /// <remarks>
     /// <paramref name="value"/> is borrowed, caller-owned memory. The implementation may read it
@@ -119,12 +135,13 @@ public interface ISecretStore
     /// </remarks>
     ValueTask<SecretStoreOperationResult> UpdateCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Replaces the locator record bound to the exact source, purpose, and reference.
+    /// Replaces the locator record bound to the exact source, purpose, semantic owner, and reference.
     /// </summary>
     /// <remarks>
     /// <paramref name="value"/> is borrowed, caller-owned memory. The implementation may read it
@@ -139,12 +156,13 @@ public interface ISecretStore
     ValueTask<SecretStoreOperationResult> UpdateLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Idempotently deletes the credentials record bound to the exact source and reference.
+    /// Idempotently deletes the credentials record bound to the exact source, semantic owner, and reference.
     /// </summary>
     /// <remarks>
     /// Success means the exact record is absent, including when it was already absent. Cancellation
@@ -154,11 +172,12 @@ public interface ISecretStore
     /// </remarks>
     ValueTask<SecretStoreOperationResult> DeleteCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Idempotently deletes the locator bound to the exact source, purpose, and reference.
+    /// Idempotently deletes the locator bound to the exact source, purpose, semantic owner, and reference.
     /// </summary>
     /// <remarks>
     /// Success means the exact record is absent, including when it was already absent. Cancellation
@@ -169,6 +188,7 @@ public interface ISecretStore
     ValueTask<SecretStoreOperationResult> DeleteLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         CancellationToken cancellationToken = default);
 }

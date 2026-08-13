@@ -44,6 +44,7 @@ Bu tablolar language-neutral contract'tır; code-generation talimatı değildir.
 | Alan | Type/constraint | Not |
 |---|---|---|
 | `id` | `SourceId` | App-generated opaque ID. |
+| `configurationId` | `SourceConfigurationId` | Her source configuration sürümü için app-generated semantic owner ID; protected credential/locator binding'inin parçası. |
 | `displayName` | trimmed text, 1–100 char | User-visible; identity değil. |
 | `kind` | `XtreamCompatible` veya `RemotePlaylist` | MVP closed set. |
 | `safeEndpoint` | `SafeEndpoint` | Yalnız scheme + IDNA host + effective port; user-info/query/fragment yok. |
@@ -111,7 +112,7 @@ Refresh favorite'ı eşleyemezse onu benzer isimli kanala sessizce bağlamak yer
 
 | Value object | Çözdüğü problem/invariant |
 |---|---|
-| `SourceId`, `SnapshotId`, `CategoryId`, `ChannelId` | Opaque typed ID, aggregate'ler arası yanlış karşılaştırmayı engeller. |
+| `SourceId`, `SourceConfigurationId`, `SnapshotId`, `CategoryId`, `ChannelId` | Opaque typed ID, aggregate/configuration/channel sınırları arası yanlış karşılaştırmayı engeller. |
 | `ChannelStableKey` | Source-scoped deterministic identity; algorithm versioned. |
 | `SafeEndpoint` | Yalnız normalized scheme, IDNA host ve port; diagnostics/UI için raw secret'tan ayrı. |
 | `SecretReference` | Secret'ı reveal veya stringify edemeyen opaque lookup token. |
@@ -125,9 +126,9 @@ Bu type'ların serialization ve string-format davranışı explicit olmalıdır.
 
 ### 4.1 M4 source-draft protected-create sınırı
 
-`SourceDraftProtectionService`, public caller'dan gelen non-empty `SourceId` ve source-kind girdilerini store mutation'ından önce domain validation'dan geçirir. Xtream için full locator+username+password, remote playlist için full locator; strict UTF-8, versioned ve length-prefixed bounded byte payload'a encode edilir. Payload yalnız typed `ISecretStore.CreateCredentialsAsync` veya `CreateLocatorAsync(RemotePlaylistLocator)` call'ına verilir; store-issued reference ve onu üreten exact `SourceId` başarılı `ValidatedSourceDraft` sonucuna bağlanır. `ContentSource` bu draft'tan kimliği, adı ve configuration'ı birlikte alır; ayrı bir caller-supplied `SourceId` ile yeniden eşleme yüzeyi yoktur. Temporary byte buffer `finally` içinde best-effort sıfırlanır; store failure safe `StorageUnavailable` domain sonucuna map edilir.
+`SourceDraftProtectionService`, public caller'dan gelen non-empty `SourceId` ve source-kind girdilerini store mutation'ından önce domain validation'dan geçirir. Xtream için full locator+username+password, remote playlist için full locator; strict UTF-8, versioned ve length-prefixed bounded byte payload'a encode edilir. Her yeni draft fresh `SourceConfigurationId` üretir; payload yalnız bu ID'den türeyen `ProtectedRecordOwner` ile typed `ISecretStore.CreateCredentialsAsync` veya `CreateLocatorAsync(RemotePlaylistLocator)` call'ına verilir. Store-issued reference, exact `SourceId` ve configuration owner ID başarılı `ValidatedSourceDraft` sonucuna birlikte bağlanır. `ContentSource` bu draft'tan kimliği, adı ve configuration'ı birlikte alır; ayrı caller-supplied source/configuration owner ile yeniden eşleme yüzeyi yoktur. Temporary byte buffer `finally` içinde best-effort sıfırlanır; store failure safe `StorageUnavailable` domain sonucuna map edilir.
 
-Doğrudan await edilen başarılı çağrıda store commit'inden sonra cancellation yeniden gözlenmez ve issued reference caller'a sonuçla döner. Bu sınır; caller'ın sonucu gözlememesi/terk etmesi, retry veya aynı `SourceId` ile duplicate create, process crash/OOM, durable metadata persistence, update/delete ya da orphan reconciliation atomikliği sağlamaz. Internal v1 decoder exact magic/version, pozitif big-endian length, exact total/no-trailing-data, strict UTF-8, control/whitespace ve Unicode-scalar sınırlarını doğrular; yalnız numeric slice layout döndürür, managed string/URI veya ikinci plaintext buffer üretmez. Unknown version, wrong-kind, bütün truncation noktaları, length overflow ve malformed UTF-8 local contract matrisinde fail-closed'dur. Decoder public resolve contract'ı değildir; semantic owner/origin ve operation-lifetime politikası hâlâ M5/lifecycle gate'ini bekler. Source formu/UI wiring'i de uygulanmamıştır.
+Doğrudan await edilen başarılı çağrıda store commit'inden sonra cancellation yeniden gözlenmez ve issued reference caller'a sonuçla döner. Bu sınır; caller'ın sonucu gözlememesi/terk etmesi, retry veya aynı `SourceId` ile duplicate create, process crash/OOM, durable metadata persistence, update/delete ya da orphan reconciliation atomikliği sağlamaz. Store envelope v2; source, purpose, semantic owner kind/ID ve opaque reference kind/ID'yi entropy, filename digest ve encrypted envelope context'ine birlikte bağlar. Source credential/remote playlist owner'ı `SourceConfigurationId`, stream/logo locator owner'ı `ChannelId`dir; same-source/same-purpose cross-owner read/update fail-closed, yanlış-owner delete doğru kayda dokunmadan idempotent success'tir. Bu owner integrity context'idir, authorization principal değildir. Internal source-payload decoder v1 exact magic/version, pozitif big-endian length, exact total/no-trailing-data, strict UTF-8, control/whitespace ve Unicode-scalar sınırlarını doğrular; yalnız numeric slice layout döndürür, managed string/URI veya ikinci plaintext buffer üretmez. Unknown version, wrong-kind, bütün truncation noktaları, length overflow ve malformed UTF-8 local contract matrisinde fail-closed'dur. Decoder public resolve contract'ı değildir; decoded locator origin equality ve operation-lifetime politikası hâlâ M5/lifecycle gate'ini bekler. Source formu/UI wiring'i de uygulanmamıştır.
 
 ## 5. Provider adapter sınırı
 

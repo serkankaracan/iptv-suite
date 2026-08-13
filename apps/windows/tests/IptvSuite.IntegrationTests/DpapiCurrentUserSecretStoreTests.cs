@@ -30,11 +30,15 @@ public sealed class DpapiCurrentUserSecretStoreTests
         byte[] payload = CreateCanaryPayload(canary);
         byte[] updated = CreateCanaryPayload(updatedCanary);
         SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner recordOwner = CreateSourceConfigurationOwner();
 
         try
         {
             var firstInstance = new DpapiCurrentUserSecretStore(temporary.FullPath);
-            SecretReferenceCreationResult created = await firstInstance.CreateCredentialsAsync(sourceId, payload);
+            SecretReferenceCreationResult created = await firstInstance.CreateCredentialsAsync(
+                sourceId,
+                recordOwner,
+                payload);
             Assert.IsTrue(created.IsSuccess);
             Assert.IsNotNull(created.Reference);
             Assert.HasCount(0, ArtifactCanaryScanner.Scan(temporary.FullPath, canary));
@@ -42,6 +46,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
             var restartedInstance = new DpapiCurrentUserSecretStore(temporary.FullPath);
             SecretStoreReadResult restartedRead = await restartedInstance.ReadCredentialsAsync(
                 sourceId,
+                recordOwner,
                 created.Reference);
             AssertLeaseMatches(restartedRead, payload);
 
@@ -51,6 +56,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
                 expectedAfterUpdates = iteration % 2 == 0 ? updated : payload;
                 SecretStoreOperationResult updatedResult = await restartedInstance.UpdateCredentialsAsync(
                     sourceId,
+                    recordOwner,
                     created.Reference,
                     expectedAfterUpdates);
                 Assert.IsTrue(
@@ -59,14 +65,20 @@ public sealed class DpapiCurrentUserSecretStoreTests
             }
 
             AssertLeaseMatches(
-                await firstInstance.ReadCredentialsAsync(sourceId, created.Reference),
+                await firstInstance.ReadCredentialsAsync(sourceId, recordOwner, created.Reference),
                 expectedAfterUpdates.Span);
             Assert.HasCount(0, ArtifactCanaryScanner.Scan(temporary.FullPath, canary));
             Assert.HasCount(0, ArtifactCanaryScanner.Scan(temporary.FullPath, updatedCanary));
 
-            Assert.IsTrue((await restartedInstance.DeleteCredentialsAsync(sourceId, created.Reference)).IsSuccess);
-            Assert.IsTrue((await restartedInstance.DeleteCredentialsAsync(sourceId, created.Reference)).IsSuccess);
-            AssertUnavailable(await firstInstance.ReadCredentialsAsync(sourceId, created.Reference));
+            Assert.IsTrue((await restartedInstance.DeleteCredentialsAsync(
+                sourceId,
+                recordOwner,
+                created.Reference)).IsSuccess);
+            Assert.IsTrue((await restartedInstance.DeleteCredentialsAsync(
+                sourceId,
+                recordOwner,
+                created.Reference)).IsSuccess);
+            AssertUnavailable(await firstInstance.ReadCredentialsAsync(sourceId, recordOwner, created.Reference));
             Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").ToArray());
             Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
         }
@@ -79,7 +91,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
 
     [TestMethod]
     [Timeout(30_000)]
-    public async Task SwappedCiphertextsFailClosedAcrossPurposeAndReferenceBindings()
+    public async Task SwappedCiphertextsFailClosedAcrossOwnerAndReferenceBindings()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -89,6 +101,8 @@ public sealed class DpapiCurrentUserSecretStoreTests
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-binding");
         var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
         SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner firstOwner = CreateChannelOwner();
+        ProtectedRecordOwner secondOwner = CreateChannelOwner();
         byte[] firstPayload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-BINDING-A"));
         byte[] secondPayload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-BINDING-B"));
         byte[]? firstCiphertext = null;
@@ -99,13 +113,15 @@ public sealed class DpapiCurrentUserSecretStoreTests
             ProtectedLocatorReferenceCreationResult first = await store.CreateLocatorAsync(
                 sourceId,
                 ProtectedValuePurpose.ChannelStreamLocator,
+                firstOwner,
                 firstPayload);
             Assert.IsNotNull(first.Reference);
             string firstPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").Single();
 
             ProtectedLocatorReferenceCreationResult second = await store.CreateLocatorAsync(
                 sourceId,
-                ProtectedValuePurpose.ChannelLogoLocator,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                secondOwner,
                 secondPayload);
             Assert.IsNotNull(second.Reference);
             string secondPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi")
@@ -119,14 +135,17 @@ public sealed class DpapiCurrentUserSecretStoreTests
             AssertUnavailable(await store.ReadLocatorAsync(
                 sourceId,
                 ProtectedValuePurpose.ChannelStreamLocator,
+                firstOwner,
                 first.Reference));
             AssertUnavailable(await store.ReadLocatorAsync(
                 sourceId,
-                ProtectedValuePurpose.ChannelLogoLocator,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                secondOwner,
                 second.Reference));
             AssertUnavailable(await store.ReadLocatorAsync(
                 SourceId.Generate(),
                 ProtectedValuePurpose.ChannelStreamLocator,
+                firstOwner,
                 first.Reference));
             Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
         }
@@ -148,6 +167,145 @@ public sealed class DpapiCurrentUserSecretStoreTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task WrongOwnerOperationsAreUnavailableAndIdempotentDeletePreservesOwnerRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-owner-binding");
+        var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner owner = CreateChannelOwner();
+        ProtectedRecordOwner otherOwner = CreateChannelOwner();
+        byte[] payload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-OWNER-A"));
+        byte[] updated = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-OWNER-B"));
+
+        try
+        {
+            ProtectedLocatorReferenceCreationResult created = await store.CreateLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                owner,
+                payload);
+            Assert.IsNotNull(created.Reference);
+            string recordPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").Single();
+            StringAssert.Contains(Path.GetFileName(recordPath), "record-v2-");
+
+            AssertUnavailable(await store.ReadLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                otherOwner,
+                created.Reference));
+            AssertUnavailable(await store.UpdateLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                otherOwner,
+                created.Reference,
+                updated));
+            Assert.IsTrue((await store.DeleteLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                otherOwner,
+                created.Reference)).IsSuccess);
+            Assert.IsTrue((await store.DeleteLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                otherOwner,
+                created.Reference)).IsSuccess);
+
+            AssertLeaseMatches(
+                await store.ReadLocatorAsync(
+                    sourceId,
+                    ProtectedValuePurpose.ChannelStreamLocator,
+                    owner,
+                    created.Reference),
+                payload);
+            Assert.IsTrue(File.Exists(recordPath));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+            CryptographicOperations.ZeroMemory(updated);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task ChannelLocatorPurposeSwapIsUnavailableAndCannotDeleteTheOwnerRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-purpose-binding");
+        var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner channelOwner = CreateChannelOwner();
+        byte[] payload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-PURPOSE-A"));
+        byte[] updated = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-PURPOSE-B"));
+
+        try
+        {
+            ProtectedLocatorReferenceCreationResult created = await store.CreateLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                channelOwner,
+                payload);
+            Assert.IsNotNull(created.Reference);
+            string recordPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").Single();
+
+            AssertUnavailable(await store.ReadLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelLogoLocator,
+                channelOwner,
+                created.Reference));
+            AssertUnavailable(await store.UpdateLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelLogoLocator,
+                channelOwner,
+                created.Reference,
+                updated));
+            Assert.IsTrue((await store.DeleteLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelLogoLocator,
+                channelOwner,
+                created.Reference)).IsSuccess);
+            Assert.IsTrue((await store.DeleteLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelLogoLocator,
+                channelOwner,
+                created.Reference)).IsSuccess);
+
+            AssertLeaseMatches(
+                await store.ReadLocatorAsync(
+                    sourceId,
+                    ProtectedValuePurpose.ChannelStreamLocator,
+                    channelOwner,
+                    created.Reference),
+                payload);
+            Assert.IsTrue(File.Exists(recordPath));
+            Assert.HasCount(1, Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").ToArray());
+
+            Assert.IsTrue((await store.DeleteLocatorAsync(
+                sourceId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                channelOwner,
+                created.Reference)).IsSuccess);
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").ToArray());
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+            CryptographicOperations.ZeroMemory(updated);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task CorruptTruncatedAndOversizedRecordsAreUnavailableWithoutSecretEcho()
     {
         if (!OperatingSystem.IsWindows())
@@ -158,17 +316,18 @@ public sealed class DpapiCurrentUserSecretStoreTests
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-corrupt");
         var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
         SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner recordOwner = CreateSourceConfigurationOwner();
         TestCanary canary = TestCanary.Create("M4", "DPAPI-CORRUPT");
         byte[] payload = CreateCanaryPayload(canary);
 
         try
         {
-            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, payload);
+            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, recordOwner, payload);
             Assert.IsNotNull(created.Reference);
             string recordPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").Single();
 
             await File.WriteAllBytesAsync(recordPath, [0x01, 0x02, 0x03]);
-            SecretStoreReadResult corrupt = await store.ReadCredentialsAsync(sourceId, created.Reference);
+            SecretStoreReadResult corrupt = await store.ReadCredentialsAsync(sourceId, recordOwner, created.Reference);
             AssertUnavailable(corrupt);
             string sensitiveText = Encoding.UTF8.GetString(payload);
             Assert.IsFalse(corrupt.ToString().Contains(sensitiveText, StringComparison.Ordinal));
@@ -177,15 +336,53 @@ public sealed class DpapiCurrentUserSecretStoreTests
             try
             {
                 await File.WriteAllBytesAsync(recordPath, oversizedCiphertext);
-                AssertUnavailable(await store.ReadCredentialsAsync(sourceId, created.Reference));
+                AssertUnavailable(await store.ReadCredentialsAsync(sourceId, recordOwner, created.Reference));
             }
             finally
             {
                 CryptographicOperations.ZeroMemory(oversizedCiphertext);
             }
 
-            Assert.IsTrue((await store.DeleteCredentialsAsync(sourceId, created.Reference)).IsSuccess);
+            Assert.IsTrue((await store.DeleteCredentialsAsync(sourceId, recordOwner, created.Reference)).IsSuccess);
             Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task V1RecordNamespaceIsIgnoredWithoutMigrationOrDeletion()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-v1-namespace");
+        var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
+        SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner owner = CreateSourceConfigurationOwner();
+        byte[] payload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-V1-NAMESPACE"));
+
+        try
+        {
+            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, owner, payload);
+            Assert.IsNotNull(created.Reference);
+            string v2Path = Directory.EnumerateFiles(temporary.FullPath, "record-v2-*.dpapi").Single();
+            string v1Path = Path.Combine(
+                temporary.FullPath,
+                Path.GetFileName(v2Path).Replace("record-v2-", "record-v1-", StringComparison.Ordinal));
+            File.Move(v2Path, v1Path);
+
+            _ = new DpapiCurrentUserSecretStore(temporary.FullPath);
+            AssertUnavailable(await store.ReadCredentialsAsync(sourceId, owner, created.Reference));
+            AssertUnavailable(await store.UpdateCredentialsAsync(sourceId, owner, created.Reference, payload));
+            Assert.IsTrue((await store.DeleteCredentialsAsync(sourceId, owner, created.Reference)).IsSuccess);
+            Assert.IsTrue(File.Exists(v1Path));
+            Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "record-v2-*.dpapi").ToArray());
         }
         finally
         {
@@ -205,6 +402,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-cancel");
         var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
         SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner recordOwner = CreateSourceConfigurationOwner();
         byte[] payload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-CANCEL"));
         using CancellationTokenSource cancellation = new();
         cancellation.Cancel();
@@ -212,16 +410,21 @@ public sealed class DpapiCurrentUserSecretStoreTests
         try
         {
             await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
-                await store.CreateCredentialsAsync(sourceId, payload, cancellation.Token));
+                await store.CreateCredentialsAsync(sourceId, recordOwner, payload, cancellation.Token));
             Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").ToArray());
 
-            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, payload);
+            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, recordOwner, payload);
             Assert.IsNotNull(created.Reference);
             await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
-                await store.UpdateCredentialsAsync(sourceId, created.Reference, payload, cancellation.Token));
+                await store.UpdateCredentialsAsync(
+                    sourceId,
+                    recordOwner,
+                    created.Reference,
+                    payload,
+                    cancellation.Token));
             await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
-                await store.DeleteCredentialsAsync(sourceId, created.Reference, cancellation.Token));
-            AssertLeaseMatches(await store.ReadCredentialsAsync(sourceId, created.Reference), payload);
+                await store.DeleteCredentialsAsync(sourceId, recordOwner, created.Reference, cancellation.Token));
+            AssertLeaseMatches(await store.ReadCredentialsAsync(sourceId, recordOwner, created.Reference), payload);
         }
         finally
         {
@@ -241,6 +444,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-concurrent");
         var store = new DpapiCurrentUserSecretStore(temporary.FullPath);
         SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner recordOwner = CreateChannelOwner();
         TestCanary[] canaries = Enumerable.Range(0, 8)
             .Select(index => TestCanary.Create("M4", $"DPAPI-CONCURRENT-{index}"))
             .ToArray();
@@ -252,6 +456,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
                 .Select(payload => store.CreateLocatorAsync(
                     sourceId,
                     ProtectedValuePurpose.ChannelStreamLocator,
+                    recordOwner,
                     payload).AsTask())
                 .ToArray();
             ProtectedLocatorReferenceCreationResult[] created = await Task.WhenAll(operations);
@@ -263,6 +468,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
                     await store.ReadLocatorAsync(
                         sourceId,
                         ProtectedValuePurpose.ChannelStreamLocator,
+                        recordOwner,
                         created[index].Reference!),
                     payloads[index]);
                 Assert.HasCount(0, ArtifactCanaryScanner.Scan(temporary.FullPath, canaries[index]));
@@ -291,27 +497,30 @@ public sealed class DpapiCurrentUserSecretStoreTests
         TimeProvider timeProvider = TestTime.Create(now);
         string stale = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-00000000000000000000000000000001.tmp");
+            "temporary-v2-00000000000000000000000000000001.tmp");
         string fresh = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-00000000000000000000000000000002.tmp");
+            "temporary-v2-00000000000000000000000000000002.tmp");
         string future = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-00000000000000000000000000000003.tmp");
+            "temporary-v2-00000000000000000000000000000003.tmp");
         string boundary = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-00000000000000000000000000000007.tmp");
+            "temporary-v2-00000000000000000000000000000007.tmp");
         string uppercaseIdentifier = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.tmp");
+            "temporary-v2-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.tmp");
         string invalidIdentifier = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-gggggggggggggggggggggggggggggggg.tmp");
+            "temporary-v2-gggggggggggggggggggggggggggggggg.tmp");
         string protectedRecord = Path.Combine(temporary.FullPath, "record-v1-preserve.dpapi");
+        string legacyTemporary = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-00000000000000000000000000000009.tmp");
         string nestedDirectory = Path.Combine(temporary.FullPath, "nested");
         string nestedTemporary = Path.Combine(
             nestedDirectory,
-            "temporary-v1-00000000000000000000000000000004.tmp");
+            "temporary-v2-00000000000000000000000000000004.tmp");
         string[] seededFiles =
         [
             stale,
@@ -321,6 +530,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
             uppercaseIdentifier,
             invalidIdentifier,
             protectedRecord,
+            legacyTemporary,
             nestedTemporary,
         ];
 
@@ -335,6 +545,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
         File.SetLastWriteTimeUtc(uppercaseIdentifier, oldTimestamp);
         File.SetLastWriteTimeUtc(invalidIdentifier, oldTimestamp);
         File.SetLastWriteTimeUtc(protectedRecord, oldTimestamp);
+        File.SetLastWriteTimeUtc(legacyTemporary, oldTimestamp);
         File.SetLastWriteTimeUtc(nestedTemporary, oldTimestamp);
         File.SetLastWriteTimeUtc(fresh, now.UtcDateTime - TimeSpan.FromMinutes(5));
         File.SetLastWriteTimeUtc(future, now.UtcDateTime + TimeSpan.FromHours(1));
@@ -350,16 +561,18 @@ public sealed class DpapiCurrentUserSecretStoreTests
         Assert.IsTrue(File.Exists(uppercaseIdentifier));
         Assert.IsTrue(File.Exists(invalidIdentifier));
         Assert.IsTrue(File.Exists(protectedRecord));
+        Assert.IsTrue(File.Exists(legacyTemporary));
         Assert.IsTrue(File.Exists(nestedTemporary));
 
         SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner recordOwner = CreateSourceConfigurationOwner();
         byte[] payload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-TEMP-CLEANUP"));
         try
         {
-            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, payload);
+            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, recordOwner, payload);
             Assert.IsTrue(created.IsSuccess);
             Assert.IsNotNull(created.Reference);
-            AssertLeaseMatches(await store.ReadCredentialsAsync(sourceId, created.Reference), payload);
+            AssertLeaseMatches(await store.ReadCredentialsAsync(sourceId, recordOwner, created.Reference), payload);
         }
         finally
         {
@@ -381,7 +594,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
         TimeProvider timeProvider = TestTime.Create(now);
         string directoryPath = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-00000000000000000000000000000005.tmp");
+            "temporary-v2-00000000000000000000000000000005.tmp");
         Directory.CreateDirectory(directoryPath);
         Directory.SetLastWriteTimeUtc(directoryPath, now.UtcDateTime - TimeSpan.FromHours(25));
 
@@ -404,7 +617,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
         TimeProvider timeProvider = TestTime.Create(now);
         string temporaryPath = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-00000000000000000000000000000006.tmp");
+            "temporary-v2-00000000000000000000000000000006.tmp");
         File.WriteAllBytes(temporaryPath, [0x4D, 0x34]);
         File.SetLastWriteTimeUtc(temporaryPath, now.UtcDateTime - TimeSpan.FromHours(25));
 
@@ -441,14 +654,14 @@ public sealed class DpapiCurrentUserSecretStoreTests
         {
             string path = Path.Combine(
                 temporary.FullPath,
-                $"temporary-v1-{index:x32}.tmp");
+                $"temporary-v2-{index:x32}.tmp");
             File.WriteAllBytes(path, [0x4D, 0x34]);
             exactTemporaryPaths.Add(path);
         }
 
         string lookalikePath = Path.Combine(
             temporary.FullPath,
-            "temporary-v1-gggggggggggggggggggggggggggggggg.tmp");
+            "temporary-v2-gggggggggggggggggggggggggggggggg.tmp");
         File.WriteAllBytes(lookalikePath, [0x4D, 0x34]);
 
         _ = CreateStoreForTest(temporary.FullPath, freshTimeProvider);
@@ -457,7 +670,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
 
         string overflowPath = Path.Combine(
             temporary.FullPath,
-            $"temporary-v1-{1024:x32}.tmp");
+            $"temporary-v2-{1024:x32}.tmp");
         File.WriteAllBytes(overflowPath, [0x4D, 0x34]);
         exactTemporaryPaths.Add(overflowPath);
         TimeProvider staleTimeProvider = TestTime.Create(freshNow + TimeSpan.FromDays(2));
@@ -492,7 +705,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
         Directory.CreateDirectory(existingStoragePath);
         string staleTemporaryPath = Path.Combine(
             existingStoragePath,
-            "temporary-v1-00000000000000000000000000000008.tmp");
+            "temporary-v2-00000000000000000000000000000008.tmp");
         File.WriteAllBytes(staleTemporaryPath, [0x4D, 0x34]);
         File.SetLastWriteTimeUtc(staleTemporaryPath, DateTime.UtcNow - TimeSpan.FromHours(25));
 
@@ -516,12 +729,16 @@ public sealed class DpapiCurrentUserSecretStoreTests
         var firstInstance = new DpapiCurrentUserSecretStore(temporary.FullPath);
         var secondInstance = new DpapiCurrentUserSecretStore(temporary.FullPath);
         SourceId sourceId = SourceId.Generate();
+        ProtectedRecordOwner recordOwner = CreateSourceConfigurationOwner();
         byte[] initial = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-GATE-INITIAL"));
         byte[] updated = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-GATE-UPDATED"));
 
         try
         {
-            SecretReferenceCreationResult created = await firstInstance.CreateCredentialsAsync(sourceId, initial);
+            SecretReferenceCreationResult created = await firstInstance.CreateCredentialsAsync(
+                sourceId,
+                recordOwner,
+                initial);
             Assert.IsNotNull(created.Reference);
             string recordPath = Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").Single();
             using CancellationTokenSource readCancellation = new();
@@ -532,11 +749,13 @@ public sealed class DpapiCurrentUserSecretStoreTests
                 FileShare.Read);
             Task<SecretStoreOperationResult> readPhaseUpdateTask = secondInstance.UpdateCredentialsAsync(
                 sourceId,
+                recordOwner,
                 created.Reference,
                 updated).AsTask();
             await WaitForTemporaryRecordAsync(temporary.FullPath);
             Task<SecretStoreReadResult> blockedReadTask = firstInstance.ReadCredentialsAsync(
                 sourceId,
+                recordOwner,
                 created.Reference,
                 readCancellation.Token).AsTask();
 
@@ -554,7 +773,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
                 readPhaseUpdate.IsSuccess,
                 $"The serialized read-phase update failed with {readPhaseUpdate.Failure}.");
             AssertLeaseMatches(
-                await firstInstance.ReadCredentialsAsync(sourceId, created.Reference),
+                await firstInstance.ReadCredentialsAsync(sourceId, recordOwner, created.Reference),
                 updated);
 
             Task<SecretStoreOperationResult> deletePhaseUpdateTask;
@@ -569,11 +788,13 @@ public sealed class DpapiCurrentUserSecretStoreTests
             {
                 deletePhaseUpdateTask = firstInstance.UpdateCredentialsAsync(
                     sourceId,
+                    recordOwner,
                     created.Reference,
                     initial).AsTask();
                 await WaitForTemporaryRecordAsync(temporary.FullPath);
                 blockedDeleteTask = secondInstance.DeleteCredentialsAsync(
                     sourceId,
+                    recordOwner,
                     created.Reference).AsTask();
 
                 await Task.Delay(25);
@@ -588,7 +809,7 @@ public sealed class DpapiCurrentUserSecretStoreTests
                 deletePhaseUpdate.IsSuccess,
                 $"The serialized delete-phase update failed with {deletePhaseUpdate.Failure}.");
             Assert.IsTrue(delete.IsSuccess, $"The serialized delete failed with {delete.Failure}.");
-            AssertUnavailable(await secondInstance.ReadCredentialsAsync(sourceId, created.Reference));
+            AssertUnavailable(await secondInstance.ReadCredentialsAsync(sourceId, recordOwner, created.Reference));
             Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.dpapi").ToArray());
             Assert.HasCount(0, Directory.EnumerateFiles(temporary.FullPath, "*.tmp").ToArray());
         }
@@ -605,6 +826,12 @@ public sealed class DpapiCurrentUserSecretStoreTests
         canary.WriteTo(stream, TestCanaryEncoding.Utf8);
         return stream.ToArray();
     }
+
+    private static ProtectedRecordOwner CreateSourceConfigurationOwner() =>
+        ProtectedRecordOwner.ForSourceConfiguration(SourceConfigurationId.Generate());
+
+    private static ProtectedRecordOwner CreateChannelOwner() =>
+        ProtectedRecordOwner.ForChannel(ChannelId.Generate());
 
     private static DpapiCurrentUserSecretStore CreateStoreForTest(
         string storageDirectoryPath,
@@ -658,5 +885,11 @@ public sealed class DpapiCurrentUserSecretStoreTests
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(SecretStoreFailure.ProtectedRecordUnavailable, result.Failure);
         Assert.IsNull(result.Lease);
+    }
+
+    private static void AssertUnavailable(SecretStoreOperationResult result)
+    {
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(SecretStoreFailure.ProtectedRecordUnavailable, result.Failure);
     }
 }

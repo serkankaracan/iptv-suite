@@ -47,6 +47,7 @@ internal static class SourceDraftTestFixtures
     {
         public ValueTask<SecretReferenceCreationResult> CreateCredentialsAsync(
             SourceId sourceId,
+            ProtectedRecordOwner owner,
             ReadOnlyMemory<byte> value,
             CancellationToken cancellationToken = default)
         {
@@ -58,6 +59,7 @@ internal static class SourceDraftTestFixtures
         public ValueTask<ProtectedLocatorReferenceCreationResult> CreateLocatorAsync(
             SourceId sourceId,
             ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
             ReadOnlyMemory<byte> value,
             CancellationToken cancellationToken = default)
         {
@@ -68,17 +70,20 @@ internal static class SourceDraftTestFixtures
 
         public ValueTask<SecretStoreReadResult> ReadCredentialsAsync(
             SourceId sourceId,
+            ProtectedRecordOwner owner,
             SecretReference reference,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 
         public ValueTask<SecretStoreReadResult> ReadLocatorAsync(
             SourceId sourceId,
             ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
             ProtectedLocatorReference reference,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 
         public ValueTask<SecretStoreOperationResult> UpdateCredentialsAsync(
             SourceId sourceId,
+            ProtectedRecordOwner owner,
             SecretReference reference,
             ReadOnlyMemory<byte> value,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
@@ -86,18 +91,21 @@ internal static class SourceDraftTestFixtures
         public ValueTask<SecretStoreOperationResult> UpdateLocatorAsync(
             SourceId sourceId,
             ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
             ProtectedLocatorReference reference,
             ReadOnlyMemory<byte> value,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 
         public ValueTask<SecretStoreOperationResult> DeleteCredentialsAsync(
             SourceId sourceId,
+            ProtectedRecordOwner owner,
             SecretReference reference,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 
         public ValueTask<SecretStoreOperationResult> DeleteLocatorAsync(
             SourceId sourceId,
             ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
             ProtectedLocatorReference reference,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 

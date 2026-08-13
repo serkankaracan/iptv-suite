@@ -35,10 +35,12 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
 
     public ValueTask<SecretReferenceCreationResult> CreateCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
         ValidateSource(sourceId);
+        ValidateOwner(ProtectedValuePurpose.SourceCredentials, owner);
         ValidateValue(value);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -51,7 +53,7 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
             do
             {
                 reference = CreateSecretReference();
-                key = ForCredentials(sourceId, reference);
+                key = ForCredentials(sourceId, owner, reference);
             }
             while (_records.ContainsKey(key));
 
@@ -63,11 +65,13 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
     public ValueTask<ProtectedLocatorReferenceCreationResult> CreateLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
         ValidateSource(sourceId);
         ValidateLocatorPurpose(purpose);
+        ValidateOwner(purpose, owner);
         ValidateValue(value);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -80,7 +84,7 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
             do
             {
                 reference = CreateLocatorReference();
-                key = ForLocator(sourceId, purpose, reference);
+                key = ForLocator(sourceId, purpose, owner, reference);
             }
             while (_records.ContainsKey(key));
 
@@ -91,78 +95,90 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
 
     public ValueTask<SecretStoreReadResult> ReadCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         CancellationToken cancellationToken = default)
     {
         ValidateSource(sourceId);
+        ValidateOwner(ProtectedValuePurpose.SourceCredentials, owner);
         ArgumentNullException.ThrowIfNull(reference);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Read(ForCredentials(sourceId, reference)));
+        return ValueTask.FromResult(Read(ForCredentials(sourceId, owner, reference)));
     }
 
     public ValueTask<SecretStoreReadResult> ReadLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         CancellationToken cancellationToken = default)
     {
         ValidateSource(sourceId);
         ValidateLocatorPurpose(purpose);
+        ValidateOwner(purpose, owner);
         ArgumentNullException.ThrowIfNull(reference);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Read(ForLocator(sourceId, purpose, reference)));
+        return ValueTask.FromResult(Read(ForLocator(sourceId, purpose, owner, reference)));
     }
 
     public ValueTask<SecretStoreOperationResult> UpdateCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
         ValidateSource(sourceId);
+        ValidateOwner(ProtectedValuePurpose.SourceCredentials, owner);
         ArgumentNullException.ThrowIfNull(reference);
         ValidateValue(value);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Update(ForCredentials(sourceId, reference), value));
+        return ValueTask.FromResult(Update(ForCredentials(sourceId, owner, reference), value));
     }
 
     public ValueTask<SecretStoreOperationResult> UpdateLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         ReadOnlyMemory<byte> value,
         CancellationToken cancellationToken = default)
     {
         ValidateSource(sourceId);
         ValidateLocatorPurpose(purpose);
+        ValidateOwner(purpose, owner);
         ArgumentNullException.ThrowIfNull(reference);
         ValidateValue(value);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Update(ForLocator(sourceId, purpose, reference), value));
+        return ValueTask.FromResult(Update(ForLocator(sourceId, purpose, owner, reference), value));
     }
 
     public ValueTask<SecretStoreOperationResult> DeleteCredentialsAsync(
         SourceId sourceId,
+        ProtectedRecordOwner owner,
         SecretReference reference,
         CancellationToken cancellationToken = default)
     {
         ValidateSource(sourceId);
+        ValidateOwner(ProtectedValuePurpose.SourceCredentials, owner);
         ArgumentNullException.ThrowIfNull(reference);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Delete(ForCredentials(sourceId, reference)));
+        return ValueTask.FromResult(Delete(ForCredentials(sourceId, owner, reference)));
     }
 
     public ValueTask<SecretStoreOperationResult> DeleteLocatorAsync(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
+        ProtectedRecordOwner owner,
         ProtectedLocatorReference reference,
         CancellationToken cancellationToken = default)
     {
         ValidateSource(sourceId);
         ValidateLocatorPurpose(purpose);
+        ValidateOwner(purpose, owner);
         ArgumentNullException.ThrowIfNull(reference);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Delete(ForLocator(sourceId, purpose, reference)));
+        return ValueTask.FromResult(Delete(ForLocator(sourceId, purpose, owner, reference)));
     }
 
     public void Dispose()
@@ -188,13 +204,17 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
 
     public override string ToString() => "[M4-IN-MEMORY-SECRET-STORE]";
 
-    private static FakeRecordKey ForCredentials(SourceId sourceId, SecretReference reference) =>
-        new(sourceId, ProtectedValuePurpose.SourceCredentials, reference);
+    private static FakeRecordKey ForCredentials(
+        SourceId sourceId,
+        ProtectedRecordOwner owner,
+        SecretReference reference) =>
+        new(sourceId, ProtectedValuePurpose.SourceCredentials, owner, reference);
 
     private static FakeRecordKey ForLocator(
         SourceId sourceId,
         ProtectedValuePurpose purpose,
-        ProtectedLocatorReference reference) => new(sourceId, purpose, reference);
+        ProtectedRecordOwner owner,
+        ProtectedLocatorReference reference) => new(sourceId, purpose, owner, reference);
 
     private static bool IsZeroed(byte[] buffer) => buffer.All(value => value == 0);
 
@@ -228,6 +248,25 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
         if (purpose is ProtectedValuePurpose.SourceCredentials || !Enum.IsDefined(purpose))
         {
             throw new ArgumentOutOfRangeException(nameof(purpose), "A locator purpose is required.");
+        }
+    }
+
+    private static void ValidateOwner(ProtectedValuePurpose purpose, ProtectedRecordOwner owner)
+    {
+        ProtectedRecordOwnerKind expectedKind = purpose switch
+        {
+            ProtectedValuePurpose.SourceCredentials or ProtectedValuePurpose.RemotePlaylistLocator =>
+                ProtectedRecordOwnerKind.SourceConfiguration,
+            ProtectedValuePurpose.ChannelStreamLocator or ProtectedValuePurpose.ChannelLogoLocator =>
+                ProtectedRecordOwnerKind.Channel,
+            _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
+        };
+
+        if (owner.IsEmpty || owner.Kind != expectedKind)
+        {
+            throw new ArgumentException(
+                "The protected-record owner kind does not match the protected-value purpose.",
+                nameof(owner));
         }
     }
 
@@ -289,6 +328,7 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
     private readonly record struct FakeRecordKey(
         SourceId SourceId,
         ProtectedValuePurpose Purpose,
+        ProtectedRecordOwner Owner,
         object Reference)
     {
         public override string ToString() => "[M4-FAKE-RECORD-KEY]";

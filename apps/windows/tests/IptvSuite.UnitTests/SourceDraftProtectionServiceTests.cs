@@ -61,6 +61,8 @@ public sealed class SourceDraftProtectionServiceTests
         Assert.AreEqual(0, store.LocatorCreateCount);
         Assert.AreEqual(0, store.PayloadSnapshots.Count);
         Assert.AreEqual(0, store.BorrowedPayloads.Count);
+        Assert.AreEqual(0, store.CredentialOwners.Count);
+        Assert.AreEqual(0, store.LocatorOwners.Count);
     }
 
     [TestMethod]
@@ -96,6 +98,7 @@ public sealed class SourceDraftProtectionServiceTests
             Assert.AreEqual(0, store.LocatorCreateCount);
             Assert.IsTrue(store.CredentialSources.All(item => item == sourceId));
             Assert.AreEqual(2, store.IssuedCredentialReferences.Count);
+            Assert.AreEqual(2, store.CredentialOwners.Count);
             Assert.AreNotEqual(
                 store.IssuedCredentialReferences[0],
                 store.IssuedCredentialReferences[1]);
@@ -104,6 +107,17 @@ public sealed class SourceDraftProtectionServiceTests
             var secondConfiguration = second.Value!.Configuration as XtreamSourceConfiguration;
             Assert.IsNotNull(firstConfiguration);
             Assert.IsNotNull(secondConfiguration);
+            Assert.IsFalse(firstConfiguration.ConfigurationId.IsEmpty);
+            Assert.IsFalse(secondConfiguration.ConfigurationId.IsEmpty);
+            Assert.AreNotEqual(
+                firstConfiguration.ConfigurationId,
+                secondConfiguration.ConfigurationId);
+            Assert.AreEqual(
+                ProtectedRecordOwner.ForSourceConfiguration(firstConfiguration.ConfigurationId),
+                store.CredentialOwners[0]);
+            Assert.AreEqual(
+                ProtectedRecordOwner.ForSourceConfiguration(secondConfiguration.ConfigurationId),
+                store.CredentialOwners[1]);
             Assert.AreSame(store.IssuedCredentialReferences[0], firstConfiguration.CredentialsReference);
             Assert.AreSame(store.IssuedCredentialReferences[1], secondConfiguration.CredentialsReference);
             Assert.AreEqual(sourceId, first.Value.SourceId);
@@ -165,6 +179,10 @@ public sealed class SourceDraftProtectionServiceTests
 
             var configuration = result.Value!.Configuration as RemotePlaylistSourceConfiguration;
             Assert.IsNotNull(configuration);
+            Assert.IsFalse(configuration.ConfigurationId.IsEmpty);
+            Assert.AreEqual(
+                ProtectedRecordOwner.ForSourceConfiguration(configuration.ConfigurationId),
+                store.LocatorOwners.Single());
             Assert.AreSame(store.IssuedLocatorReferences.Single(), configuration.LocatorReference);
             Assert.AreEqual(sourceId, result.Value.SourceId);
             Assert.AreEqual("example.test", configuration.SafeEndpoint.Host);
@@ -435,7 +453,11 @@ public sealed class SourceDraftProtectionServiceTests
 
         internal List<SourceId> CredentialSources { get; } = [];
 
+        internal List<ProtectedRecordOwner> CredentialOwners { get; } = [];
+
         internal List<SourceId> LocatorSources { get; } = [];
+
+        internal List<ProtectedRecordOwner> LocatorOwners { get; } = [];
 
         internal List<ProtectedValuePurpose> LocatorPurposes { get; } = [];
 
@@ -449,12 +471,14 @@ public sealed class SourceDraftProtectionServiceTests
 
         public ValueTask<SecretReferenceCreationResult> CreateCredentialsAsync(
             SourceId sourceId,
+            ProtectedRecordOwner owner,
             ReadOnlyMemory<byte> value,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             CredentialsCreateCount++;
             CredentialSources.Add(sourceId);
+            CredentialOwners.Add(owner);
             Capture(value);
             if (CredentialsException is not null)
             {
@@ -476,6 +500,7 @@ public sealed class SourceDraftProtectionServiceTests
         public ValueTask<ProtectedLocatorReferenceCreationResult> CreateLocatorAsync(
             SourceId sourceId,
             ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
             ReadOnlyMemory<byte> value,
             CancellationToken cancellationToken = default)
         {
@@ -483,6 +508,7 @@ public sealed class SourceDraftProtectionServiceTests
             LocatorCreateCount++;
             LocatorSources.Add(sourceId);
             LocatorPurposes.Add(purpose);
+            LocatorOwners.Add(owner);
             Capture(value);
             if (LocatorException is not null)
             {
@@ -503,17 +529,20 @@ public sealed class SourceDraftProtectionServiceTests
 
         public ValueTask<SecretStoreReadResult> ReadCredentialsAsync(
             SourceId sourceId,
+            ProtectedRecordOwner owner,
             SecretReference reference,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 
         public ValueTask<SecretStoreReadResult> ReadLocatorAsync(
             SourceId sourceId,
             ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
             ProtectedLocatorReference reference,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 
         public ValueTask<SecretStoreOperationResult> UpdateCredentialsAsync(
             SourceId sourceId,
+            ProtectedRecordOwner owner,
             SecretReference reference,
             ReadOnlyMemory<byte> value,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
@@ -521,18 +550,21 @@ public sealed class SourceDraftProtectionServiceTests
         public ValueTask<SecretStoreOperationResult> UpdateLocatorAsync(
             SourceId sourceId,
             ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
             ProtectedLocatorReference reference,
             ReadOnlyMemory<byte> value,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 
         public ValueTask<SecretStoreOperationResult> DeleteCredentialsAsync(
             SourceId sourceId,
+            ProtectedRecordOwner owner,
             SecretReference reference,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 
         public ValueTask<SecretStoreOperationResult> DeleteLocatorAsync(
             SourceId sourceId,
             ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
             ProtectedLocatorReference reference,
             CancellationToken cancellationToken = default) => throw UnexpectedOperation();
 

@@ -19,6 +19,23 @@ public readonly record struct SourceId
     public override string ToString() => Value.ToString("D", CultureInfo.InvariantCulture);
 }
 
+public readonly record struct SourceConfigurationId
+{
+    private SourceConfigurationId(Guid value) => Value = value;
+
+    public Guid Value { get; }
+
+    public bool IsEmpty => Value == Guid.Empty;
+
+    public static DomainResult<SourceConfigurationId> Create(Guid value) => value == Guid.Empty
+        ? DomainResult.Failure<SourceConfigurationId>(DomainErrorCode.DomainInvariantViolation)
+        : DomainResult.Success(new SourceConfigurationId(value));
+
+    public static SourceConfigurationId Generate() => new(Guid.NewGuid());
+
+    public override string ToString() => Value.ToString("D", CultureInfo.InvariantCulture);
+}
+
 public readonly record struct SnapshotId
 {
     private SnapshotId(Guid value) => Value = value;

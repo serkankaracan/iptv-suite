@@ -7,6 +7,7 @@ public sealed class EntityIdentifiersTests
 {
     [TestMethod]
     [DataRow("source")]
+    [DataRow("source-configuration")]
     [DataRow("snapshot")]
     [DataRow("category")]
     [DataRow("channel")]
@@ -15,6 +16,7 @@ public sealed class EntityIdentifiersTests
         DomainError? error = identifierKind switch
         {
             "source" => SourceId.Create(Guid.Empty).Error,
+            "source-configuration" => SourceConfigurationId.Create(Guid.Empty).Error,
             "snapshot" => SnapshotId.Create(Guid.Empty).Error,
             "category" => CategoryId.Create(Guid.Empty).Error,
             "channel" => ChannelId.Create(Guid.Empty).Error,
@@ -27,6 +29,7 @@ public sealed class EntityIdentifiersTests
 
     [TestMethod]
     [DataRow("source")]
+    [DataRow("source-configuration")]
     [DataRow("snapshot")]
     [DataRow("category")]
     [DataRow("channel")]
@@ -36,6 +39,7 @@ public sealed class EntityIdentifiersTests
         (bool IsSuccess, Guid Actual) result = identifierKind switch
         {
             "source" => From(SourceId.Create(expected)),
+            "source-configuration" => From(SourceConfigurationId.Create(expected)),
             "snapshot" => From(SnapshotId.Create(expected)),
             "category" => From(CategoryId.Create(expected)),
             "channel" => From(ChannelId.Create(expected)),
@@ -50,12 +54,16 @@ public sealed class EntityIdentifiersTests
     public void GeneratedIdentifiersAreNonEmpty()
     {
         Assert.IsFalse(SourceId.Generate().IsEmpty);
+        Assert.IsFalse(SourceConfigurationId.Generate().IsEmpty);
         Assert.IsFalse(SnapshotId.Generate().IsEmpty);
         Assert.IsFalse(CategoryId.Generate().IsEmpty);
         Assert.IsFalse(ChannelId.Generate().IsEmpty);
     }
 
     private static (bool IsSuccess, Guid Value) From(DomainResult<SourceId> result) =>
+        (result.IsSuccess, result.Value.Value);
+
+    private static (bool IsSuccess, Guid Value) From(DomainResult<SourceConfigurationId> result) =>
         (result.IsSuccess, result.Value.Value);
 
     private static (bool IsSuccess, Guid Value) From(DomainResult<SnapshotId> result) =>
