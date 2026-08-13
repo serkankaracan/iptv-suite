@@ -301,10 +301,38 @@ public sealed class DependencyRulesTests
         Assert.AreEqual("win-x64", GetProperty(project, "RuntimeIdentifier"));
         Assert.AreEqual("true", GetProperty(project, "UseWinUI"), ignoreCase: true);
         Assert.AreEqual("true", GetProperty(project, "EnableMsixTooling"), ignoreCase: true);
+        Assert.AreEqual("Baseline", GetProperty(project, "LifecyclePackageFlavor"));
+
+        XElement[] manifestSelections = project.Descendants()
+            .Where(element => element.Name.LocalName == "AppxManifest")
+            .ToArray();
+        Assert.HasCount(2, manifestSelections);
+        Assert.IsTrue(manifestSelections.Any(element =>
+            element.Attribute("Include")?.Value == "Package.appxmanifest" &&
+            element.Parent?.Attribute("Condition")?.Value ==
+                "'$(LifecyclePackageFlavor)' == 'Baseline'"));
+        Assert.IsTrue(manifestSelections.Any(element =>
+            element.Attribute("Include")?.Value == "Package.Update.appxmanifest" &&
+            element.Parent?.Attribute("Condition")?.Value ==
+                "'$(LifecyclePackageFlavor)' == 'Update'"));
+
+        XElement flavorValidation = project.Descendants()
+            .Single(element =>
+                element.Name.LocalName == "Target" &&
+                element.Attribute("Name")?.Value == "ValidateLifecyclePackageFlavor");
+        Assert.AreEqual("PrepareForBuild", flavorValidation.Attribute("BeforeTargets")?.Value);
+        StringAssert.Contains(
+            flavorValidation.Elements().Single(element => element.Name.LocalName == "Error")
+                .Attribute("Condition")?.Value ?? string.Empty,
+            "'$(LifecyclePackageFlavor)' != 'Baseline' and '$(LifecyclePackageFlavor)' != 'Update'");
 
         XDocument manifest = LoadXml(
             "apps/windows/tests/IptvSuite.PackageLifecycleHarness/Package.appxmanifest");
+        XDocument updateManifest = LoadXml(
+            "apps/windows/tests/IptvSuite.PackageLifecycleHarness/Package.Update.appxmanifest");
         XElement identity = manifest.Descendants().Single(element => element.Name.LocalName == "Identity");
+        XElement updateIdentity = updateManifest.Descendants()
+            .Single(element => element.Name.LocalName == "Identity");
         XElement[] applications = manifest.Descendants()
             .Where(element => element.Name.LocalName == "Application")
             .ToArray();
@@ -316,8 +344,16 @@ public sealed class DependencyRulesTests
 
         Assert.AreEqual(LifecycleHarnessIdentity, identity.Attribute("Name")?.Value);
         Assert.AreEqual(LifecycleHarnessPublisher, identity.Attribute("Publisher")?.Value);
+        Assert.AreEqual("0.0.1.0", identity.Attribute("Version")?.Value);
+        Assert.AreEqual(LifecycleHarnessIdentity, updateIdentity.Attribute("Name")?.Value);
+        Assert.AreEqual(LifecycleHarnessPublisher, updateIdentity.Attribute("Publisher")?.Value);
+        Assert.AreEqual("0.0.2.0", updateIdentity.Attribute("Version")?.Value);
         Assert.AreNotEqual(DevelopmentIdentity, identity.Attribute("Name")?.Value);
         Assert.AreNotEqual(DevelopmentPublisher, identity.Attribute("Publisher")?.Value);
+        updateIdentity.SetAttributeValue("Version", "0.0.1.0");
+        Assert.IsTrue(
+            XNode.DeepEquals(manifest.Root!, updateManifest.Root!),
+            "The disposable package manifests may differ only by their exact package version.");
         CollectionAssert.AreEqual(RequiredCapabilities, capabilities);
         Assert.HasCount(1, applications);
         Assert.AreEqual("Harness", applications[0].Attribute("Id")?.Value);
@@ -502,6 +538,27 @@ public sealed class DependencyRulesTests
             Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageLifecycleSmoke.ps1"));
         StringAssert.Contains(lifecycleSmoke, LifecycleHarnessIdentity);
         StringAssert.Contains(lifecycleSmoke, LifecycleHarnessPublisher);
+        StringAssert.Contains(lifecycleSmoke, "$baselineVersion = \"0.0.1.0\"");
+        StringAssert.Contains(lifecycleSmoke, "$updatedVersion = \"0.0.2.0\"");
+        StringAssert.Contains(lifecycleSmoke, "\"-p:AppxPackageDir=$baselinePackageOutput\"");
+        StringAssert.Contains(lifecycleSmoke, "\"-p:AppxPackageDir=$updatedPackageOutput\"");
+        StringAssert.Contains(lifecycleSmoke, "-p:LifecyclePackageFlavor=Baseline");
+        StringAssert.Contains(lifecycleSmoke, "-p:LifecyclePackageFlavor=Update");
+        StringAssert.Contains(lifecycleSmoke, "-Path $updatedArtifacts.Package.FullName");
+        StringAssert.Contains(lifecycleSmoke, "ProtectedRecordReadAfterPackageUpdate");
+        StringAssert.Contains(lifecycleSmoke, "PostUpdateOwnedSurfaceCanaryScanPassed = $true");
+        StringAssert.Contains(lifecycleSmoke, "SamePackageFamily = $true");
+        StringAssert.Contains(lifecycleSmoke, "PackageFullNameChanged = $true");
+        Assert.HasCount(
+            2,
+            Regex.Matches(lifecycleSmoke, @"(?<![A-Za-z0-9])-t:Rebuild(?![A-Za-z0-9])"),
+            "Both package versions require isolated rebuilds to prevent a stale generated manifest.");
+        Assert.IsFalse(
+            lifecycleSmoke.Contains("ForceUpdateFromAnyVersion", StringComparison.Ordinal),
+            "The forward package-update proof must use the normal higher-version deployment path.");
+        Assert.IsFalse(
+            Regex.IsMatch(lifecycleSmoke, @"(?m)(?:^|\s)-Update(?:\s|`|$)"),
+            "-Update is for dependency-package updates and must not drive the primary package update.");
         StringAssert.Contains(lifecycleSmoke, "CoCreateInstance");
         StringAssert.Contains(lifecycleSmoke, "LocalServer = 0x00000004");
         StringAssert.Contains(lifecycleSmoke, "--phase $Phase --run-id $runId");

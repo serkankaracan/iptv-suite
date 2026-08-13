@@ -111,13 +111,16 @@ Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
 
 $expectedName = "ProtectedStore.PackageLifecycleTest.Local.5d8c7a91"
 $expectedPublisher = "CN=Protected Store Package Lifecycle Local Test"
-$expectedVersion = "0.0.1.0"
+$baselineVersion = "0.0.1.0"
+$updatedVersion = "0.0.2.0"
 $expectedApplicationId = "Harness"
 $expectedProcessName = "IptvSuite.PackageLifecycleHarness"
-$expectedPackageFileName = "IptvSuite.PackageLifecycleHarness_0.0.1.0_x64.msix"
+$baselinePackageFileName = "IptvSuite.PackageLifecycleHarness_0.0.1.0_x64.msix"
+$updatedPackageFileName = "IptvSuite.PackageLifecycleHarness_0.0.2.0_x64.msix"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.PackageLifecycleHarness\IptvSuite.PackageLifecycleHarness.csproj"
 $sourceManifestPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.PackageLifecycleHarness\Package.appxmanifest"
+$sourceUpdateManifestPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.PackageLifecycleHarness\Package.Update.appxmanifest"
 $testingProjectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.Testing\IptvSuite.Testing.csproj"
 $testingToolPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.Testing\bin\Release\net10.0\IptvSuite.Testing.dll"
 $artifactsRoot = Join-Path $repositoryRoot ".artifacts"
@@ -125,6 +128,8 @@ $artifactRoot = Join-Path $artifactsRoot "package-lifecycle"
 $runId = [Guid]::NewGuid().ToString("N")
 $packageOutputRoot = Join-Path $artifactRoot "packages"
 $packageOutput = Join-Path $packageOutputRoot $runId
+$baselinePackageOutput = Join-Path $packageOutput "baseline"
+$updatedPackageOutput = Join-Path $packageOutput "updated"
 $publicCertificatePath = Join-Path $artifactRoot "$runId.cer"
 $successEvidencePath = Join-Path $artifactRoot "last-success.json"
 $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
@@ -141,13 +146,16 @@ $primaryFailure = $null
 $failureStage = "Bootstrap"
 $failureCode = "UnexpectedFailure"
 $actualSdk = $null
-$packageFileName = $null
-$packageSha256 = $null
-$signatureStatus = $null
+$baselineArtifacts = $null
+$updatedArtifacts = $null
+$baselinePackageSha256 = $null
+$updatedPackageSha256 = $null
+$baselinePackageFullName = $null
+$baselineSignatureStatus = $null
+$updatedSignatureStatus = $null
 $successEvidence = $null
 $msBuildEnvironment = @{
     AppxBundle                    = "Never"
-    AppxPackageDir                = "$packageOutput\"
     AppxPackageSigningEnabled     = "true"
     AppxSymbolPackageEnabled      = "false"
     DebugSymbols                  = "false"
@@ -208,6 +216,10 @@ function Assert-ManifestPolicy {
         [Parameter(Mandatory)]
         [xml]$Manifest,
 
+        [Parameter(Mandatory)]
+        [ValidateSet("0.0.1.0", "0.0.2.0")]
+        [string]$ExpectedVersion,
+
         [switch]$Built
     )
 
@@ -215,7 +227,7 @@ function Assert-ManifestPolicy {
     if ($null -eq $identity -or
         $identity.GetAttribute("Name") -ne $expectedName -or
         $identity.GetAttribute("Publisher") -ne $expectedPublisher -or
-        $identity.GetAttribute("Version") -ne $expectedVersion) {
+        $identity.GetAttribute("Version") -ne $ExpectedVersion) {
         throw "The package identity is outside lifecycle-smoke policy."
     }
 
@@ -268,6 +280,59 @@ function Assert-ManifestPolicy {
             throw "The lifecycle MSIX must use the exact Windows App Runtime dependency."
         }
     }
+}
+
+function Get-BuiltPackageArtifacts {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackageOutput,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedPackageFileName
+    )
+
+    Assert-SafeDirectory -Path $PackageOutput
+    $packages = @(
+        Get-ChildItem -LiteralPath $PackageOutput -Filter "*.msix" -Recurse -File |
+            Where-Object { $_.FullName -notmatch "[\\/]Dependencies[\\/]" }
+    )
+    if ($packages.Count -ne 1 -or $packages[0].Name -ne $ExpectedPackageFileName) {
+        throw "The lifecycle build did not produce the exact x64 MSIX."
+    }
+
+    $runtimeDependencies = @(
+        Get-ChildItem -LiteralPath $PackageOutput -Filter "Microsoft.WindowsAppRuntime.2.msix" -Recurse -File |
+            Where-Object { $_.Directory.Name -eq "x64" }
+    )
+    if ($runtimeDependencies.Count -ne 1) {
+        throw "The lifecycle build did not produce the exact x64 runtime dependency."
+    }
+
+    Assert-RegularFile -Path $packages[0].FullName
+    Assert-RegularFile -Path $runtimeDependencies[0].FullName
+    return [pscustomobject]@{
+        Package = $packages[0]
+        RuntimeDependency = $runtimeDependencies[0]
+    }
+}
+
+function Get-ValidatedPackageSignature {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$Package,
+
+        [Parameter(Mandatory)]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+    )
+
+    $signature = Get-AuthenticodeSignature -FilePath $Package.FullName
+    if ($null -eq $signature.SignerCertificate -or
+        $signature.SignerCertificate.Thumbprint -ne $Certificate.Thumbprint -or
+        $signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+        throw "The lifecycle MSIX signature is invalid."
+    }
+
+    return $signature.Status.ToString()
 }
 
 function Assert-HarnessResult {
@@ -782,7 +847,9 @@ try {
 
     Set-FailurePoint -Stage "ManifestValidation" -Code "ManifestPolicyFailed"
     [xml]$sourceManifest = Get-Content -Raw -LiteralPath $sourceManifestPath
-    Assert-ManifestPolicy -Manifest $sourceManifest
+    [xml]$sourceUpdateManifest = Get-Content -Raw -LiteralPath $sourceUpdateManifestPath
+    Assert-ManifestPolicy -Manifest $sourceManifest -ExpectedVersion $baselineVersion
+    Assert-ManifestPolicy -Manifest $sourceUpdateManifest -ExpectedVersion $updatedVersion
     $storeAssociations = @(Get-ChildItem -Path (Join-Path $repositoryRoot "apps") -Filter "Package.StoreAssociation.xml" -Recurse -File)
     if ($storeAssociations.Count -ne 0) {
         throw "Store association is forbidden for the disposable lifecycle identity."
@@ -838,15 +905,25 @@ try {
     Export-Certificate -Cert $certificate -FilePath $publicCertificatePath | Out-Null
     Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" | Out-Null
 
-    Set-FailurePoint -Stage "PackageBuild" -Code "SignedBuildFailed"
+    Set-FailurePoint -Stage "UpdatedPackageBuild" -Code "UpdatedSignedBuildFailed"
     $msBuildEnvironment.PackageCertificateThumbprint = $certificate.Thumbprint
     foreach ($entry in $msBuildEnvironment.GetEnumerator()) {
         $environmentBackup[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
     }
-    & $DotNetPath build $projectPath -c $Configuration -p:Platform=x64 --no-restore --nologo
+    & $DotNetPath build $projectPath -c $Configuration -p:Platform=x64 `
+        "-p:AppxPackageDir=$updatedPackageOutput" `
+        -p:LifecyclePackageFlavor=Update -t:Rebuild --no-restore --nologo
     if ($LASTEXITCODE -ne 0) {
-        throw "The signed lifecycle MSIX build failed."
+        throw "The signed updated lifecycle MSIX build failed."
+    }
+
+    Set-FailurePoint -Stage "BaselinePackageBuild" -Code "BaselineSignedBuildFailed"
+    & $DotNetPath build $projectPath -c $Configuration -p:Platform=x64 `
+        "-p:AppxPackageDir=$baselinePackageOutput" `
+        -p:LifecyclePackageFlavor=Baseline -t:Rebuild --no-restore --nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw "The signed baseline lifecycle MSIX build failed."
     }
 
     Set-FailurePoint -Stage "ScannerBuild" -Code "ScannerBuildFailed"
@@ -856,54 +933,57 @@ try {
     }
 
     Set-FailurePoint -Stage "PackageInspection" -Code "PackageOutputInvalid"
-    $packages = @(
-        Get-ChildItem -LiteralPath $packageOutput -Filter "*.msix" -Recurse -File |
-            Where-Object { $_.FullName -notmatch "[\\/]Dependencies[\\/]" }
-    )
-    if ($packages.Count -ne 1 -or $packages[0].Name -ne $expectedPackageFileName) {
-        throw "The lifecycle build did not produce the exact x64 MSIX."
+    $baselineArtifacts = Get-BuiltPackageArtifacts `
+        -PackageOutput $baselinePackageOutput `
+        -ExpectedPackageFileName $baselinePackageFileName
+    $updatedArtifacts = Get-BuiltPackageArtifacts `
+        -PackageOutput $updatedPackageOutput `
+        -ExpectedPackageFileName $updatedPackageFileName
+    $baselineSignatureStatus = Get-ValidatedPackageSignature `
+        -Package $baselineArtifacts.Package `
+        -Certificate $certificate
+    $updatedSignatureStatus = Get-ValidatedPackageSignature `
+        -Package $updatedArtifacts.Package `
+        -Certificate $certificate
+    $baselinePackageSha256 = (Get-FileHash `
+        -LiteralPath $baselineArtifacts.Package.FullName `
+        -Algorithm SHA256).Hash.ToLowerInvariant()
+    $updatedPackageSha256 = (Get-FileHash `
+        -LiteralPath $updatedArtifacts.Package.FullName `
+        -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($baselinePackageSha256 -eq $updatedPackageSha256) {
+        throw "The baseline and updated lifecycle packages must have distinct content."
     }
-    $runtimeDependencies = @(
-        Get-ChildItem -LiteralPath $packageOutput -Filter "Microsoft.WindowsAppRuntime.2.msix" -Recurse -File |
-            Where-Object { $_.Directory.Name -eq "x64" }
-    )
-    if ($runtimeDependencies.Count -ne 1) {
-        throw "The lifecycle build did not produce the exact x64 runtime dependency."
-    }
-    Assert-RegularFile -Path $packages[0].FullName
-    Assert-RegularFile -Path $runtimeDependencies[0].FullName
 
-    $signature = Get-AuthenticodeSignature -FilePath $packages[0].FullName
-    if ($null -eq $signature.SignerCertificate -or
-        $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint -or
-        $signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-        throw "The lifecycle MSIX signature is invalid."
-    }
-    $signatureStatus = $signature.Status.ToString()
-    $packageFileName = $packages[0].Name
-    $packageSha256 = (Get-FileHash -LiteralPath $packages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-
-    Set-FailurePoint -Stage "PackageInstall" -Code "PackageInstallFailed"
+    Set-FailurePoint -Stage "BaselinePackageInstall" -Code "BaselinePackageInstallFailed"
     $installAttempted = $true
-    Add-AppxPackage -Path $packages[0].FullName -DependencyPath $runtimeDependencies[0].FullName -ErrorAction Stop
+    Add-AppxPackage `
+        -Path $baselineArtifacts.Package.FullName `
+        -DependencyPath $baselineArtifacts.RuntimeDependency.FullName `
+        -ErrorAction Stop
     $installedPackages = @(
         Get-AppxPackage -Name $expectedName -ErrorAction Stop |
             Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
     )
     if ($installedPackages.Count -ne 1) {
-        throw "The exact lifecycle package was not installed."
+        throw "The exact baseline lifecycle package was not installed."
     }
     $installedPackage = $installedPackages[0]
-    if ($installedPackage.Architecture -ne "X64" -or $installedPackage.Version.ToString() -ne $expectedVersion) {
-        throw "The installed lifecycle package is outside architecture or version policy."
+    if ($installedPackage.Architecture -ne "X64" -or
+        $installedPackage.Version.ToString() -ne $baselineVersion) {
+        throw "The installed baseline lifecycle package is outside architecture or version policy."
     }
     [xml]$installedManifest = ($installedPackage | Get-AppxPackageManifest).Package.OuterXml
-    Assert-ManifestPolicy -Manifest $installedManifest -Built
+    Assert-ManifestPolicy -Manifest $installedManifest -ExpectedVersion $baselineVersion -Built
 
     $packageFamilyName = $installedPackage.PackageFamilyName
     if ([string]::IsNullOrWhiteSpace($packageFamilyName) -or
         $packageFamilyName.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0) {
         throw "The installed package family identifier is unsafe."
+    }
+    $baselinePackageFullName = $installedPackage.PackageFullName
+    if ([string]::IsNullOrWhiteSpace($baselinePackageFullName)) {
+        throw "The installed baseline package full name is unavailable."
     }
     $appDataPath = Join-Path $env:LOCALAPPDATA "Packages\$packageFamilyName"
     $localCachePath = Join-Path $appDataPath "LocalCache"
@@ -926,6 +1006,33 @@ try {
     Assert-ProtectedStoreCreated
     Assert-RegularFile -Path $ticketPath
     Remove-ExactPhaseFiles -Phase "create"
+
+    Set-FailurePoint -Stage "PackageUpdate" -Code "PackageUpdateFailed"
+    Add-AppxPackage `
+        -Path $updatedArtifacts.Package.FullName `
+        -DependencyPath $updatedArtifacts.RuntimeDependency.FullName `
+        -ErrorAction Stop
+    $updatedInstalledPackages = @(
+        Get-AppxPackage -Name $expectedName -ErrorAction Stop |
+            Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
+    )
+    if ($updatedInstalledPackages.Count -ne 1) {
+        throw "The exact updated lifecycle package was not installed."
+    }
+    $installedPackage = $updatedInstalledPackages[0]
+    if ($installedPackage.Architecture -ne "X64" -or
+        $installedPackage.Version.ToString() -ne $updatedVersion -or
+        $installedPackage.PackageFamilyName -ne $packageFamilyName -or
+        $installedPackage.PackageFullName -eq $baselinePackageFullName) {
+        throw "The lifecycle package update did not preserve the family and advance the package identity."
+    }
+    [xml]$updatedInstalledManifest = ($installedPackage | Get-AppxPackageManifest).Package.OuterXml
+    Assert-ManifestPolicy -Manifest $updatedInstalledManifest -ExpectedVersion $updatedVersion -Built
+    Assert-ProtectedStoreCreated
+    Assert-RegularFile -Path $ticketPath
+
+    Set-FailurePoint -Stage "PackageUpdateScan" -Code "PackageUpdateCanaryScanFailed"
+    Invoke-OwnedCanaryScan
 
     Set-FailurePoint -Stage "VerifyDeleteLaunch" -Code "VerifyDeletePhaseFailed"
     $verifyResult = Invoke-HarnessPhase -Phase "verify-delete" -ExpectedResult "VerifyDelete" -ExpectedExitCode 0
@@ -956,18 +1063,28 @@ try {
     }
 
     $successEvidence = [ordered]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
         CompletedAt = (Get-Date).ToUniversalTime().ToString("O")
         Configuration = $Configuration
         DotNetSdk = $actualSdk
-        PackageFile = $packageFileName
-        PackageSha256 = $packageSha256
+        BaselinePackageFile = $baselinePackageFileName
+        BaselinePackageSha256 = $baselinePackageSha256
+        BaselinePackageVersion = $baselineVersion
+        UpdatedPackageFile = $updatedPackageFileName
+        UpdatedPackageSha256 = $updatedPackageSha256
+        UpdatedPackageVersion = $updatedVersion
         PackageName = $expectedName
         PackagePublisher = $expectedPublisher
-        PackageVersion = $expectedVersion
         Architecture = "x64"
         Capabilities = @("runFullTrust")
-        SignatureStatus = $signatureStatus
+        BaselineSignatureStatus = $baselineSignatureStatus
+        UpdatedSignatureStatus = $updatedSignatureStatus
+        SameSigner = $true
+        SamePackageFamily = $true
+        PackageFullNameChanged = $true
+        UpdateInstalled = $true
+        ProtectedRecordReadAfterPackageUpdate = [bool]$verifyResult.InitialReadVerified
+        PostUpdateOwnedSurfaceCanaryScanPassed = $true
         ProtectedStoreVersion = "v2"
         DataProtectionScope = "CurrentUser"
         CreatePersistedAcrossProcessRestart = $true

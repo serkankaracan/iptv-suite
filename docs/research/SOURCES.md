@@ -1,6 +1,6 @@
 # Araştırma kaynakları
 
-**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency ve VS packaged-launch yeniden doğrulaması 2026-08-10
+**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency ve VS packaged-launch yeniden doğrulaması 2026-08-10; packaged activation/update yeniden doğrulaması 2026-08-14
 
 **Kapsam:** Phase 0 mimari, playback, güvenlik, mağaza ve platform kararları
 
@@ -64,6 +64,8 @@
 | S86 | AppWindow icon ve packaged activation | Microsoft | [SetIcon](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.windowing.appwindow.seticon), [IApplicationActivationManager](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iapplicationactivationmanager), [ActivateApplication](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iapplicationactivationmanager-activateapplication) | `SetIcon(String)` için fully-qualified asset path; kısa ömürlü launcher için `LOCAL_SERVER` activation ve sonuçta exact process ID alınması | Güncel | 2026-08-13 |
 | S87 | Windows App Certification Kit launch prerequisites | Microsoft | [Resmî belge](https://learn.microsoft.com/en-us/windows/uwp/debug-test-perf/windows-app-certification-kit-tests) | Certification launch doğrulamasının `IApplicationActivationManager` kullanması ve UAC/app-model önkoşulu | Güncel | 2026-08-13 |
 | S88 | Windows App SDK desktop launch arguments | Microsoft | [`LaunchActivatedEventArgs.Arguments`](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.launchactivatedeventargs.arguments?view=windows-app-sdk-1.8), [`AppInstance.GetActivatedEventArgs`](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.windows.applifecycle.appinstance.getactivatedeventargs?view=windows-app-sdk-1.8), [rich activation](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/applifecycle/applifecycle-rich-activation) | XAML desktop launch argümanının boş olması; packaged app-specific launch payload'unun erken `AppInstance` çağrısı ve `ILaunchActivatedEventArgs` üzerinden alınması | Windows App SDK 1.8/2.0 | 2026-08-14 |
+| S89 | App package updates | Microsoft / MSIX | [Resmî belge](https://learn.microsoft.com/en-us/windows/msix/app-package-updates) | Update'in aynı package family içinde yapılması ve normal update'te hedef package sürümünün kaynak sürümden yüksek olması gereği | Güncelleme 2022-06-03 | 2026-08-14 |
+| S90 | `Add-AppxPackage` | Microsoft / PowerShell | [Resmî cmdlet belgesi](https://learn.microsoft.com/en-us/powershell/module/appx/add-appxpackage?view=windowsserver2025-ps) | İmzalı `.msix` paketini kullanıcı hesabına `-Path` ile ekleme/güncelleme; gerekli paketleri `-DependencyPath` ile verme; installed package update'inde aynı package family gereği | Windows Server 2025 PowerShell, güncel | 2026-08-14 |
 
 ## Windows media ve player adayları
 
