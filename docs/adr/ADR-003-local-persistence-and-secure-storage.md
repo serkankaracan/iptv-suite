@@ -43,11 +43,11 @@ Windows Credential Locker credential için resmî bir API'dir; ancak Microsoft-a
 
 Credential Locker primary değildir: roaming, bulk locator uyumsuzluğu ve full-trust user-locker isolation riski nedeniyle reddedilir; 20-record sınırı bu process modeli için tek başına karar gerekçesi değildir. Kendi kripto protokolü veya SQLCipher da ilk seçenek değildir. DPAPI-per-locator performansı bütçeyi geçmezse, güvenlik/hukuk review'undan geçen **DPAPI-wrapped per-source data-encryption key + standart authenticated encryption** ya da vetted encrypted database yeni karar olarak açılır; ad-hoc kripto uygulanmaz.
 
-### M4 foundation implementation note — 2026-08-10
+### M4 foundation implementation note — 2026-08-13
 
-Application `ISecretStore` contract'ı ile Infrastructure `System.Security.Cryptography.ProtectedData 10.0.10` / `DataProtectionScope.CurrentUser` adapter'ı uygulanmıştır. V1 binary envelope ve entropy source, purpose, reference kind ve opaque record ID'ye bağlıdır; payload ve envelope buffer'ları bounded/zeroed, disk dosya adları digest tabanlıdır. Normal Windows test host'unda fake + gerçek CRUD/restart/corruption/binding/canary matrisi, işlem başlamadan iptal edilmiş çağrıların mutation yapmaması, birbirinden bağımsız kayıtların concurrent create'i ve aynı süreçte iki adapter instance'ı için same-key update/read/delete sıralaması iki-run 130/130 quality gate içinde PASS'tir. Arbitrary mid-I/O cancellation/interleaving ve cross-process sıralama kanıtlanmış değildir.
+Application `ISecretStore` contract'ı ile Infrastructure `System.Security.Cryptography.ProtectedData 10.0.10` / `DataProtectionScope.CurrentUser` adapter'ı uygulanmıştır. V1 binary envelope ve entropy source, purpose, reference kind ve opaque record ID'ye bağlıdır; payload ve envelope buffer'ları bounded/zeroed, disk dosya adları digest tabanlıdır. Windows composition factory beklenen initialization hatalarını typed `StorageUnavailable` sonucuna eşler ve caller cancellation'ını korur. Adapter startup'ı yalnız exact current-namespace, regular ve en az 24 saatlik ciphertext temp artığını siler; fresh/future/lookalike/nested/`.dpapi` girdilerini korur ve unsafe/silinemeyen exact entry'de fail-closed davranır. Normal Windows test host'unda fake + gerçek CRUD/restart/corruption/binding/canary matrisi, işlem başlamadan iptal edilmiş çağrıların mutation yapmaması, bounded startup temp cleanup, birbirinden bağımsız kayıtların concurrent create'i ve aynı süreçte iki adapter instance'ı için same-key update/read/delete sıralaması iki-run 135/135 quality gate içinde PASS'tir. Arbitrary mid-I/O cancellation/interleaving ve cross-process sıralama kanıtlanmış değildir.
 
-Bu ara sonuç ADR'yi `Accepted` yapmaz. Packaged lifecycle, wrong-user ve 5k–50k karşılaştırmalı ölçüme ek olarak; source-wide delete/startup orphan reconciliation, aynı source/purpose referansını configuration/channel/endpoint owner'ına bağlayan semantic ref-swap politikası, store initialization hatalarının safe typed sonuca eşlenmesi ve check-to-use yarışını kapatan handle-relative path/reparse kararı henüz yoktur.
+Bu ara sonuç ADR'yi `Accepted` yapmaz. Packaged lifecycle, wrong-user ve 5k–50k karşılaştırmalı ölçüme ek olarak; source-wide delete/startup protected-record orphan reconciliation, aynı source/purpose referansını configuration/channel/endpoint owner'ına bağlayan semantic ref-swap politikası ve check-to-use yarışını kapatan handle-relative path/reparse kararı henüz yoktur.
 
 ## Consequences and trade-offs
 
@@ -64,7 +64,7 @@ Bu ara sonuç ADR'yi `Accepted` yapmaz. Packaged lifecycle, wrong-user ve 5k–5
 - Migration sırasında geçici plaintext veya orphan ciphertext.
 - Bilinen tekil referanslar dışındaki source-wide record/temp orphan'ların mevcut contract üzerinden reconcile edilememesi.
 - Aynı source/purpose içindeki geçerli bir referansın yanlış configuration/channel owner'ına takılması.
-- Store initialization veya path hatasının safe result mapping dışında raw OS exception üretmesi.
+- Yeni/öngörülmeyen store initialization hata tipinin safe result allowlist'i dışında raw OS exception üretmesi.
 - Managed path/reparse kontrolü ile gerçek file open arasındaki check-to-use yarışı.
 - App identity/publisher değişiminde korumalı verinin açılamaması.
 - Uninstall/reinstall/reset yaşam döngüsünün varsayılandan farklı olması.

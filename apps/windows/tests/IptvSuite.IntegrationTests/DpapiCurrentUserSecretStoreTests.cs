@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
@@ -277,6 +279,187 @@ public sealed class DpapiCurrentUserSecretStoreTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task StartupCleanupDeletesOnlyExactStaleTopLevelTemporaryFiles()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-temp-cleanup");
+        DateTimeOffset now = new(2035, 7, 20, 12, 0, 0, TimeSpan.Zero);
+        TimeProvider timeProvider = TestTime.Create(now);
+        string stale = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-00000000000000000000000000000001.tmp");
+        string fresh = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-00000000000000000000000000000002.tmp");
+        string future = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-00000000000000000000000000000003.tmp");
+        string boundary = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-00000000000000000000000000000007.tmp");
+        string uppercaseIdentifier = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.tmp");
+        string invalidIdentifier = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-gggggggggggggggggggggggggggggggg.tmp");
+        string protectedRecord = Path.Combine(temporary.FullPath, "record-v1-preserve.dpapi");
+        string nestedDirectory = Path.Combine(temporary.FullPath, "nested");
+        string nestedTemporary = Path.Combine(
+            nestedDirectory,
+            "temporary-v1-00000000000000000000000000000004.tmp");
+        string[] seededFiles =
+        [
+            stale,
+            fresh,
+            future,
+            boundary,
+            uppercaseIdentifier,
+            invalidIdentifier,
+            protectedRecord,
+            nestedTemporary,
+        ];
+
+        Directory.CreateDirectory(nestedDirectory);
+        foreach (string path in seededFiles)
+        {
+            await File.WriteAllBytesAsync(path, [0x4D, 0x34]);
+        }
+
+        DateTime oldTimestamp = now.UtcDateTime - TimeSpan.FromHours(25);
+        File.SetLastWriteTimeUtc(stale, oldTimestamp);
+        File.SetLastWriteTimeUtc(uppercaseIdentifier, oldTimestamp);
+        File.SetLastWriteTimeUtc(invalidIdentifier, oldTimestamp);
+        File.SetLastWriteTimeUtc(protectedRecord, oldTimestamp);
+        File.SetLastWriteTimeUtc(nestedTemporary, oldTimestamp);
+        File.SetLastWriteTimeUtc(fresh, now.UtcDateTime - TimeSpan.FromMinutes(5));
+        File.SetLastWriteTimeUtc(future, now.UtcDateTime + TimeSpan.FromHours(1));
+        File.SetLastWriteTimeUtc(boundary, now.UtcDateTime - TimeSpan.FromHours(24));
+
+        DpapiCurrentUserSecretStore store = CreateStoreForTest(temporary.FullPath, timeProvider);
+        _ = CreateStoreForTest(temporary.FullPath, timeProvider);
+
+        Assert.IsFalse(File.Exists(stale));
+        Assert.IsTrue(File.Exists(fresh));
+        Assert.IsTrue(File.Exists(future));
+        Assert.IsFalse(File.Exists(boundary));
+        Assert.IsTrue(File.Exists(uppercaseIdentifier));
+        Assert.IsTrue(File.Exists(invalidIdentifier));
+        Assert.IsTrue(File.Exists(protectedRecord));
+        Assert.IsTrue(File.Exists(nestedTemporary));
+
+        SourceId sourceId = SourceId.Generate();
+        byte[] payload = CreateCanaryPayload(TestCanary.Create("M4", "DPAPI-TEMP-CLEANUP"));
+        try
+        {
+            SecretReferenceCreationResult created = await store.CreateCredentialsAsync(sourceId, payload);
+            Assert.IsTrue(created.IsSuccess);
+            Assert.IsNotNull(created.Reference);
+            AssertLeaseMatches(await store.ReadCredentialsAsync(sourceId, created.Reference), payload);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public void StartupCleanupFailsClosedForNonRegularExactTemporaryEntry()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-temp-nonregular");
+        DateTimeOffset now = new(2035, 7, 20, 12, 0, 0, TimeSpan.Zero);
+        TimeProvider timeProvider = TestTime.Create(now);
+        string directoryPath = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-00000000000000000000000000000005.tmp");
+        Directory.CreateDirectory(directoryPath);
+        Directory.SetLastWriteTimeUtc(directoryPath, now.UtcDateTime - TimeSpan.FromHours(25));
+
+        Assert.ThrowsExactly<IOException>(() =>
+            _ = CreateStoreForTest(temporary.FullPath, timeProvider));
+        Assert.IsTrue(Directory.Exists(directoryPath));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public void StartupCleanupFailsOnLockedStaleTemporaryFileAndSucceedsOnRetry()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-temp-locked");
+        DateTimeOffset now = new(2035, 7, 20, 12, 0, 0, TimeSpan.Zero);
+        TimeProvider timeProvider = TestTime.Create(now);
+        string temporaryPath = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-00000000000000000000000000000006.tmp");
+        File.WriteAllBytes(temporaryPath, [0x4D, 0x34]);
+        File.SetLastWriteTimeUtc(temporaryPath, now.UtcDateTime - TimeSpan.FromHours(25));
+
+        using (var blocker = new FileStream(
+            temporaryPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read))
+        {
+            Assert.ThrowsExactly<IOException>(() =>
+                _ = CreateStoreForTest(temporary.FullPath, timeProvider));
+            Assert.IsTrue(File.Exists(temporaryPath));
+        }
+
+        _ = CreateStoreForTest(temporary.FullPath, timeProvider);
+        Assert.IsFalse(File.Exists(temporaryPath));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public void PreCancelledInitializationDoesNotCreateStorageDirectory()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-init-cancel");
+        string storagePath = Path.Combine(temporary.FullPath, "not-created");
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+
+        Assert.ThrowsExactly<OperationCanceledException>(() =>
+            _ = new DpapiCurrentUserSecretStore(
+                storagePath,
+                cancellation.Token));
+        Assert.IsFalse(Directory.Exists(storagePath));
+
+        string existingStoragePath = Path.Combine(temporary.FullPath, "existing");
+        Directory.CreateDirectory(existingStoragePath);
+        string staleTemporaryPath = Path.Combine(
+            existingStoragePath,
+            "temporary-v1-00000000000000000000000000000008.tmp");
+        File.WriteAllBytes(staleTemporaryPath, [0x4D, 0x34]);
+        File.SetLastWriteTimeUtc(staleTemporaryPath, DateTime.UtcNow - TimeSpan.FromHours(25));
+
+        Assert.ThrowsExactly<OperationCanceledException>(() =>
+            _ = new DpapiCurrentUserSecretStore(
+                existingStoragePath,
+                cancellation.Token));
+        Assert.IsTrue(File.Exists(staleTemporaryPath));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task SameKeyUpdateReadAndDeleteAreSerializedAcrossAdapterInstances()
     {
         if (!OperatingSystem.IsWindows())
@@ -376,6 +559,28 @@ public sealed class DpapiCurrentUserSecretStoreTests
         using MemoryStream stream = new();
         canary.WriteTo(stream, TestCanaryEncoding.Utf8);
         return stream.ToArray();
+    }
+
+    private static DpapiCurrentUserSecretStore CreateStoreForTest(
+        string storageDirectoryPath,
+        TimeProvider timeProvider)
+    {
+        ConstructorInfo constructor = typeof(DpapiCurrentUserSecretStore).GetConstructor(
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            [typeof(string), typeof(TimeProvider), typeof(CancellationToken)],
+            modifiers: null)!;
+
+        try
+        {
+            return (DpapiCurrentUserSecretStore)constructor.Invoke(
+                [storageDirectoryPath, timeProvider, CancellationToken.None]);
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
+        }
     }
 
     private static async Task WaitForTemporaryRecordAsync(string rootPath)

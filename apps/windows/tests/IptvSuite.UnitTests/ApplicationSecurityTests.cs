@@ -128,6 +128,12 @@ public sealed class ApplicationSecurityTests
     [TestMethod]
     public void StoreResultFactoriesRejectContradictoryFailureStates()
     {
+        Assert.ThrowsExactly<ArgumentNullException>(() =>
+            SecretStoreInitializationResult.Succeeded(null!));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            SecretStoreInitializationResult.Failed(SecretStoreFailure.None));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            SecretStoreInitializationResult.Failed(SecretStoreFailure.ProtectedRecordUnavailable));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
             SecretStoreOperationResult.Failed(SecretStoreFailure.None));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
@@ -138,6 +144,39 @@ public sealed class ApplicationSecurityTests
             SecretStoreReadResult.Failed(SecretStoreFailure.None));
     }
 
+    [TestMethod]
+    public void StoreInitializationResultDoesNotExposeStoreOrDiagnosticContext()
+    {
+        string sensitive = SecurityTestAssertions.CreateSensitiveValue("STORE-INITIALIZATION");
+        var store = new StubSecretStore(sensitive);
+        SecretStoreInitializationResult succeeded = SecretStoreInitializationResult.Succeeded(store);
+        SecretStoreInitializationResult failed = SecretStoreInitializationResult.Failed(
+            SecretStoreFailure.StorageUnavailable);
+
+        Assert.IsTrue(succeeded.IsSuccess);
+        Assert.AreSame(store, succeeded.Store);
+        Assert.AreEqual(SecretStoreFailure.None, succeeded.Failure);
+        Assert.IsFalse(failed.IsSuccess);
+        Assert.IsNull(failed.Store);
+        Assert.AreEqual(SecretStoreFailure.StorageUnavailable, failed.Failure);
+
+        string observable = string.Join(
+            '|',
+            succeeded,
+            failed,
+            JsonSerializer.Serialize(succeeded),
+            JsonSerializer.Serialize(failed));
+        SecurityTestAssertions.DoesNotContainSensitive(observable, sensitive);
+        Assert.IsFalse(observable.Contains(nameof(SecretStoreInitializationResult.Store), StringComparison.Ordinal));
+        StringAssert.Contains(observable, nameof(SecretStoreFailure.StorageUnavailable));
+        Assert.AreEqual(
+            DebuggerBrowsableState.Never,
+            typeof(SecretStoreInitializationResult)
+                .GetProperty(nameof(SecretStoreInitializationResult.Store))!
+                .GetCustomAttribute<DebuggerBrowsableAttribute>()?
+                .State);
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static (WeakReference Lease, ReadOnlyMemory<byte> Observed) CreateAbandonedLease()
     {
@@ -146,5 +185,63 @@ public sealed class ApplicationSecurityTests
         ReadOnlyMemory<byte> observed = lease.Value;
         CryptographicOperations.ZeroMemory(input);
         return (new WeakReference(lease), observed);
+    }
+
+    private sealed class StubSecretStore : ISecretStore
+    {
+        private readonly string _diagnosticContext;
+
+        internal StubSecretStore(string diagnosticContext)
+        {
+            _diagnosticContext = diagnosticContext;
+        }
+
+        public override string ToString() => _diagnosticContext;
+
+        public ValueTask<SecretReferenceCreationResult> CreateCredentialsAsync(
+            SourceId sourceId,
+            ReadOnlyMemory<byte> value,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<ProtectedLocatorReferenceCreationResult> CreateLocatorAsync(
+            SourceId sourceId,
+            ProtectedValuePurpose purpose,
+            ReadOnlyMemory<byte> value,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<SecretStoreReadResult> ReadCredentialsAsync(
+            SourceId sourceId,
+            SecretReference reference,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<SecretStoreReadResult> ReadLocatorAsync(
+            SourceId sourceId,
+            ProtectedValuePurpose purpose,
+            ProtectedLocatorReference reference,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<SecretStoreOperationResult> UpdateCredentialsAsync(
+            SourceId sourceId,
+            SecretReference reference,
+            ReadOnlyMemory<byte> value,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<SecretStoreOperationResult> UpdateLocatorAsync(
+            SourceId sourceId,
+            ProtectedValuePurpose purpose,
+            ProtectedLocatorReference reference,
+            ReadOnlyMemory<byte> value,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<SecretStoreOperationResult> DeleteCredentialsAsync(
+            SourceId sourceId,
+            SecretReference reference,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<SecretStoreOperationResult> DeleteLocatorAsync(
+            SourceId sourceId,
+            ProtectedValuePurpose purpose,
+            ProtectedLocatorReference reference,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

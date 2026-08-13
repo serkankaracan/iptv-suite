@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Text.Json.Serialization;
+
 namespace IptvSuite.Application;
 
 public enum SecretStoreFailure
@@ -5,6 +8,43 @@ public enum SecretStoreFailure
     None = 0,
     ProtectedRecordUnavailable = 1,
     StorageUnavailable = 2,
+}
+
+[DebuggerDisplay("{DebuggerDisplay,nq}")]
+public sealed class SecretStoreInitializationResult
+{
+    private SecretStoreInitializationResult(ISecretStore? store, SecretStoreFailure failure)
+    {
+        Store = store;
+        Failure = failure;
+    }
+
+    public bool IsSuccess => Store is not null && Failure is SecretStoreFailure.None;
+
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
+    [JsonIgnore]
+    public ISecretStore? Store { get; }
+
+    public SecretStoreFailure Failure { get; }
+
+    public static SecretStoreInitializationResult Succeeded(ISecretStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        return new SecretStoreInitializationResult(store, SecretStoreFailure.None);
+    }
+
+    public static SecretStoreInitializationResult Failed(SecretStoreFailure failure) =>
+        failure is SecretStoreFailure.StorageUnavailable
+            ? new SecretStoreInitializationResult(null, failure)
+            : throw new ArgumentOutOfRangeException(
+                nameof(failure),
+                failure,
+                "The storage-unavailable failure status is required.");
+
+    public override string ToString() => DebuggerDisplay;
+
+    private string DebuggerDisplay =>
+        $"secret-store-initialization;success={IsSuccess};failure={Failure}";
 }
 
 public sealed record SecretReferenceCreationResult

@@ -10,19 +10,41 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
 {
     private const int FileBufferSize = 4096;
     private const int MaxMoveAttempts = 8;
+    private const string TemporaryFilePrefix = "temporary-v1-";
+    private const string TemporaryFileSuffix = ".tmp";
+    private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromHours(24);
     // Coordinates adapter instances in this process; this is not a cross-process lock.
     private static readonly SecretStoreKeyedGate SharedOperationGate = new();
     private readonly string _storageDirectoryPath;
     private readonly string _storageDirectoryPrefix;
+    private readonly TimeProvider _timeProvider;
 
     public DpapiCurrentUserSecretStore(string storageDirectoryPath)
+        : this(storageDirectoryPath, TimeProvider.System, CancellationToken.None)
     {
+    }
+
+    public DpapiCurrentUserSecretStore(
+        string storageDirectoryPath,
+        CancellationToken cancellationToken)
+        : this(storageDirectoryPath, TimeProvider.System, cancellationToken)
+    {
+    }
+
+    internal DpapiCurrentUserSecretStore(
+        string storageDirectoryPath,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException("The protected store requires Windows.");
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(storageDirectoryPath);
+        ArgumentNullException.ThrowIfNull(timeProvider);
 
         if (!Path.IsPathFullyQualified(storageDirectoryPath))
         {
@@ -45,8 +67,11 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
         _storageDirectoryPrefix = Path.EndsInDirectorySeparator(fullPath)
             ? fullPath
             : fullPath + Path.DirectorySeparatorChar;
+        _timeProvider = timeProvider;
 
+        cancellationToken.ThrowIfCancellationRequested();
         EnsureStorageDirectoryForWrite();
+        DeleteStaleTemporaryFiles(cancellationToken);
     }
 
     public async ValueTask<SecretReferenceCreationResult> CreateCredentialsAsync(
@@ -445,7 +470,8 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
         bool replaceExisting,
         CancellationToken cancellationToken)
     {
-        string temporaryPath = GetContainedPath($"temporary-v1-{Guid.NewGuid():N}.tmp");
+        string temporaryPath = GetContainedPath(
+            $"{TemporaryFilePrefix}{Guid.NewGuid():N}{TemporaryFileSuffix}");
         bool temporaryCreated = false;
 
         try
@@ -528,6 +554,98 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
         EnsureNoExistingReparsePoints(_storageDirectoryPath);
         Directory.CreateDirectory(_storageDirectoryPath);
         EnsureExistingStorageDirectory();
+    }
+
+    private void DeleteStaleTemporaryFiles(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        DateTimeOffset staleCutoff = _timeProvider.GetUtcNow() - StaleTemporaryFileAge;
+
+        foreach (string entryPath in Directory.EnumerateFileSystemEntries(
+            _storageDirectoryPath,
+            $"{TemporaryFilePrefix}*{TemporaryFileSuffix}",
+            SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string fileName = Path.GetFileName(entryPath);
+
+            if (!IsCurrentTemporaryFileName(fileName))
+            {
+                continue;
+            }
+
+            string temporaryPath = GetContainedPath(fileName);
+
+            if (!TryGetAttributes(temporaryPath, out FileAttributes attributes))
+            {
+                continue;
+            }
+
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+            {
+                throw new IOException("A protected-store temporary entry is not a regular file.");
+            }
+
+            DateTime lastWriteTimeUtc = File.GetLastWriteTimeUtc(temporaryPath);
+
+            if (lastWriteTimeUtc > staleCutoff.UtcDateTime)
+            {
+                continue;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!TryGetAttributes(temporaryPath, out attributes))
+            {
+                continue;
+            }
+
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+            {
+                throw new IOException("A protected-store temporary entry is not a regular file.");
+            }
+
+            DeleteExactStaleTemporaryFile(temporaryPath);
+        }
+    }
+
+    private static bool IsCurrentTemporaryFileName(string fileName)
+    {
+        const int GuidCharacterCount = 32;
+        int expectedLength = TemporaryFilePrefix.Length + GuidCharacterCount + TemporaryFileSuffix.Length;
+
+        if (fileName.Length != expectedLength ||
+            !fileName.StartsWith(TemporaryFilePrefix, StringComparison.Ordinal) ||
+            !fileName.EndsWith(TemporaryFileSuffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> identifier = fileName.AsSpan(TemporaryFilePrefix.Length, GuidCharacterCount);
+
+        foreach (char character in identifier)
+        {
+            if (character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void DeleteExactStaleTemporaryFile(string temporaryPath)
+    {
+        try
+        {
+            File.Delete(temporaryPath);
+        }
+        catch (FileNotFoundException)
+        {
+        }
+        catch (DirectoryNotFoundException)
+        {
+        }
     }
 
     private bool TryEnsureExistingStorageDirectory()

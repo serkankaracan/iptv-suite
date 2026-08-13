@@ -1,6 +1,6 @@
 # Windows development, quality gate ve M4 secure-storage foundation
 
-Bu klasör Windows uygulamasını, M2 test scaffold'unu, M3 saf domain/validation çekirdeğini ve M4'ün ilk protected-storage dilimini içerir. M2 hosted kabulü ve M3 local mühendislik kabulü **PASS, 2026-08-09** durumundadır. M4 foundation `IN PROGRESS`; 2026-08-10 local gate'i 130/130 testi iki koşuda geçmiştir. Uygulama UI'sı hâlâ yalnız gerçek assembly/package sürümünü, build configuration'ını ve process architecture'ını gösteren development shell'dir; source formu, network/provider, parser, database veya playback özelliği henüz yoktur.
+Bu klasör Windows uygulamasını, M2 test scaffold'unu, M3 saf domain/validation çekirdeğini ve M4'ün ilk protected-storage dilimini içerir. M2 hosted kabulü ve M3 local mühendislik kabulü **PASS, 2026-08-09** durumundadır. M4 foundation `IN PROGRESS`; 2026-08-13 local gate'i 135/135 testi iki koşuda geçmiştir. Uygulama UI'sı hâlâ yalnız gerçek assembly/package sürümünü, build configuration'ını ve process architecture'ını gösteren development shell'dir; source formu, network/provider, parser, database veya playback özelliği henüz yoktur.
 
 ## Toolchain
 
@@ -54,9 +54,11 @@ Source-controlled `Properties/launchSettings.json`, Visual Studio'ya packaged si
 - `IptvSuite.Application`, arbitrary string key taşımayan typed `ISecretStore` portunu; source/purpose/reference binding'ini; dispose sırasında owned buffer'ı sıfırlayan ve JSON/debug çıktısında `[SENSITIVE]` dışında veri vermeyen `SecretLease`i içerir.
 - `IptvSuite.Infrastructure`, stable `System.Security.Cryptography.ProtectedData 10.0.10` ile yalnız `DataProtectionScope.CurrentUser` kullanan Windows adapter'ını içerir. Bounded v1 binary envelope source, purpose, reference kind ve opaque record ID'yi hem entropy'ye hem korunan içeriğe bağlar.
 - Yazım aynı dizinde `CreateNew` temp + `WriteThrough` + `Flush(true)` + overwrite rename ile yapılır; yalnız transient Windows access/share/lock kodları bounded retry alır. Raw path, exception mesajı veya secret result'a taşınmaz.
-- M4 fake contract testleri ve gerçek Windows DPAPI testleri CRUD/update, adapter restart, idempotent delete, pre-cancel, concurrent create, aynı süreçte iki adapter instance'ı arasında same-key update/read/delete sıralaması, ciphertext swap/corruption/oversize, zeroization ve canary-at-rest taramasını kapsar.
+- Windows composition factory'si beklenen filesystem/path/WinRT initialization hatalarını store veya diagnostic context taşımayan typed `StorageUnavailable` sonucuna eşler; caller cancellation'ı `OperationCanceledException` olarak korur.
+- Adapter başlangıcı yalnız protected-store kökündeki tam lowercase `temporary-v1-{32 hex}.tmp` biçimli, regular ve en az 24 saatlik crash artığını idempotent temizler. Fresh/future, lookalike, nested ve `.dpapi` kayıtlarına dokunmaz; non-regular/reparse veya silinemeyen exact stale entry'de fail-closed davranır.
+- M4 fake contract testleri ve gerçek Windows DPAPI testleri CRUD/update, adapter restart, idempotent delete, pre-cancel, concurrent create, aynı süreçte iki adapter instance'ı arasında same-key update/read/delete sıralaması, ciphertext swap/corruption/oversize, bounded startup temp cleanup, zeroization ve canary-at-rest taramasını kapsar.
 - Bu kanıt normal MSTest process'i ve temp root içindir. Packaged `LocalCache` two-launch/update/reset/uninstall, gerçek ikinci Windows user, source-deletion reconciliation, 5k–50k layout/performance ve ADR-003 final kararı açık hard-gate'tir.
-- Managed containment/reparse kontrolleri path tabanlı TOCTOU yarışını bütünüyle kapatmaz; handle-relative Windows hardening ve silinemeyen protected temp orphan reconciliation M4 acceptance öncesi açık kalır.
+- Managed containment/reparse kontrolleri path tabanlı TOCTOU yarışını bütünüyle kapatmaz; cleanup non-adversarial filesystem yarışlarında fail-closed/best-effort sınırındadır. Handle-relative Windows hardening ile `.dpapi` source-wide deletion/record reconciliation M4 acceptance öncesi açık kalır.
 
 ## M2 iki-run quality gate
 
