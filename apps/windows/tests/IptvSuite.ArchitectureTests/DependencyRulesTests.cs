@@ -325,6 +325,21 @@ public sealed class DependencyRulesTests
         XElement visualElements = applications[0].Elements()
             .Single(element => element.Name.LocalName == "VisualElements");
         Assert.AreEqual("none", visualElements.Attribute("AppListEntry")?.Value);
+
+        string applicationSource = File.ReadAllText(
+            Path.Combine(
+                RepositoryRoot,
+                "apps",
+                "windows",
+                "tests",
+                "IptvSuite.PackageLifecycleHarness",
+                "App.xaml.cs"));
+        StringAssert.Contains(applicationSource, "AppInstance.GetCurrent().GetActivatedEventArgs()");
+        StringAssert.Contains(applicationSource, "ExtendedActivationKind.Launch");
+        StringAssert.Contains(applicationSource, "ILaunchActivatedEventArgs");
+        Assert.IsFalse(
+            applicationSource.Contains("args.Arguments", StringComparison.Ordinal),
+            "WinUI desktop LaunchActivatedEventArgs.Arguments is always empty and cannot carry harness arguments.");
     }
 
     [TestMethod]
