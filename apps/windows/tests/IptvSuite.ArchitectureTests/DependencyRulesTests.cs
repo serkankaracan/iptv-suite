@@ -10,6 +10,8 @@ public sealed class DependencyRulesTests
 {
     private const string DevelopmentIdentity = "IptvSuite.LocalDev.6f0d9a64";
     private const string DevelopmentPublisher = "CN=IptvSuite Local Development";
+    private const string LifecycleHarnessIdentity = "ProtectedStore.PackageLifecycleTest.Local.5d8c7a91";
+    private const string LifecycleHarnessPublisher = "CN=Protected Store Package Lifecycle Local Test";
 
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string[] RequiredCapabilities = ["runFullTrust"];
@@ -70,6 +72,12 @@ public sealed class DependencyRulesTests
             ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
             [],
             []),
+        new(
+            "IptvSuite.PackageLifecycleHarness",
+            "apps/windows/tests/IptvSuite.PackageLifecycleHarness/IptvSuite.PackageLifecycleHarness.csproj",
+            ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure"],
+            [],
+            ["Microsoft.Windows.SDK.BuildTools", "Microsoft.WindowsAppSDK"]),
     ];
 
     [TestMethod]
@@ -105,6 +113,7 @@ public sealed class DependencyRulesTests
         AssertNoPath(graph, "IptvSuite.Application", "IptvSuite.Infrastructure");
         AssertNoPath(graph, "IptvSuite.Application", "IptvSuite.Windows");
         AssertNoPath(graph, "IptvSuite.Infrastructure", "IptvSuite.Windows");
+        AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PackageLifecycleHarness");
     }
 
     [TestMethod]
@@ -193,7 +202,7 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
-    public void WinUiAndMsixSettingsStayInWindowsCompositionRoot()
+    public void WinUiAndMsixSettingsStayInApprovedPackagedProjects()
     {
         foreach (ProjectRule rule in ProjectRules)
         {
@@ -201,7 +210,7 @@ public sealed class DependencyRulesTests
             string? useWinUi = GetProperty(project, "UseWinUI");
             string? enableMsixTooling = GetProperty(project, "EnableMsixTooling");
 
-            if (rule.Name == "IptvSuite.Windows")
+            if (rule.Name is "IptvSuite.Windows" or "IptvSuite.PackageLifecycleHarness")
             {
                 Assert.AreEqual("true", useWinUi, ignoreCase: true);
                 Assert.AreEqual("true", enableMsixTooling, ignoreCase: true);
@@ -232,12 +241,21 @@ public sealed class DependencyRulesTests
         string solution = File.ReadAllText(
             Path.Combine(RepositoryRoot, "apps", "windows", "IptvSuite.Windows.sln"));
         const string windowsProjectGuid = "{1D606C2E-0328-4C4C-9DFE-383651FC0CD1}";
+        const string lifecycleHarnessProjectGuid = "{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}";
 
         foreach (string configuration in new[] { "Debug", "Release" })
         {
             StringAssert.Contains(
                 solution,
                 $"{windowsProjectGuid}.{configuration}|x64.Deploy.0 = {configuration}|x64");
+            StringAssert.Contains(
+                solution,
+                $"{lifecycleHarnessProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
+            Assert.IsFalse(
+                solution.Contains(
+                    $"{lifecycleHarnessProjectGuid}.{configuration}|x64.Deploy.0",
+                    StringComparison.Ordinal),
+                "The test-only lifecycle harness must never deploy as part of a solution build.");
         }
     }
 
@@ -267,6 +285,46 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             Directory.EnumerateFiles(appsRoot, "Package.StoreAssociation.xml", SearchOption.AllDirectories).Any(),
             "Store association is forbidden for the disposable M1 identity.");
+    }
+
+    [TestMethod]
+    public void PackageLifecycleHarnessIsIsolatedNonPublishableTestInfrastructure()
+    {
+        XDocument project = LoadXml(
+            "apps/windows/tests/IptvSuite.PackageLifecycleHarness/IptvSuite.PackageLifecycleHarness.csproj");
+        Assert.AreEqual("WinExe", GetProperty(project, "OutputType"));
+        Assert.AreEqual("false", GetProperty(project, "IsTestProject"));
+        Assert.AreEqual("false", GetProperty(project, "IsPackable"));
+        Assert.AreEqual("false", GetProperty(project, "IsPublishable"));
+        Assert.AreEqual("x64", GetProperty(project, "Platforms"));
+        Assert.AreEqual("x64", GetProperty(project, "PlatformTarget"));
+        Assert.AreEqual("win-x64", GetProperty(project, "RuntimeIdentifier"));
+        Assert.AreEqual("true", GetProperty(project, "UseWinUI"), ignoreCase: true);
+        Assert.AreEqual("true", GetProperty(project, "EnableMsixTooling"), ignoreCase: true);
+
+        XDocument manifest = LoadXml(
+            "apps/windows/tests/IptvSuite.PackageLifecycleHarness/Package.appxmanifest");
+        XElement identity = manifest.Descendants().Single(element => element.Name.LocalName == "Identity");
+        XElement[] applications = manifest.Descendants()
+            .Where(element => element.Name.LocalName == "Application")
+            .ToArray();
+        string[] capabilities = manifest.Descendants()
+            .Where(element => element.Name.LocalName == "Capability")
+            .Select(element => element.Attribute("Name")?.Value ?? string.Empty)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.AreEqual(LifecycleHarnessIdentity, identity.Attribute("Name")?.Value);
+        Assert.AreEqual(LifecycleHarnessPublisher, identity.Attribute("Publisher")?.Value);
+        Assert.AreNotEqual(DevelopmentIdentity, identity.Attribute("Name")?.Value);
+        Assert.AreNotEqual(DevelopmentPublisher, identity.Attribute("Publisher")?.Value);
+        CollectionAssert.AreEqual(RequiredCapabilities, capabilities);
+        Assert.HasCount(1, applications);
+        Assert.AreEqual("Harness", applications[0].Attribute("Id")?.Value);
+
+        XElement visualElements = applications[0].Elements()
+            .Single(element => element.Name.LocalName == "VisualElements");
+        Assert.AreEqual("none", visualElements.Attribute("AppListEntry")?.Value);
     }
 
     [TestMethod]
@@ -376,6 +434,7 @@ public sealed class DependencyRulesTests
                 content.Contains("IptvSuite.UnitTests", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.IntegrationTests", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.SecretStoreSpike", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.PackageLifecycleHarness", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.AspNetCore.App", StringComparison.Ordinal) ||
                 content.Contains("IPTVSUITE_TEST_ONLY_CANARY_V1", StringComparison.Ordinal),
@@ -398,6 +457,7 @@ public sealed class DependencyRulesTests
         string packageSmoke = File.ReadAllText(
             Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageSmoke.ps1"));
         StringAssert.Contains(packageSmoke, "IptvSuite\\.SecretStoreSpike(?:\\..*)?");
+        StringAssert.Contains(packageSmoke, "IptvSuite\\.PackageLifecycleHarness(?:\\..*)?");
         StringAssert.Contains(packageSmoke, "PackagedApplicationActivator]::Activate($aumid)");
         StringAssert.Contains(packageSmoke, "CoCreateInstance");
         StringAssert.Contains(packageSmoke, "LocalServer = 0x00000004");
@@ -422,6 +482,24 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             packageSmoke.Contains("remains after uninstall: $appDataPath", StringComparison.Ordinal),
             "Package-smoke diagnostics must not disclose the current user's app-data path.");
+
+        string lifecycleSmoke = File.ReadAllText(
+            Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageLifecycleSmoke.ps1"));
+        StringAssert.Contains(lifecycleSmoke, LifecycleHarnessIdentity);
+        StringAssert.Contains(lifecycleSmoke, LifecycleHarnessPublisher);
+        StringAssert.Contains(lifecycleSmoke, "CoCreateInstance");
+        StringAssert.Contains(lifecycleSmoke, "LocalServer = 0x00000004");
+        StringAssert.Contains(lifecycleSmoke, "--phase $Phase --run-id $runId");
+        StringAssert.Contains(lifecycleSmoke, "PACKAGE_LIFECYCLE_CREATE");
+        StringAssert.Contains(lifecycleSmoke, "record-v2-[0-9A-F]{64}\\.dpapi");
+        StringAssert.Contains(lifecycleSmoke, "AppxSymbolPackageEnabled      = \"false\"");
+        StringAssert.Contains(lifecycleSmoke, "$artifactsRoot = Join-Path $repositoryRoot \".artifacts\"");
+        StringAssert.Contains(lifecycleSmoke, "$artifactRoot = Join-Path $artifactsRoot \"package-lifecycle\"");
+        StringAssert.Contains(lifecycleSmoke, "last-success.json");
+        StringAssert.Contains(lifecycleSmoke, "last-failure.json");
+        Assert.IsFalse(
+            lifecycleSmoke.Contains("Exception.Message", StringComparison.Ordinal),
+            "Lifecycle evidence and diagnostics must use stable codes instead of raw exception messages.");
     }
 
     [TestMethod]
@@ -507,6 +585,14 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(workflow, "persist-credentials: false");
         StringAssert.Contains(workflow, "dotnet-version: \"10.0.302\"");
         StringAssert.Contains(workflow, "shell: powershell\n        run: .\\eng\\Invoke-WindowsPackageSmoke.ps1");
+        StringAssert.Contains(
+            workflow,
+            "shell: powershell\n        run: .\\eng\\Invoke-WindowsPackageLifecycleSmoke.ps1");
+        StringAssert.Contains(workflow, "name: windows-package-lifecycle-evidence");
+        StringAssert.Contains(workflow, ".artifacts/package-lifecycle/last-success.json");
+        StringAssert.Contains(
+            workflow,
+            "scan-artifacts .\\.artifacts\\package-lifecycle M4 PACKAGE_LIFECYCLE_EVIDENCE");
         StringAssert.Contains(workflow, "name: Required Windows gate");
         StringAssert.Contains(workflow, "if: ${{ always() }}");
         StringAssert.Contains(workflow, "scan-artifacts .\\.artifacts\\msix-smoke CI PACKAGE_EVIDENCE");
@@ -524,7 +610,7 @@ public sealed class DependencyRulesTests
         MatchCollection pinnedUses = Regex.Matches(
             workflow,
             @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
-        Assert.HasCount(6, allUses);
+        Assert.HasCount(7, allUses);
         Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
     }
 

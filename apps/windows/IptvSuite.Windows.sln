@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.IntegrationTests"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.SecretStoreSpike", "tests\IptvSuite.SecretStoreSpike\IptvSuite.SecretStoreSpike.csproj", "{3DEEBAF7-FFD4-4A47-82A6-D2D8128CF35A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.PackageLifecycleHarness", "tests\IptvSuite.PackageLifecycleHarness\IptvSuite.PackageLifecycleHarness.csproj", "{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -69,6 +71,10 @@ Global
 		{3DEEBAF7-FFD4-4A47-82A6-D2D8128CF35A}.Debug|x64.Build.0 = Debug|x64
 		{3DEEBAF7-FFD4-4A47-82A6-D2D8128CF35A}.Release|x64.ActiveCfg = Release|x64
 		{3DEEBAF7-FFD4-4A47-82A6-D2D8128CF35A}.Release|x64.Build.0 = Release|x64
+		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}.Debug|x64.ActiveCfg = Debug|x64
+		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}.Debug|x64.Build.0 = Debug|x64
+		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}.Release|x64.ActiveCfg = Release|x64
+		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -83,5 +89,6 @@ Global
 		{B17DAE4A-06F2-4DD6-931D-A4812563E989} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{C460CFA0-6197-43C6-A4BB-D656518D4E61} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{3DEEBAF7-FFD4-4A47-82A6-D2D8128CF35A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

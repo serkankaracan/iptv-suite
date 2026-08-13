@@ -103,6 +103,10 @@ jobs:
         shell: powershell
         run: .\eng\Invoke-WindowsPackageSmoke.ps1 -Configuration Release
 
+      - name: Verify packaged protected-store process lifecycle
+        shell: powershell
+        run: .\eng\Invoke-WindowsPackageLifecycleSmoke.ps1 -Configuration Release
+
       - name: Scan packaged-smoke evidence
         shell: pwsh
         run: |
@@ -118,6 +122,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "The packaged-smoke evidence scan failed."
           }
+          dotnet .\apps\windows\tests\IptvSuite.Testing\bin\Release\net10.0\IptvSuite.Testing.dll `
+            scan-artifacts .\.artifacts\package-lifecycle M4 PACKAGE_LIFECYCLE_EVIDENCE
+          if ($LASTEXITCODE -ne 0) {
+            throw "The packaged lifecycle evidence scan failed."
+          }
 
       - name: Upload sanitized packaged smoke evidence
         if: ${{ success() }}
@@ -125,6 +134,16 @@ jobs:
         with:
           name: windows-msix-smoke-evidence
           path: .artifacts/msix-smoke/last-success.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Upload sanitized packaged lifecycle evidence
+        if: ${{ success() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-package-lifecycle-evidence
+          path: .artifacts/package-lifecycle/last-success.json
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
