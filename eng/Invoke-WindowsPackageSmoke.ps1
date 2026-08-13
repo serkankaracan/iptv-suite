@@ -809,6 +809,14 @@ try {
     if ($null -eq $launchedProcess) {
         throw "The packaged application exited before its process could be observed."
     }
+    try {
+        # Cache the native handle while the PID is live. Windows PowerShell 5.1
+        # otherwise exposes ExitCode as null after an attached process exits.
+        $null = $launchedProcess.Handle
+    }
+    catch {
+        throw "The packaged application exited before its process handle could be retained."
+    }
     $launchedProcess.Refresh()
     if ($launchedProcess.HasExited) {
         throw ("The packaged application exited during activation (exit code 0x{0:X8})." -f [int]$launchedProcess.ExitCode)
@@ -858,8 +866,12 @@ try {
         throw "The application did not exit after a normal window-close request."
     }
     $launchedProcess.Refresh()
-    if ($launchedProcess.ExitCode -ne 0) {
-        throw ("The application returned a non-zero exit code after the normal window-close request (exit code 0x{0:X8})." -f [int]$launchedProcess.ExitCode)
+    $exitCode = $launchedProcess.ExitCode
+    if ($null -eq $exitCode) {
+        throw "The application exit code could not be read after the normal window-close request."
+    }
+    if ([int]$exitCode -ne 0) {
+        throw ("The application returned a non-zero exit code after the normal window-close request (exit code 0x{0:X8})." -f [int]$exitCode)
     }
 
     $packageFamilyName = $installedPackage.PackageFamilyName

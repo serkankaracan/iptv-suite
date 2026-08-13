@@ -340,10 +340,12 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "LocalServer = 0x00000004");
         StringAssert.Contains(packageSmoke, "-Name \"EnableLUA\"");
         StringAssert.Contains(packageSmoke, "$launchedProcess.Refresh()");
+        StringAssert.Contains(packageSmoke, "$null = $launchedProcess.Handle");
         StringAssert.Contains(packageSmoke, "IsWindowVisible($windowHandle)");
         StringAssert.Contains(packageSmoke, "GetWindowThreadProcessId");
         StringAssert.Contains(packageSmoke, "Start-Sleep -Seconds 2");
-        StringAssert.Contains(packageSmoke, "$launchedProcess.ExitCode -ne 0");
+        StringAssert.Contains(packageSmoke, "$null -eq $exitCode");
+        StringAssert.Contains(packageSmoke, "[int]$exitCode -ne 0");
         Assert.IsFalse(
             packageSmoke.Contains("Start-Process -FilePath \"explorer.exe\"", StringComparison.Ordinal),
             "The package smoke must retain the exact PID returned by the official activation API.");
