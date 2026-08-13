@@ -270,6 +270,25 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void WinUiWindowIconDoesNotDependOnTheProcessWorkingDirectory()
+    {
+        string mainWindow = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows",
+            "MainWindow.xaml.cs"));
+
+        StringAssert.Contains(
+            mainWindow,
+            "Path.Combine(AppContext.BaseDirectory, \"Assets\", \"AppIcon.ico\")");
+        Assert.IsFalse(
+            mainWindow.Contains("SetIcon(\"Assets", StringComparison.Ordinal),
+            "Packaged startup must not resolve the window icon from the process working directory.");
+    }
+
+    [TestMethod]
     public void TestInfrastructureCannotLeakIntoProduction()
     {
         string solution = File.ReadAllText(Path.Combine(RepositoryRoot, "apps", "windows", "IptvSuite.Windows.sln"));
@@ -316,6 +335,21 @@ public sealed class DependencyRulesTests
         string packageSmoke = File.ReadAllText(
             Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageSmoke.ps1"));
         StringAssert.Contains(packageSmoke, "IptvSuite\\.SecretStoreSpike(?:\\..*)?");
+        StringAssert.Contains(packageSmoke, "PackagedApplicationActivator]::Activate($aumid)");
+        StringAssert.Contains(packageSmoke, "CoCreateInstance");
+        StringAssert.Contains(packageSmoke, "LocalServer = 0x00000004");
+        StringAssert.Contains(packageSmoke, "-Name \"EnableLUA\"");
+        StringAssert.Contains(packageSmoke, "$launchedProcess.Refresh()");
+        StringAssert.Contains(packageSmoke, "IsWindowVisible($windowHandle)");
+        StringAssert.Contains(packageSmoke, "GetWindowThreadProcessId");
+        StringAssert.Contains(packageSmoke, "Start-Sleep -Seconds 2");
+        StringAssert.Contains(packageSmoke, "$launchedProcess.ExitCode -ne 0");
+        Assert.IsFalse(
+            packageSmoke.Contains("Start-Process -FilePath \"explorer.exe\"", StringComparison.Ordinal),
+            "The package smoke must retain the exact PID returned by the official activation API.");
+        Assert.IsFalse(
+            packageSmoke.Contains("remains after uninstall: $appDataPath", StringComparison.Ordinal),
+            "Package-smoke diagnostics must not disclose the current user's app-data path.");
     }
 
     [TestMethod]

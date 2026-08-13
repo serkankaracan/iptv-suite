@@ -10,6 +10,124 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
 
+$activationInterop = @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace IptvSuite.PackageSmoke
+{
+    [Flags]
+    internal enum ActivateOptions : uint
+    {
+        NoErrorUi = 0x00000002,
+    }
+
+    [ComImport]
+    [Guid("2E941141-7F97-4756-BA1D-9DECDE894A3D")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IApplicationActivationManager
+    {
+        [PreserveSig]
+        int ActivateApplication(
+            [MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
+            [MarshalAs(UnmanagedType.LPWStr)] string arguments,
+            ActivateOptions options,
+            out uint processId);
+    }
+
+    public static class PackagedApplicationActivator
+    {
+        private const uint LocalServer = 0x00000004;
+        private static readonly Guid ClassId =
+            new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C");
+        private static readonly Guid InterfaceId =
+            new Guid("2E941141-7F97-4756-BA1D-9DECDE894A3D");
+
+        [DllImport("ole32.dll", ExactSpelling = true, PreserveSig = true)]
+        private static extern int CoCreateInstance(
+            [In] ref Guid classId,
+            IntPtr outer,
+            uint classContext,
+            [In] ref Guid interfaceId,
+            [MarshalAs(UnmanagedType.Interface)] out object value);
+
+        public static int Activate(string appUserModelId)
+        {
+            if (String.IsNullOrWhiteSpace(appUserModelId))
+            {
+                throw new ArgumentException(
+                    "The application user model ID is required.",
+                    "appUserModelId");
+            }
+
+            Guid classId = ClassId;
+            Guid interfaceId = InterfaceId;
+            object activationManager;
+            int creationResult = CoCreateInstance(
+                ref classId,
+                IntPtr.Zero,
+                LocalServer,
+                ref interfaceId,
+                out activationManager);
+            if (creationResult < 0)
+            {
+                throw new COMException(
+                    String.Format(
+                        "Packaged application activation service creation failed (HRESULT 0x{0:X8}).",
+                        unchecked((uint)creationResult)),
+                    creationResult);
+            }
+
+            try
+            {
+                uint processId;
+                int result = ((IApplicationActivationManager)activationManager).ActivateApplication(
+                    appUserModelId,
+                    null,
+                    ActivateOptions.NoErrorUi,
+                    out processId);
+                if (result < 0)
+                {
+                    throw new COMException(
+                        String.Format(
+                            "Packaged application activation failed (HRESULT 0x{0:X8}).",
+                            unchecked((uint)result)),
+                        result);
+                }
+
+                if (processId == 0 || processId > Int32.MaxValue)
+                {
+                    throw new InvalidOperationException(
+                        "Package activation returned an invalid process identifier.");
+                }
+
+                return (int)processId;
+            }
+            finally
+            {
+                if (Marshal.IsComObject(activationManager))
+                {
+                    Marshal.FinalReleaseComObject(activationManager);
+                }
+            }
+        }
+    }
+
+    public static class WindowInspector
+    {
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindowVisible(IntPtr windowHandle);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(
+            IntPtr windowHandle,
+            out uint processId);
+    }
+}
+'@
+Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
+
 $expectedName = "IptvSuite.LocalDev.6f0d9a64"
 $expectedPublisher = "CN=IptvSuite Local Development"
 $expectedApplicationId = "App"
@@ -565,6 +683,14 @@ try {
         throw "Run this smoke test from an elevated PowerShell session so the temporary public certificate can be trusted and removed."
     }
 
+    $enableLua = Get-ItemPropertyValue `
+        -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" `
+        -Name "EnableLUA" `
+        -ErrorAction Stop
+    if ([int]$enableLua -ne 1) {
+        throw "Package activation requires the Windows app-model UAC service to be enabled."
+    }
+
     $expectedSdk = (Get-Content -Raw (Join-Path $repositoryRoot "global.json") | ConvertFrom-Json).sdk.version
     $actualSdk = (& $DotNetPath --version).Trim()
     if ($LASTEXITCODE -ne 0 -or $actualSdk -ne $expectedSdk) {
@@ -678,27 +804,62 @@ try {
     }
 
     $aumid = "$($installedPackage.PackageFamilyName)!$expectedApplicationId"
-    Start-Process -FilePath "explorer.exe" -ArgumentList "shell:AppsFolder\$aumid" | Out-Null
-
-    $launchDeadline = (Get-Date).AddSeconds(20)
-    do {
-        Start-Sleep -Milliseconds 250
-        $launchedProcess = Get-Process -Name "IptvSuite.Windows" -ErrorAction SilentlyContinue |
-            Where-Object { $_.MainWindowHandle -ne 0 } |
-            Select-Object -First 1
-    } while ($null -eq $launchedProcess -and (Get-Date) -lt $launchDeadline)
-
+    $activationProcessId = [IptvSuite.PackageSmoke.PackagedApplicationActivator]::Activate($aumid)
+    $launchedProcess = Get-Process -Id $activationProcessId -ErrorAction SilentlyContinue
     if ($null -eq $launchedProcess) {
-        throw "The installed package did not create a visible application window."
+        throw "The packaged application exited before its process could be observed."
+    }
+    $launchedProcess.Refresh()
+    if ($launchedProcess.HasExited) {
+        throw ("The packaged application exited during activation (exit code 0x{0:X8})." -f [int]$launchedProcess.ExitCode)
+    }
+    if ($launchedProcess.ProcessName -ne "IptvSuite.Windows") {
+        throw "Package activation returned an unexpected process."
+    }
+
+    $launchDeadline = (Get-Date).AddSeconds(30)
+    $visibleWindow = $false
+    do {
+        $launchedProcess.Refresh()
+        if ($launchedProcess.HasExited) {
+            throw ("The packaged application exited before creating a visible window (exit code 0x{0:X8})." -f [int]$launchedProcess.ExitCode)
+        }
+
+        $windowHandle = $launchedProcess.MainWindowHandle
+        if ($windowHandle -ne [IntPtr]::Zero -and
+            [IptvSuite.PackageSmoke.WindowInspector]::IsWindowVisible($windowHandle)) {
+            [uint32]$windowOwnerProcessId = 0
+            [void][IptvSuite.PackageSmoke.WindowInspector]::GetWindowThreadProcessId(
+                $windowHandle,
+                [ref]$windowOwnerProcessId)
+            if ($windowOwnerProcessId -eq [uint32]$activationProcessId) {
+                $visibleWindow = $true
+                break
+            }
+        }
+
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $launchDeadline)
+
+    if (-not $visibleWindow) {
+        throw "The packaged application remained running but did not create a visible window before the launch deadline."
     }
 
     Start-Sleep -Seconds 2
+    $launchedProcess.Refresh()
+    if ($launchedProcess.HasExited) {
+        throw ("The packaged application exited during the launch stability interval (exit code 0x{0:X8})." -f [int]$launchedProcess.ExitCode)
+    }
     if (-not $launchedProcess.CloseMainWindow()) {
         throw "The application rejected a normal window-close request."
     }
 
     if (-not $launchedProcess.WaitForExit(10000)) {
         throw "The application did not exit after a normal window-close request."
+    }
+    $launchedProcess.Refresh()
+    if ($launchedProcess.ExitCode -ne 0) {
+        throw ("The application returned a non-zero exit code after the normal window-close request (exit code 0x{0:X8})." -f [int]$launchedProcess.ExitCode)
     }
 
     $packageFamilyName = $installedPackage.PackageFamilyName
@@ -717,7 +878,7 @@ try {
         Start-Sleep -Milliseconds 250
     }
     if (Test-Path -LiteralPath $appDataPath) {
-        throw "Package app-data remains after uninstall: $appDataPath"
+        throw "Package app-data remains after uninstall."
     }
 
     $successEvidence = [ordered]@{
@@ -750,8 +911,19 @@ catch {
 }
 finally {
     Invoke-CleanupStep -Failures $cleanupFailures -Name "Stop launched application" -Action {
-        if ($null -ne $launchedProcess -and -not $launchedProcess.HasExited) {
-            Stop-Process -Id $launchedProcess.Id -Force -ErrorAction Stop
+        if ($null -ne $launchedProcess) {
+            try {
+                $launchedProcess.Refresh()
+                if (-not $launchedProcess.HasExited) {
+                    $launchedProcess.Kill()
+                    if (-not $launchedProcess.WaitForExit(10000)) {
+                        throw "The exact packaged application process did not stop during cleanup."
+                    }
+                }
+            }
+            finally {
+                $launchedProcess.Dispose()
+            }
         }
     }
 
