@@ -506,6 +506,29 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(lifecycleSmoke, "LocalServer = 0x00000004");
         StringAssert.Contains(lifecycleSmoke, "--phase $Phase --run-id $runId");
         StringAssert.Contains(lifecycleSmoke, "PACKAGE_LIFECYCLE_CREATE");
+        StringAssert.Contains(
+            lifecycleSmoke,
+            "foreach ($scanRoot in @($script:protectedStorePath, $script:runDirectory))");
+        StringAssert.Contains(
+            lifecycleSmoke,
+            "scan-artifacts $scanRoot M4 PACKAGE_LIFECYCLE_CREATE");
+        Assert.HasCount(
+            1,
+            Regex.Matches(lifecycleSmoke, @"\bscan-artifacts\b"),
+            "The lifecycle smoke must scan only the two owned roots through one exact invocation.");
+        Assert.IsFalse(
+            lifecycleSmoke.Contains(
+                "scan-artifacts $script:appDataPath M4 PACKAGE_LIFECYCLE_CREATE",
+                StringComparison.Ordinal),
+            "The lifecycle scanner must avoid mutable OS-managed package hive files.");
+        StringAssert.Contains(lifecycleSmoke, "CanaryScannerOperationalFailure");
+        StringAssert.Contains(lifecycleSmoke, "CanaryArtifactDetected");
+        StringAssert.Contains(lifecycleSmoke, "CanaryScannerContractFailure");
+        StringAssert.Contains(lifecycleSmoke, "InitialOwnedSurfaceCanaryScanPassed = $true");
+        StringAssert.Contains(lifecycleSmoke, "FinalOwnedSurfaceCanaryScanPassed = $true");
+        Assert.IsFalse(
+            lifecycleSmoke.Contains("AppDataCanaryScanPassed", StringComparison.Ordinal),
+            "Lifecycle evidence must not overstate an owned-surface scan as whole AppData coverage.");
         StringAssert.Contains(lifecycleSmoke, "record-v2-[0-9A-F]{64}\\.dpapi");
         StringAssert.Contains(lifecycleSmoke, "AppxSymbolPackageEnabled      = \"false\"");
         StringAssert.Contains(lifecycleSmoke, "$artifactsRoot = Join-Path $repositoryRoot \".artifacts\"");

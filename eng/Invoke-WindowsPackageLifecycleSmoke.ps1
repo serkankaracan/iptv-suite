@@ -537,12 +537,26 @@ function Assert-ProtectedStoreClean {
     }
 }
 
-function Invoke-AppDataCanaryScan {
-    Assert-SafeDirectory -Path $script:appDataPath
-    & $DotNetPath $testingToolPath scan-artifacts $script:appDataPath M4 PACKAGE_LIFECYCLE_CREATE *> $null
-    $scannerExitCode = $LASTEXITCODE
-    if ($scannerExitCode -ne 0) {
-        throw "The packaged app-data canary scan failed."
+function Invoke-OwnedCanaryScan {
+    foreach ($scanRoot in @($script:protectedStorePath, $script:runDirectory)) {
+        Assert-SafeDirectory -Path $scanRoot
+        & $DotNetPath $testingToolPath scan-artifacts $scanRoot M4 PACKAGE_LIFECYCLE_CREATE *> $null
+        $scannerExitCode = $LASTEXITCODE
+        switch ($scannerExitCode) {
+            0 { }
+            1 {
+                $script:failureCode = "CanaryScannerOperationalFailure"
+                throw "The packaged lifecycle canary scanner could not complete."
+            }
+            2 {
+                $script:failureCode = "CanaryArtifactDetected"
+                throw "A packaged lifecycle write surface contains a test-canary artifact."
+            }
+            default {
+                $script:failureCode = "CanaryScannerContractFailure"
+                throw "The packaged lifecycle canary scanner returned an unsupported result."
+            }
+        }
     }
 }
 
@@ -904,7 +918,7 @@ try {
     Assert-RegularFile -Path $ticketPath
 
     Set-FailurePoint -Stage "CreateScan" -Code "CreateCanaryScanFailed"
-    Invoke-AppDataCanaryScan
+    Invoke-OwnedCanaryScan
     Remove-ExactPhaseFiles -Phase "create"
 
     Set-FailurePoint -Stage "DuplicateCreateLaunch" -Code "DuplicateCreateGateFailed"
@@ -920,7 +934,7 @@ try {
     Assert-ProtectedStoreClean
 
     Set-FailurePoint -Stage "FinalScan" -Code "FinalCanaryScanFailed"
-    Invoke-AppDataCanaryScan
+    Invoke-OwnedCanaryScan
     Remove-ExactPhaseFiles -Phase "verify-delete"
 
     Set-FailurePoint -Stage "PackageRemoval" -Code "PackageRemovalFailed"
@@ -966,8 +980,8 @@ try {
         UpdatedReadVerified = [bool]$verifyResult.UpdatedReadVerified
         DeleteCommitted = [bool]$verifyResult.DeleteCommitted
         PostDeleteUnavailable = [bool]$verifyResult.PostDeleteUnavailable
-        InitialAppDataCanaryScanPassed = $true
-        FinalAppDataCanaryScanPassed = $true
+        InitialOwnedSurfaceCanaryScanPassed = $true
+        FinalOwnedSurfaceCanaryScanPassed = $true
         RecordCleanupPassed = $true
         TicketCleanupPassed = [bool]$verifyResult.TicketRemoved
         PackageRemoved = $true
