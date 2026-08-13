@@ -540,8 +540,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(lifecycleSmoke, LifecycleHarnessPublisher);
         StringAssert.Contains(lifecycleSmoke, "$baselineVersion = \"0.0.1.0\"");
         StringAssert.Contains(lifecycleSmoke, "$updatedVersion = \"0.0.2.0\"");
-        StringAssert.Contains(lifecycleSmoke, "\"-p:AppxPackageDir=$baselinePackageOutput\"");
-        StringAssert.Contains(lifecycleSmoke, "\"-p:AppxPackageDir=$updatedPackageOutput\"");
+        StringAssert.Contains(lifecycleSmoke, "\"-p:AppxPackageDir=$baselinePackageOutput/\"");
+        StringAssert.Contains(lifecycleSmoke, "\"-p:AppxPackageDir=$updatedPackageOutput/\"");
         StringAssert.Contains(lifecycleSmoke, "-p:LifecyclePackageFlavor=Baseline");
         StringAssert.Contains(lifecycleSmoke, "-p:LifecyclePackageFlavor=Update");
         StringAssert.Contains(lifecycleSmoke, "-Path $updatedArtifacts.Package.FullName");

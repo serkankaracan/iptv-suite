@@ -912,7 +912,7 @@ try {
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
     }
     & $DotNetPath build $projectPath -c $Configuration -p:Platform=x64 `
-        "-p:AppxPackageDir=$updatedPackageOutput" `
+        "-p:AppxPackageDir=$updatedPackageOutput/" `
         -p:LifecyclePackageFlavor=Update -t:Rebuild --no-restore --nologo
     if ($LASTEXITCODE -ne 0) {
         throw "The signed updated lifecycle MSIX build failed."
@@ -920,7 +920,7 @@ try {
 
     Set-FailurePoint -Stage "BaselinePackageBuild" -Code "BaselineSignedBuildFailed"
     & $DotNetPath build $projectPath -c $Configuration -p:Platform=x64 `
-        "-p:AppxPackageDir=$baselinePackageOutput" `
+        "-p:AppxPackageDir=$baselinePackageOutput/" `
         -p:LifecyclePackageFlavor=Baseline -t:Rebuild --no-restore --nologo
     if ($LASTEXITCODE -ne 0) {
         throw "The signed baseline lifecycle MSIX build failed."
