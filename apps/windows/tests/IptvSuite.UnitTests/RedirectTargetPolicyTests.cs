@@ -85,11 +85,9 @@ public sealed class RedirectTargetPolicyTests
 
     private static SafeEndpoint GetEndpoint(string locator)
     {
-        DomainResult<ValidatedSourceDraft> result = SourceConfigurationValidator.ValidateRemotePlaylist(
-            "Source",
-            locator,
-            ProtectedLocatorReference.Create());
+        DomainResult<PreparedRemotePlaylistSourceDraft> result =
+            SourceConfigurationValidator.PrepareRemotePlaylist("Source", locator);
         Assert.IsTrue(result.IsSuccess, "A redirect source fixture was rejected.");
-        return result.Value!.Configuration.SafeEndpoint;
+        return result.Value!.SafeEndpoint;
     }
 }

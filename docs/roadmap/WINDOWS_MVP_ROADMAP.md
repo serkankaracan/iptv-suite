@@ -174,11 +174,11 @@ Sentetik Xtream/M3U configuration'larının güvenli kabul/ret ve localized erro
 - Pure URI/header/untrusted-text redaction ile same/cross-origin redirect target policy'si network çağrısı yapmadan doğrulanır. Bounded content classifier `.m3u`/`.m3u8` uzantısını karar girdisi almaz ve catalog/HLS master/HLS media ayrımını içerikten yapar; gerçek parser M7'ye bırakılmıştır.
 - Exact SDK locked gate Debug/Release x64 build'i sıfır warning/error ile tamamladı; architecture 9, unit 91 ve integration 5 olmak üzere **105/105 test**, iki ayrı koşuda aynı `Passed` setini verdi. Sentinel fail/recovery, deterministic fixture hashleri ve artifact canary scan de geçti.
 - Network/provider, DPAPI/secret persistence, database, UI form ve playback eklenmedi; bunlar M4+ kapsamında açık kalır.
-- Opaque reference ile protected record/source/endpoint binding'i M3 kanıtı değildir; issuance M4'te atomikleşir, resolved locator origin equality ve ref-swap testleri M5'te hard gate olur.
+- Opaque reference ile protected record/source/endpoint binding'i M3 kanıtı değildir; M4 source-draft dilimi doğrudan await edilen create sonrası store-issued reference'ı sonuca bağlar, fakat durable metadata atomikliği/retry reconciliation kanıtlamaz. Resolved locator origin equality ve ref-swap testleri M5'te hard gate olur.
 
 ## M4 — Secure credential storage ve merkezi redaction
 
-**Implementation status:** IN PROGRESS — 2026-08-13 local foundation gate PASS; milestone acceptance pending
+**Implementation status:** IN PROGRESS — 2026-08-13 güncel local foundation gate 153/153 x2 PASS; hosted packaged initialization ve milestone acceptance pending
 
 ### Amaç
 
@@ -186,11 +186,14 @@ Credential ve token-bearing locator'ları plaintext persistence/log/artifact'tan
 
 Mevcut dilim; typed Application `ISecretStore`, zeroing `SecretLease`, merkezi sanitizer, `ProtectedData 10.0.10`/CurrentUser adapter, packaged `LocalCache` factory ve fake/gerçek contract testlerini içerir. Factory beklenen initialization hatalarını diagnostic context taşımayan typed sonuca eşler; cancellation'ı exception olarak korur. Adapter startup'ı yalnız exact current-namespace, regular ve en az 24 saatlik ciphertext temp artığını bounded biçimde temizler; `.dpapi` kayıtlarını enumerate etmez. Local exact-SDK gate architecture 9, unit 100 ve integration 26 olmak üzere 135/135 testi iki kez aynı setle geçirmiş; source/purpose/reference'a bağlı kriptografik context, restart edilen adapter instance'ı, CRUD/update/delete, işlem başlamadan iptal edilmiş çağrıların mutation yapmaması, exact stale-temp cleanup, birbirinden bağımsız kayıtların concurrent create'i, aynı süreçte iki adapter instance'ı için same-key update/read/delete sıralaması, ciphertext swap/corruption ve canary-at-rest davranışı doğrulanmıştır. Ayrı opt-in Release x64 spike scaffold'u, sentetik 256-byte locator workload'u ile per-record DPAPI create/restart/read/delete/cancellation ve sanitized evidence zincirini sağlar; 1k smoke geçmiştir, fakat 5k–50k `Decision` henüz çalıştırılmamıştır. Arbitrary mid-I/O cancellation/interleaving ve cross-process sıralama bu kanıtın parçası değildir; sonuç packaged process/lifecycle veya gerçek wrong-user testi de değildir.
 
+Mevcut foundation kaydından sonraki dilimde `SourceDraftProtectionService`, draft'ı store mutation'ından önce validate eder; Xtream locator+username+password veya remote-playlist locator'ını bounded/versioned payload'a kodlar; store-issued reference ile exact `SourceId`yi yalnız başarılı create sonrasında aynı draft'a bağlar ve geçici payload buffer'ını sıfırlar. `ContentSource` kimlik/ad/configuration değerlerini bu draft'tan birlikte alır. Doğrudan await edilen çağrıda store commit'inden sonra cancellation yeniden gözlenmez ve reference başarılı sonuçla döner; caller abandonment/retry, duplicate create, process crash/OOM, DB/configuration persistence ve orphan reconciliation kanıtlanmaz. Payload yolu şu an encode-only'dir; decoder/round-trip ve malformed-version/length/trailing-data compatibility testi yoktur. Composition root factory'yi packaged launch'ta bir kez çağırır, başarısız initialization'da pencereyi oluşturmadan fail-closed olur, `LocalCache\ProtectedStore\v1` store'unu uygulama ömrü boyunca tutar ve fallback oluşturmaz. Startup cleanup exact current-namespace aday listesini 1.024 girdide sınırlar ve 1.025'inci exact adayda mutation yapmadan fail-closed olur; toplam directory-enumeration maliyeti ayrıca açıktır. Bu davranışlar güncel local exact-SDK quality gate içinde architecture 12, unit 114 ve integration 27 olmak üzere 153/153 testle iki kez aynı sonuç setini üretmiştir; `ProtectedStoreDirectoryInitialized` alanını taşıyan hosted packaged artifact henüz kaydedilmemiştir.
+
 M4'ü açık tutan hard-gate'ler: source disable + in-flight operation drain + source-wide deletion + `DeletionPending` orchestration ve startup protected-record orphan reconciliation; aynı source/purpose içindeki referansı gerçek configuration/channel/endpoint owner'ına bağlayan semantic ref-swap politikası; handle-relative path/reparse hardening veya açık threat-model kararı; installed package two-launch/update/reset/uninstall; ikinci gerçek Windows user; 5k/10k/20k/50k ölçümü ve buna bağlı ADR-003 kararı. Tamamlanıp caller'a verilmiş bir plaintext lease delete ile geriye dönük revoke edilmez; lifecycle koordinatörü yeni resolve'ları durdurup aktif operasyonların kapanmasını beklemelidir. Bu kanıtlar olmadan aşağıdaki milestone acceptance maddeleri `UNVERIFIED` kalır.
 
 ### Kapsam
 
 - `ISecretStore` contract ve Windows DPAPI CurrentUser/LOCAL=user packaged adapter.
+- Pre-validation → bounded protected payload create → store-issued opaque reference bağlama source-draft application operation'ı.
 - Source secret create/read/update/delete, opaque reference ve restart.
 - 5k/10k/20k/50k protected-locator spike; DPAPI-per-record ile reviewed alternative karşılaştırması gerekiyorsa yalnız spike.
 - Central structured sanitizer; URI/header/exception/native-text adapters.
@@ -212,7 +215,7 @@ Provider login, production catalog DB, cloud sync/export, own cryptographic sche
 
 ### Testler / doğrulama
 
-- Fake-store shared contract + real packaged Windows integration.
+- Fake-store shared contract + real Windows DPAPI integration; packaged `LocalCache` initialization smoke.
 - Add/read/update/delete, restart, corrupt blob, wrong context.
 - App update, reset, uninstall/reinstall, provisional identity change.
 - DB/file/log/artifact binary canary scan.

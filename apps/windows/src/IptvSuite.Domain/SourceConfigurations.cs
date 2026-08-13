@@ -55,16 +55,63 @@ public sealed class RemotePlaylistSourceConfiguration : SourceConfiguration
     public ProtectedLocatorReference LocatorReference { get; }
 }
 
+[DebuggerDisplay("[PREPARED-XTREAM-SOURCE-DRAFT]")]
+public sealed class PreparedXtreamSourceDraft
+{
+    internal PreparedXtreamSourceDraft(string normalizedDisplayName, SafeEndpoint safeEndpoint)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(normalizedDisplayName);
+        ArgumentNullException.ThrowIfNull(safeEndpoint);
+        NormalizedDisplayName = normalizedDisplayName;
+        SafeEndpoint = safeEndpoint;
+    }
+
+    public string NormalizedDisplayName { get; }
+
+    public SafeEndpoint SafeEndpoint { get; }
+
+    public override string ToString() => "[PREPARED-XTREAM-SOURCE-DRAFT]";
+}
+
+[DebuggerDisplay("[PREPARED-REMOTE-PLAYLIST-SOURCE-DRAFT]")]
+public sealed class PreparedRemotePlaylistSourceDraft
+{
+    internal PreparedRemotePlaylistSourceDraft(string normalizedDisplayName, SafeEndpoint safeEndpoint)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(normalizedDisplayName);
+        ArgumentNullException.ThrowIfNull(safeEndpoint);
+        NormalizedDisplayName = normalizedDisplayName;
+        SafeEndpoint = safeEndpoint;
+    }
+
+    public string NormalizedDisplayName { get; }
+
+    public SafeEndpoint SafeEndpoint { get; }
+
+    public override string ToString() => "[PREPARED-REMOTE-PLAYLIST-SOURCE-DRAFT]";
+}
+
 [DebuggerDisplay("[VALIDATED-SOURCE-DRAFT]")]
 public sealed class ValidatedSourceDraft
 {
-    internal ValidatedSourceDraft(string normalizedDisplayName, SourceConfiguration configuration)
+    internal ValidatedSourceDraft(
+        SourceId sourceId,
+        string normalizedDisplayName,
+        SourceConfiguration configuration)
     {
+        if (sourceId.IsEmpty)
+        {
+            throw new ArgumentException("A non-empty source identifier is required.", nameof(sourceId));
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(normalizedDisplayName);
         ArgumentNullException.ThrowIfNull(configuration);
+        SourceId = sourceId;
         NormalizedDisplayName = normalizedDisplayName;
         Configuration = configuration;
     }
+
+    public SourceId SourceId { get; }
 
     public string NormalizedDisplayName { get; }
 

@@ -47,7 +47,7 @@ public readonly record struct ChannelStableKey
 
 public static class ChannelStableKeyBuilder
 {
-    public const int AlgorithmVersion = 1;
+    public const int AlgorithmVersion = 2;
     public const int MaximumProviderKindLength = 64;
     public const int MaximumProviderIdentifierLength = 512;
     public const int MaximumChannelNameLength = 256;
@@ -133,7 +133,7 @@ public static class ChannelStableKeyBuilder
         params string[] identityParts)
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        AppendPart(hash, "IPTVSUITE-CHANNEL-STABLE-KEY");
+        AppendPart(hash, "CHANNEL-STABLE-KEY");
         AppendPart(hash, AlgorithmVersion.ToString(CultureInfo.InvariantCulture));
         AppendPart(hash, sourceId.Value.ToString("D", CultureInfo.InvariantCulture));
         AppendPart(hash, discriminator);

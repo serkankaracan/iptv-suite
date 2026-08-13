@@ -171,7 +171,7 @@ public sealed class M4SecretStoreContractTests
             AssertUnavailable(await store.ReadLocatorAsync(
                 owner,
                 ProtectedValuePurpose.RemotePlaylistLocator,
-                ProtectedLocatorReference.Create()));
+                CreateLocatorReference()));
             AssertUnavailable(await store.UpdateLocatorAsync(
                 otherSource,
                 ProtectedValuePurpose.RemotePlaylistLocator,
@@ -181,7 +181,7 @@ public sealed class M4SecretStoreContractTests
             SecretReferenceCreationResult credentials = await store.CreateCredentialsAsync(owner, payload);
             Assert.IsNotNull(credentials.Reference);
             AssertUnavailable(await store.ReadCredentialsAsync(otherSource, credentials.Reference));
-            AssertUnavailable(await store.ReadCredentialsAsync(owner, SecretReference.Create()));
+            AssertUnavailable(await store.ReadCredentialsAsync(owner, CreateSecretReference()));
 
             Assert.IsTrue((await store.DeleteLocatorAsync(
                 otherSource,
@@ -297,7 +297,7 @@ public sealed class M4SecretStoreContractTests
         {
             Assert.IsTrue((await store.DeleteCredentialsAsync(
                 sourceId,
-                SecretReference.Create())).IsSuccess);
+                CreateSecretReference())).IsSuccess);
 
             ProtectedLocatorReferenceCreationResult created = await store.CreateLocatorAsync(
                 sourceId,
@@ -428,6 +428,23 @@ public sealed class M4SecretStoreContractTests
     }
 
     private static byte[] CreateSensitivePayload() => CreateCanaryPayload("CONTRACT");
+
+    private static SecretReference CreateSecretReference()
+    {
+        DomainResult<SecretReference> result = SecretReference.Parse($"secret-ref-v1:{Guid.NewGuid():N}");
+        return result.IsSuccess
+            ? result.Value!
+            : throw new InvalidOperationException("A synthetic secret reference could not be created.");
+    }
+
+    private static ProtectedLocatorReference CreateLocatorReference()
+    {
+        DomainResult<ProtectedLocatorReference> result =
+            ProtectedLocatorReference.Parse($"locator-ref-v1:{Guid.NewGuid():N}");
+        return result.IsSuccess
+            ? result.Value!
+            : throw new InvalidOperationException("A synthetic locator reference could not be created.");
+    }
 
     private static byte[] CreateUpdatedPayload() => CreateCanaryPayload("CONTRACT-UPDATED");
 

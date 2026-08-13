@@ -425,6 +425,51 @@ public sealed class DpapiCurrentUserSecretStoreTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public void StartupCleanupFailsClosedWhenTemporaryEntryLimitIsExceeded()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m4-dpapi-temp-limit");
+        DateTimeOffset freshNow = DateTimeOffset.UtcNow;
+        TimeProvider freshTimeProvider = TestTime.Create(freshNow);
+        List<string> exactTemporaryPaths = new(1025);
+
+        for (int index = 0; index < 1024; index++)
+        {
+            string path = Path.Combine(
+                temporary.FullPath,
+                $"temporary-v1-{index:x32}.tmp");
+            File.WriteAllBytes(path, [0x4D, 0x34]);
+            exactTemporaryPaths.Add(path);
+        }
+
+        string lookalikePath = Path.Combine(
+            temporary.FullPath,
+            "temporary-v1-gggggggggggggggggggggggggggggggg.tmp");
+        File.WriteAllBytes(lookalikePath, [0x4D, 0x34]);
+
+        _ = CreateStoreForTest(temporary.FullPath, freshTimeProvider);
+        Assert.IsTrue(exactTemporaryPaths.All(File.Exists));
+        Assert.IsTrue(File.Exists(lookalikePath));
+
+        string overflowPath = Path.Combine(
+            temporary.FullPath,
+            $"temporary-v1-{1024:x32}.tmp");
+        File.WriteAllBytes(overflowPath, [0x4D, 0x34]);
+        exactTemporaryPaths.Add(overflowPath);
+        TimeProvider staleTimeProvider = TestTime.Create(freshNow + TimeSpan.FromDays(2));
+
+        Assert.ThrowsExactly<IOException>(() =>
+            _ = CreateStoreForTest(temporary.FullPath, staleTimeProvider));
+        Assert.IsTrue(exactTemporaryPaths.All(File.Exists));
+        Assert.IsTrue(File.Exists(lookalikePath));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public void PreCancelledInitializationDoesNotCreateStorageDirectory()
     {
         if (!OperatingSystem.IsWindows())

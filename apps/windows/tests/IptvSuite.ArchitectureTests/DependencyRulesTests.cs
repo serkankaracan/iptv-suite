@@ -289,6 +289,69 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void WinUiCompositionRetainsThePackagedSecretStoreWithoutAStorageFallback()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string app = File.ReadAllText(Path.Combine(windowsRoot, "App.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        string factory = File.ReadAllText(Path.Combine(windowsRoot, "WindowsSecretStoreFactory.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        string protectedEnvelopeCodec = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "DpapiProtectedEnvelopeCodec.cs"));
+
+        const string compositionSequence =
+            "SecretStoreInitializationResult secretStoreInitialization =\n" +
+            "            WindowsSecretStoreFactory.Create();\n" +
+            "        ISecretStore secretStore = secretStoreInitialization.Store ??\n" +
+            "            throw new InvalidOperationException(\"Protected storage is unavailable.\");\n" +
+            "        _secretStore = secretStore;\n" +
+            "        _window = new MainWindow();";
+        const string neutralProtectedStorePath =
+            "Path.Combine(\n" +
+            "                localCachePath,\n" +
+            "                \"ProtectedStore\",\n" +
+            "                \"v1\")";
+
+        StringAssert.Contains(app, "private ISecretStore? _secretStore;");
+        StringAssert.Contains(app, compositionSequence);
+        Assert.AreEqual(
+            1,
+            Regex.Count(app, @"\bWindowsSecretStoreFactory\.Create\("),
+            "The packaged secret-store factory must run exactly once during application launch.");
+        Assert.IsFalse(
+            app.Contains("new DpapiCurrentUserSecretStore", StringComparison.Ordinal) ||
+            app.Contains("InMemorySecretStore", StringComparison.Ordinal),
+            "The composition root must not create a fallback secret store.");
+        StringAssert.Contains(factory, neutralProtectedStorePath);
+        Assert.IsFalse(
+            factory.Contains("localCachePath,\n                \"IptvSuite\"", StringComparison.Ordinal),
+            "The unverified codename must not become part of the persisted protected-store path.");
+        StringAssert.Contains(protectedEnvelopeCodec, "\"SRCSEC01\"u8");
+        StringAssert.Contains(
+            protectedEnvelopeCodec,
+            "\"protected-source-store/dpapi-current-user/entropy/v1\"u8");
+        StringAssert.Contains(
+            protectedEnvelopeCodec,
+            "\"protected-source-store/dpapi-current-user/file-name/v1\"u8");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                protectedEnvelopeCodec,
+                "\"[^\"]*iptv[^\"]*\"u8",
+                RegexOptions.IgnoreCase),
+            "The unverified codename must not become part of the durable protected-record format.");
+    }
+
+    [TestMethod]
     public void TestInfrastructureCannotLeakIntoProduction()
     {
         string solution = File.ReadAllText(Path.Combine(RepositoryRoot, "apps", "windows", "IptvSuite.Windows.sln"));
@@ -346,6 +409,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "Start-Sleep -Seconds 2");
         StringAssert.Contains(packageSmoke, "$null -eq $exitCode");
         StringAssert.Contains(packageSmoke, "[int]$exitCode -ne 0");
+        StringAssert.Contains(packageSmoke, "LocalCache\\ProtectedStore\\v1");
+        StringAssert.Contains(
+            packageSmoke,
+            "ProtectedStoreDirectoryInitialized = $protectedStoreDirectoryInitialized");
+        StringAssert.Contains(
+            packageSmoke,
+            "The packaged protected-store directory could not be inspected safely.");
         Assert.IsFalse(
             packageSmoke.Contains("Start-Process -FilePath \"explorer.exe\"", StringComparison.Ordinal),
             "The package smoke must retain the exact PID returned by the official activation API.");
@@ -393,6 +463,32 @@ public sealed class DependencyRulesTests
             Assert.IsFalse(
                 Regex.IsMatch(combinedSource, $@"\b(?:class|record|struct)\s+{futureType}\b"),
                 $"Future type {futureType} must not be added before its milestone.");
+        }
+    }
+
+    [TestMethod]
+    public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
+    {
+        string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
+        string[] forbiddenPersistentIdentifiers =
+        [
+            "\"IPTVSUITE-",
+            "\"IPTVSEC",
+            "\"IPTVCRED",
+            "\"IPTVLOCR",
+            "\"iptv-suite/",
+        ];
+
+        foreach (string sourceFile in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            string content = File.ReadAllText(sourceFile);
+            foreach (string forbiddenIdentifier in forbiddenPersistentIdentifiers)
+            {
+                Assert.IsFalse(
+                    content.Contains(forbiddenIdentifier, StringComparison.Ordinal),
+                    $"Unverified codename reached a persistent format identifier: " +
+                    $"{Path.GetRelativePath(RepositoryRoot, sourceFile)}");
+            }
         }
     }
 

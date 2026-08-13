@@ -16,7 +16,7 @@ public sealed class SecretReference : IEquatable<SecretReference>
         _identifier = identifier;
     }
 
-    public static SecretReference Create() => new(Guid.NewGuid());
+    internal static SecretReference Create() => new(Guid.NewGuid());
 
     public static DomainResult<SecretReference> Parse(string? opaqueIdentifier)
     {
@@ -61,7 +61,7 @@ public sealed class ProtectedLocatorReference : IEquatable<ProtectedLocatorRefer
         _identifier = identifier;
     }
 
-    public static ProtectedLocatorReference Create() => new(Guid.NewGuid());
+    internal static ProtectedLocatorReference Create() => new(Guid.NewGuid());
 
     public static DomainResult<ProtectedLocatorReference> Parse(string? opaqueIdentifier)
     {

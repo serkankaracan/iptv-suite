@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -6,6 +7,9 @@ namespace IptvSuite.UnitTests;
 [TestClass]
 public sealed class SourceValidationSecurityTests
 {
+    private static readonly string[] ExpectedPublicValidatorMethods =
+        ["PrepareRemotePlaylist", "PrepareXtream"];
+
     [TestMethod]
     public void SafeEndpointPublicStateContainsOnlySchemeHostAndEffectivePort()
     {
@@ -24,12 +28,29 @@ public sealed class SourceValidationSecurityTests
     }
 
     [TestMethod]
+    public void PublicSourceDraftValidationCannotAttachCallerIssuedReferences()
+    {
+        string[] publicMethods = typeof(SourceConfigurationValidator)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Select(method => method.Name)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        CollectionAssert.AreEquivalent(
+            ExpectedPublicValidatorMethods,
+            publicMethods);
+        Assert.AreEqual(0, typeof(PreparedXtreamSourceDraft).GetConstructors().Length);
+        Assert.AreEqual(0, typeof(PreparedRemotePlaylistSourceDraft).GetConstructors().Length);
+        Assert.AreEqual(0, typeof(ValidatedSourceDraft).GetConstructors().Length);
+    }
+
+    [TestMethod]
     public void DisplayNameIsTrimmedNormalizedAndCountedByUnicodeScalar()
     {
-        DomainResult<ValidatedSourceDraft> normalized = SourceConfigurationValidator.ValidateRemotePlaylist(
-            "  Cafe\u0301  ",
-            "https://example.test/list.m3u",
-            ProtectedLocatorReference.Create());
+        DomainResult<PreparedRemotePlaylistSourceDraft> normalized =
+            SourceConfigurationValidator.PrepareRemotePlaylist(
+                "  Cafe\u0301  ",
+                "https://example.test/list.m3u");
 
         Assert.IsTrue(normalized.IsSuccess);
         Assert.AreEqual("Caf\u00e9", normalized.Value!.NormalizedDisplayName);
@@ -38,15 +59,13 @@ public sealed class SourceValidationSecurityTests
         string maximum = string.Concat(Enumerable.Repeat(oneScalar, 100));
         string oversized = maximum + oneScalar;
 
-        Assert.IsTrue(SourceConfigurationValidator.ValidateRemotePlaylist(
+        Assert.IsTrue(SourceConfigurationValidator.PrepareRemotePlaylist(
             maximum,
-            "https://example.test/list.m3u",
-            ProtectedLocatorReference.Create()).IsSuccess);
+            "https://example.test/list.m3u").IsSuccess);
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateRemotePlaylist(
+            SourceConfigurationValidator.PrepareRemotePlaylist(
                 oversized,
-                "https://example.test/list.m3u",
-                ProtectedLocatorReference.Create()),
+                "https://example.test/list.m3u"),
             DomainErrorCode.SourceNameTooLong);
     }
 
@@ -57,41 +76,36 @@ public sealed class SourceValidationSecurityTests
         string maximumLocator = prefix + new string('a', 4096 - prefix.Length);
         string oversizedLocator = maximumLocator + "a";
 
-        Assert.IsTrue(SourceConfigurationValidator.ValidateRemotePlaylist(
+        Assert.IsTrue(SourceConfigurationValidator.PrepareRemotePlaylist(
             "Source",
-            maximumLocator,
-            ProtectedLocatorReference.Create()).IsSuccess);
+            maximumLocator).IsSuccess);
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateRemotePlaylist(
+            SourceConfigurationValidator.PrepareRemotePlaylist(
                 "Source",
-                oversizedLocator,
-                ProtectedLocatorReference.Create()),
+                oversizedLocator),
             DomainErrorCode.EndpointTooLong);
 
         string maximumUsername = new('u', 256);
         string maximumPassword = new('p', 1024);
-        Assert.IsTrue(SourceConfigurationValidator.ValidateXtream(
+        Assert.IsTrue(SourceConfigurationValidator.PrepareXtream(
             "Source",
             "https://example.test/api",
             maximumUsername,
-            maximumPassword,
-            SecretReference.Create()).IsSuccess);
+            maximumPassword).IsSuccess);
 
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateXtream(
+            SourceConfigurationValidator.PrepareXtream(
                 "Source",
                 "https://example.test/api",
                 maximumUsername + "u",
-                maximumPassword,
-                SecretReference.Create()),
+                maximumPassword),
             DomainErrorCode.CredentialTooLong);
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateXtream(
+            SourceConfigurationValidator.PrepareXtream(
                 "Source",
                 "https://example.test/api",
                 maximumUsername,
-                maximumPassword + "p",
-                SecretReference.Create()),
+                maximumPassword + "p"),
             DomainErrorCode.CredentialTooLong);
     }
 
@@ -115,18 +129,15 @@ public sealed class SourceValidationSecurityTests
     [TestMethod]
     public void UnsupportedAndInsecureSchemesFailWithTypedErrors()
     {
-        ProtectedLocatorReference locatorReference = ProtectedLocatorReference.Create();
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateRemotePlaylist(
+            SourceConfigurationValidator.PrepareRemotePlaylist(
                 "Source",
-                "ftp://example.test/list",
-                locatorReference),
+                "ftp://example.test/list"),
             DomainErrorCode.EndpointSchemeUnsupported);
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateRemotePlaylist(
+            SourceConfigurationValidator.PrepareRemotePlaylist(
                 "Source",
-                "http://example.test/list",
-                locatorReference),
+                "http://example.test/list"),
             DomainErrorCode.InsecureTransportRejected);
     }
 
@@ -138,18 +149,12 @@ public sealed class SourceValidationSecurityTests
         string fragmentValue = SecurityTestAssertions.CreateSensitiveValue("FRAGMENT");
         string withFragment = $"https://example.test/list#{fragmentValue}";
 
-        DomainResult<ValidatedSourceDraft> invalid = SourceConfigurationValidator.ValidateRemotePlaylist(
-            "Source",
-            invalidUtf16,
-            ProtectedLocatorReference.Create());
-        DomainResult<ValidatedSourceDraft> control = SourceConfigurationValidator.ValidateRemotePlaylist(
-            "Source",
-            controlled,
-            ProtectedLocatorReference.Create());
-        DomainResult<ValidatedSourceDraft> fragment = SourceConfigurationValidator.ValidateRemotePlaylist(
-            "Source",
-            withFragment,
-            ProtectedLocatorReference.Create());
+        DomainResult<PreparedRemotePlaylistSourceDraft> invalid =
+            SourceConfigurationValidator.PrepareRemotePlaylist("Source", invalidUtf16);
+        DomainResult<PreparedRemotePlaylistSourceDraft> control =
+            SourceConfigurationValidator.PrepareRemotePlaylist("Source", controlled);
+        DomainResult<PreparedRemotePlaylistSourceDraft> fragment =
+            SourceConfigurationValidator.PrepareRemotePlaylist("Source", withFragment);
 
         SecurityTestAssertions.IsFailure(invalid, DomainErrorCode.EndpointMalformed);
         SecurityTestAssertions.IsFailure(control, DomainErrorCode.EndpointMalformed);
@@ -164,32 +169,28 @@ public sealed class SourceValidationSecurityTests
         string controlled = "value\0";
 
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateRemotePlaylist(
+            SourceConfigurationValidator.PrepareRemotePlaylist(
                 invalidUtf16,
-                "https://example.test/list",
-                ProtectedLocatorReference.Create()),
+                "https://example.test/list"),
             DomainErrorCode.SourceNameInvalid);
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateRemotePlaylist(
+            SourceConfigurationValidator.PrepareRemotePlaylist(
                 controlled,
-                "https://example.test/list",
-                ProtectedLocatorReference.Create()),
+                "https://example.test/list"),
             DomainErrorCode.SourceNameInvalid);
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateXtream(
+            SourceConfigurationValidator.PrepareXtream(
                 "Source",
                 "https://example.test/api",
                 invalidUtf16,
-                "password",
-                SecretReference.Create()),
+                "password"),
             DomainErrorCode.CredentialInvalid);
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateXtream(
+            SourceConfigurationValidator.PrepareXtream(
                 "Source",
                 "https://example.test/api",
                 "user",
-                controlled,
-                SecretReference.Create()),
+                controlled),
             DomainErrorCode.CredentialInvalid);
     }
 
@@ -199,12 +200,11 @@ public sealed class SourceValidationSecurityTests
         string sensitiveValue = SecurityTestAssertions.CreateSensitiveValue("USERINFO");
         string locator = $"https://user:{sensitiveValue}@example.test/api";
 
-        DomainResult<ValidatedSourceDraft> result = SourceConfigurationValidator.ValidateXtream(
+        DomainResult<PreparedXtreamSourceDraft> result = SourceConfigurationValidator.PrepareXtream(
             "Source",
             locator,
             "user",
-            sensitiveValue,
-            SecretReference.Create());
+            sensitiveValue);
 
         SecurityTestAssertions.IsFailure(result, DomainErrorCode.EndpointUserInfoNotAllowed);
         SecurityTestAssertions.DoesNotContainSensitive(result.ToString(), sensitiveValue);
@@ -216,88 +216,58 @@ public sealed class SourceValidationSecurityTests
         string sensitiveValue = SecurityTestAssertions.CreateSensitiveValue("XTREAM-QUERY");
         string locator = $"https://example.test/private/{sensitiveValue}?token={sensitiveValue}";
 
-        DomainResult<ValidatedSourceDraft> result = SourceConfigurationValidator.ValidateXtream(
+        DomainResult<PreparedXtreamSourceDraft> result = SourceConfigurationValidator.PrepareXtream(
             "Source",
             locator,
             "user",
-            sensitiveValue,
-            SecretReference.Create());
+            sensitiveValue);
 
         Assert.IsTrue(result.IsSuccess);
-        XtreamSourceConfiguration? configuration =
-            result.Value!.Configuration as XtreamSourceConfiguration;
-        Assert.IsNotNull(configuration);
-        Assert.AreEqual("example.test", configuration!.SafeEndpoint.Host);
+        Assert.AreEqual("example.test", result.Value!.SafeEndpoint.Host);
         SecurityTestAssertions.DoesNotContainSensitive(
-            JsonSerializer.Serialize(configuration),
+            JsonSerializer.Serialize(result.Value),
             sensitiveValue);
     }
 
     [TestMethod]
-    public void RemoteLocatorIsRepresentedOnlyByProtectedReference()
+    public void RemoteLocatorPreparationRetainsOnlySafeEndpoint()
     {
         string sensitiveValue = SecurityTestAssertions.CreateSensitiveValue("REMOTE-LOCATOR");
         string locator = $"https://user:{sensitiveValue}@example.test/private/{sensitiveValue}?key={sensitiveValue}";
-        ProtectedLocatorReference locatorReference = ProtectedLocatorReference.Create();
-
-        DomainResult<ValidatedSourceDraft> result = SourceConfigurationValidator.ValidateRemotePlaylist(
-            "Source",
-            locator,
-            locatorReference);
+        DomainResult<PreparedRemotePlaylistSourceDraft> result =
+            SourceConfigurationValidator.PrepareRemotePlaylist("Source", locator);
 
         Assert.IsTrue(result.IsSuccess);
-        RemotePlaylistSourceConfiguration? configuration =
-            result.Value!.Configuration as RemotePlaylistSourceConfiguration;
-        Assert.IsNotNull(configuration);
-        Assert.AreEqual(locatorReference, configuration!.LocatorReference);
-        Assert.AreEqual("example.test", configuration.SafeEndpoint.Host);
+        Assert.AreEqual("example.test", result.Value!.SafeEndpoint.Host);
         SecurityTestAssertions.DoesNotContainSensitive(
-            JsonSerializer.Serialize(configuration),
+            JsonSerializer.Serialize(result.Value),
             sensitiveValue);
     }
 
     [TestMethod]
-    public void MissingReferencesAndCredentialsUseStableTypedErrors()
+    public void MissingCredentialsUseStableTypedErrors()
     {
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateXtream(
+            SourceConfigurationValidator.PrepareXtream(
                 "Source",
                 "https://example.test/api",
                 null,
-                "password",
-                SecretReference.Create()),
+                "password"),
             DomainErrorCode.UsernameRequired);
         SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateXtream(
+            SourceConfigurationValidator.PrepareXtream(
                 "Source",
                 "https://example.test/api",
                 "user",
-                null,
-                SecretReference.Create()),
+                null),
             DomainErrorCode.PasswordRequired);
-        SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateXtream(
-                "Source",
-                "https://example.test/api",
-                "user",
-                "password",
-                null),
-            DomainErrorCode.SecretReferenceInvalid);
-        SecurityTestAssertions.IsFailure(
-            SourceConfigurationValidator.ValidateRemotePlaylist(
-                "Source",
-                "https://example.test/list",
-                null),
-            DomainErrorCode.SecretReferenceInvalid);
     }
 
     private static SafeEndpoint GetRemoteEndpoint(string locator)
     {
-        DomainResult<ValidatedSourceDraft> result = SourceConfigurationValidator.ValidateRemotePlaylist(
-            "Source",
-            locator,
-            ProtectedLocatorReference.Create());
+        DomainResult<PreparedRemotePlaylistSourceDraft> result =
+            SourceConfigurationValidator.PrepareRemotePlaylist("Source", locator);
         Assert.IsTrue(result.IsSuccess, "A safe endpoint fixture was rejected.");
-        return result.Value!.Configuration.SafeEndpoint;
+        return result.Value!.SafeEndpoint;
     }
 }

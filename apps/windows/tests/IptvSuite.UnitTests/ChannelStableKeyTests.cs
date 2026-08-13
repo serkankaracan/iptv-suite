@@ -57,7 +57,7 @@ public sealed class ChannelStableKeyTests
         Assert.AreEqual(FirstSource, first.Value.SourceId);
         Assert.AreEqual(64, first.Value.Value.Length);
         Assert.AreEqual(
-            "BB601A0613ED996EE6C5F5ABFF7971BB7A9865111047BA77BC020AFF24A70325",
+            "A0C70349A309F776B0BAFBA2C54941874FCEAC8E4DD9502B6F2EB01B8E3FCBBB",
             first.Value.Value);
     }
 

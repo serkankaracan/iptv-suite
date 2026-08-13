@@ -11,64 +11,88 @@ public static class SourceConfigurationValidator
     public const int MaxUsernameUnicodeScalars = 256;
     public const int MaxPasswordUnicodeScalars = 1024;
 
-    public static DomainResult<ValidatedSourceDraft> ValidateXtream(
+    public static DomainResult<PreparedXtreamSourceDraft> PrepareXtream(
         string? displayName,
         string? locator,
         string? username,
-        string? password,
-        SecretReference? credentialsReference)
+        string? password)
     {
         DomainResult<string> normalizedName = ValidateDisplayName(displayName);
         if (!normalizedName.IsSuccess)
         {
-            return DomainResult.Failure<ValidatedSourceDraft>(normalizedName.Error!);
+            return DomainResult.Failure<PreparedXtreamSourceDraft>(normalizedName.Error!);
         }
 
         DomainResult<SafeEndpoint> endpoint = ValidateHttpsLocator(locator, rejectUserInfo: true);
         if (!endpoint.IsSuccess)
         {
-            return DomainResult.Failure<ValidatedSourceDraft>(endpoint.Error!);
+            return DomainResult.Failure<PreparedXtreamSourceDraft>(endpoint.Error!);
         }
 
         DomainErrorCode? credentialError = ValidateCredentials(username, password);
         if (credentialError is not null)
         {
-            return DomainResult.Failure<ValidatedSourceDraft>(credentialError.Value);
+            return DomainResult.Failure<PreparedXtreamSourceDraft>(credentialError.Value);
         }
 
-        if (credentialsReference is null)
-        {
-            return DomainResult.Failure<ValidatedSourceDraft>(DomainErrorCode.SecretReferenceInvalid);
-        }
-
-        XtreamSourceConfiguration configuration = new(endpoint.Value!, credentialsReference);
-        return DomainResult.Success(new ValidatedSourceDraft(normalizedName.Value!, configuration));
+        return DomainResult.Success(
+            new PreparedXtreamSourceDraft(normalizedName.Value!, endpoint.Value!));
     }
 
-    public static DomainResult<ValidatedSourceDraft> ValidateRemotePlaylist(
+    public static DomainResult<PreparedRemotePlaylistSourceDraft> PrepareRemotePlaylist(
         string? displayName,
-        string? locator,
-        ProtectedLocatorReference? locatorReference)
+        string? locator)
     {
         DomainResult<string> normalizedName = ValidateDisplayName(displayName);
         if (!normalizedName.IsSuccess)
         {
-            return DomainResult.Failure<ValidatedSourceDraft>(normalizedName.Error!);
+            return DomainResult.Failure<PreparedRemotePlaylistSourceDraft>(normalizedName.Error!);
         }
 
         DomainResult<SafeEndpoint> endpoint = ValidateHttpsLocator(locator, rejectUserInfo: false);
         if (!endpoint.IsSuccess)
         {
-            return DomainResult.Failure<ValidatedSourceDraft>(endpoint.Error!);
+            return DomainResult.Failure<PreparedRemotePlaylistSourceDraft>(endpoint.Error!);
         }
 
-        if (locatorReference is null)
+        return DomainResult.Success(
+            new PreparedRemotePlaylistSourceDraft(normalizedName.Value!, endpoint.Value!));
+    }
+
+    internal static ValidatedSourceDraft CompleteXtream(
+        SourceId sourceId,
+        PreparedXtreamSourceDraft prepared,
+        SecretReference credentialsReference)
+    {
+        if (sourceId.IsEmpty)
         {
-            return DomainResult.Failure<ValidatedSourceDraft>(DomainErrorCode.SecretReferenceInvalid);
+            throw new ArgumentException("A non-empty source identifier is required.", nameof(sourceId));
         }
 
-        RemotePlaylistSourceConfiguration configuration = new(endpoint.Value!, locatorReference);
-        return DomainResult.Success(new ValidatedSourceDraft(normalizedName.Value!, configuration));
+        ArgumentNullException.ThrowIfNull(prepared);
+        ArgumentNullException.ThrowIfNull(credentialsReference);
+        var configuration = new XtreamSourceConfiguration(
+            prepared.SafeEndpoint,
+            credentialsReference);
+        return new ValidatedSourceDraft(sourceId, prepared.NormalizedDisplayName, configuration);
+    }
+
+    internal static ValidatedSourceDraft CompleteRemotePlaylist(
+        SourceId sourceId,
+        PreparedRemotePlaylistSourceDraft prepared,
+        ProtectedLocatorReference locatorReference)
+    {
+        if (sourceId.IsEmpty)
+        {
+            throw new ArgumentException("A non-empty source identifier is required.", nameof(sourceId));
+        }
+
+        ArgumentNullException.ThrowIfNull(prepared);
+        ArgumentNullException.ThrowIfNull(locatorReference);
+        var configuration = new RemotePlaylistSourceConfiguration(
+            prepared.SafeEndpoint,
+            locatorReference);
+        return new ValidatedSourceDraft(sourceId, prepared.NormalizedDisplayName, configuration);
     }
 
     internal static DomainResult<SafeEndpoint> ValidateHttpsLocator(string? locator, bool rejectUserInfo)

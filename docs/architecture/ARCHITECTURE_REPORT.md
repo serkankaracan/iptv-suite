@@ -14,7 +14,7 @@ Geniş IPTV compatibility için birincil playback adayı **non-GPL libVLC + LibV
 
 Platformlar aynı UI/player implementation'ını paylaşmayacaktır. Samsung ayrı Tizen Web + AVPlay, Android Kotlin + Media3, Apple Swift + AVFoundation/AVKit yönündedir. Paylaşım; versioned terminology, contracts, error codes ve sentetik test vectors ile sınırlıdır. İlk organizasyon modeli, platform sınırları kesin bir monorepo'dur.
 
-M1 bootstrap, M2 test/quality altyapısı ve M3 domain/validation mühendislik kabulleri tamamlanmıştır. M2 exact-SDK local iki-run gate'i ile commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` üzerindeki [hosted run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270) quality, signed packaged-host ve coordinator işlerini geçmiştir. M3 local gate'i safe source configuration, domain invariant, stable key/error, redaction ve catalog/HLS karar contract'larıyla 105/105 testi iki koşuda geçmiştir. M4'ün Application secret-store contract'ı, typed initialization sonucu, bounded stale-temp cleanup'ı ve Windows CurrentUser DPAPI adapter'ı uygulanmış; local foundation gate 135/135 testi iki koşuda geçmiştir. M4 milestone'u packaged lifecycle, wrong-user, source deletion/record reconciliation ve 50k kararına kadar açıktır; network/provider, parser, database, feature UI ve playback implementation'ı hâlâ yoktur.
+M1 bootstrap, M2 test/quality altyapısı ve M3 domain/validation mühendislik kabulleri tamamlanmıştır. M2 exact-SDK local iki-run gate'i ile commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` üzerindeki [hosted run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270) quality, signed packaged-host ve coordinator işlerini geçmiştir. M3 local gate'i safe source configuration, domain invariant, stable key/error, redaction ve catalog/HLS karar contract'larıyla 105/105 testi iki koşuda geçmiştir. M4'ün Application secret-store contract'ı, typed initialization sonucu, bounded stale-temp cleanup'ı ve Windows CurrentUser DPAPI adapter'ı uygulanmıştır. Güncel local foundation gate; source draft'ın pre-validation→protected create→store-issued reference attach operation'ı, fail-closed packaged composition ve 1.024 startup temp-aday cap'i dahil architecture 12, unit 114 ve integration 27 olmak üzere 153/153 testi iki koşuda geçmiştir. Yeni directory-initialization alanını taşıyan hosted package evidence'i pending'dir. M4 milestone'u packaged update/reset/uninstall, wrong-user, source deletion/record reconciliation ve 50k kararına kadar açıktır; network/provider, parser, database, feature UI ve playback implementation'ı hâlâ yoktur.
 
 ## A. Gereksinim analizi
 
@@ -227,6 +227,8 @@ M10 en fazla küçük, throwaway fakat ölçümlü bir harness'tir; production p
 
 Bu bir modular monolith'tir. Microservice/backend yoktur. CQRS/event sourcing/global immutable store yoktur. Abstraction yalnız değişen dış sistem veya test clock/player/transport gibi gerçek seam için vardır.
 
+M4'ün ilk gerçek Application orchestration'ı `SourceDraftProtectionService`'tir: pure validation store mutation'ından önce tamamlanır; bounded/versioned secret payload typed `ISecretStore` create operation'ına verilir; başarılı commit'ten dönen exact opaque reference ile onu üreten `SourceId` aynı draft'a bağlanır ve temporary buffer sıfırlanır. `ContentSource` kimlik/ad/configuration üçlüsünü bu draft'tan birlikte alır. Doğrudan await edilen çağrıda commit'ten sonra cancellation yeniden gözlenmez ve reference başarılı sonuçla döner. Caller abandonment/retry, duplicate create, process crash/OOM, source metadata persistence, update rollback ve orphan reconciliation kanıtlanmaz. Payload yolu encode-only'dir; decoder/round-trip ve malformed version/length/trailing-data compatibility henüz yoktur.
+
 ### E.2 State management
 
 - View-model yalnız presentation state taşır.
@@ -272,6 +274,8 @@ Complete download tek string'e çevrilmez. Unknown directives bounded warning ol
 
 - SQLite normalized metadata, index ve snapshot state.
 - DPAPI CurrentUser/LOCAL=user ile protected source secret ve M3U locator.
+- Packaged composition root'ta `ApplicationData.LocalCachePath\ProtectedStore\v1`; tek factory call, retained store, initialization failure'da pencere öncesi fail-closed ve fallback yasağı.
+- Startup stale-temp cleanup için 1.024 aday cap'i; aşımda cleanup mutation'ı yapmadan fail-closed. Bu aynı-user candidate-fill DoS'unu engellemez.
 - Credential Locker 20 kayıt/roaming/bulk locator nedeniyle primary değil.
 - 50k DPAPI layout M4 benchmark koşullu; gerekirse reviewed envelope encryption/vetted encrypted DB.
 - Failed/cancelled import eski active snapshot'ı değiştirmez.
@@ -294,7 +298,7 @@ Complete download tek string'e çevrilmez. Unknown directives bounded warning ol
 
 ### E.7 Dependency injection ve testability
 
-Composition root'ta Microsoft.Extensions DI benzeri minimal container uygun olabilir; M1'de gerçek composition ihtiyacı olmadığı için DI paketi eklenmemiştir. Exact paket ilk gerçek adapter wiring milestone'unda stable sürüm ve ihtiyaçla seçilir. Source adapter, transport, clock, secret store, catalog store, image fetch/cache ve player seam'leri injection alır. “Her sınıfa interface” yoktur.
+Composition root M4'te secret-store factory'sini doğrudan ve tek kez wire eder; başarılı store'u app lifetime boyunca tutar, typed initialization failure'da UI oluşturmadan fail-closed olur ve fallback yaratmaz. Bu tek dependency için DI paketi eklenmemiştir. Gelecekte birden fazla gerçek adapter aynı lifecycle/composition ihtiyacını kanıtlarsa stable minimal container ayrı dependency kararıyla eklenebilir. Source adapter, transport, clock, secret store, catalog store, image fetch/cache ve player seam'leri injection alır. “Her sınıfa interface” yoktur.
 
 Test sınırları:
 
@@ -324,9 +328,11 @@ Production projects -X-> any test project
 
 Generator `1.0.0` / algorithm `1` / seed `20260809` ile byte-identical sentetik record ve SHA-256/provenance manifesti üretir. Corpus gerçek provider/account/credential/playlist/medya içermez. Internal `LicenseRef-IPTVSuite-Synthetic-Test-Only` durumu `UNVERIFIED` olduğundan public paylaşım hakkı değildir. Canary de gerçek secret değil, bilinen marker sızıntısını kanıtlayan test girdisidir; genel credential/redaction kanıtı sayılmaz.
 
-Local `Invoke-WindowsQualityGate.ps1`; exact SDK locked restore, Debug/Release x64 build, full suite'in ayrı TRX dizinlerinde iki ardışık yeşil koşusu ve eşit sonuç seti, fixture SHA-256 eşitliği, armed sentinel non-zero/recovery ve artifact canary kontrollerini birleştirir. Hosted workflow bütün PR, `merge_group`, `main` push ve manual dispatch olaylarında exact SDK ile bu gate'i çalıştırır; required check'in path filter nedeniyle `Pending` kalmaması için üst seviye path filter yoktur. Quality sonrasındaki package job'u signed x64 MSIX'i hedefli test-payload/canary sızıntısına karşı inceler, kurar, görünür AUMID launch yapar, normal kapatır ve exact cleanup uygular. `always()` coordinator'ı quality fail veya package skip/fail durumunu tek `Required Windows gate` sonucuna taşır.
+Local `Invoke-WindowsQualityGate.ps1`; exact SDK locked restore, Debug/Release x64 build, full suite'in ayrı TRX dizinlerinde iki ardışık yeşil koşusu ve eşit sonuç seti, fixture SHA-256 eşitliği, armed sentinel non-zero/recovery ve artifact canary kontrollerini birleştirir. Hosted workflow bütün PR, `merge_group`, `main` push ve manual dispatch olaylarında exact SDK ile bu gate'i çalıştırır; required check'in path filter nedeniyle `Pending` kalmaması için üst seviye path filter yoktur. Quality sonrasındaki package job'u signed x64 MSIX'i hedefli test-payload/canary sızıntısına karşı inceler, kurar, görünür AUMID launch yapar, exact package-family `LocalCache\ProtectedStore\v1` directory initialization'ını/reparse-point yasağını kontrol eder, normal kapatır ve exact cleanup uygular. Başarılı yeni evidence `ProtectedStoreDirectoryInitialized=true` taşır; bu yalnız directory initialization kanıtıdır, DPAPI CRUD veya lifecycle kanıtı değildir. `always()` coordinator'ı quality fail veya package skip/fail durumunu tek `Required Windows gate` sonucuna taşır.
 
 Bir local/hosted komut tanımının varlığı başarılı run kanıtı değildir. Tarihsel M2 local exact-SDK gate'i 2026-08-09'da 22 testi iki koşuda geçmiş; M3 sonrası local gate aynı gün 105 testi iki koşuda geçmiştir. M2 hosted run `31327398270` üç işi de geçirmiş; iki sanitized artifact'ın commit bağı, quality şekli, fixture hashleri, signature, capability allowlist'i ve package smoke sonuçları `14/14` assertion ile doğrulanmıştır. Artifact taraması GitHub job logunu kapsamaz; log canary sonucu `UNVERIFIED` kalır. Yeşil hosted smoke yalnız çalıştığı runner ve commit için package zincirini kanıtlar; feature UI/UIA/accessibility, update/migration, WACK/Store, gerçek provider/player/codec, genel secret yokluğu, ARM64 veya cihaz matrisi pass'i değildir. Branch policy enforcement mevcut private-repository planında etkin değildir. Ayrıntılı kalıcı M2 kaydı [M2 completion evidence](../quality/M2_COMPLETION_EVIDENCE.md) belgesindedir.
+
+Tarihsel M2 hosted artifact'ı `ProtectedStoreDirectoryInitialized` alanını taşımaz; güncel hosted packaged initialization kanıtı pending'dir.
 
 ## F. Repository stratejisi
 

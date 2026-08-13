@@ -10,6 +10,7 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
 {
     private const int FileBufferSize = 4096;
     private const int MaxMoveAttempts = 8;
+    private const int MaxStartupTemporaryEntries = 1024;
     private const string TemporaryFilePrefix = "temporary-v1-";
     private const string TemporaryFileSuffix = ".tmp";
     private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromHours(24);
@@ -82,11 +83,12 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
         ValidateValue(value);
         (SecretReference reference, SecretStoreKey key) = SecretStoreKey.IssueCredentials(sourceId);
         cancellationToken.ThrowIfCancellationRequested();
+        SecretReferenceCreationResult success = SecretReferenceCreationResult.Succeeded(reference);
 
         try
         {
             await CreateRecordAsync(key, value, cancellationToken).ConfigureAwait(false);
-            return SecretReferenceCreationResult.Succeeded(reference);
+            return success;
         }
         catch (CryptographicException)
         {
@@ -111,11 +113,13 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
         ValidateValue(value);
         (ProtectedLocatorReference reference, SecretStoreKey key) = SecretStoreKey.IssueLocator(sourceId, purpose);
         cancellationToken.ThrowIfCancellationRequested();
+        ProtectedLocatorReferenceCreationResult success =
+            ProtectedLocatorReferenceCreationResult.Succeeded(reference);
 
         try
         {
             await CreateRecordAsync(key, value, cancellationToken).ConfigureAwait(false);
-            return ProtectedLocatorReferenceCreationResult.Succeeded(reference);
+            return success;
         }
         catch (CryptographicException)
         {
@@ -560,6 +564,7 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         DateTimeOffset staleCutoff = _timeProvider.GetUtcNow() - StaleTemporaryFileAge;
+        List<string> temporaryEntries = new(MaxStartupTemporaryEntries);
 
         foreach (string entryPath in Directory.EnumerateFileSystemEntries(
             _storageDirectoryPath,
@@ -574,6 +579,18 @@ public sealed class DpapiCurrentUserSecretStore : ISecretStore
                 continue;
             }
 
+            if (temporaryEntries.Count == MaxStartupTemporaryEntries)
+            {
+                throw new IOException("The protected-store temporary-entry limit was exceeded.");
+            }
+
+            temporaryEntries.Add(entryPath);
+        }
+
+        foreach (string entryPath in temporaryEntries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string fileName = Path.GetFileName(entryPath);
             string temporaryPath = GetContainedPath(fileName);
 
             if (!TryGetAttributes(temporaryPath, out FileAttributes attributes))

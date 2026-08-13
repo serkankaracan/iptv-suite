@@ -50,7 +50,7 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
             FakeRecordKey key;
             do
             {
-                reference = SecretReference.Create();
+                reference = CreateSecretReference();
                 key = ForCredentials(sourceId, reference);
             }
             while (_records.ContainsKey(key));
@@ -79,7 +79,7 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
             FakeRecordKey key;
             do
             {
-                reference = ProtectedLocatorReference.Create();
+                reference = CreateLocatorReference();
                 key = ForLocator(sourceId, purpose, reference);
             }
             while (_records.ContainsKey(key));
@@ -197,6 +197,23 @@ internal sealed class M4InMemorySecretStore : ISecretStore, IDisposable
         ProtectedLocatorReference reference) => new(sourceId, purpose, reference);
 
     private static bool IsZeroed(byte[] buffer) => buffer.All(value => value == 0);
+
+    private static SecretReference CreateSecretReference()
+    {
+        DomainResult<SecretReference> result = SecretReference.Parse($"secret-ref-v1:{Guid.NewGuid():N}");
+        return result.IsSuccess
+            ? result.Value!
+            : throw new InvalidOperationException("A synthetic secret reference could not be created.");
+    }
+
+    private static ProtectedLocatorReference CreateLocatorReference()
+    {
+        DomainResult<ProtectedLocatorReference> result =
+            ProtectedLocatorReference.Parse($"locator-ref-v1:{Guid.NewGuid():N}");
+        return result.IsSuccess
+            ? result.Value!
+            : throw new InvalidOperationException("A synthetic locator reference could not be created.");
+    }
 
     private static void ValidateSource(SourceId sourceId)
     {

@@ -63,9 +63,7 @@ public sealed class ContentSource
     public DomainErrorCode? LastErrorCode { get; }
 
     public static DomainResult<ContentSource> Create(
-        SourceId id,
-        string? displayName,
-        SourceConfiguration? configuration,
+        ValidatedSourceDraft? sourceDraft,
         ContentSourceStatus status,
         DateTimeOffset createdAt,
         DateTimeOffset updatedAt,
@@ -77,13 +75,13 @@ public sealed class ContentSource
         bool hasSuccessfulSync = lastSuccessfulSyncAt.HasValue;
         bool hasLastError = lastErrorCode.HasValue;
 
-        if (id.IsEmpty || configuration is null ||
-            (configuration is not XtreamSourceConfiguration &&
-                configuration is not RemotePlaylistSourceConfiguration) ||
+        if (sourceDraft is null || sourceDraft.SourceId.IsEmpty ||
+            (sourceDraft.Configuration is not XtreamSourceConfiguration &&
+                sourceDraft.Configuration is not RemotePlaylistSourceConfiguration) ||
             !Enum.IsDefined(status) ||
             createdAt == default || updatedAt == default || updatedAt < createdAt ||
             !DomainText.TryNormalizeRequired(
-                displayName,
+                sourceDraft.NormalizedDisplayName,
                 MaximumDisplayNameLength,
                 out string normalizedDisplayName) ||
             (activeSnapshotId.HasValue && activeSnapshotId.Value.IsEmpty) ||
@@ -99,9 +97,9 @@ public sealed class ContentSource
 
         return DomainResult.Success(
             new ContentSource(
-                id,
+                sourceDraft.SourceId,
                 normalizedDisplayName,
-                configuration,
+                sourceDraft.Configuration,
                 status,
                 activeSnapshotId,
                 createdAt.ToUniversalTime(),

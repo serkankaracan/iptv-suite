@@ -17,7 +17,6 @@ internal static class WindowsSecretStoreFactory
             string localCachePath = ApplicationData.GetDefault().LocalCachePath;
             string protectedStorePath = Path.Combine(
                 localCachePath,
-                "IptvSuite",
                 "ProtectedStore",
                 "v1");
             var store = new DpapiCurrentUserSecretStore(protectedStorePath, cancellationToken);

@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace IptvSuite.UnitTests;
@@ -5,7 +6,8 @@ namespace IptvSuite.UnitTests;
 [TestClass]
 public sealed class ContentSourceTests
 {
-    private static readonly SourceConfiguration RemoteConfiguration = CreateRemoteConfiguration();
+    private static readonly ValidatedSourceDraft RemoteDraft =
+        SourceDraftTestFixtures.CreateRemoteDraft(SourceId.Generate());
 
     [TestMethod]
     public void DraftFactoryNormalizesDisplayNameAndUtcInstants()
@@ -13,19 +15,23 @@ public sealed class ContentSourceTests
         DateTimeOffset createdAt = new(2026, 8, 9, 16, 0, 0, TimeSpan.FromHours(3));
         DateTimeOffset updatedAt = createdAt.AddMinutes(5);
 
+        SourceId sourceId = SourceId.Generate();
+        ValidatedSourceDraft sourceDraft = SourceDraftTestFixtures.CreateRemoteDraft(
+            sourceId,
+            "  Cafe\u0301 Source  ");
         DomainResult<ContentSource> result = ContentSource.Create(
-            SourceId.Generate(),
-            "  Cafe\u0301 Source  ",
-            RemoteConfiguration,
+            sourceDraft,
             ContentSourceStatus.Draft,
             createdAt,
             updatedAt);
 
         Assert.IsTrue(result.IsSuccess);
         ContentSource source = result.Value!;
+        Assert.AreEqual(sourceId, source.Id);
         Assert.AreEqual("Caf\u00E9 Source", source.DisplayName);
         Assert.AreEqual(SourceKind.RemotePlaylist, source.Kind);
-        Assert.AreSame(RemoteConfiguration.SafeEndpoint, source.SafeEndpoint);
+        Assert.AreSame(sourceDraft.Configuration, source.Configuration);
+        Assert.AreSame(sourceDraft.Configuration.SafeEndpoint, source.SafeEndpoint);
         Assert.AreEqual(TimeSpan.Zero, source.CreatedAt.Offset);
         Assert.AreEqual(TimeSpan.Zero, source.UpdatedAt.Offset);
         Assert.IsNull(source.ActiveSnapshotId);
@@ -36,6 +42,20 @@ public sealed class ContentSourceTests
     }
 
     [TestMethod]
+    public void PublicFactoryCannotReplaceTheProtectedDraftSourceIdentifier()
+    {
+        MethodInfo? create = typeof(ContentSource).GetMethod(
+            nameof(ContentSource.Create),
+            BindingFlags.Public | BindingFlags.Static);
+        Assert.IsNotNull(create);
+        Type[] parameterTypes = create.GetParameters().Select(parameter => parameter.ParameterType).ToArray();
+
+        Assert.AreEqual(typeof(ValidatedSourceDraft), parameterTypes[0]);
+        Assert.IsFalse(parameterTypes.Contains(typeof(SourceId)));
+        Assert.IsFalse(parameterTypes.Contains(typeof(SourceConfiguration)));
+    }
+
+    [TestMethod]
     public void ReadyFactoryRetainsOnlyAtomicSnapshotLifecycleMetadata()
     {
         DateTimeOffset createdAt = new(2026, 8, 9, 13, 0, 0, TimeSpan.Zero);
@@ -43,9 +63,7 @@ public sealed class ContentSourceTests
         SnapshotId activeSnapshotId = SnapshotId.Generate();
 
         DomainResult<ContentSource> result = ContentSource.Create(
-            SourceId.Generate(),
-            "Synthetic Ready Source",
-            RemoteConfiguration,
+            RemoteDraft,
             ContentSourceStatus.Ready,
             createdAt,
             synchronizedAt,
@@ -65,10 +83,11 @@ public sealed class ContentSourceTests
         string oneHundredAstralScalars = string.Concat(
             Enumerable.Repeat("\U0001F4FA", ContentSource.MaximumDisplayNameLength));
 
-        DomainResult<ContentSource> result = ContentSource.Create(
+        ValidatedSourceDraft sourceDraft = SourceDraftTestFixtures.CreateRemoteDraft(
             SourceId.Generate(),
-            oneHundredAstralScalars,
-            RemoteConfiguration,
+            oneHundredAstralScalars);
+        DomainResult<ContentSource> result = ContentSource.Create(
+            sourceDraft,
             ContentSourceStatus.Draft,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow);
@@ -84,24 +103,17 @@ public sealed class ContentSourceTests
         string maximumNormalizedName = string.Concat(
             Enumerable.Repeat(decomposedScalar, ContentSource.MaximumDisplayNameLength));
 
+        ValidatedSourceDraft sourceDraft = SourceDraftTestFixtures.CreateRemoteDraft(
+            SourceId.Generate(),
+            $"  {maximumNormalizedName}  ");
         DomainResult<ContentSource> accepted = ContentSource.Create(
-            SourceId.Generate(),
-            $"  {maximumNormalizedName}  ",
-            RemoteConfiguration,
-            ContentSourceStatus.Draft,
-            new DateTimeOffset(2026, 8, 9, 13, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 8, 9, 13, 1, 0, TimeSpan.Zero));
-        DomainResult<ContentSource> rejected = ContentSource.Create(
-            SourceId.Generate(),
-            maximumNormalizedName + decomposedScalar,
-            RemoteConfiguration,
+            sourceDraft,
             ContentSourceStatus.Draft,
             new DateTimeOffset(2026, 8, 9, 13, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 8, 9, 13, 1, 0, TimeSpan.Zero));
 
         Assert.IsTrue(accepted.IsSuccess);
         Assert.AreEqual(ContentSource.MaximumDisplayNameLength, accepted.Value!.DisplayName.Length);
-        AssertInvariantFailure(rejected, "normalized-scalar-overflow");
     }
 
     [TestMethod]
@@ -122,9 +134,7 @@ public sealed class ContentSourceTests
         foreach ((string caseId, ContentSourceStatus status, bool hasSnapshot, bool hasSync, bool hasError) in cases)
         {
             DomainResult<ContentSource> result = ContentSource.Create(
-                SourceId.Generate(),
-                "Synthetic Lifecycle Source",
-                RemoteConfiguration,
+                RemoteDraft,
                 status,
                 createdAt,
                 updatedAt,
@@ -137,44 +147,28 @@ public sealed class ContentSourceTests
     }
 
     [TestMethod]
-    public void FactoryRejectsUntrustedDisplayAndInvalidTimeBoundsWithoutEchoingThem()
+    public void FactoryRejectsMissingDraftAndInvalidTimeBounds()
     {
-        (string CaseId, string DisplayName, bool ReverseTimes)[] cases =
-        [
-            ("empty-display", string.Empty, false),
-            ("control-display", "Synthetic\0Source", false),
-            ("oversized-display", new string('S', ContentSource.MaximumDisplayNameLength + 1), false),
-            ("oversized-astral-display", string.Concat(
-                Enumerable.Repeat("\U0001F4FA", ContentSource.MaximumDisplayNameLength + 1)), false),
-            ("invalid-utf16-display", "\uD800", false),
-            ("reverse-times", "Synthetic Source", true),
-        ];
-
         DateTimeOffset createdAt = new(2026, 8, 9, 13, 0, 0, TimeSpan.Zero);
         DateTimeOffset updatedAt = createdAt.AddMinutes(1);
+        (string CaseId, ValidatedSourceDraft? Draft, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt)[] cases =
+        [
+            ("missing-draft", null, createdAt, updatedAt),
+            ("missing-created-time", RemoteDraft, default, updatedAt),
+            ("missing-updated-time", RemoteDraft, createdAt, default),
+            ("reverse-times", RemoteDraft, updatedAt, createdAt),
+        ];
 
-        foreach ((string caseId, string displayName, bool reverseTimes) in cases)
+        foreach ((string caseId, ValidatedSourceDraft? draft, DateTimeOffset start, DateTimeOffset end) in cases)
         {
             DomainResult<ContentSource> result = ContentSource.Create(
-                SourceId.Generate(),
-                displayName,
-                RemoteConfiguration,
+                draft,
                 ContentSourceStatus.Draft,
-                reverseTimes ? updatedAt : createdAt,
-                reverseTimes ? createdAt : updatedAt);
+                start,
+                end);
 
             AssertInvariantFailure(result, caseId);
         }
-    }
-
-    private static SourceConfiguration CreateRemoteConfiguration()
-    {
-        DomainResult<ValidatedSourceDraft> result = SourceConfigurationValidator.ValidateRemotePlaylist(
-            "Synthetic Playlist",
-            "https://fixtures.invalid/catalog.m3u",
-            ProtectedLocatorReference.Create());
-        Assert.IsTrue(result.IsSuccess);
-        return result.Value!.Configuration;
     }
 
     private static void AssertInvariantFailure(DomainResult<ContentSource> result, string caseId)

@@ -16,11 +16,13 @@ internal static class DpapiProtectedEnvelopeCodec
 
     internal const int MaxProtectedRecordBytes = 128 * 1024;
 
-    private static ReadOnlySpan<byte> EnvelopeMagic => "IPTVSEC!"u8;
+    private static ReadOnlySpan<byte> EnvelopeMagic => "SRCSEC01"u8;
 
-    private static ReadOnlySpan<byte> EntropyDomain => "iptv-suite/dpapi-current-user/entropy/v1"u8;
+    private static ReadOnlySpan<byte> EntropyDomain =>
+        "protected-source-store/dpapi-current-user/entropy/v1"u8;
 
-    private static ReadOnlySpan<byte> FileNameDomain => "iptv-suite/dpapi-current-user/file-name/v1"u8;
+    private static ReadOnlySpan<byte> FileNameDomain =>
+        "protected-source-store/dpapi-current-user/file-name/v1"u8;
 
     internal static byte[] Protect(SecretStoreKey key, ReadOnlySpan<byte> value)
     {

@@ -13,8 +13,8 @@ public sealed class LiveChannelTests
     [TestMethod]
     public void RemoteChannelFactoryNormalizesMetadataAndRetainsOnlyOpaqueLocators()
     {
-        ProtectedLocatorReference streamReference = ProtectedLocatorReference.Create();
-        ProtectedLocatorReference logoReference = ProtectedLocatorReference.Create();
+        ProtectedLocatorReference streamReference = SourceDraftTestFixtures.CreateLocatorReference();
+        ProtectedLocatorReference logoReference = SourceDraftTestFixtures.CreateLocatorReference();
 
         DomainResult<LiveChannel> result = LiveChannel.Create(
             ChannelId.Generate(),
@@ -109,7 +109,7 @@ public sealed class LiveChannelTests
 
         DomainResult<LiveChannel> ambiguousPlayback = CreateValidChannel(
             providerPlaybackKey: CreateProviderItemKey("synthetic-stream-ambiguous"),
-            streamReference: ProtectedLocatorReference.Create());
+            streamReference: SourceDraftTestFixtures.CreateLocatorReference());
         AssertInvariantFailure(ambiguousPlayback, "ambiguous-playback-reference");
     }
 

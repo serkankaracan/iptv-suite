@@ -11,8 +11,8 @@ public sealed class OpaqueReferenceSecurityTests
     [TestMethod]
     public void SecretReferencesAreRandomOpaqueAndJsonRoundTripSafe()
     {
-        SecretReference first = SecretReference.Create();
-        SecretReference second = SecretReference.Create();
+        SecretReference first = SourceDraftTestFixtures.CreateSecretReference();
+        SecretReference second = SourceDraftTestFixtures.CreateSecretReference();
 
         Assert.AreNotEqual(first, second);
         Assert.AreEqual("[SECRET-REFERENCE]", first.ToString());
@@ -29,8 +29,8 @@ public sealed class OpaqueReferenceSecurityTests
     [TestMethod]
     public void ProtectedLocatorReferencesAreRandomOpaqueAndJsonRoundTripSafe()
     {
-        ProtectedLocatorReference first = ProtectedLocatorReference.Create();
-        ProtectedLocatorReference second = ProtectedLocatorReference.Create();
+        ProtectedLocatorReference first = SourceDraftTestFixtures.CreateLocatorReference();
+        ProtectedLocatorReference second = SourceDraftTestFixtures.CreateLocatorReference();
 
         Assert.AreNotEqual(first, second);
         Assert.AreEqual("[PROTECTED-LOCATOR-REFERENCE]", first.ToString());
@@ -75,6 +75,17 @@ public sealed class OpaqueReferenceSecurityTests
 
         SecurityTestAssertions.DoesNotContainSensitive(secretException.Message, sensitiveValue);
         SecurityTestAssertions.DoesNotContainSensitive(locatorException.Message, sensitiveValue);
+    }
+
+    [TestMethod]
+    public void ProductionCallersCannotIssueOpaqueReferencesDirectly()
+    {
+        Assert.IsNull(typeof(SecretReference).GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static));
+        Assert.IsNull(typeof(ProtectedLocatorReference).GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static));
     }
 
     private static string GetDebuggerDisplay<T>()

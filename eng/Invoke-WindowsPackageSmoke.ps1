@@ -150,6 +150,7 @@ $environmentBackup = @{}
 $primaryFailure = $null
 $successEvidence = $null
 $successMessage = $null
+$protectedStoreDirectoryInitialized = $false
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
     AppxBundle                    = "Never"
@@ -858,6 +859,32 @@ try {
     if ($launchedProcess.HasExited) {
         throw ("The packaged application exited during the launch stability interval (exit code 0x{0:X8})." -f [int]$launchedProcess.ExitCode)
     }
+
+    $packageFamilyName = $installedPackage.PackageFamilyName
+    $protectedStoreDirectoryExists = $false
+    $protectedStoreAttributes = [System.IO.FileAttributes]0
+    try {
+        $protectedStorePath = Join-Path `
+            $env:LOCALAPPDATA `
+            "Packages\$packageFamilyName\LocalCache\ProtectedStore\v1"
+        $protectedStoreDirectoryExists = Test-Path `
+            -LiteralPath $protectedStorePath `
+            -PathType Container
+        if ($protectedStoreDirectoryExists) {
+            $protectedStoreAttributes = [System.IO.File]::GetAttributes($protectedStorePath)
+        }
+    }
+    catch {
+        throw "The packaged protected-store directory could not be inspected safely."
+    }
+    if (-not $protectedStoreDirectoryExists) {
+        throw "The packaged application did not initialize its protected-store directory."
+    }
+    if (($protectedStoreAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The packaged protected-store directory must not be a reparse point."
+    }
+    $protectedStoreDirectoryInitialized = $true
+
     if (-not $launchedProcess.CloseMainWindow()) {
         throw "The application rejected a normal window-close request."
     }
@@ -874,7 +901,6 @@ try {
         throw ("The application returned a non-zero exit code after the normal window-close request (exit code 0x{0:X8})." -f [int]$exitCode)
     }
 
-    $packageFamilyName = $installedPackage.PackageFamilyName
     $packageFileName = $packages[0].Name
     Remove-ExactDevelopmentPackage
 
@@ -907,6 +933,7 @@ try {
         Capabilities      = @("runFullTrust")
         SignatureStatus   = $signature.Status.ToString()
         PayloadLeakGate   = $true
+        ProtectedStoreDirectoryInitialized = $protectedStoreDirectoryInitialized
         NormalClose       = $true
         PackageRemoved    = $true
     }

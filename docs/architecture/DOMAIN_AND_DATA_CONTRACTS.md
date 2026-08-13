@@ -1,6 +1,6 @@
 # Domain ve veri contract'ları
 
-**Durum:** M3 Windows contract implementation completed; persistence/provider/parser davranışı specification
+**Durum:** M3 Windows contract implementation completed; M4 source-draft protected-create dilimi `IN PROGRESS`; kalıcı metadata/provider/parser davranışı specification
 
 **Tarih:** 2026-08-09
 
@@ -8,7 +8,7 @@
 
 ## 1. Tasarım kuralları
 
-Windows M3 implementation'ı bu belgedeki Live TV terminology'sinin ilk saf `net10.0` karşılığını içerir. Source adı 100, locator 4096, username 256 ve password 1024 Unicode scalar ile sınırlıdır. `SafeEndpoint`, opaque references, stable errors, source/snapshot/category/channel invariant'ları ve content-based catalog/HLS karar contract'ı test edilmiştir. Network, protected persistence, provider mapping, incremental parser ve database bu uygulama iddiasının dışındadır.
+Windows M3 implementation'ı bu belgedeki Live TV terminology'sinin ilk saf `net10.0` karşılığını içerir. Source adı 100, locator 4096, username 256 ve password 1024 Unicode scalar ile sınırlıdır. `SafeEndpoint`, opaque references, stable errors, source/snapshot/category/channel invariant'ları ve content-based catalog/HLS karar contract'ı test edilmiştir. M4'te source-draft girdisini validate edip typed protected-store create sonucundaki opaque reference'ı in-memory `ValidatedSourceDraft`'a bağlayan dar Application operation'ı eklenmiştir. Network, durable source metadata/configuration persistence, provider mapping, incremental parser ve database bu uygulama iddiasının dışındadır.
 
 - Domain dili provider endpoint'ini veya player library'sini değil, ürünü anlatır.
 - Provider payload'ı güvenilmeyen external contract'tır. Adapter sınırında çevrilir; doğrudan presentation veya persistence'e geçmez.
@@ -47,7 +47,7 @@ Bu tablolar language-neutral contract'tır; code-generation talimatı değildir.
 | `displayName` | trimmed text, 1–100 char | User-visible; identity değil. |
 | `kind` | `XtreamCompatible` veya `RemotePlaylist` | MVP closed set. |
 | `safeEndpoint` | `SafeEndpoint` | Yalnız scheme + IDNA host + effective port; user-info/query/fragment yok. |
-| `secretReference` | `SecretReference` | Username/password/full sensitive URL'nin protected kaydına referans. |
+| `secretReference` | Source kind'a göre `SecretReference` veya `ProtectedLocatorReference` | Xtream full locator+username+password kaydına ya da remote-playlist full locator kaydına typed opaque referans; plaintext taşımaz. |
 | `status` | `Draft / Testing / Syncing / Ready / Failed / Disabled / DeletionPending` | Transient progress yüzdesi persist edilmez. |
 | `activeSnapshotId` | optional `SnapshotId` | Yalnız successful atomic import sonrası değişir. |
 | `createdAt`, `updatedAt` | UTC instant | Contract boundary'de ISO 8601. |
@@ -123,6 +123,12 @@ Refresh favorite'ı eşleyemezse onu benzer isimli kanala sessizce bağlamak yer
 
 Bu type'ların serialization ve string-format davranışı explicit olmalıdır. M3'te opaque reference ve stable error JSON contract'ları explicit'tir; aggregate, typed ID, `SafeEndpoint` ve stable-key için varsayılan `System.Text.Json` round-trip bir persistence contract'ı değildir ve M8 mapping kararı öncesi kullanılmaz. Secret ref veya untrusted display string diagnostic scope'a otomatik girmez.
 
+### 4.1 M4 source-draft protected-create sınırı
+
+`SourceDraftProtectionService`, public caller'dan gelen non-empty `SourceId` ve source-kind girdilerini store mutation'ından önce domain validation'dan geçirir. Xtream için full locator+username+password, remote playlist için full locator; strict UTF-8, versioned ve length-prefixed bounded byte payload'a encode edilir. Payload yalnız typed `ISecretStore.CreateCredentialsAsync` veya `CreateLocatorAsync(RemotePlaylistLocator)` call'ına verilir; store-issued reference ve onu üreten exact `SourceId` başarılı `ValidatedSourceDraft` sonucuna bağlanır. `ContentSource` bu draft'tan kimliği, adı ve configuration'ı birlikte alır; ayrı bir caller-supplied `SourceId` ile yeniden eşleme yüzeyi yoktur. Temporary byte buffer `finally` içinde best-effort sıfırlanır; store failure safe `StorageUnavailable` domain sonucuna map edilir.
+
+Doğrudan await edilen başarılı çağrıda store commit'inden sonra cancellation yeniden gözlenmez ve issued reference caller'a sonuçla döner. Bu sınır; caller'ın sonucu gözlememesi/terk etmesi, retry veya aynı `SourceId` ile duplicate create, process crash/OOM, durable metadata persistence, update/delete ya da orphan reconciliation atomikliği sağlamaz. Payload implementation'ı şu an encode-only'dir; decoder/round-trip, unknown version, malformed length, trailing data ve migration compatibility contract'ı henüz yoktur. Source formu/UI wiring'i de uygulanmamıştır.
+
 ## 5. Provider adapter sınırı
 
 Adapter gerçek provider variability'sini çözdüğü için gerekli abstraction'dır. Her entity için generic repository/interface oluşturulmaz.
@@ -132,6 +138,7 @@ Adapter gerçek provider variability'sini çözdüğü için gerekli abstraction
 Conceptual operations:
 
 - `ValidateConfiguration`: yalnız local syntactic/security checks; network yok.
+- `ProtectSourceDraft`: local validation sonrası typed protected create ve store-issued opaque reference'lı `ValidatedSourceDraft`; durable aggregate persistence değil.
 - `ProbeConnection`: bounded, cancellable capability/auth probe.
 - `OpenCatalogStream`: forward-only provider record/playlist byte stream + safe response metadata.
 - `ResolvePlaybackSource`: seçilen `LiveChannel` için `SecretReference`'ı just-in-time çözer; lifetime tek playback attempt.
@@ -199,7 +206,7 @@ Kurallar:
 - M3U'da normalized `group-title`; blank ise synthetic category.
 - Aynı display name fakat farklı provider ID internal olarak ayrı kalır; gelecekte explicit merge rule olmadan birleştirilmez.
 
-### 7.3 Stable channel key algorithm v1
+### 7.3 Stable channel key algorithm v2
 
 1. Non-empty ve source içinde unique provider stream ID: hash `sourceId + provider-kind + provider-id`.
 2. Değilse non-empty unique `tvg-id`: hash `sourceId + m3u-tvg-id`.
@@ -207,6 +214,8 @@ Kurallar:
 4. Collision'da deterministic occurrence discriminator + warning.
 
 Locator fingerprint secure boundary içinde hesaplanır ve loglanmaz. Volatile credential yalnız structure güvenle biliniyorsa fingerprint'ten çıkarılır; aksi halde full protected canonical locator katılır. Algorithm version persist edilir; migration favorite reconciliation ölçer.
+
+V2, doğrulanmamış codename'i hash domain'inden çıkarıp ürün-adından bağımsız `CHANNEL-STABLE-KEY` domain'i kullanır. Bu pre-release değişiklik v1 geliştirme golden'ını bilinçli olarak geçersiz kılar; yayımlanmış kullanıcı verisi veya v1→v2 migration kabulü yoktur.
 
 ### 7.4 Duplicate
 
