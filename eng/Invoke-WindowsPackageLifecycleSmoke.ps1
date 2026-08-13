@@ -151,6 +151,7 @@ $updatedArtifacts = $null
 $baselinePackageSha256 = $null
 $updatedPackageSha256 = $null
 $baselinePackageFullName = $null
+$updatedPackageFullName = $null
 $baselineSignatureStatus = $null
 $updatedSignatureStatus = $null
 $successEvidence = $null
@@ -572,7 +573,7 @@ function Invoke-HarnessPhase {
     return $result
 }
 
-function Assert-ProtectedStoreCreated {
+function Get-ExactProtectedRecordLeaf {
     Assert-SafeDirectory -Path $script:protectedStorePath
     $entries = @(Get-ChildItem -LiteralPath $script:protectedStorePath -Force)
     foreach ($entry in $entries) {
@@ -588,6 +589,11 @@ function Assert-ProtectedStoreCreated {
     }
 
     Assert-RegularFile -Path $records[0].FullName
+    return [string]$records[0].Name
+}
+
+function Assert-ProtectedStoreCreated {
+    $null = Get-ExactProtectedRecordLeaf
 }
 
 function Assert-ProtectedStoreClean {
@@ -599,6 +605,47 @@ function Assert-ProtectedStoreClean {
 
     if (Test-Path -LiteralPath $script:ticketPath) {
         throw "The lifecycle operation left its control ticket."
+    }
+}
+
+function Assert-OwnedLifecycleStateAbsent {
+    $deadline = (Get-Date).AddSeconds(15)
+    while (((Test-Path -LiteralPath $script:protectedStorePath) -or
+            (Test-Path -LiteralPath $script:runDirectory)) -and
+        (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 250
+    }
+
+    if ((Test-Path -LiteralPath $script:protectedStorePath) -or
+        (Test-Path -LiteralPath $script:runDirectory)) {
+        throw "The package lifecycle operation retained app-owned state."
+    }
+}
+
+function Assert-ExactAppDataAbsent {
+    if ([string]::IsNullOrWhiteSpace($script:appDataPath) -or
+        [string]::IsNullOrWhiteSpace($script:packageFamilyName)) {
+        throw "The exact package app-data identity is unavailable."
+    }
+
+    $packagesRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Packages"))
+    $resolvedPath = [System.IO.Path]::GetFullPath($script:appDataPath)
+    $expectedPath = [System.IO.Path]::GetFullPath((Join-Path $packagesRoot $script:packageFamilyName))
+    $parent = [System.IO.Directory]::GetParent($resolvedPath)
+    if (-not $resolvedPath.Equals($expectedPath, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $null -eq $parent -or
+        -not $parent.FullName.Equals($packagesRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+        [System.IO.Path]::GetFileName($resolvedPath) -ne $script:packageFamilyName) {
+        throw "Refusing to inspect an unexpected package app-data directory."
+    }
+
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Test-Path -LiteralPath $resolvedPath) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 250
+    }
+
+    if (Test-Path -LiteralPath $resolvedPath) {
+        throw "The package deployment operation retained app data."
     }
 }
 
@@ -643,15 +690,25 @@ function Invoke-CleanupStep {
 }
 
 function Remove-ExactLifecyclePackage {
+    param(
+        [string]$ExpectedPackageFullName
+    )
+
     $packages = @(
         Get-AppxPackage -Name $expectedName -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
     )
-    if ($packages.Count -gt 1) {
-        throw "More than one exact lifecycle package is registered."
+    if ($packages.Count -gt 1 -or
+        (-not [string]::IsNullOrWhiteSpace($ExpectedPackageFullName) -and $packages.Count -ne 1)) {
+        throw "The exact lifecycle package registration count is outside policy."
     }
 
     if ($packages.Count -eq 1) {
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedPackageFullName) -and
+            $packages[0].PackageFullName -ne $ExpectedPackageFullName) {
+            throw "The registered lifecycle package does not match the expected package full name."
+        }
+
         if ($null -eq $script:packageFamilyName) {
             $script:packageFamilyName = $packages[0].PackageFamilyName
             $script:appDataPath = Join-Path $env:LOCALAPPDATA "Packages\$($script:packageFamilyName)"
@@ -1023,9 +1080,11 @@ try {
     if ($installedPackage.Architecture -ne "X64" -or
         $installedPackage.Version.ToString() -ne $updatedVersion -or
         $installedPackage.PackageFamilyName -ne $packageFamilyName -or
+        [string]::IsNullOrWhiteSpace($installedPackage.PackageFullName) -or
         $installedPackage.PackageFullName -eq $baselinePackageFullName) {
         throw "The lifecycle package update did not preserve the family and advance the package identity."
     }
+    $updatedPackageFullName = $installedPackage.PackageFullName
     [xml]$updatedInstalledManifest = ($installedPackage | Get-AppxPackageManifest).Package.OuterXml
     Assert-ManifestPolicy -Manifest $updatedInstalledManifest -ExpectedVersion $updatedVersion -Built
     Assert-ProtectedStoreCreated
@@ -1040,12 +1099,53 @@ try {
     Set-FailurePoint -Stage "LifecycleCleanupValidation" -Code "LifecycleResidueDetected"
     Assert-ProtectedStoreClean
 
-    Set-FailurePoint -Stage "FinalScan" -Code "FinalCanaryScanFailed"
+    Set-FailurePoint -Stage "PostUpdateDeleteScan" -Code "PostUpdateDeleteCanaryScanFailed"
     Invoke-OwnedCanaryScan
     Remove-ExactPhaseFiles -Phase "verify-delete"
 
-    Set-FailurePoint -Stage "PackageRemoval" -Code "PackageRemovalFailed"
-    Remove-ExactLifecyclePackage
+    Set-FailurePoint -Stage "ResetSeedLaunch" -Code "ResetSeedCreateFailed"
+    $preResetResult = Invoke-HarnessPhase -Phase "create" -ExpectedResult "Create" -ExpectedExitCode 0
+    $preResetRecordLeaf = Get-ExactProtectedRecordLeaf
+    Assert-RegularFile -Path $ticketPath
+
+    Set-FailurePoint -Stage "ResetSeedScan" -Code "ResetSeedCanaryScanFailed"
+    Invoke-OwnedCanaryScan
+
+    Set-FailurePoint -Stage "PackageReset" -Code "PackageResetFailed"
+    Reset-AppxPackage -Package $installedPackage.PackageFullName -ErrorAction Stop
+    $resetInstalledPackages = @(
+        Get-AppxPackage -Name $expectedName -ErrorAction Stop |
+            Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
+    )
+    if ($resetInstalledPackages.Count -ne 1) {
+        throw "The exact lifecycle package registration changed during reset."
+    }
+    $installedPackage = $resetInstalledPackages[0]
+    if ($installedPackage.Architecture -ne "X64" -or
+        $installedPackage.Version.ToString() -ne $updatedVersion -or
+        $installedPackage.PackageFamilyName -ne $packageFamilyName -or
+        $installedPackage.PackageFullName -ne $updatedPackageFullName) {
+        throw "The lifecycle package reset changed the installed package identity."
+    }
+    [xml]$resetInstalledManifest = ($installedPackage | Get-AppxPackageManifest).Package.OuterXml
+    Assert-ManifestPolicy -Manifest $resetInstalledManifest -ExpectedVersion $updatedVersion -Built
+
+    Set-FailurePoint -Stage "ResetStateValidation" -Code "ResetOwnedStateRetained"
+    Assert-OwnedLifecycleStateAbsent
+
+    Set-FailurePoint -Stage "PostResetCreateLaunch" -Code "PostResetCreateFailed"
+    $postResetResult = Invoke-HarnessPhase -Phase "create" -ExpectedResult "Create" -ExpectedExitCode 0
+    $postResetRecordLeaf = Get-ExactProtectedRecordLeaf
+    Assert-RegularFile -Path $ticketPath
+    if ($postResetRecordLeaf -eq $preResetRecordLeaf) {
+        throw "Package reset reused the previous protected-record identity."
+    }
+
+    Set-FailurePoint -Stage "PostResetCreateScan" -Code "PostResetCanaryScanFailed"
+    Invoke-OwnedCanaryScan
+
+    Set-FailurePoint -Stage "LiveStatePackageRemoval" -Code "LiveStatePackageRemovalFailed"
+    Remove-ExactLifecyclePackage -ExpectedPackageFullName $updatedPackageFullName
     $remainingPackages = @(
         Get-AppxPackage -Name $expectedName -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
@@ -1056,14 +1156,77 @@ try {
     $installedPackage = $null
     $installAttempted = $false
 
-    Set-FailurePoint -Stage "AppDataRemoval" -Code "AppDataRemovalFailed"
-    Remove-ExactAppData
-    if (Test-Path -LiteralPath $appDataPath) {
-        throw "The exact lifecycle app-data directory remains."
+    Set-FailurePoint -Stage "LiveStateUninstallValidation" -Code "LiveStateAppDataRetained"
+    Assert-ExactAppDataAbsent
+
+    Set-FailurePoint -Stage "PackageReinstall" -Code "PackageReinstallFailed"
+    $installAttempted = $true
+    Add-AppxPackage `
+        -Path $updatedArtifacts.Package.FullName `
+        -DependencyPath $updatedArtifacts.RuntimeDependency.FullName `
+        -ErrorAction Stop
+    $reinstalledPackages = @(
+        Get-AppxPackage -Name $expectedName -ErrorAction Stop |
+            Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
+    )
+    if ($reinstalledPackages.Count -ne 1) {
+        throw "The exact lifecycle package was not reinstalled."
+    }
+    $installedPackage = $reinstalledPackages[0]
+    if ($installedPackage.Architecture -ne "X64" -or
+        $installedPackage.Version.ToString() -ne $updatedVersion -or
+        $installedPackage.PackageFamilyName -ne $packageFamilyName -or
+        $installedPackage.PackageFullName -ne $updatedPackageFullName) {
+        throw "The reinstalled lifecycle package identity is outside policy."
+    }
+    [xml]$reinstalledManifest = ($installedPackage | Get-AppxPackageManifest).Package.OuterXml
+    Assert-ManifestPolicy -Manifest $reinstalledManifest -ExpectedVersion $updatedVersion -Built
+
+    Set-FailurePoint -Stage "ReinstallStateValidation" -Code "ReinstallOwnedStateRetained"
+    Assert-OwnedLifecycleStateAbsent
+
+    Set-FailurePoint -Stage "PostReinstallCreateLaunch" -Code "PostReinstallCreateFailed"
+    $postReinstallResult = Invoke-HarnessPhase -Phase "create" -ExpectedResult "Create" -ExpectedExitCode 0
+    $postReinstallRecordLeaf = Get-ExactProtectedRecordLeaf
+    Assert-RegularFile -Path $ticketPath
+    if ($postReinstallRecordLeaf -eq $postResetRecordLeaf) {
+        throw "Package reinstall reused the previous protected-record identity."
     }
 
+    Set-FailurePoint -Stage "PostReinstallCreateScan" -Code "PostReinstallCanaryScanFailed"
+    Invoke-OwnedCanaryScan
+    Remove-ExactPhaseFiles -Phase "create"
+
+    Set-FailurePoint -Stage "FreshVerifyDeleteLaunch" -Code "FreshVerifyDeletePhaseFailed"
+    $freshVerifyResult = Invoke-HarnessPhase `
+        -Phase "verify-delete" `
+        -ExpectedResult "VerifyDelete" `
+        -ExpectedExitCode 0
+
+    Set-FailurePoint -Stage "FreshLifecycleCleanupValidation" -Code "FreshLifecycleResidueDetected"
+    Assert-ProtectedStoreClean
+
+    Set-FailurePoint -Stage "FinalScan" -Code "FinalCanaryScanFailed"
+    Invoke-OwnedCanaryScan
+    Remove-ExactPhaseFiles -Phase "verify-delete"
+
+    Set-FailurePoint -Stage "PackageRemoval" -Code "PackageRemovalFailed"
+    Remove-ExactLifecyclePackage -ExpectedPackageFullName $updatedPackageFullName
+    $remainingPackages = @(
+        Get-AppxPackage -Name $expectedName -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
+    )
+    if ($remainingPackages.Count -ne 0) {
+        throw "The exact lifecycle package remains registered."
+    }
+    $installedPackage = $null
+    $installAttempted = $false
+
+    Set-FailurePoint -Stage "AppDataRemovalValidation" -Code "AppDataRemovalFailed"
+    Assert-ExactAppDataAbsent
+
     $successEvidence = [ordered]@{
-        SchemaVersion = 2
+        SchemaVersion = 3
         CompletedAt = (Get-Date).ToUniversalTime().ToString("O")
         Configuration = $Configuration
         DotNetSdk = $actualSdk
@@ -1085,6 +1248,17 @@ try {
         UpdateInstalled = $true
         ProtectedRecordReadAfterPackageUpdate = [bool]$verifyResult.InitialReadVerified
         PostUpdateOwnedSurfaceCanaryScanPassed = $true
+        PackageReset = $true
+        PackageIdentityPreservedAfterReset = $true
+        ResetOwnedStateRemoved = $true
+        FreshCreateAfterReset = [bool]$postResetResult.CreateCommitted
+        ResetRecordIdentityChanged = $true
+        PackageUninstalledWithOwnedState = $true
+        UninstallAppDataRemoved = $true
+        PackageReinstalled = $true
+        PackageIdentityPreservedAfterReinstall = $true
+        FreshCreateAfterReinstall = [bool]$postReinstallResult.CreateCommitted
+        ReinstallRecordIdentityChanged = $true
         ProtectedStoreVersion = "v2"
         DataProtectionScope = "CurrentUser"
         CreatePersistedAcrossProcessRestart = $true
@@ -1100,7 +1274,7 @@ try {
         InitialOwnedSurfaceCanaryScanPassed = $true
         FinalOwnedSurfaceCanaryScanPassed = $true
         RecordCleanupPassed = $true
-        TicketCleanupPassed = [bool]$verifyResult.TicketRemoved
+        TicketCleanupPassed = [bool]($verifyResult.TicketRemoved -and $freshVerifyResult.TicketRemoved)
         PackageRemoved = $true
         AppDataRemoved = $true
         CertificateRemoved = $false

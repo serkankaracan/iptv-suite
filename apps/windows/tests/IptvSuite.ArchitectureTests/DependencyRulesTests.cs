@@ -549,6 +549,265 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(lifecycleSmoke, "PostUpdateOwnedSurfaceCanaryScanPassed = $true");
         StringAssert.Contains(lifecycleSmoke, "SamePackageFamily = $true");
         StringAssert.Contains(lifecycleSmoke, "PackageFullNameChanged = $true");
+        StringAssert.Contains(lifecycleSmoke, "SchemaVersion = 3");
+        StringAssert.Contains(
+            lifecycleSmoke,
+            "Reset-AppxPackage -Package $installedPackage.PackageFullName -ErrorAction Stop");
+        StringAssert.Contains(lifecycleSmoke, "PackageReset = $true");
+        StringAssert.Contains(lifecycleSmoke, "PackageIdentityPreservedAfterReset = $true");
+        StringAssert.Contains(lifecycleSmoke, "ResetOwnedStateRemoved = $true");
+        StringAssert.Contains(
+            lifecycleSmoke,
+            "FreshCreateAfterReset = [bool]$postResetResult.CreateCommitted");
+        StringAssert.Contains(lifecycleSmoke, "ResetRecordIdentityChanged = $true");
+        StringAssert.Contains(
+            lifecycleSmoke,
+            "if ($postResetRecordLeaf -eq $preResetRecordLeaf)");
+        StringAssert.Contains(lifecycleSmoke, "PackageUninstalledWithOwnedState = $true");
+        StringAssert.Contains(lifecycleSmoke, "UninstallAppDataRemoved = $true");
+        StringAssert.Contains(lifecycleSmoke, "PackageReinstalled = $true");
+        StringAssert.Contains(lifecycleSmoke, "PackageIdentityPreservedAfterReinstall = $true");
+        StringAssert.Contains(
+            lifecycleSmoke,
+            "FreshCreateAfterReinstall = [bool]$postReinstallResult.CreateCommitted");
+        StringAssert.Contains(lifecycleSmoke, "ReinstallRecordIdentityChanged = $true");
+        StringAssert.Contains(
+            lifecycleSmoke,
+            "if ($postReinstallRecordLeaf -eq $postResetRecordLeaf)");
+        Assert.IsFalse(
+            lifecycleSmoke.Contains("PreserveApplicationData", StringComparison.Ordinal) ||
+            lifecycleSmoke.Contains("PreserveRoamableApplicationData", StringComparison.Ordinal) ||
+            lifecycleSmoke.Contains("-AllUsers", StringComparison.Ordinal),
+            "The current-user fresh-state proof must not preserve app data or broaden package removal.");
+
+        int packageReset = lifecycleSmoke.IndexOf(
+            "Set-FailurePoint -Stage \"PackageReset\"",
+            StringComparison.Ordinal);
+        int postResetCreate = lifecycleSmoke.IndexOf(
+            "Set-FailurePoint -Stage \"PostResetCreateLaunch\"",
+            StringComparison.Ordinal);
+        int liveStateRemoval = lifecycleSmoke.IndexOf(
+            "Set-FailurePoint -Stage \"LiveStatePackageRemoval\"",
+            StringComparison.Ordinal);
+        int packageReinstall = lifecycleSmoke.IndexOf(
+            "Set-FailurePoint -Stage \"PackageReinstall\"",
+            StringComparison.Ordinal);
+        int postReinstallCreate = lifecycleSmoke.IndexOf(
+            "Set-FailurePoint -Stage \"PostReinstallCreateLaunch\"",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            packageReset >= 0 &&
+            postResetCreate > packageReset &&
+            liveStateRemoval > postResetCreate &&
+            packageReinstall > liveStateRemoval &&
+            postReinstallCreate > packageReinstall,
+            "The lifecycle fresh-state proof must run reset, live-state uninstall, reinstall, and fresh create in order.");
+
+        string resetProof = lifecycleSmoke[packageReset..postResetCreate];
+        StringAssert.Contains(resetProof, "Reset-AppxPackage");
+        StringAssert.Contains(resetProof, "Assert-OwnedLifecycleStateAbsent");
+        Assert.IsFalse(
+            resetProof.Contains("Remove-ExactAppData", StringComparison.Ordinal) ||
+            resetProof.Contains("Remove-Item", StringComparison.Ordinal),
+            "Reset state must be inspected before any manual app-data cleanup.");
+
+        string liveStateProof = lifecycleSmoke[postResetCreate..liveStateRemoval];
+        StringAssert.Contains(liveStateProof, "$postResetRecordLeaf = Get-ExactProtectedRecordLeaf");
+        StringAssert.Contains(liveStateProof, "Assert-RegularFile -Path $ticketPath");
+        Assert.IsFalse(
+            liveStateProof.Contains("verify-delete", StringComparison.Ordinal) ||
+            liveStateProof.Contains("Assert-ProtectedStoreClean", StringComparison.Ordinal) ||
+            liveStateProof.Contains("Remove-ExactAppData", StringComparison.Ordinal) ||
+            liveStateProof.Contains("Remove-Item", StringComparison.Ordinal),
+            "The uninstall proof must begin while the post-reset protected record and ticket are live.");
+
+        string uninstallProof = lifecycleSmoke[liveStateRemoval..packageReinstall];
+        StringAssert.Contains(uninstallProof, "Remove-ExactLifecyclePackage");
+        StringAssert.Contains(uninstallProof, "Assert-ExactAppDataAbsent");
+        Assert.IsFalse(
+            uninstallProof.Contains("Remove-ExactAppData", StringComparison.Ordinal) ||
+            uninstallProof.Contains("Remove-Item", StringComparison.Ordinal),
+            "Uninstall state must be inspected before any manual app-data cleanup.");
+
+        int ownedStateHelperStart = lifecycleSmoke.IndexOf(
+            "function Assert-OwnedLifecycleStateAbsent",
+            StringComparison.Ordinal);
+        int appDataAbsenceHelperStart = lifecycleSmoke.IndexOf(
+            "function Assert-ExactAppDataAbsent",
+            ownedStateHelperStart,
+            StringComparison.Ordinal);
+        int ownedCanaryScanHelperStart = lifecycleSmoke.IndexOf(
+            "function Invoke-OwnedCanaryScan",
+            appDataAbsenceHelperStart,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            ownedStateHelperStart >= 0 &&
+            appDataAbsenceHelperStart > ownedStateHelperStart &&
+            ownedCanaryScanHelperStart > appDataAbsenceHelperStart);
+
+        string ownedStateHelper = lifecycleSmoke[ownedStateHelperStart..appDataAbsenceHelperStart];
+        string appDataAbsenceHelper = lifecycleSmoke[appDataAbsenceHelperStart..ownedCanaryScanHelperStart];
+        foreach (string observationHelper in new[] { ownedStateHelper, appDataAbsenceHelper })
+        {
+            Assert.IsFalse(
+                observationHelper.Contains("Remove-Item", StringComparison.Ordinal) ||
+                observationHelper.Contains("Remove-ExactAppData", StringComparison.Ordinal) ||
+                observationHelper.Contains("Remove-AppxPackage", StringComparison.Ordinal) ||
+                observationHelper.Contains("Reset-AppxPackage", StringComparison.Ordinal),
+                "Lifecycle state observation helpers must never mutate package registration or app data.");
+        }
+
+        int removePackageHelperStart = lifecycleSmoke.IndexOf(
+            "function Remove-ExactLifecyclePackage",
+            StringComparison.Ordinal);
+        int removeAppDataHelperStart = lifecycleSmoke.IndexOf(
+            "function Remove-ExactAppData",
+            removePackageHelperStart,
+            StringComparison.Ordinal);
+        Assert.IsTrue(removePackageHelperStart >= 0 && removeAppDataHelperStart > removePackageHelperStart);
+        string removePackageHelper = lifecycleSmoke[removePackageHelperStart..removeAppDataHelperStart];
+        StringAssert.Contains(
+            removePackageHelper,
+            "Remove-AppxPackage -Package $packages[0].PackageFullName -ErrorAction Stop");
+        StringAssert.Contains(
+            removePackageHelper,
+            "$packages[0].PackageFullName -ne $ExpectedPackageFullName");
+        StringAssert.Contains(
+            removePackageHelper,
+            "(-not [string]::IsNullOrWhiteSpace($ExpectedPackageFullName) -and $packages.Count -ne 1)");
+        Assert.IsFalse(
+            removePackageHelper.Contains("Remove-ExactAppData", StringComparison.Ordinal) ||
+            removePackageHelper.Contains("Remove-Item", StringComparison.Ordinal),
+            "Exact package removal must not manually erase app data before OS-removal evidence is observed.");
+        Assert.HasCount(
+            2,
+            Regex.Matches(
+                lifecycleSmoke,
+                @"Remove-ExactLifecyclePackage -ExpectedPackageFullName \$updatedPackageFullName"),
+            "Both proof-stage removals must target the exact updated package full name.");
+
+        string reinstallProof = lifecycleSmoke[packageReinstall..postReinstallCreate];
+        StringAssert.Contains(reinstallProof, "-Path $updatedArtifacts.Package.FullName");
+        StringAssert.Contains(reinstallProof, "Assert-OwnedLifecycleStateAbsent");
+        Assert.HasCount(
+            2,
+            Regex.Matches(
+                lifecycleSmoke,
+                @"\$installedPackage\.PackageFullName -ne \$updatedPackageFullName"),
+            "Reset and reinstall must both preserve the exact updated package full name.");
+
+        int evidenceStart = lifecycleSmoke.IndexOf("$successEvidence = [ordered]@{", StringComparison.Ordinal);
+        int evidenceEnd = lifecycleSmoke.IndexOf("$githubSha =", evidenceStart, StringComparison.Ordinal);
+        Assert.IsTrue(evidenceStart >= 0 && evidenceEnd > evidenceStart);
+        string lifecycleEvidence = lifecycleSmoke[evidenceStart..evidenceEnd];
+        string[] expectedEvidenceKeys =
+        [
+            "SchemaVersion",
+            "CompletedAt",
+            "Configuration",
+            "DotNetSdk",
+            "BaselinePackageFile",
+            "BaselinePackageSha256",
+            "BaselinePackageVersion",
+            "UpdatedPackageFile",
+            "UpdatedPackageSha256",
+            "UpdatedPackageVersion",
+            "PackageName",
+            "PackagePublisher",
+            "Architecture",
+            "Capabilities",
+            "BaselineSignatureStatus",
+            "UpdatedSignatureStatus",
+            "SameSigner",
+            "SamePackageFamily",
+            "PackageFullNameChanged",
+            "UpdateInstalled",
+            "ProtectedRecordReadAfterPackageUpdate",
+            "PostUpdateOwnedSurfaceCanaryScanPassed",
+            "PackageReset",
+            "PackageIdentityPreservedAfterReset",
+            "ResetOwnedStateRemoved",
+            "FreshCreateAfterReset",
+            "ResetRecordIdentityChanged",
+            "PackageUninstalledWithOwnedState",
+            "UninstallAppDataRemoved",
+            "PackageReinstalled",
+            "PackageIdentityPreservedAfterReinstall",
+            "FreshCreateAfterReinstall",
+            "ReinstallRecordIdentityChanged",
+            "ProtectedStoreVersion",
+            "DataProtectionScope",
+            "CreatePersistedAcrossProcessRestart",
+            "DuplicateCreateSuppressed",
+            "InitialReadVerified",
+            "WrongOwnerReadRejected",
+            "WrongOwnerDeleteIdempotent",
+            "CorrectRecordSurvivedWrongOwnerDelete",
+            "UpdateCommitted",
+            "UpdatedReadVerified",
+            "DeleteCommitted",
+            "PostDeleteUnavailable",
+            "InitialOwnedSurfaceCanaryScanPassed",
+            "FinalOwnedSurfaceCanaryScanPassed",
+            "RecordCleanupPassed",
+            "TicketCleanupPassed",
+            "PackageRemoved",
+            "AppDataRemoved",
+            "CertificateRemoved",
+            "PackageOutputRemoved",
+        ];
+        string[] actualEvidenceKeys = Regex.Matches(
+                lifecycleEvidence,
+                @"(?m)^\s{8}([A-Za-z][A-Za-z0-9]*)\s*=")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            expectedEvidenceKeys,
+            actualEvidenceKeys,
+            "Lifecycle success evidence must remain an exact allowlist.");
+        foreach (string sensitiveToken in new[]
+                 {
+                     "$appDataPath",
+                     "$script:appDataPath",
+                     "$packageFamilyName",
+                     "$script:packageFamilyName",
+                     "$baselinePackageFullName",
+                     "$updatedPackageFullName",
+                     "$ticketPath",
+                     "$script:ticketPath",
+                     "$script:runDirectory",
+                     "$script:protectedStorePath",
+                     "$runId",
+                     "$preResetRecordLeaf",
+                     "$postResetRecordLeaf",
+                     "$postReinstallRecordLeaf",
+                     "$secretReference",
+                     "$sourceId",
+                     "$sourceConfigurationId",
+                     "$owner",
+                 })
+        {
+            Assert.IsFalse(
+                lifecycleEvidence.Contains(sensitiveToken, StringComparison.Ordinal),
+                $"Lifecycle success evidence must not contain sensitive token {sensitiveToken}.");
+        }
+        string[] assignedEvidenceKeys = Regex.Matches(
+                lifecycleSmoke,
+                @"(?m)^\s*\$successEvidence\.([A-Za-z][A-Za-z0-9]*)\s*=")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        string[] expectedAssignedEvidenceKeys =
+        [
+            "CommitSha",
+            "CertificateRemoved",
+            "PackageOutputRemoved",
+            "CompletedAt",
+        ];
+        CollectionAssert.AreEqual(
+            expectedAssignedEvidenceKeys,
+            assignedEvidenceKeys,
+            "Lifecycle success evidence may only update its four post-block allowlisted fields.");
+        StringAssert.Contains(lifecycleSmoke, "$successEvidence.CommitSha = $githubSha.ToLowerInvariant()");
         Assert.HasCount(
             2,
             Regex.Matches(lifecycleSmoke, @"(?<![A-Za-z0-9])-t:Rebuild(?![A-Za-z0-9])"),
