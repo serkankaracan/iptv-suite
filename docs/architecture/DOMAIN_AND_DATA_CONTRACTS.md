@@ -298,7 +298,7 @@ ContentSource 1 --- * (LiveChannel | Movie | Series)
 
 ## 12. Açık doğrulama kalemleri
 
-- **UNVERIFIED:** 50.000 M3U protected locator için DPAPI throughput. M4'te ölçülmeden exact layout kabul edilmez.
+- **VERIFIED / INFERENCE:** 50.000 protected locator için file-per-record DPAPI baseline ölçülmüş ve bulk channel-locator kullanımı için reddedilmiştir; test-only protected-catalog comparative `Decision` da tamamlanmıştır. Production same-SQLite-transaction yerleşimi ile parser + normalize + index end-to-end 50k kanıtı M8'de hâlâ `UNVERIFIED`dır.
 - **UNVERIFIED:** Legacy M3U encoding prevalence. Sentetik ve lawfully contributed sanitized corpus ile karar verilir.
 - **UNVERIFIED:** Representative provider refresh'te stable-key survival. Favorite reconciliation oranı contract corpus'ta ölçülür.
 - **UNVERIFIED:** Herhangi bir provider'ın cookie persistence gerektirip gerektirmediği. Default disabled; evidence ile isolated source handling.
