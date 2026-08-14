@@ -1,8 +1,8 @@
 # Risk kaydı
 
-**Tarih:** 2026-08-09
+**Tarih:** 2026-08-14
 
-**Durum:** Phase 0 baseline
+**Durum:** Phase 0 baseline; M4 residual-risk kararı işlendi
 
 **Ölçek:** Olasılık ve etki: Düşük / Orta / Yüksek. “Owner” rolü gösterir; ekip ataması değildir.
 
@@ -43,6 +43,12 @@
 | R23 | Package identity/signing erken marka adına kilitlenir ya da update lineage bozulur | Orta | Orta | Codename public identity'de görünür; publisher/identity değişimi protected data/update'i kırar | M1 disposable local identity + non-exportable ephemeral cert + exact cleanup tamamlandı; Store association fail; public reservation ve identity migration/lifecycle M15 legal clearance sonrası | Release/Product / M1 PASS, M15 |
 | R24 | Accessibility, keyboard veya TV remote/focus sonradan eklendiği için temel navigation yeniden yazılır | Orta | Orta | Keyboard focus kaybolur; UIA name yok; Samsung focus trap/Back yanlış | M2 packaged visible-launch smoke; M9 keyboard/UIA/Narrator; TV design'da focus graph ve gerçek remote başlangıçtan; accessibility acceptance | UI/Samsung / M2, M9, Tizen spike |
 | R25 | App-generated request, logo veya redirect yerel ağ kaynaklarını probe eder | Orta | Orta | Playlist logo URL'si loopback/private IP'ye gider; DNS rebinding | Default private/link-local/loopback deny; final DNS/redirect recheck; same-origin private source için explicit policy | Security/Networking / M5, M9 |
+
+## Kabul edilen residual riskler
+
+| ID | Risk | Olasılık | Etki | Erken uyarı işareti | Kabul sınırı / reopen trigger | Owner veya karar |
+|---|---|---|---|---|---|---|
+| R26 | Managed protected-store path kontrolü ile gerçek I/O arasında same-user reparse/parent-swap yarışı kalır | Düşük | Orta | Store root/ancestor beklenmedik reparse olur; record başka kullanıcı-yazılabilir konuma yönlenir; availability/integrity sapması | Yalnız yükseltilmemiş, kullanıcıya özel local store ve same-user compromise threat modelinde residual risk. Production manifesti `asInvoker`/`uiAccess=false` ister ve package capability allowlist'i `allowElevation` içermez [S13][S95]. Mevcut path kontrolleri yalnız gözlemlenen reparse/validation failure'larında fail-closed defense-in-depth sağlar; adversarial parent-swap'ı garanti etmez. Paylaşılan/ağ store, elevation veya same-user adversary scope değişirse pinned-directory/root-relative Windows I/O adapter'ı zorunlu ve karar yeniden açılır [S94]. | Security / **ACCEPTED 2026-08-14**; scope-change trigger |
 
 ## En yüksek öncelikli gate'ler
 

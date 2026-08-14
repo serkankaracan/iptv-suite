@@ -263,7 +263,10 @@ public sealed class DependencyRulesTests
     public void ManifestHasDisposableIdentityAndOnlyRequiredCapability()
     {
         XDocument manifest = LoadXml("apps/windows/src/IptvSuite.Windows/Package.appxmanifest");
+        XDocument applicationManifest = LoadXml("apps/windows/src/IptvSuite.Windows/app.manifest");
         XElement identity = manifest.Descendants().Single(element => element.Name.LocalName == "Identity");
+        XElement requestedExecutionLevel = applicationManifest.Descendants()
+            .Single(element => element.Name.LocalName == "requestedExecutionLevel");
         string[] capabilities = manifest.Descendants()
             .Where(element => element.Name.LocalName == "Capability")
             .Select(element => element.Attribute("Name")?.Value ?? string.Empty)
@@ -275,6 +278,8 @@ public sealed class DependencyRulesTests
 
         Assert.AreEqual(DevelopmentIdentity, identity.Attribute("Name")?.Value);
         Assert.AreEqual(DevelopmentPublisher, identity.Attribute("Publisher")?.Value);
+        Assert.AreEqual("asInvoker", requestedExecutionLevel.Attribute("level")?.Value);
+        Assert.AreEqual("false", requestedExecutionLevel.Attribute("uiAccess")?.Value);
         CollectionAssert.AreEqual(RequiredCapabilities, capabilities);
         Assert.HasCount(1, targetFamilies);
         Assert.AreEqual("Windows.Desktop", targetFamilies[0].Attribute("Name")?.Value);
