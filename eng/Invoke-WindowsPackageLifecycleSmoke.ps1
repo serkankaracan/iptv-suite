@@ -649,6 +649,175 @@ function Assert-ExactAppDataAbsent {
     }
 }
 
+function Get-AppxDeploymentFailureClass {
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $current = $ErrorRecord.Exception
+    for ($depth = 0; $null -ne $current -and $depth -lt 8; $depth++) {
+        $hresult = "0x{0:X8}" -f ([int64]$current.HResult -band 0xFFFFFFFFL)
+        switch ($hresult) {
+            "0x80004001" { return "NotImplemented" }
+            "0x80070032" { return "NotSupported" }
+            "0x80073D00" { return "PackageUpdating" }
+            "0x80073D01" { return "DeploymentBlockedByPolicy" }
+            "0x80073D02" { return "PackagesInUse" }
+            "0x80073D05" { return "ApplicationDataDeleteFailed" }
+            "0x80073D1D" { return "DeploymentOptionNotSupported" }
+            "0x80073D23" { return "DeploymentBlockedByProfilePolicy" }
+            "0x80073CF1" { return "PackageNotFound" }
+            "0x80073CF9" { return "PackageDeploymentFailed" }
+            "0x80073CFE" { return "PackageRepositoryCorrupted" }
+            "0x80070005" { return "AccessDenied" }
+        }
+
+        $current = $current.InnerException
+    }
+
+    return "Other"
+}
+
+function Wait-ExactHarnessProcessQuiescence {
+    $deadline = (Get-Date).AddSeconds(5)
+    $consecutiveAbsentObservations = 0
+
+    while ((Get-Date) -lt $deadline) {
+        $harnessProcesses = @([System.Diagnostics.Process]::GetProcessesByName($expectedProcessName))
+        try {
+            if ($harnessProcesses.Count -eq 0) {
+                $consecutiveAbsentObservations++
+                if ($consecutiveAbsentObservations -ge 3) {
+                    return
+                }
+            }
+            else {
+                $consecutiveAbsentObservations = 0
+            }
+        }
+        finally {
+            foreach ($harnessProcess in $harnessProcesses) {
+                $harnessProcess.Dispose()
+            }
+        }
+
+        Start-Sleep -Milliseconds 250
+    }
+
+    throw "The exact lifecycle harness process did not become quiescent."
+}
+
+function Invoke-ExactPackageReset {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ExpectedPackageFullName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedPackageFullName)) {
+        throw "The exact lifecycle package identity is unavailable for reset."
+    }
+
+    $maximumAttempts = 3
+    for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+        Wait-ExactHarnessProcessQuiescence
+
+        try {
+            Reset-AppxPackage -Package $ExpectedPackageFullName -Confirm:$false -ErrorAction Stop
+            return
+        }
+        catch {
+            $failureClass = Get-AppxDeploymentFailureClass -ErrorRecord $_
+            $retryable = $failureClass -in @(
+                "PackageUpdating",
+                "PackagesInUse",
+                "ApplicationDataDeleteFailed"
+            )
+            if (-not $retryable -or $attempt -eq $maximumAttempts) {
+                $script:failureCode = switch ($failureClass) {
+                    "PackageUpdating" { "PackageResetPackageUpdating" }
+                    "PackagesInUse" { "PackageResetPackagesInUse" }
+                    "ApplicationDataDeleteFailed" { "PackageResetDataDeletionFailed" }
+                    "PackageNotFound" { "PackageResetPackageNotFound" }
+                    "AccessDenied" { "PackageResetAccessDenied" }
+                    "DeploymentBlockedByPolicy" { "PackageResetBlockedByPolicy" }
+                    "DeploymentBlockedByProfilePolicy" { "PackageResetBlockedByProfilePolicy" }
+                    "PackageRepositoryCorrupted" { "PackageResetRepositoryCorrupted" }
+                    "PackageDeploymentFailed" { "PackageResetDeploymentFailed" }
+                    "NotImplemented" { "PackageResetUnsupported" }
+                    "NotSupported" { "PackageResetUnsupported" }
+                    "DeploymentOptionNotSupported" { "PackageResetUnsupported" }
+                    default { "PackageResetUnexpectedDeploymentFailure" }
+                }
+                throw "The exact lifecycle package reset deployment failed."
+            }
+
+            $retryDelayMilliseconds = if ($attempt -eq 1) { 500 } else { 1500 }
+            Start-Sleep -Milliseconds $retryDelayMilliseconds
+        }
+    }
+
+    throw "The exact lifecycle package reset did not complete."
+}
+
+function Wait-ExactLifecyclePackageRegistration {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ExpectedPackageFullName,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedPackageFamilyName,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedVersion
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedPackageFullName) -or
+        [string]::IsNullOrWhiteSpace($ExpectedPackageFamilyName) -or
+        [string]::IsNullOrWhiteSpace($ExpectedVersion)) {
+        throw "The exact lifecycle package registration expectation is unavailable."
+    }
+
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        try {
+            $packages = @(
+                Get-AppxPackage -Name $expectedName -ErrorAction Stop |
+                    Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
+            )
+        }
+        catch {
+            if ((Get-Date) -ge $deadline) {
+                throw "The exact lifecycle package registration could not be queried after reset."
+            }
+
+            Start-Sleep -Milliseconds 250
+            continue
+        }
+        if ($packages.Count -gt 1) {
+            throw "The exact lifecycle package registration count is outside policy after reset."
+        }
+        if ($packages.Count -eq 1) {
+            $candidate = $packages[0]
+            if ($candidate.Architecture -ne "X64" -or
+                $candidate.Version.ToString() -ne $ExpectedVersion -or
+                $candidate.PackageFamilyName -ne $ExpectedPackageFamilyName -or
+                $candidate.PackageFullName -ne $ExpectedPackageFullName) {
+                throw "The lifecycle package reset changed the installed package identity."
+            }
+
+            if ($candidate.Status.ToString() -eq "Ok") {
+                return $candidate
+            }
+        }
+
+        Start-Sleep -Milliseconds 250
+    }
+    while ((Get-Date) -lt $deadline)
+
+    throw "The exact lifecycle package registration was unavailable after reset."
+}
+
 function Invoke-OwnedCanaryScan {
     foreach ($scanRoot in @($script:protectedStorePath, $script:runDirectory)) {
         Assert-SafeDirectory -Path $scanRoot
@@ -1111,22 +1280,16 @@ try {
     Set-FailurePoint -Stage "ResetSeedScan" -Code "ResetSeedCanaryScanFailed"
     Invoke-OwnedCanaryScan
 
-    Set-FailurePoint -Stage "PackageReset" -Code "PackageResetFailed"
-    Reset-AppxPackage -Package $installedPackage.PackageFullName -ErrorAction Stop
-    $resetInstalledPackages = @(
-        Get-AppxPackage -Name $expectedName -ErrorAction Stop |
-            Where-Object { $_.Name -eq $expectedName -and $_.Publisher -eq $expectedPublisher }
-    )
-    if ($resetInstalledPackages.Count -ne 1) {
-        throw "The exact lifecycle package registration changed during reset."
-    }
-    $installedPackage = $resetInstalledPackages[0]
-    if ($installedPackage.Architecture -ne "X64" -or
-        $installedPackage.Version.ToString() -ne $updatedVersion -or
-        $installedPackage.PackageFamilyName -ne $packageFamilyName -or
-        $installedPackage.PackageFullName -ne $updatedPackageFullName) {
-        throw "The lifecycle package reset changed the installed package identity."
-    }
+    Set-FailurePoint -Stage "PackageResetInvocation" -Code "PackageResetInvocationFailed"
+    Invoke-ExactPackageReset -ExpectedPackageFullName $updatedPackageFullName
+
+    Set-FailurePoint -Stage "PackageResetRegistrationValidation" -Code "PackageResetRegistrationInvalid"
+    $installedPackage = Wait-ExactLifecyclePackageRegistration `
+        -ExpectedPackageFullName $updatedPackageFullName `
+        -ExpectedPackageFamilyName $packageFamilyName `
+        -ExpectedVersion $updatedVersion
+
+    Set-FailurePoint -Stage "PackageResetManifestValidation" -Code "PackageResetManifestInvalid"
     [xml]$resetInstalledManifest = ($installedPackage | Get-AppxPackageManifest).Package.OuterXml
     Assert-ManifestPolicy -Manifest $resetInstalledManifest -ExpectedVersion $updatedVersion -Built
 

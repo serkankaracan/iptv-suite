@@ -552,7 +552,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(lifecycleSmoke, "SchemaVersion = 3");
         StringAssert.Contains(
             lifecycleSmoke,
-            "Reset-AppxPackage -Package $installedPackage.PackageFullName -ErrorAction Stop");
+            "Invoke-ExactPackageReset -ExpectedPackageFullName $updatedPackageFullName");
         StringAssert.Contains(lifecycleSmoke, "PackageReset = $true");
         StringAssert.Contains(lifecycleSmoke, "PackageIdentityPreservedAfterReset = $true");
         StringAssert.Contains(lifecycleSmoke, "ResetOwnedStateRemoved = $true");
@@ -581,7 +581,19 @@ public sealed class DependencyRulesTests
             "The current-user fresh-state proof must not preserve app data or broaden package removal.");
 
         int packageReset = lifecycleSmoke.IndexOf(
-            "Set-FailurePoint -Stage \"PackageReset\"",
+            "Set-FailurePoint -Stage \"PackageResetInvocation\"",
+            StringComparison.Ordinal);
+        int packageResetRegistration = lifecycleSmoke.IndexOf(
+            "Set-FailurePoint -Stage \"PackageResetRegistrationValidation\"",
+            packageReset,
+            StringComparison.Ordinal);
+        int packageResetManifest = lifecycleSmoke.IndexOf(
+            "Set-FailurePoint -Stage \"PackageResetManifestValidation\"",
+            packageResetRegistration,
+            StringComparison.Ordinal);
+        int packageResetState = lifecycleSmoke.IndexOf(
+            "Set-FailurePoint -Stage \"ResetStateValidation\"",
+            packageResetManifest,
             StringComparison.Ordinal);
         int postResetCreate = lifecycleSmoke.IndexOf(
             "Set-FailurePoint -Stage \"PostResetCreateLaunch\"",
@@ -597,14 +609,28 @@ public sealed class DependencyRulesTests
             StringComparison.Ordinal);
         Assert.IsTrue(
             packageReset >= 0 &&
-            postResetCreate > packageReset &&
+            packageResetRegistration > packageReset &&
+            packageResetManifest > packageResetRegistration &&
+            packageResetState > packageResetManifest &&
+            postResetCreate > packageResetState &&
             liveStateRemoval > postResetCreate &&
             packageReinstall > liveStateRemoval &&
             postReinstallCreate > packageReinstall,
-            "The lifecycle fresh-state proof must run reset, live-state uninstall, reinstall, and fresh create in order.");
+            "The lifecycle fresh-state proof must validate reset invocation, registration, manifest, state, uninstall, and reinstall in order.");
 
         string resetProof = lifecycleSmoke[packageReset..postResetCreate];
-        StringAssert.Contains(resetProof, "Reset-AppxPackage");
+        StringAssert.Contains(
+            resetProof,
+            "Invoke-ExactPackageReset -ExpectedPackageFullName $updatedPackageFullName");
+        StringAssert.Contains(
+            resetProof,
+            "Wait-ExactLifecyclePackageRegistration `");
+        StringAssert.Contains(
+            lifecycleSmoke[packageResetManifest..packageResetState],
+            "Assert-ManifestPolicy -Manifest $resetInstalledManifest -ExpectedVersion $updatedVersion -Built");
+        StringAssert.Contains(
+            lifecycleSmoke[packageResetState..postResetCreate],
+            "Assert-OwnedLifecycleStateAbsent");
         StringAssert.Contains(resetProof, "Assert-OwnedLifecycleStateAbsent");
         Assert.IsFalse(
             resetProof.Contains("Remove-ExactAppData", StringComparison.Ordinal) ||
@@ -636,17 +662,37 @@ public sealed class DependencyRulesTests
             "function Assert-ExactAppDataAbsent",
             ownedStateHelperStart,
             StringComparison.Ordinal);
+        int deploymentFailureClassifierStart = lifecycleSmoke.IndexOf(
+            "function Get-AppxDeploymentFailureClass",
+            appDataAbsenceHelperStart,
+            StringComparison.Ordinal);
+        int processQuiescenceHelperStart = lifecycleSmoke.IndexOf(
+            "function Wait-ExactHarnessProcessQuiescence",
+            deploymentFailureClassifierStart,
+            StringComparison.Ordinal);
+        int packageResetHelperStart = lifecycleSmoke.IndexOf(
+            "function Invoke-ExactPackageReset",
+            processQuiescenceHelperStart,
+            StringComparison.Ordinal);
+        int packageRegistrationHelperStart = lifecycleSmoke.IndexOf(
+            "function Wait-ExactLifecyclePackageRegistration",
+            packageResetHelperStart,
+            StringComparison.Ordinal);
         int ownedCanaryScanHelperStart = lifecycleSmoke.IndexOf(
             "function Invoke-OwnedCanaryScan",
-            appDataAbsenceHelperStart,
+            packageRegistrationHelperStart,
             StringComparison.Ordinal);
         Assert.IsTrue(
             ownedStateHelperStart >= 0 &&
             appDataAbsenceHelperStart > ownedStateHelperStart &&
-            ownedCanaryScanHelperStart > appDataAbsenceHelperStart);
+            deploymentFailureClassifierStart > appDataAbsenceHelperStart &&
+            processQuiescenceHelperStart > deploymentFailureClassifierStart &&
+            packageResetHelperStart > processQuiescenceHelperStart &&
+            packageRegistrationHelperStart > packageResetHelperStart &&
+            ownedCanaryScanHelperStart > packageRegistrationHelperStart);
 
         string ownedStateHelper = lifecycleSmoke[ownedStateHelperStart..appDataAbsenceHelperStart];
-        string appDataAbsenceHelper = lifecycleSmoke[appDataAbsenceHelperStart..ownedCanaryScanHelperStart];
+        string appDataAbsenceHelper = lifecycleSmoke[appDataAbsenceHelperStart..deploymentFailureClassifierStart];
         foreach (string observationHelper in new[] { ownedStateHelper, appDataAbsenceHelper })
         {
             Assert.IsFalse(
@@ -656,6 +702,169 @@ public sealed class DependencyRulesTests
                 observationHelper.Contains("Reset-AppxPackage", StringComparison.Ordinal),
                 "Lifecycle state observation helpers must never mutate package registration or app data.");
         }
+
+        string deploymentFailureClassifier =
+            lifecycleSmoke[deploymentFailureClassifierStart..processQuiescenceHelperStart];
+        string processQuiescenceHelper =
+            lifecycleSmoke[processQuiescenceHelperStart..packageResetHelperStart];
+        string packageResetHelper =
+            lifecycleSmoke[packageResetHelperStart..packageRegistrationHelperStart];
+        string packageRegistrationHelper =
+            lifecycleSmoke[packageRegistrationHelperStart..ownedCanaryScanHelperStart];
+
+        StringAssert.Contains(
+            deploymentFailureClassifier,
+            "([int64]$current.HResult -band 0xFFFFFFFFL)");
+        Assert.IsFalse(
+            deploymentFailureClassifier.Contains("[int64]0xFFFFFFFF", StringComparison.Ordinal),
+            "PowerShell 5.1 must parse the HRESULT mask as an unsigned long literal.");
+        StringAssert.Contains(deploymentFailureClassifier, "$depth -lt 8");
+        string[] expectedDeploymentHResults =
+        [
+            "0x80004001",
+            "0x80070032",
+            "0x80073D00",
+            "0x80073D01",
+            "0x80073D02",
+            "0x80073D05",
+            "0x80073D1D",
+            "0x80073D23",
+            "0x80073CF1",
+            "0x80073CF9",
+            "0x80073CFE",
+            "0x80070005",
+        ];
+        string[] actualDeploymentHResults = Regex.Matches(
+                deploymentFailureClassifier,
+                @"0x(?!FFFFFFFF)[0-9A-F]{8}")
+            .Select(match => match.Value)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            expectedDeploymentHResults,
+            actualDeploymentHResults,
+            "The reset classifier must expose only the reviewed HRESULT allowlist.");
+        StringAssert.Contains(
+            deploymentFailureClassifier,
+            "\"0x80004001\" { return \"NotImplemented\" }");
+        StringAssert.Contains(
+            deploymentFailureClassifier,
+            "\"0x80070032\" { return \"NotSupported\" }");
+        StringAssert.Contains(
+            deploymentFailureClassifier,
+            "\"0x80073D1D\" { return \"DeploymentOptionNotSupported\" }");
+        StringAssert.Contains(
+            deploymentFailureClassifier,
+            "\"0x80073D23\" { return \"DeploymentBlockedByProfilePolicy\" }");
+        StringAssert.Contains(
+            deploymentFailureClassifier,
+            "\"0x80073D00\" { return \"PackageUpdating\" }");
+        StringAssert.Contains(
+            deploymentFailureClassifier,
+            "\"0x80073D02\" { return \"PackagesInUse\" }");
+        StringAssert.Contains(
+            deploymentFailureClassifier,
+            "\"0x80073D05\" { return \"ApplicationDataDeleteFailed\" }");
+
+        StringAssert.Contains(processQuiescenceHelper, "(Get-Date).AddSeconds(5)");
+        StringAssert.Contains(
+            processQuiescenceHelper,
+            "[System.Diagnostics.Process]::GetProcessesByName($expectedProcessName)");
+        StringAssert.Contains(processQuiescenceHelper, "$consecutiveAbsentObservations -ge 3");
+        StringAssert.Contains(processQuiescenceHelper, "$harnessProcess.Dispose()");
+        StringAssert.Contains(processQuiescenceHelper, "Start-Sleep -Milliseconds 250");
+        Assert.IsFalse(
+            processQuiescenceHelper.Contains("Get-Process", StringComparison.Ordinal) ||
+            processQuiescenceHelper.Contains("Stop-Process", StringComparison.Ordinal) ||
+            processQuiescenceHelper.Contains(".Kill(", StringComparison.Ordinal),
+            "Reset quiescence must observe the exact harness process without broad lookup or termination.");
+
+        StringAssert.Contains(packageResetHelper, "$maximumAttempts = 3");
+        StringAssert.Contains(
+            packageResetHelper,
+            "for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++)");
+        StringAssert.Contains(packageResetHelper, "Wait-ExactHarnessProcessQuiescence");
+        StringAssert.Contains(
+            packageResetHelper,
+            "Reset-AppxPackage -Package $ExpectedPackageFullName -Confirm:$false -ErrorAction Stop");
+        Assert.HasCount(
+            1,
+            Regex.Matches(packageResetHelper, @"\bReset-AppxPackage\b"),
+            "The bounded retry loop must have one exact reset invocation site.");
+        int quiescenceCall = packageResetHelper.IndexOf(
+            "Wait-ExactHarnessProcessQuiescence",
+            StringComparison.Ordinal);
+        int resetInvocation = packageResetHelper.IndexOf(
+            "Reset-AppxPackage -Package $ExpectedPackageFullName -Confirm:$false -ErrorAction Stop",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            quiescenceCall >= 0 && resetInvocation > quiescenceCall,
+            "Every reset attempt must first establish exact process quiescence.");
+        int retryPolicyStart = packageResetHelper.IndexOf("$retryable = $failureClass -in @(", StringComparison.Ordinal);
+        int retryPolicyEnd = packageResetHelper.IndexOf("if (-not $retryable", retryPolicyStart, StringComparison.Ordinal);
+        Assert.IsTrue(retryPolicyStart >= 0 && retryPolicyEnd > retryPolicyStart);
+        string[] retryableFailureClasses = Regex.Matches(
+                packageResetHelper[retryPolicyStart..retryPolicyEnd],
+                "\"([A-Za-z]+)\"")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        string[] expectedRetryableFailureClasses =
+        [
+            "PackageUpdating",
+            "PackagesInUse",
+            "ApplicationDataDeleteFailed",
+        ];
+        CollectionAssert.AreEqual(
+            expectedRetryableFailureClasses,
+            retryableFailureClasses,
+            "Only 0x80073D00, 0x80073D02, and 0x80073D05 may be retried.");
+        StringAssert.Contains(
+            packageResetHelper,
+            "if (-not $retryable -or $attempt -eq $maximumAttempts)");
+        StringAssert.Contains(
+            packageResetHelper,
+            "$retryDelayMilliseconds = if ($attempt -eq 1) { 500 } else { 1500 }");
+
+        foreach (string forbiddenResetDiagnostic in new[]
+                 {
+                     ".Message",
+                     "Get-AppxLog",
+                     "Get-AppxLastError",
+                     "EventLog",
+                     "Get-WinEvent",
+                     "InvocationInfo",
+                     "ScriptStackTrace",
+                     "TargetObject",
+                     "InstallLocation",
+                     "Write-Host",
+                     "Write-Output",
+                     "Write-Error",
+                     "Write-Warning",
+                     "Write-Verbose",
+                     "Write-Information",
+                     "Remove-Item",
+                     "Remove-ExactAppData",
+                     "Remove-AppxPackage",
+                 })
+        {
+            Assert.IsFalse(
+                deploymentFailureClassifier.Contains(forbiddenResetDiagnostic, StringComparison.Ordinal) ||
+                packageResetHelper.Contains(forbiddenResetDiagnostic, StringComparison.Ordinal),
+                $"Reset classification and invocation must not disclose diagnostics or mutate adjacent state: {forbiddenResetDiagnostic}.");
+        }
+
+        StringAssert.Contains(
+            packageRegistrationHelper,
+            "$candidate.PackageFullName -ne $ExpectedPackageFullName");
+        StringAssert.Contains(
+            packageRegistrationHelper,
+            "$candidate.PackageFamilyName -ne $ExpectedPackageFamilyName");
+        StringAssert.Contains(
+            packageRegistrationHelper,
+            "$candidate.Version.ToString() -ne $ExpectedVersion");
+        StringAssert.Contains(packageRegistrationHelper, "(Get-Date).AddSeconds(15)");
+        StringAssert.Contains(packageRegistrationHelper, "Start-Sleep -Milliseconds 250");
+        StringAssert.Contains(packageRegistrationHelper, "$packages.Count -gt 1");
+        StringAssert.Contains(packageRegistrationHelper, "$candidate.Status.ToString() -eq \"Ok\"");
 
         int removePackageHelperStart = lifecycleSmoke.IndexOf(
             "function Remove-ExactLifecyclePackage",
@@ -690,11 +899,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(reinstallProof, "-Path $updatedArtifacts.Package.FullName");
         StringAssert.Contains(reinstallProof, "Assert-OwnedLifecycleStateAbsent");
         Assert.HasCount(
-            2,
+            1,
             Regex.Matches(
                 lifecycleSmoke,
                 @"\$installedPackage\.PackageFullName -ne \$updatedPackageFullName"),
-            "Reset and reinstall must both preserve the exact updated package full name.");
+            "Reinstall must preserve the exact updated package full name after reset registration is checked by its helper.");
 
         int evidenceStart = lifecycleSmoke.IndexOf("$successEvidence = [ordered]@{", StringComparison.Ordinal);
         int evidenceEnd = lifecycleSmoke.IndexOf("$githubSha =", evidenceStart, StringComparison.Ordinal);
