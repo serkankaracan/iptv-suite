@@ -13,6 +13,7 @@ Bu dosya `apps/windows/` ağacı için kök `AGENTS.md` kurallarını daraltır.
 - `IptvSuite.SecretStoreSpike`: yalnız opt-in M4 ölçüm executable'ıdır; Application/Domain/Infrastructure ve test-only canary scanner'a bağlıdır. Quality/CI tarafından çalıştırılmaz, production payload'a giremez ve ağır `Decision` modu açık onay olmadan başlatılmaz.
 - `IptvSuite.ProtectedCatalogSpike`: yalnız reddedilen bulk file-per-record düzeniyle karşılaştırılacak test-only immutable-container executable'ıdır; yalnız `IptvSuite.Testing` ve mevcut `ProtectedData` paketine bağlı, nonpackable/nonpublishable x64 kalır. Solution quality build'inde derlenebilir; fakat production projeleri tarafından referans alınamaz, production MSIX'e giremez, normal quality/hosted workflow executable'ı çalıştıramaz ve ağır `Decision` modu fresh açık onay olmadan başlatılmaz.
 - `IptvSuite.PackageLifecycleHarness`: yalnız M4 packaged-process lifecycle kanıtı için kullanılan, ayrı disposable identity'li ve publish edilemeyen x64 MSIX test hostudur. Production `IptvSuite.Windows` tarafından referans alınamaz, production MSIX'e veya upload artifact'ına giremez.
+- `IptvSuite.DpapiUserBoundaryHarness`: yalnız M4 gerçek Windows-account/DPAPI `CurrentUser` sınır kanıtı için kullanılan framework-dependent x64 test executable'ıdır. Production projeleri tarafından referans alınamaz, production MSIX'e giremez ve normal quality gate executable'ı çalıştırmaz; gerçek local user oluşturan controller yalnız açık onayla elevated hostta veya zorunlu hosted job'da çalıştırılır.
 - M2 test double'ları production `IPlayer`, `ISecretStore` veya provider contract'ı değildir. IntegrationTests içindeki M4 fake production `ISecretStore` contract senaryosudur, fakat gerçek DPAPI veya packaged lifecycle kanıtı değildir. M4 boyunca player/provider/parser/HTTP/database, DI/MVVM paketi ve feature navigation ekleme.
 
 ## M4 protected-storage sınırı
@@ -64,6 +65,14 @@ Package lifecycle harness değişikliğinde aynı elevated hostta ayrıca:
 ```powershell
 .\eng\Invoke-WindowsPackageLifecycleSmoke.ps1 -Configuration Release
 ```
+
+Gerçek Windows-user DPAPI boundary harness/controller değişikliğinde local OS account oluşturma yetkisi ayrıca açıkça verilmişse aynı elevated hostta:
+
+```powershell
+.\eng\Invoke-WindowsDpapiUserBoundarySmoke.ps1 -Configuration Release
+```
+
+Bu açık local onay yoksa yalnız statik contract, locked build, protocol self-test ve normal quality gate çalıştırılır; gerçek farklı-user execution hosted job'a bırakılır.
 
 ## Paket güvenliği
 

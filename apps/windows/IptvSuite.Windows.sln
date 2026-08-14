@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.ProtectedCatalogS
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.PackageLifecycleHarness", "tests\IptvSuite.PackageLifecycleHarness\IptvSuite.PackageLifecycleHarness.csproj", "{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.DpapiUserBoundaryHarness", "tests\IptvSuite.DpapiUserBoundaryHarness\IptvSuite.DpapiUserBoundaryHarness.csproj", "{9E610CDF-2461-4D7B-A289-84B41BB4F55A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -81,6 +83,10 @@ Global
 		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}.Debug|x64.Build.0 = Debug|x64
 		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}.Release|x64.ActiveCfg = Release|x64
 		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}.Release|x64.Build.0 = Release|x64
+		{9E610CDF-2461-4D7B-A289-84B41BB4F55A}.Debug|x64.ActiveCfg = Debug|x64
+		{9E610CDF-2461-4D7B-A289-84B41BB4F55A}.Debug|x64.Build.0 = Debug|x64
+		{9E610CDF-2461-4D7B-A289-84B41BB4F55A}.Release|x64.ActiveCfg = Release|x64
+		{9E610CDF-2461-4D7B-A289-84B41BB4F55A}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -97,5 +103,6 @@ Global
 		{3DEEBAF7-FFD4-4A47-82A6-D2D8128CF35A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{E7CD0B28-6FCC-4E20-86AF-7D7BD4FC7E6E} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{9E610CDF-2461-4D7B-A289-84B41BB4F55A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

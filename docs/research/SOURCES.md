@@ -1,6 +1,6 @@
 # Araştırma kaynakları
 
-**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency ve VS packaged-launch yeniden doğrulaması 2026-08-10; packaged activation/update ile protected-catalog/AEAD aday incelemesi yeniden doğrulaması 2026-08-14
+**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency ve VS packaged-launch yeniden doğrulaması 2026-08-10; packaged activation/update, protected-catalog/AEAD ve gerçek Windows user-boundary incelemesi yeniden doğrulaması 2026-08-14
 
 **Kapsam:** Phase 0 mimari, playback, güvenlik, mağaza ve platform kararları
 
@@ -114,6 +114,11 @@
 | S104 | Resmî SQLCipher for .NET dağıtımı | Zetetic | [SQLCipher for .NET](https://www.zetetic.net/sqlcipher/sqlcipher-for-dotnet/) | Resmî .NET native paketlerinin yalnız Commercial/Enterprise lisansıyla sunulması; `Microsoft.Data.Sqlite.Core` entegrasyonu; public `SQLitePCLRaw.*e_sqlcipher*` paketlerinin Zetetic tarafından üretilmemiş/desteklenmemiş ve eski binary taşıyor olarak tanımlanması | Güncel | 2026-08-14 |
 | S105 | SQLCipher edition ve lisans sınırları | Zetetic | [Lisanslar](https://www.zetetic.net/sqlcipher/license/), [Community](https://www.zetetic.net/sqlcipher/community/), [edition karşılaştırması](https://www.zetetic.net/sqlcipher/) | Community'nin BSD-style notice yükümlülüğü, core-function/community-support kapsamı; Commercial'ın resmî prebuilt package, performans iyileştirmesi ve private support sağlaması; Trial'ın production/redistribution için uygun olmaması | Copyright 2008–2026; güncel | 2026-08-14 |
 | S106 | SQLite Encryption Extension | SQLite | [SEE ürün/lisans sayfası](https://sqlite.org/com/see.html), [örnek lisans](https://sqlite.org/com/license-see.html) | SEE'nin ücretli/source-licensed SQLite eklentisi olması; native build/link/distribution koşulları ve ayrı algoritma/API yüzeyi. M4'te hazır, provenance'i kilitli .NET package yolu veya packaged/performance kanıtı sağlamaz | Güncel | 2026-08-14 |
+| S107 | `CreateProcessWithLogonW` ve logon profile sınırı | Microsoft / Windows | [`CreateProcessWithLogonW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createprocesswithlogonw) | Child process'in verilen credential'ın security context'inde çalışması; `LOGON_WITH_PROFILE` ile hedef user profile'ının yüklenmesi ve `lpEnvironment=null` iken hedef profile environment'ının kullanılması. `LOGON_NETCREDENTIALS_ONLY` caller'ın aynı token'ını koruduğundan gerçek local-user/DPAPI ayrımı kanıtı değildir; exact application path ve process/thread handle cleanup gereklidir | Windows desktop API, güncel | 2026-08-14 |
+| S108 | Windows local-account yaşam döngüsü | Microsoft / PowerShell | [`New-LocalUser`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.localaccounts/new-localuser?view=powershell-5.1), [`Get-LocalUser`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.localaccounts/get-localuser?view=powershell-5.1), [`Remove-LocalUser`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.localaccounts/remove-localuser?view=powershell-5.1) | Password'lü local test user'ı oluşturma, name/SID ile exact hesabı yeniden bulma ve exact local hesabı kaldırma yüzeyi; `Microsoft.PowerShell.LocalAccounts` modülünün 64-bit Windows'ta 32-bit PowerShell'de bulunmaması | Windows PowerShell 5.1, güncel | 2026-08-14 |
+| S109 | .NET DPAPI data-protection kapsamı | Microsoft / .NET | [How to use data protection](https://learn.microsoft.com/en-us/dotnet/standard/security/how-to-use-data-protection) | Windows-only `ProtectedData` yüzeyinde `DataProtectionScope.CurrentUser` ile yalnız aynı user account'un decrypt edebilmesi; bilgisayar kapsamının ayrı ve daha geniş bir seçim olması | .NET 10; güncelleme 2026-07-23 | 2026-08-14 |
+| S110 | Local security-group üyeliği | Microsoft / PowerShell | [`Add-LocalGroupMember`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.localaccounts/add-localgroupmember?view=powershell-5.1) | Local user/group'u local security group'a ekleme; hedef group ve member'ın SID ile belirtilebilmesi. Yerelleştirilmiş group adına dayanmadan built-in group SID kullanımı bu sözleşmeden türetilen `INFERENCE`dır | Windows PowerShell 5.1, güncel | 2026-08-14 |
+| S111 | Exact user-profile temizliği | Microsoft / Windows | [`DeleteProfileW`](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-deleteprofilew) | Administrator caller'ın exact user SID ile profile ve ilişkili ayarları silmesi; null profile path'te path'in registry'den bulunması ve Windows Vista+ için local-computer parametresinin null kalması | Windows desktop API, güncel | 2026-08-14 |
 
 ## Samsung TV / Tizen
 
@@ -167,7 +172,7 @@ Aşağıdaki maddeler kaynak taramasıyla kapanmamıştır:
 - Genel BYO-authorized IPTV player'ın Microsoft veya Samsung incelemesinden kabul garantisi.
 - Samsung Partner Seller/Content Manager'ın Türkiye ürünü için sözleşme ve ülke onayı.
 - Tizen `WidgetData` verisinin update, uninstall/reinstall, Smart Hub reset ve OS upgrade yaşam döngüsü.
-- Windows'ta DPAPI-per-locator yaklaşımının 50.000 kayıt performansı ve atomik migration davranışı.
+- Windows'ta DPAPI-per-locator bulk channel düzeninin 50.000 kayıt performansı ölçülmüş ve bütçe dışı olduğu için reddedilmiştir; M8 production SQLite yerleşiminin end-to-end 50.000 performansı, crash/recovery ve atomik migration davranışı hâlâ `UNVERIFIED`dır.
 - Gerçek sağlayıcıların Xtream-compatible varyasyonları ve cookie/redirect beklentileri.
 - Uygulama yayıncısının tamamen cihaz-içi akışta KVKK rolü, VERBİS ve yurt dışı aktarım sorumluluğu.
 

@@ -86,6 +86,12 @@ public sealed class DependencyRulesTests
             ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure"],
             [],
             ["Microsoft.Windows.SDK.BuildTools", "Microsoft.WindowsAppSDK"]),
+        new(
+            "IptvSuite.DpapiUserBoundaryHarness",
+            "apps/windows/tests/IptvSuite.DpapiUserBoundaryHarness/IptvSuite.DpapiUserBoundaryHarness.csproj",
+            ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
+            [],
+            ["System.Security.Cryptography.ProtectedData"]),
     ];
 
     [TestMethod]
@@ -123,6 +129,7 @@ public sealed class DependencyRulesTests
         AssertNoPath(graph, "IptvSuite.Infrastructure", "IptvSuite.Windows");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.ProtectedCatalogSpike");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PackageLifecycleHarness");
+        AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.DpapiUserBoundaryHarness");
     }
 
     [TestMethod]
@@ -252,11 +259,15 @@ public sealed class DependencyRulesTests
         const string windowsProjectGuid = "{1D606C2E-0328-4C4C-9DFE-383651FC0CD1}";
         const string protectedCatalogSpikeProjectGuid = "{E7CD0B28-6FCC-4E20-86AF-7D7BD4FC7E6E}";
         const string lifecycleHarnessProjectGuid = "{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}";
+        const string dpapiUserBoundaryHarnessProjectGuid = "{9E610CDF-2461-4D7B-A289-84B41BB4F55A}";
         const string testsFolderGuid = "{0AB3BF05-4346-4AA6-1389-037BE0695223}";
 
         StringAssert.Contains(
             solution,
             $"{protectedCatalogSpikeProjectGuid} = {testsFolderGuid}");
+        StringAssert.Contains(
+            solution,
+            $"{dpapiUserBoundaryHarnessProjectGuid} = {testsFolderGuid}");
 
         foreach (string configuration in new[] { "Debug", "Release" })
         {
@@ -269,6 +280,9 @@ public sealed class DependencyRulesTests
             StringAssert.Contains(
                 solution,
                 $"{protectedCatalogSpikeProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
+            StringAssert.Contains(
+                solution,
+                $"{dpapiUserBoundaryHarnessProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
             Assert.IsFalse(
                 solution.Contains(
                     $"{protectedCatalogSpikeProjectGuid}.{configuration}|x64.Deploy.0",
@@ -279,6 +293,11 @@ public sealed class DependencyRulesTests
                     $"{lifecycleHarnessProjectGuid}.{configuration}|x64.Deploy.0",
                     StringComparison.Ordinal),
                 "The test-only lifecycle harness must never deploy as part of a solution build.");
+            Assert.IsFalse(
+                solution.Contains(
+                    $"{dpapiUserBoundaryHarnessProjectGuid}.{configuration}|x64.Deploy.0",
+                    StringComparison.Ordinal),
+                "The test-only DPAPI user-boundary harness must never deploy as part of a solution build.");
         }
     }
 
@@ -404,6 +423,33 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             applicationSource.Contains("args.Arguments", StringComparison.Ordinal),
             "WinUI desktop LaunchActivatedEventArgs.Arguments is always empty and cannot carry harness arguments.");
+    }
+
+    [TestMethod]
+    public void DpapiUserBoundaryHarnessIsIsolatedNonPublishableTestInfrastructure()
+    {
+        XDocument project = LoadXml(
+            "apps/windows/tests/IptvSuite.DpapiUserBoundaryHarness/IptvSuite.DpapiUserBoundaryHarness.csproj");
+
+        Assert.AreEqual("Exe", GetProperty(project, "OutputType"));
+        Assert.AreEqual("net10.0", GetProperty(project, "TargetFramework"));
+        Assert.AreEqual("false", GetProperty(project, "IsTestProject"));
+        Assert.AreEqual("false", GetProperty(project, "IsPackable"));
+        Assert.AreEqual("false", GetProperty(project, "IsPublishable"));
+        Assert.AreEqual("x64", GetProperty(project, "Platforms"));
+        Assert.AreEqual("x64", GetProperty(project, "PlatformTarget"));
+        Assert.AreEqual("false", GetProperty(project, "Prefer32Bit"));
+        Assert.AreEqual("false", GetProperty(project, "SelfContained"));
+        Assert.AreEqual("true", GetProperty(project, "UseAppHost"));
+        Assert.AreEqual(
+            "IptvSuite.DpapiUserBoundaryHarness",
+            GetProperty(project, "RootNamespace"));
+        Assert.AreEqual(
+            "IptvSuite.DpapiUserBoundaryHarness",
+            GetProperty(project, "AssemblyName"));
+        Assert.IsNull(GetProperty(project, "UseWinUI"));
+        Assert.IsNull(GetProperty(project, "EnableMsixTooling"));
+        Assert.IsNull(GetProperty(project, "RuntimeIdentifier"));
     }
 
     [TestMethod]
@@ -775,6 +821,7 @@ public sealed class DependencyRulesTests
                 content.Contains("IptvSuite.SecretStoreSpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.ProtectedCatalogSpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.PackageLifecycleHarness", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.DpapiUserBoundaryHarness", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.AspNetCore.App", StringComparison.Ordinal) ||
                 content.Contains("IPTVSUITE_TEST_ONLY_CANARY_V1", StringComparison.Ordinal),
@@ -811,6 +858,9 @@ public sealed class DependencyRulesTests
             packageSmoke,
             "$entry.Name -match '^(?i:IptvSuite\\.ProtectedCatalogSpike(?:\\..*)?)$'");
         StringAssert.Contains(packageSmoke, "IptvSuite\\.PackageLifecycleHarness(?:\\..*)?");
+        StringAssert.Contains(
+            packageSmoke,
+            "$entry.Name -match '^(?i:IptvSuite\\.DpapiUserBoundaryHarness(?:\\..*)?)$'");
         StringAssert.Contains(packageSmoke, "PackagedApplicationActivator]::Activate($aumid)");
         StringAssert.Contains(packageSmoke, "CoCreateInstance");
         StringAssert.Contains(packageSmoke, "LocalServer = 0x00000004");
@@ -1436,6 +1486,339 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void DpapiUserBoundaryLaneIsSanitizedCleanupBoundAndRequired()
+    {
+        string smoke = File.ReadAllText(
+                Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsDpapiUserBoundarySmoke.ps1"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        string invocation = File.ReadAllText(
+            Path.Combine(
+                RepositoryRoot,
+                "apps",
+                "windows",
+                "tests",
+                "IptvSuite.DpapiUserBoundaryHarness",
+                "HarnessInvocation.cs"));
+        string runner = File.ReadAllText(
+            Path.Combine(
+                RepositoryRoot,
+                "apps",
+                "windows",
+                "tests",
+                "IptvSuite.DpapiUserBoundaryHarness",
+                "DpapiUserBoundaryRunner.cs"));
+        string workflow = File.ReadAllText(
+                Path.Combine(RepositoryRoot, ".github", "workflows", "windows-quality.yml"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        foreach (string mode in new[]
+                 {
+                     "prepare-primary",
+                     "probe-secondary",
+                     "verify-primary",
+                     "protocol-self-test",
+                 })
+        {
+            StringAssert.Contains(invocation, $"\"{mode}\"");
+        }
+
+        StringAssert.Contains(runner, "DataProtectionScope.CurrentUser");
+        StringAssert.Contains(runner, "SecretStoreFailure.ProtectedRecordUnavailable");
+        StringAssert.Contains(runner, "CreatorRecordLeaseAbsent");
+        StringAssert.Contains(runner, "CreatorRecordImmutable");
+        StringAssert.Contains(runner, "SecondaryIsNonAdministrator");
+
+        StringAssert.Contains(smoke, "private const uint LogonWithProfile = 0x00000001;");
+        StringAssert.Contains(smoke, "private const uint LogonNetCredentialsOnly = 0x00000002;");
+        StringAssert.Contains(smoke, "uint logonFlags = LogonWithProfile;");
+        StringAssert.Contains(smoke, "Network-credentials-only logon is forbidden.");
+        StringAssert.Contains(smoke, "CreateProcessWithLogonW(");
+        StringAssert.Contains(
+            smoke,
+            "$dotNetExecutable,\n        @($stagedHarnessPath, \"probe-secondary\"");
+        StringAssert.Contains(smoke, "IntPtr.Zero,\n                    workingDirectory,");
+        StringAssert.Contains(smoke, "Marshal.ZeroFreeGlobalAllocUnicode(passwordPointer)");
+        StringAssert.Contains(smoke, "[Array]::Reverse($runBytes, 0, 4)");
+        StringAssert.Contains(smoke, "[Array]::Reverse($runBytes, 4, 2)");
+        StringAssert.Contains(smoke, "[Array]::Reverse($runBytes, 6, 2)");
+        StringAssert.Contains(smoke, "$actualRunId = [Guid]::new($runBytes)");
+        StringAssert.Contains(
+            smoke,
+            "if (processCreated && !processHandleTransferred && processInformation.hProcess != IntPtr.Zero)");
+        StringAssert.Contains(
+            smoke,
+            "uint initialWait = WaitForSingleObject(processInformation.hProcess, 0);");
+        StringAssert.Contains(smoke, "if (initialWait != WaitObject0)");
+        StringAssert.Contains(smoke, "TerminateProcess(processInformation.hProcess, 18)");
+        StringAssert.Contains(
+            smoke,
+            "if (WaitForSingleObject(processInformation.hProcess, 0) != WaitObject0)");
+        StringAssert.Contains(
+            smoke,
+            "else if (WaitForSingleObject(processInformation.hProcess, 10000) != WaitObject0)");
+        int retainedProcessIndex = smoke.IndexOf(
+            "RetainedProcess retainedProcess = new RetainedProcess(",
+            StringComparison.Ordinal);
+        int processHandleTransferIndex = smoke.IndexOf(
+            "processHandleTransferred = true;",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            retainedProcessIndex >= 0 && processHandleTransferIndex > retainedProcessIndex,
+            "The alternate-user process handle may transfer only after a retained process owns it.");
+        StringAssert.Contains(smoke, "Get-LocalGroup -SID $usersSid");
+        StringAssert.Contains(smoke, "Get-LocalGroup -SID $administratorsSid");
+        StringAssert.Contains(
+            smoke,
+            "Add-NumericAccessRule -Security $security -Sid $script:administratorsSid -Rights ([System.Security.AccessControl.FileSystemRights]::FullControl)");
+        StringAssert.Contains(smoke, "function Set-NumericFileAcl");
+        StringAssert.Contains(smoke, "$security = [System.Security.AccessControl.FileSecurity]::new()");
+        StringAssert.Contains(smoke, "$security.SetAccessRuleProtection($true, $false)");
+        StringAssert.Contains(
+            smoke,
+            "[pscustomobject]@{ Sid = $PrimarySid; Rights = [System.Security.AccessControl.FileSystemRights]::FullControl }");
+        StringAssert.Contains(
+            smoke,
+            "[pscustomobject]@{ Sid = $script:systemSid; Rights = [System.Security.AccessControl.FileSystemRights]::FullControl }");
+        StringAssert.Contains(
+            smoke,
+            "[pscustomobject]@{ Sid = $script:administratorsSid; Rights = [System.Security.AccessControl.FileSystemRights]::FullControl }");
+        StringAssert.Contains(
+            smoke,
+            "[pscustomobject]@{ Sid = $SecondarySid; Rights = $SecondaryRights }");
+        StringAssert.Contains(
+            smoke,
+            "[System.IO.File]::SetAccessControl([System.IO.Path]::GetFullPath($Path), $security)");
+        StringAssert.Contains(smoke, "function Get-BoundedRegularTree");
+        StringAssert.Contains(smoke, "[int]$MaxEntries = 512");
+        StringAssert.Contains(smoke, "[int]$MaxDepth = 12");
+        StringAssert.Contains(smoke, "[long]$MaxTotalBytes = 268435456");
+        StringAssert.Contains(smoke, "[System.IO.FileAttributes]::ReparsePoint");
+        StringAssert.Contains(smoke, "The staged tool tree contains an escaped entry.");
+        StringAssert.Contains(smoke, "The staged tool tree contains an unsupported entry.");
+        StringAssert.Contains(smoke, "function Assert-EquivalentRegularTrees");
+        StringAssert.Contains(smoke, "$actualEntry.RelativePath -cne $expectedEntry.RelativePath");
+        StringAssert.Contains(smoke, "$actualEntry.IsDirectory -ne $expectedEntry.IsDirectory");
+        StringAssert.Contains(smoke, "$actualEntry.Length -ne $expectedEntry.Length");
+        StringAssert.Contains(smoke, "$actualEntry.Sha256 -cne $expectedEntry.Sha256");
+        StringAssert.Contains(
+            smoke,
+            "if (@(Get-ChildItem -LiteralPath $Destination -Force -ErrorAction Stop).Count -ne 0)");
+        StringAssert.Contains(
+            smoke,
+            "Assert-EquivalentRegularTrees -Expected $sourceEntries -Actual $destinationEntries");
+        StringAssert.Contains(smoke, "function Set-StagedToolTreeAcl");
+        StringAssert.Contains(smoke, "function Assert-ExactNumericAcl");
+        StringAssert.Contains(smoke, "$security.AreAccessRulesProtected");
+        StringAssert.Contains(smoke, "$normalizedSecondaryRights = $SecondaryRights -bor");
+        StringAssert.Contains(
+            smoke,
+            "[System.Security.AccessControl.FileSystemRights]::Synchronize");
+        StringAssert.Contains(
+            smoke,
+            "$expectedRules.Add($SecondarySid.Value, [int]$normalizedSecondaryRights)");
+        StringAssert.Contains(smoke, "if ($rules.Count -ne $expectedRules.Count)");
+        StringAssert.Contains(smoke, "$rule.IsInherited");
+        StringAssert.Contains(smoke, "$rule.InheritanceFlags -ne $expectedInheritance");
+        StringAssert.Contains(smoke, "$seenRules.Count -ne $expectedRules.Count");
+        StringAssert.Contains(
+            smoke,
+            "foreach ($entry in @($before | Where-Object { $_.IsDirectory }))");
+        StringAssert.Contains(
+            smoke,
+            "foreach ($entry in @($before | Where-Object { -not $_.IsDirectory }))");
+        StringAssert.Contains(smoke, "Assert-EquivalentRegularTrees -Expected $before -Actual $after");
+        StringAssert.Contains(
+            smoke,
+            "Copy-RegularTree -Source $harnessOutputDirectory -Destination $toolRoot\n    Set-FailurePoint -Stage \"ToolStaging\" -Code \"StagedToolAclFailed\"\n    Set-StagedToolTreeAcl `");
+        StringAssert.Contains(smoke, "$boundaryTicketPath = Join-Path $inputPath \"boundary-ticket.bin\"");
+        StringAssert.Contains(smoke, "$primaryRawPath = Join-Path $inputPath \"primary-raw.dpapi\"");
+        StringAssert.Contains(
+            smoke,
+            "$primaryStoreEntries = @(Get-ChildItem -LiteralPath $primaryStorePath -Force -ErrorAction Stop)");
+        StringAssert.Contains(smoke, "$primaryStoreEntries.Count -ne 1");
+        StringAssert.Contains(smoke, "$primaryStoreEntries[0] -isnot [System.IO.FileInfo]");
+        StringAssert.Contains(
+            smoke,
+            "$primaryStoreEntries[0].Name -cnotmatch '\\Arecord-v2-[0-9A-F]{64}\\.dpapi\\z'");
+        StringAssert.Contains(
+            smoke,
+            "foreach ($preparedInputPath in @($boundaryTicketPath, $primaryRawPath, $primaryRecordPath))");
+        StringAssert.Contains(
+            smoke,
+            "-Path $preparedInputPath `\n            -PrimarySid $primarySid `\n            -SecondarySid $createdUserSid `\n            -SecondaryRights ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute)");
+        StringAssert.Contains(smoke, "New-LocalUser `");
+        StringAssert.Contains(smoke, "Remove-LocalUser -InputObject $candidate");
+        StringAssert.Contains(smoke, "NativeBoundaryHost]::DeleteProfile(");
+        StringAssert.Contains(smoke, "$accountDescription = \"DPAPI-BOUNDARY:\" + $runIdText");
+        StringAssert.Contains(smoke, "-not $candidate.SID.Equals($script:createdUserSid)");
+        StringAssert.Contains(smoke, "$script:accountDescription,");
+        StringAssert.Contains(smoke, "$absentProfilePath = Assert-ProfilePathAbsent");
+        StringAssert.Contains(
+            smoke,
+            "Get-ChildItem `\n        -LiteralPath $profileParent.FullName `\n        -Force `\n        -ErrorAction Stop");
+        Assert.IsTrue(
+            Regex.Count(smoke, @"Get-LocalUser -ErrorAction Stop") >= 3,
+            "Account discovery, exact removal, and absence checks must fail closed.");
+        Assert.IsFalse(
+            Regex.IsMatch(smoke, @"Get-LocalUser[^\r\n]*-ErrorAction\s+SilentlyContinue"),
+            "A failed local-account query must not be mistaken for account absence.");
+        StringAssert.Contains(smoke, "if ($remainingAccounts.Count -ne 0)");
+        StringAssert.Contains(smoke, "$securePassword.Dispose()");
+        StringAssert.Contains(smoke, "$cleanupFailures.Count -ne 0");
+        StringAssert.Contains(smoke, "$failureCode = \"CleanupEvidenceIncomplete\"");
+        StringAssert.Contains(smoke, "scan-artifacts $evidenceStagingRoot M4_DPAPI_USER_BOUNDARY $caseId");
+
+        string[] cleanupSteps =
+        [
+            "Invoke-CleanupStep -Code \"ProcessCleanupFailed\"",
+            "Invoke-CleanupStep -Code \"ProfileCleanupFailed\"",
+            "Invoke-CleanupStep -Code \"GroupCleanupFailed\"",
+            "Invoke-CleanupStep -Code \"AccountCleanupFailed\"",
+            "Invoke-CleanupStep -Code \"WorkspaceCleanupFailed\"",
+        ];
+        int previousCleanupStepIndex = -1;
+        foreach (string cleanupStep in cleanupSteps)
+        {
+            int cleanupStepIndex = smoke.IndexOf(cleanupStep, StringComparison.Ordinal);
+            Assert.IsTrue(
+                cleanupStepIndex > previousCleanupStepIndex,
+                $"The cleanup step is missing or out of order: {cleanupStep}.");
+            previousCleanupStepIndex = cleanupStepIndex;
+        }
+        StringAssert.Contains(smoke, "$script:failureCode = \"MultipleCleanupFailures\"");
+
+        int evidenceStart = smoke.IndexOf("$successCandidate = [ordered]@{", StringComparison.Ordinal);
+        int evidenceEnd = smoke.IndexOf("\n    }\n}", evidenceStart, StringComparison.Ordinal);
+        Assert.IsTrue(evidenceStart >= 0 && evidenceEnd > evidenceStart);
+        string successEvidence = smoke[evidenceStart..evidenceEnd];
+        string[] expectedEvidenceKeys =
+        [
+            "SchemaVersion",
+            "Milestone",
+            "EvidenceKind",
+            "Configuration",
+            "Platform",
+            "DataProtectionScope",
+            "ExactSdkVerified",
+            "DotNetSdk",
+            "CleanHeadBound",
+            "CommitSha",
+            "ControllerScriptSha256",
+            "HarnessAssemblySha256",
+            "DistinctWindowsAccountVerified",
+            "StandardUsersMembershipVerified",
+            "SecondaryTokenNonAdministrator",
+            "NumericSidAclApplied",
+            "LogonWithProfileUsed",
+            "NetCredentialsOnlyForbidden",
+            "CreateNoWindowUsed",
+            "ProbeProcessOwnerVerified",
+            "ProbeProcessStartVerified",
+            "ProfileLoadedForProbe",
+            "RawInputDigestMatched",
+            "RecordInputDigestMatched",
+            "SecondaryRawRoundTripPassed",
+            "CreatorRawRejectedCryptographically",
+            "SecondaryAdapterRoundTripPassed",
+            "SecondaryStoreClean",
+            "CreatorRecordUnavailable",
+            "CreatorRecordLeaseAbsent",
+            "CreatorRecordImmutable",
+            "OwnedDataCanaryScanPassed",
+            "PrimaryVerificationPassed",
+            "ProbeExitedSuccessfully",
+        ];
+        string[] actualEvidenceKeys = Regex.Matches(
+                successEvidence,
+                @"(?m)^\s{8}([A-Za-z][A-Za-z0-9]*)\s*=")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            expectedEvidenceKeys,
+            actualEvidenceKeys,
+            "DPAPI user-boundary success evidence must remain an exact allowlist.");
+
+        StringAssert.Contains(successEvidence, "DotNetSdk = $actualSdk");
+        StringAssert.Contains(successEvidence, "CommitSha = $repositoryHead");
+        StringAssert.Contains(successEvidence, "ControllerScriptSha256 = $controllerScriptSha256");
+        StringAssert.Contains(successEvidence, "HarnessAssemblySha256 = $stagedHarnessSha256");
+        StringAssert.Contains(smoke, "$repositoryHead = Get-RepositoryHead");
+        StringAssert.Contains(smoke, "$controllerScriptSha256 = Get-RegularFileSha256 -Path $PSCommandPath");
+        StringAssert.Contains(smoke, "$stagedHarnessSha256 = Get-RegularFileSha256 -Path $stagedHarnessPath");
+        StringAssert.Contains(smoke, "$head[0] -notmatch '\\A[0-9a-fA-F]{40}\\z'");
+        StringAssert.Contains(smoke, "$hash -notmatch '\\A[0-9a-f]{64}\\z'");
+
+        foreach (string sensitiveToken in new[]
+                 {
+                     "$securePassword",
+                     "$createdUserName",
+                     "$createdUserSid",
+                     "$primarySid",
+                     "$runId",
+                      "$runRoot",
+                      "$workspaceBase",
+                      "$stagedHarnessPath",
+                      "$dotNetExecutable",
+                  })
+        {
+            Assert.IsFalse(
+                successEvidence.Contains(sensitiveToken, StringComparison.Ordinal),
+                $"DPAPI user-boundary success evidence must not contain sensitive token {sensitiveToken}.");
+        }
+
+        string[] expectedAssignedEvidenceKeys =
+        [
+            "ProcessCleanupPassed",
+            "StandardUsersMembershipRemoved",
+            "LocalAccountRemoved",
+            "ProfileRemoved",
+            "RunWorkspaceRemoved",
+            "ToolWorkspaceRemoved",
+            "RepositoryCleanAfterRun",
+            "EvidenceCanaryScanPassed",
+        ];
+        string[] assignedEvidenceKeys = Regex.Matches(
+                smoke,
+                @"(?m)^\s*\$successCandidate\[""([A-Za-z][A-Za-z0-9]*)""\]\s*=")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            expectedAssignedEvidenceKeys,
+            assignedEvidenceKeys,
+            "Only reviewed post-cleanup evidence fields may be assigned.");
+
+        int failureEvidenceStart = smoke.IndexOf("$failureEvidence = [ordered]@{", StringComparison.Ordinal);
+        int failureEvidenceEnd = smoke.IndexOf("\n    }", failureEvidenceStart, StringComparison.Ordinal);
+        Assert.IsTrue(failureEvidenceStart >= 0 && failureEvidenceEnd > failureEvidenceStart);
+        string[] failureEvidenceKeys = Regex.Matches(
+                smoke[failureEvidenceStart..failureEvidenceEnd],
+                @"(?m)^\s{8}([A-Za-z][A-Za-z0-9]*)\s*=")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        string[] expectedFailureEvidenceKeys = ["Stage", "Code"];
+        CollectionAssert.AreEqual(expectedFailureEvidenceKeys, failureEvidenceKeys);
+
+        StringAssert.Contains(
+            workflow,
+            "  dpapi-user-boundary:\n    name: DPAPI real-user boundary smoke\n    needs: quality\n");
+        StringAssert.Contains(
+            workflow,
+            "shell: powershell\n        run: .\\eng\\Invoke-WindowsDpapiUserBoundarySmoke.ps1 -Configuration Release");
+        StringAssert.Contains(
+            workflow,
+            "- name: Upload sanitized DPAPI user-boundary evidence\n        if: ${{ success() }}\n        uses:");
+        StringAssert.Contains(workflow, "name: windows-dpapi-user-boundary-evidence");
+        StringAssert.Contains(workflow, ".artifacts/dpapi-user-boundary/last-success.json");
+        StringAssert.Contains(
+            workflow,
+            "      - quality\n      - package-smoke\n      - dpapi-user-boundary\n");
+        StringAssert.Contains(
+            workflow,
+            "DPAPI_USER_BOUNDARY_RESULT: ${{ needs.dpapi-user-boundary.result }}");
+        StringAssert.Contains(workflow, "test \"$DPAPI_USER_BOUNDARY_RESULT\" = \"success\"");
+    }
+
+    [TestMethod]
     public void CiWorkflowIsLeastPrivilegePinnedAndAlwaysTriggered()
     {
         string workflowPath = Path.Combine(RepositoryRoot, ".github", "workflows", "windows-quality.yml");
@@ -1475,7 +1858,7 @@ public sealed class DependencyRulesTests
         MatchCollection pinnedUses = Regex.Matches(
             workflow,
             @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
-        Assert.HasCount(7, allUses);
+        Assert.HasCount(10, allUses);
         Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
     }
 
