@@ -4,6 +4,8 @@ Bu klasör Windows uygulamasını, M2 test scaffold'unu, M3 saf domain/validatio
 
 Test-only lifecycle schema v3 dilimi, güncel disposable pakette reset ile app-owned state'in kaldırılmasını ve canlı protected record/control ticket varken exact current-user uninstall ardından aynı güncel MSIX'in fresh-state reinstall'ini kodlar. Run number `#20`, commit `6f30e3fa92f329c1fa26333c591edb5148261cec` için bu dilimin hosted execution'ını workflow/UI düzeyinde **VERIFIED** yapmıştır; artifact içeriği bağımsız doğrulanmamıştır.
 
+Run number `#22` UI kaydı, threat-model kararı ile production `asInvoker` / `uiAccess=false` manifestini içeren commit `43bf88c591bdc216d3a288ca578f90e4fad927c6` için 3/3 işi yeşil, üç artifact ve `8m23s` toplam süre gösterir. Exact architecture gate ile signed production-package smoke ve disposable lifecycle adımı commit-bound workflow'da zorunlu olduğundan declarative least-privilege manifest sınırı ve packaged execution workflow/UI düzeyinde **VERIFIED**dır. Bu kayıt R26 kararının doğruluğunu, runtime process token'ının non-elevated olduğunu, atomik path güvenliğini veya same-user isolation'ı kanıtlamaz; indirilen artifact alanları, ZIP/içerik, tam digest, job log/test sayısı ve GitHub database run ID'si bağımsız doğrulanmamıştır.
+
 ## Toolchain
 
 | Bileşen | Exact sürüm / sınır |
