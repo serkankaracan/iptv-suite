@@ -102,7 +102,11 @@ Runner threshold uygulamadığı için “bütçenin altında” sınıflandırm
 - Gerçek ikinci Windows kullanıcısı/wrong-user, production PFN update/reset/repair/uninstall-reinstall, source-wide deletion/reconciliation, migration ve backup/journal/free-page sanitization açık kalır.
 - AES-GCM/DPAPI kullanımı kendi başına security review, FIPS/compliance veya managed runtime/OS iç key schedule zeroization kanıtı değildir.
 
-## 6. Takip koşulu
+## 6. Hosted workflow/UI kaydı
+
+2026-08-14 kullanıcı tarafından sağlanan GitHub Actions UI kaydı, run number `#27`nin docs-only commit `0c71d811b7f804e73daae04a684c1c4062a4a55a` için üç işin üçünü yeşil, artifact sayısını üç ve toplam süreyi `8m41s` gösterdiğini **VERIFIED** yapar. Bu yalnız Decision kaydını taşıyan commit'in normal hosted workflow sonucudur. Workflow `Invoke-WindowsProtectedCatalogSpike.ps1` çağırmadığından local opt-in `Decision` workload'unu, metriklerini veya summary hash'ini yeniden doğrulamamıştır. GitHub database run ID'si, job log/test sayısı ile artifact ID/içerik/JSON/ZIP/tam digest bağları bağımsız doğrulanmamıştır. Bu kayıt M4 veya ADR-003 durumunu değiştirmez.
+
+## 7. Takip koşulu
 
 Comparative spike tekrar edilmek zorunda olan açık gate değildir. M4'te gerçek ikinci Windows user ile source admission/drain, source-wide deletion ve startup reconciliation kanıtı kapanmalıdır. M8 production tasarımı; exact SQLite schema/provider/dependency/lisans kararı, aynı transaction'da old-or-new activation, bounded batch, crash/recovery, key rotation/delete ve migration contract'larını ayrı review ile kapatmalı; aynı 50k corpus üzerinde parser + normalize + protected persist + index end-to-end referans-cihaz ölçümünü geçmelidir. Production PFN lifecycle/repair/identity ve Store kabulü M15'te kalır.
 
