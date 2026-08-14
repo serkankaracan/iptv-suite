@@ -10,6 +10,8 @@ Configuration primitive'i yalnız durable olarak `DeletionPending` olduğu varsa
 
 Run number `#24` UI kaydı, yalnız documentation değişikliği olan commit `207455a54d2d7ac9b6b5c1ce8eb5e29bbee0c383` için 3/3 yeşil iş, üç artifact ve `9m02s` toplam süre gösterir. Bu hosted kayıt yalnız o docs-only commit'in workflow/UI sonucudur; protected-catalog adayının Smoke veya `Decision` kanıtı değildir.
 
+Run number `#25` UI kaydı, `test(windows): spike protected catalog layout` başlıklı commit `786151cef6c60de5e34009ebb6643ec804490ee9` için 3/3 işi yeşil, üç artifact ve `8m32s` toplam süre gösterir. Commit-bound normal workflow protected-catalog projesini solution'ın Debug/Release x64 build'lerinde derler; architecture guard'ları production graph ayrımını ve opt-in wrapper'ın normal quality/hosted akışta çağrılmamasını denetler, package smoke ise çıkarılmış production MSIX payload'ında `IptvSuite.ProtectedCatalogSpike*` adlarını denylist ile reddeder. Böylece hosted compile, isolation ve package-exclusion zinciri workflow/UI düzeyinde **VERIFIED**dır. Workflow aday executable'ını çağırmadığından bu kayıt `Smoke`/`Decision`, cryptographic correctness/performance veya production seçimi kanıtı değildir; job log/test sayıları ile indirilen artifact içerik ve tam digest bağları bağımsız doğrulanmamıştır. M4 `IN PROGRESS`, ADR-003 `Proposed` kalır.
+
 Windows uygulaması C# / .NET 10 LTS, WinUI 3 ve framework-dependent MSIX kullanır. Production bağımlılık yönü şöyledir:
 
 ```text

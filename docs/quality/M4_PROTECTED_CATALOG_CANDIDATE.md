@@ -120,11 +120,13 @@ Worktree'de ayrı, nonpackable/nonpublishable `IptvSuite.ProtectedCatalogSpike` 
 
 Run number `#24` kullanıcı tarafından sağlanan GitHub Actions UI kaydında docs commit'i için 3/3 işi yeşil, üç artifact ve `9m02s` toplam süre gösterir. Bu yalnız hosted workflow/UI düzeyinde docs-commit geçişidir; immutable-container implementation'ı, AES-GCM/nonce correctness'i, cryptographic evidence, benchmark `Decision` veya production seçimi değildir.
 
+Run number `#25` kullanıcı tarafından sağlanan GitHub Actions UI kaydında `test(windows): spike protected catalog layout` başlıklı commit `786151cef6c60de5e34009ebb6643ec804490ee9` için 3/3 işi yeşil, üç artifact ve `8m32s` toplam süre gösterir. Commit-bound normal workflow protected-catalog projesini solution'ın Debug/Release x64 build'lerinde derler; architecture guard'ları production graph ayrımını ve `Invoke-WindowsProtectedCatalogSpike.ps1` çağrısının normal quality/hosted akışta bulunmamasını denetler, package smoke ise çıkarılmış production MSIX payload'ında `IptvSuite.ProtectedCatalogSpike*` adlarını denylist ile reddeder. Bu nedenle hosted compile, isolation ve package-exclusion sonucu workflow/UI düzeyinde **VERIFIED**dır. Normal üç artifact candidate evidence değildir; workflow aday executable'ının `Smoke` veya `Decision` modunu çalıştırmamıştır. Job log/test sayıları ile indirilen JSON/ZIP/içerik/tam digest bağları bağımsız doğrulanmadığından run, AES-GCM/nonce/fault correctness'i, comparative performansı veya production seçimini kanıtlamaz. Heavy `Decision` `UNVERIFIED`, M4 `IN PROGRESS` ve ADR-003 `Proposed` kalır.
+
 ## 10. Kanıt sınıflandırması
 
-- **VERIFIED:** Resmî .NET API boyutları/semantiği, DPAPI scope'u, NIST final guidance, SQLite transaction/recovery modeli ve Zetetic'in resmî package/lisans ayrımları [S96–S106]; yukarıdaki exact-hash bağlı dirty-worktree local Smoke correctness/harness sonucu.
+- **VERIFIED:** Resmî .NET API boyutları/semantiği, DPAPI scope'u, NIST final guidance, SQLite transaction/recovery modeli ve Zetetic'in resmî package/lisans ayrımları [S96–S106]; yukarıdaki exact-hash bağlı dirty-worktree local Smoke correctness/harness sonucu; run `#25` için yalnız commit-bound hosted compile, architecture isolation ve production-package exclusion zinciri.
 - **INFERENCE:** Fresh key + in-attempt collision rejection + no-resume modelinin persisted counter'dan daha küçük crash state'i oluşturması; tek SQLite transaction-domain'inin production için tercih edilmesi; Community/SEE entegrasyon yükünün bu milestone'a uygun olmaması.
-- **UNVERIFIED:** Heavy comparative `Decision` performansı, packaged lifecycle/wrong-user, crash/power-loss matrisi, production schema/provider, source deletion, migration ve SQLCipher Commercial procurement.
+- **UNVERIFIED:** Run `#25` job log/test sayıları ve indirilen artifact JSON/ZIP/içerik/tam digest bağları; heavy comparative `Decision` performansı, packaged lifecycle/wrong-user, crash/power-loss matrisi, production schema/provider, source deletion, migration ve SQLCipher Commercial procurement.
 
 ## Kaynaklar
 

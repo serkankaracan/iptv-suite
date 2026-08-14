@@ -20,6 +20,8 @@ Run `#18`den sonra lifecycle harness schema v3'e genişletilmiştir: updated dis
 
 Run number `#24` UI kaydı, yalnız documentation değişikliği olan commit `207455a54d2d7ac9b6b5c1ce8eb5e29bbee0c383` için 3/3 yeşil iş, üç artifact ve `9m02s` toplam süre gösterir. Bu hosted kayıt protected-catalog adayının Smoke veya `Decision` execution kanıtı değildir.
 
+Run number `#25` UI kaydı, `test(windows): spike protected catalog layout` başlıklı commit `786151cef6c60de5e34009ebb6643ec804490ee9` için 3/3 işi yeşil, üç artifact ve `8m32s` toplam süre gösterir. Commit-bound normal workflow protected-catalog projesini solution'ın Debug/Release x64 build'lerinde derlemiş; architecture guard'ları production dependency graph'ından ve normal workflow invocation'ından ayrımı denetlemiş, package smoke da çıkarılmış production MSIX'te `IptvSuite.ProtectedCatalogSpike*` denylist'ini uygulamıştır. Hosted compile/isolation/package-exclusion sonucu workflow/UI düzeyinde **VERIFIED**dır; aday executable'ı `Smoke` veya `Decision` modunda çalıştırılmamış ve candidate evidence yüklenmemiştir. Job log/test sayıları ile artifact JSON/ZIP/içerik/tam digest bağları bağımsız doğrulanmamıştır. Bu kayıt production persistence seçimi değildir; M4 `IN PROGRESS`, ADR-003 `Proposed` kalır.
+
 ## A. Gereksinim analizi
 
 ### A.1 Ürün ve güven sınırı
