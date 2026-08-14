@@ -512,6 +512,10 @@ function Assert-ProductionPackagePayload {
                 throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
             }
 
+            if ($entry.Name -match '^(?i:IptvSuite\.ProtectedCatalogSpike(?:\..*)?)$') {
+                throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
+            }
+
             if ($entry.Name -match '^(?i:IptvSuite\.PackageLifecycleHarness(?:\..*)?)$') {
                 throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
             }

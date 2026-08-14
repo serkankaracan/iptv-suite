@@ -15,6 +15,8 @@ public sealed class DependencyRulesTests
 
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string[] RequiredCapabilities = ["runFullTrust"];
+    private static readonly int[] ProtectedCatalogSmokeRecordCounts = [1_000];
+    private static readonly int[] ProtectedCatalogDecisionRecordCounts = [5_000, 10_000, 20_000, 50_000];
 
     private static readonly ProjectRule[] ProjectRules =
     [
@@ -73,6 +75,12 @@ public sealed class DependencyRulesTests
             [],
             []),
         new(
+            "IptvSuite.ProtectedCatalogSpike",
+            "apps/windows/tests/IptvSuite.ProtectedCatalogSpike/IptvSuite.ProtectedCatalogSpike.csproj",
+            ["IptvSuite.Testing"],
+            [],
+            ["System.Security.Cryptography.ProtectedData"]),
+        new(
             "IptvSuite.PackageLifecycleHarness",
             "apps/windows/tests/IptvSuite.PackageLifecycleHarness/IptvSuite.PackageLifecycleHarness.csproj",
             ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure"],
@@ -113,6 +121,7 @@ public sealed class DependencyRulesTests
         AssertNoPath(graph, "IptvSuite.Application", "IptvSuite.Infrastructure");
         AssertNoPath(graph, "IptvSuite.Application", "IptvSuite.Windows");
         AssertNoPath(graph, "IptvSuite.Infrastructure", "IptvSuite.Windows");
+        AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.ProtectedCatalogSpike");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PackageLifecycleHarness");
     }
 
@@ -241,7 +250,13 @@ public sealed class DependencyRulesTests
         string solution = File.ReadAllText(
             Path.Combine(RepositoryRoot, "apps", "windows", "IptvSuite.Windows.sln"));
         const string windowsProjectGuid = "{1D606C2E-0328-4C4C-9DFE-383651FC0CD1}";
+        const string protectedCatalogSpikeProjectGuid = "{E7CD0B28-6FCC-4E20-86AF-7D7BD4FC7E6E}";
         const string lifecycleHarnessProjectGuid = "{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}";
+        const string testsFolderGuid = "{0AB3BF05-4346-4AA6-1389-037BE0695223}";
+
+        StringAssert.Contains(
+            solution,
+            $"{protectedCatalogSpikeProjectGuid} = {testsFolderGuid}");
 
         foreach (string configuration in new[] { "Debug", "Release" })
         {
@@ -251,6 +266,14 @@ public sealed class DependencyRulesTests
             StringAssert.Contains(
                 solution,
                 $"{lifecycleHarnessProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
+            StringAssert.Contains(
+                solution,
+                $"{protectedCatalogSpikeProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
+            Assert.IsFalse(
+                solution.Contains(
+                    $"{protectedCatalogSpikeProjectGuid}.{configuration}|x64.Deploy.0",
+                    StringComparison.Ordinal),
+                "The test-only protected-catalog spike must never deploy as part of a solution build.");
             Assert.IsFalse(
                 solution.Contains(
                     $"{lifecycleHarnessProjectGuid}.{configuration}|x64.Deploy.0",
@@ -466,6 +489,266 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void ProtectedCatalogSpikeRequiresExplicitIsolatedExecutionAndFixedWorkload()
+    {
+        string wrapper = File.ReadAllText(
+            Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsProtectedCatalogSpike.ps1"));
+        string qualityGate = File.ReadAllText(
+            Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsQualityGate.ps1"));
+        string workflow = File.ReadAllText(
+            Path.Combine(RepositoryRoot, ".github", "workflows", "windows-quality.yml"));
+        string invocation = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ProtectedCatalogSpike",
+            "SpikeInvocation.cs"));
+        string environmentEvidence = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ProtectedCatalogSpike",
+            "SpikeEnvironmentEvidence.cs"));
+        string runner = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ProtectedCatalogSpike",
+            "ProtectedCatalogSpikeRunner.cs"));
+        string safeWorkspace = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ProtectedCatalogSpike",
+            "SafeSpikeWorkspace.cs"));
+        string store = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ProtectedCatalogSpike",
+            "ProtectedCatalogStore.cs"));
+        string spikeEvidence = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ProtectedCatalogSpike",
+            "SpikeEvidence.cs"));
+
+        StringAssert.Contains(wrapper, "[ValidateSet(\"Smoke\", \"Decision\")]");
+        StringAssert.Contains(wrapper, "[switch]$AllowDecision");
+        StringAssert.Contains(wrapper, "if ($Mode -eq \"Decision\" -and -not $AllowDecision)");
+        StringAssert.Contains(wrapper, "--acknowledge-long-running-decision");
+        Assert.AreEqual(
+            1,
+            Regex.Count(wrapper, "--acknowledge-long-running-decision"),
+            "The protected-catalog runner acknowledgement must only be added by the guarded Decision branch.");
+        StringAssert.Contains(
+            wrapper,
+            "apps\\windows\\tests\\IptvSuite.ProtectedCatalogSpike\\IptvSuite.ProtectedCatalogSpike.csproj");
+        StringAssert.Contains(
+            wrapper,
+            "apps\\windows\\tests\\IptvSuite.ProtectedCatalogSpike\\bin\\x64\\Release\\net10.0\\" +
+            "IptvSuite.ProtectedCatalogSpike.dll");
+        StringAssert.Contains(wrapper, "IPTVSUITE_PROTECTED_CATALOG_SPIKE_VALIDATED_SDK");
+        StringAssert.Contains(wrapper, "IPTVSUITE_PROTECTED_CATALOG_SPIKE_RUNNER_ASSEMBLY_SHA256");
+        Assert.IsFalse(wrapper.Contains("IPTVSUITE_SPIKE_VALIDATED_SDK", StringComparison.Ordinal));
+        Assert.IsFalse(wrapper.Contains("IPTVSUITE_SPIKE_RUNNER_ASSEMBLY_SHA256", StringComparison.Ordinal));
+        StringAssert.Contains(wrapper, "$env:DOTNET_CLI_USE_MSBUILD_SERVER = \"0\"");
+        StringAssert.Contains(wrapper, "$env:MSBUILDDISABLENODEREUSE = \"1\"");
+        StringAssert.Contains(wrapper, "$maximumBuildNodes = 1");
+        StringAssert.Contains(wrapper, "\"--locked-mode\"");
+        StringAssert.Contains(wrapper, "\"--disable-parallel\"");
+        StringAssert.Contains(wrapper, "\"-c\", \"Release\"");
+        StringAssert.Contains(wrapper, "\"-p:Platform=x64\"");
+        StringAssert.Contains(wrapper, "\"-maxcpucount:$maximumBuildNodes\"");
+        StringAssert.Contains(wrapper, "\"-p:UseSharedCompilation=false\"");
+        StringAssert.Contains(wrapper, "\"--no-incremental\"");
+        StringAssert.Contains(
+            invocation,
+            "arguments is [\"--mode\", string decision, DecisionAcknowledgement]");
+        StringAssert.Contains(
+            environmentEvidence,
+            "bool decisionEligible = !isDirty && OperatingSystem.IsWindows() && Environment.Is64BitProcess;");
+        StringAssert.Contains(environmentEvidence, "mode is SpikeMode.Decision && !decisionEligible");
+        StringAssert.Contains(
+            environmentEvidence,
+            "[\"status\", \"--porcelain=v1\", \"--untracked-files=normal\"]");
+        StringAssert.Contains(environmentEvidence, "AssertRepositoryStateUnchangedAsync");
+        StringAssert.Contains(environmentEvidence, "dirty || !initial.DecisionEligible");
+        StringAssert.Contains(environmentEvidence, "string PackageLockSha256,");
+        StringAssert.Contains(environmentEvidence, "string TestingAssemblySha256,");
+        StringAssert.Contains(environmentEvidence, "string RunnerDepsJsonSha256,");
+        StringAssert.Contains(
+            environmentEvidence,
+            "ComputeSha256Async(workspace.PackageLockPath, cancellationToken)");
+        StringAssert.Contains(
+            environmentEvidence,
+            "Path.Combine(assemblyDirectory, \"IptvSuite.Testing.dll\")");
+        StringAssert.Contains(
+            environmentEvidence,
+            "Path.Combine(assemblyDirectory, \"IptvSuite.ProtectedCatalogSpike.deps.json\")");
+        StringAssert.Contains(
+            environmentEvidence,
+            "if (!File.Exists(testingAssemblyPath) || !File.Exists(runnerDepsPath))");
+        StringAssert.Contains(
+            environmentEvidence,
+            "ComputeSha256Async(testingAssemblyPath, cancellationToken)");
+        StringAssert.Contains(
+            environmentEvidence,
+            "ComputeSha256Async(runnerDepsPath, cancellationToken)");
+        StringAssert.Contains(
+            runner,
+            "await SpikeEnvironmentEvidenceCollector.AssertRepositoryStateUnchangedAsync(");
+        StringAssert.Contains(safeWorkspace, "GetContainedPath(_artifactsRoot, \"m4-protected-catalog-spike\")");
+        StringAssert.Contains(safeWorkspace, "\"IptvSuite.ProtectedCatalogSpike\",");
+        StringAssert.Contains(safeWorkspace, "\"packages.lock.json\"));");
+        Assert.IsFalse(safeWorkspace.Contains("m4-secret-store-spike", StringComparison.Ordinal));
+        StringAssert.Contains(store, "internal const uint AeadAlgorithmId = 1;");
+        StringAssert.Contains(store, "internal const uint KeyWrapAlgorithmId = 1;");
+        StringAssert.Contains(store, "internal const string EntropyContext =");
+        StringAssert.Contains(store, "BinaryPrimitives.WriteUInt32BigEndian");
+        StringAssert.Contains(store, "BinaryPrimitives.ReadUInt32BigEndian");
+        StringAssert.Contains(store, "bigEndian: true");
+        StringAssert.Contains(store, "int validationProbeCount = Math.Min(recordCount, 16);");
+        StringAssert.Contains(
+            store,
+            "using (ProtectedCatalogReader stagedReader = ProtectedCatalogReader.Open(_stagedPath, binding))");
+        StringAssert.Contains(store, "if (nextOffset != stream.Length)");
+        Assert.IsFalse(
+            store.Contains("footer", StringComparison.OrdinalIgnoreCase),
+            "The bounded candidate format must remain footerless; exact file length closes the structure.");
+        StringAssert.Contains(spikeEvidence, "string ByteOrder,");
+        StringAssert.Contains(spikeEvidence, "string WorkloadCommit,");
+        StringAssert.Contains(spikeEvidence, "string SpecificationSha256,");
+        StringAssert.Contains(spikeEvidence, "string RunnerAssemblySha256,");
+        StringAssert.Contains(spikeEvidence, "string DecisionSummarySha256,");
+        StringAssert.Contains(spikeEvidence, "string DecisionWorkloadSha256,");
+        StringAssert.Contains(spikeEvidence, "string EvidenceRecordCommit);");
+        StringAssert.Contains(spikeEvidence, "PhaseEvidence AdapterReopenAndUnwrap,");
+        StringAssert.Contains(spikeEvidence, "int DeleteRecordsCoveredPerSample,");
+        StringAssert.Contains(spikeEvidence, "int PreActivationTagProbeCount,");
+        StringAssert.Contains(spikeEvidence, "internal sealed record StagingCancellationEvidence(");
+        StringAssert.Contains(spikeEvidence, "StagingCancellationEvidence StagingCancellation,");
+        StringAssert.Contains(spikeEvidence, "bool DuplicateNonceFailedClosed,");
+        StringAssert.Contains(spikeEvidence, "bool IndexTupleAuthenticationFailedClosed,");
+        StringAssert.Contains(spikeEvidence, "bool CrossContainerWrappedDekSwapFailedClosed,");
+        StringAssert.Contains(spikeEvidence, "bool TrailingBytesFailedClosed,");
+        StringAssert.Contains(spikeEvidence, "bool InjectedNonceCollisionRetryPassed,");
+        StringAssert.Contains(spikeEvidence, "\"smoke-summary.json\" : \"decision-summary.json\"");
+        StringAssert.Contains(runner, "CandidateId: \"immutable-protected-catalog-container-v1\"");
+        StringAssert.Contains(runner, "specification.BaselineEvidence.WorkloadCommit");
+        StringAssert.Contains(runner, "specification.BaselineEvidence.SpecificationSha256");
+        StringAssert.Contains(runner, "specification.BaselineEvidence.RunnerAssemblySha256");
+        StringAssert.Contains(runner, "specification.BaselineEvidence.DecisionSummarySha256");
+        StringAssert.Contains(runner, "specification.BaselineEvidence.DecisionWorkloadSha256");
+        StringAssert.Contains(runner, "specification.BaselineEvidence.EvidenceRecordCommit");
+        StringAssert.Contains(runner, "StagingCancellation: stagingCancellation");
+        StringAssert.Contains(runner, "\"big-endian\"");
+        StringAssert.Contains(runner, "\"AES-256-GCM-algorithm-id-1\"");
+        StringAssert.Contains(runner, "\"DPAPI-CurrentUser-key-wrap-id-1\"");
+        StringAssert.Contains(
+            runner,
+            "\"fresh-rng-256-bit-dek-and-key-generation-id-per-staging-attempt\"");
+        StringAssert.Contains(
+            runner,
+            "\"strict-structural-reopen-dpapi-unwrap-and-up-to-16-evenly-spaced-tag-probes\"");
+        StringAssert.Contains(runner, "\"controlled-fault-only-not-power-loss-durability\"");
+
+        Assert.IsFalse(
+            qualityGate.Contains("Invoke-WindowsProtectedCatalogSpike.ps1", StringComparison.Ordinal),
+            "The normal quality gate must never invoke the opt-in protected-catalog spike.");
+        Assert.IsFalse(
+            workflow.Contains("Invoke-WindowsProtectedCatalogSpike.ps1", StringComparison.Ordinal),
+            "The required hosted workflow must never invoke the opt-in protected-catalog spike.");
+
+        using JsonDocument specification = LoadJson(
+            "apps/windows/testdata/m4/protected-catalog-spike-spec.json");
+        JsonElement root = specification.RootElement;
+        JsonElement baselineEvidence = root.GetProperty("baselineEvidence");
+        JsonElement format = root.GetProperty("format");
+        JsonElement smoke = root.GetProperty("smoke");
+        JsonElement decision = root.GetProperty("decision");
+
+        Assert.AreEqual(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.AreEqual("m4-protected-catalog-spike-v1", root.GetProperty("fixtureSetId").GetString());
+        Assert.AreEqual(
+            "IptvSuite.ProtectedCatalogSpike.DeterministicPayloadGenerator",
+            root.GetProperty("generatorName").GetString());
+        Assert.AreEqual(
+            "IptvSuite.SecretStoreSpike.DeterministicPayloadGenerator",
+            root.GetProperty("baselineGeneratorName").GetString());
+        Assert.AreEqual(
+            "fc96a211171d1e4f5e5f02174da6c565ef2d59bb",
+            baselineEvidence.GetProperty("workloadCommit").GetString());
+        Assert.AreEqual(
+            "0447355215f8c744340a39640e55bc798916638b48e5386b213e7d3f06c7a568",
+            baselineEvidence.GetProperty("specificationSha256").GetString());
+        Assert.AreEqual(
+            "3df0676151a906f815bd0881994ffd3f7f347f2f7121a494409f85afcdeca119",
+            baselineEvidence.GetProperty("runnerAssemblySha256").GetString());
+        Assert.AreEqual(
+            "8cd4c6d86b813fd07794217a71a824e7368694363f89a16be36cb8a311d67460",
+            baselineEvidence.GetProperty("decisionSummarySha256").GetString());
+        Assert.AreEqual(
+            "eb6a4eaaecf437e80ef01feb00c6d1453e41994682a76ed08f81c1808a372f3f",
+            baselineEvidence.GetProperty("decisionWorkloadSha256").GetString());
+        Assert.AreEqual(
+            "207455a54d2d7ac9b6b5c1ce8eb5e29bbee0c383",
+            baselineEvidence.GetProperty("evidenceRecordCommit").GetString());
+        Assert.AreEqual(1, root.GetProperty("algorithmVersion").GetInt32());
+        Assert.AreEqual(20260813, root.GetProperty("seed").GetInt32());
+        Assert.AreEqual(256, root.GetProperty("payloadByteLength").GetInt32());
+        Assert.AreEqual(1, format.GetProperty("version").GetInt32());
+        Assert.AreEqual(50_000, format.GetProperty("maximumRecordsPerDek").GetInt32());
+        Assert.AreEqual(32, format.GetProperty("dekByteLength").GetInt32());
+        Assert.AreEqual(12, format.GetProperty("nonceByteLength").GetInt32());
+        Assert.AreEqual(16, format.GetProperty("tagByteLength").GetInt32());
+        Assert.AreEqual(256, format.GetProperty("readProbeCount").GetInt32());
+        Assert.AreEqual("CurrentUser", format.GetProperty("dpapiScope").GetString());
+        Assert.AreEqual(
+            "protected-catalog-spike/v1/current-user/dek",
+            format.GetProperty("dpapiEntropyContext").GetString());
+
+        CollectionAssert.AreEqual(
+            ProtectedCatalogSmokeRecordCounts,
+            smoke.GetProperty("recordCounts").EnumerateArray().Select(value => value.GetInt32()).ToArray());
+        Assert.AreEqual(1, smoke.GetProperty("iterations").GetInt32());
+        Assert.AreEqual(1, smoke.GetProperty("cancellationSamples").GetInt32());
+        Assert.AreEqual(
+            "d330726e2e886b1d61585c3fc276c6d5f20a1dfad85561749230ba35e99a40af",
+            smoke.GetProperty("expectedWorkloadSha256").GetString());
+        CollectionAssert.AreEqual(
+            ProtectedCatalogDecisionRecordCounts,
+            decision.GetProperty("recordCounts").EnumerateArray().Select(value => value.GetInt32()).ToArray());
+        Assert.AreEqual(20, decision.GetProperty("iterations").GetInt32());
+        Assert.AreEqual(20, decision.GetProperty("cancellationSamples").GetInt32());
+        Dictionary<string, string?> decisionScaleHashes = decision
+            .GetProperty("expectedScaleWorkloadSha256")
+            .EnumerateObject()
+            .ToDictionary(property => property.Name, property => property.Value.GetString(), StringComparer.Ordinal);
+        Dictionary<string, string?> expectedDecisionScaleHashes = new(StringComparer.Ordinal)
+        {
+            ["5000"] = "80f110a11351dd95b3489f0a8973cc826f096334da0b4363e1d4b24e98082fe1",
+            ["10000"] = "c4084013d6205597e412d47ec65329b8d671b9e0edb551a6d29c54cf34cd1512",
+            ["20000"] = "94bb81ddc7d2afe6fc4b2935dd9d2dec5f1bf8e80b5444cf90e8e860b9512c86",
+            ["50000"] = "88b5fad60d89e2fb6c16e9dac1a3372abb0779cdd216424833555b8f906ab232",
+        };
+        CollectionAssert.AreEquivalent(
+            expectedDecisionScaleHashes.ToArray(),
+            decisionScaleHashes.ToArray(),
+            "The candidate Decision workload must remain byte-for-byte comparable with the baseline.");
+        Assert.AreEqual(
+            "eb6a4eaaecf437e80ef01feb00c6d1453e41994682a76ed08f81c1808a372f3f",
+            decision.GetProperty("expectedWorkloadSha256").GetString());
+    }
+
+    [TestMethod]
     public void TestInfrastructureCannotLeakIntoProduction()
     {
         string solution = File.ReadAllText(Path.Combine(RepositoryRoot, "apps", "windows", "IptvSuite.Windows.sln"));
@@ -490,6 +773,7 @@ public sealed class DependencyRulesTests
                 content.Contains("IptvSuite.UnitTests", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.IntegrationTests", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.SecretStoreSpike", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.ProtectedCatalogSpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.PackageLifecycleHarness", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.AspNetCore.App", StringComparison.Ordinal) ||
@@ -510,9 +794,22 @@ public sealed class DependencyRulesTests
         Assert.AreEqual("x64", GetProperty(spikeProject, "Platforms"));
         Assert.AreEqual("x64", GetProperty(spikeProject, "PlatformTarget"));
 
+        XDocument protectedCatalogSpikeProject = LoadXml(
+            "apps/windows/tests/IptvSuite.ProtectedCatalogSpike/IptvSuite.ProtectedCatalogSpike.csproj");
+        Assert.AreEqual("Exe", GetProperty(protectedCatalogSpikeProject, "OutputType"));
+        Assert.AreEqual("false", GetProperty(protectedCatalogSpikeProject, "IsTestProject"));
+        Assert.AreEqual("false", GetProperty(protectedCatalogSpikeProject, "IsPackable"));
+        Assert.AreEqual("false", GetProperty(protectedCatalogSpikeProject, "IsPublishable"));
+        Assert.AreEqual("x64", GetProperty(protectedCatalogSpikeProject, "Platforms"));
+        Assert.AreEqual("x64", GetProperty(protectedCatalogSpikeProject, "PlatformTarget"));
+        Assert.AreEqual("false", GetProperty(protectedCatalogSpikeProject, "Prefer32Bit"));
+
         string packageSmoke = File.ReadAllText(
             Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageSmoke.ps1"));
         StringAssert.Contains(packageSmoke, "IptvSuite\\.SecretStoreSpike(?:\\..*)?");
+        StringAssert.Contains(
+            packageSmoke,
+            "$entry.Name -match '^(?i:IptvSuite\\.ProtectedCatalogSpike(?:\\..*)?)$'");
         StringAssert.Contains(packageSmoke, "IptvSuite\\.PackageLifecycleHarness(?:\\..*)?");
         StringAssert.Contains(packageSmoke, "PackagedApplicationActivator]::Activate($aumid)");
         StringAssert.Contains(packageSmoke, "CoCreateInstance");

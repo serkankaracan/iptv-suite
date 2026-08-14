@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "fixtureSetId": "m4-protected-catalog-spike-v1",
+  "generatorName": "IptvSuite.ProtectedCatalogSpike.DeterministicPayloadGenerator",
+  "baselineGeneratorName": "IptvSuite.SecretStoreSpike.DeterministicPayloadGenerator",
+  "baselineEvidence": {
+    "workloadCommit": "fc96a211171d1e4f5e5f02174da6c565ef2d59bb",
+    "specificationSha256": "0447355215f8c744340a39640e55bc798916638b48e5386b213e7d3f06c7a568",
+    "runnerAssemblySha256": "3df0676151a906f815bd0881994ffd3f7f347f2f7121a494409f85afcdeca119",
+    "decisionSummarySha256": "8cd4c6d86b813fd07794217a71a824e7368694363f89a16be36cb8a311d67460",
+    "decisionWorkloadSha256": "eb6a4eaaecf437e80ef01feb00c6d1453e41994682a76ed08f81c1808a372f3f",
+    "evidenceRecordCommit": "207455a54d2d7ac9b6b5c1ce8eb5e29bbee0c383"
+  },
+  "algorithmVersion": 1,
+  "seed": 20260813,
+  "payloadByteLength": 256,
+  "provenance": "synthetic",
+  "containsThirdPartyContent": false,
+  "containsPersonalData": false,
+  "containsRealCredentials": false,
+  "containsUnauthorizedMedia": false,
+  "license": {
+    "expression": "LicenseRef-IPTVSuite-Synthetic-Test-Only",
+    "status": "UNVERIFIED",
+    "file": "../LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt"
+  },
+  "format": {
+    "version": 1,
+    "maximumRecordsPerDek": 50000,
+    "dekByteLength": 32,
+    "nonceByteLength": 12,
+    "tagByteLength": 16,
+    "readProbeCount": 256,
+    "dpapiScope": "CurrentUser",
+    "dpapiEntropyContext": "protected-catalog-spike/v1/current-user/dek"
+  },
+  "smoke": {
+    "recordCounts": [
+      1000
+    ],
+    "iterations": 1,
+    "cancellationSamples": 1,
+    "expectedScaleWorkloadSha256": {
+      "1000": "d330726e2e886b1d61585c3fc276c6d5f20a1dfad85561749230ba35e99a40af"
+    },
+    "expectedWorkloadSha256": "d330726e2e886b1d61585c3fc276c6d5f20a1dfad85561749230ba35e99a40af"
+  },
+  "decision": {
+    "recordCounts": [
+      5000,
+      10000,
+      20000,
+      50000
+    ],
+    "iterations": 20,
+    "cancellationSamples": 20,
+    "expectedScaleWorkloadSha256": {
+      "5000": "80f110a11351dd95b3489f0a8973cc826f096334da0b4363e1d4b24e98082fe1",
+      "10000": "c4084013d6205597e412d47ec65329b8d671b9e0edb551a6d29c54cf34cd1512",
+      "20000": "94bb81ddc7d2afe6fc4b2935dd9d2dec5f1bf8e80b5444cf90e8e860b9512c86",
+      "50000": "88b5fad60d89e2fb6c16e9dac1a3372abb0779cdd216424833555b8f906ab232"
+    },
+    "expectedWorkloadSha256": "eb6a4eaaecf437e80ef01feb00c6d1453e41994682a76ed08f81c1808a372f3f"
+  }
+}

@@ -11,6 +11,7 @@ Bu dosya `apps/windows/` ağacı için kök `AGENTS.md` kurallarını daraltır.
 - `IptvSuite.Testing`: yalnız test destek executable/library'si; production proje reference'ı yoktur ve production tarafından referans alınamaz.
 - `IptvSuite.UnitTests`: `IptvSuite.Application`, `IptvSuite.Domain`, `IptvSuite.Testing` ve MSTest'e bağlıdır; pure Application/Domain testleri ile M2 harness testlerini içerir. `IptvSuite.IntegrationTests`, yalnız test yönünde Application, Infrastructure ve Testing'e bağlıdır; architecture test ayrı kalır.
 - `IptvSuite.SecretStoreSpike`: yalnız opt-in M4 ölçüm executable'ıdır; Application/Domain/Infrastructure ve test-only canary scanner'a bağlıdır. Quality/CI tarafından çalıştırılmaz, production payload'a giremez ve ağır `Decision` modu açık onay olmadan başlatılmaz.
+- `IptvSuite.ProtectedCatalogSpike`: yalnız reddedilen bulk file-per-record düzeniyle karşılaştırılacak test-only immutable-container executable'ıdır; yalnız `IptvSuite.Testing` ve mevcut `ProtectedData` paketine bağlı, nonpackable/nonpublishable x64 kalır. Solution quality build'inde derlenebilir; fakat production projeleri tarafından referans alınamaz, production MSIX'e giremez, normal quality/hosted workflow executable'ı çalıştıramaz ve ağır `Decision` modu fresh açık onay olmadan başlatılmaz.
 - `IptvSuite.PackageLifecycleHarness`: yalnız M4 packaged-process lifecycle kanıtı için kullanılan, ayrı disposable identity'li ve publish edilemeyen x64 MSIX test hostudur. Production `IptvSuite.Windows` tarafından referans alınamaz, production MSIX'e veya upload artifact'ına giremez.
 - M2 test double'ları production `IPlayer`, `ISecretStore` veya provider contract'ı değildir. IntegrationTests içindeki M4 fake production `ISecretStore` contract senaryosudur, fakat gerçek DPAPI veya packaged lifecycle kanıtı değildir. M4 boyunca player/provider/parser/HTTP/database, DI/MVVM paketi ve feature navigation ekleme.
 
@@ -20,7 +21,7 @@ Bu dosya `apps/windows/` ağacı için kök `AGENTS.md` kurallarını daraltır.
 - Yalnız `DataProtectionScope.CurrentUser`; `LocalMachine`, PasswordVault bulk store veya ad-hoc crypto kullanma.
 - Protected record source + purpose + semantic owner + typed opaque reference ile bağlanır. Source credential/remote playlist owner'ı `SourceConfigurationId`, channel stream/logo owner'ı `ChannelId`dir. Raw locator, username, password, endpoint veya display name dosya adı/path/log/result içine girmez.
 - Plaintext owned buffer'ları ve lease'leri `CryptographicOperations.ZeroMemory` ile best-effort sıfırla; `ToString`, debugger ve JSON yüzeyleri sensitive değeri döndürmesin.
-- Normal test-host CRUD/restart sonucu packaged `LocalCache`, update/reset/uninstall veya gerçek wrong-user kanıtı değildir. 50k spike ve bu lifecycle matrisi geçmeden ADR-003/M4 `Completed` yazma.
+- Normal test-host CRUD/restart sonucu packaged `LocalCache`, update/reset/uninstall veya gerçek wrong-user kanıtı değildir. Reddedilen per-record düzenin 50k sonucu, reviewed alternatifin fresh-onaylı comparative 50k kararı ve lifecycle matrisi birlikte değerlendirilmeden ADR-003/M4 `Completed` yazma.
 
 ## M3 domain güvenlik sınırı
 
