@@ -1523,7 +1523,7 @@ try {
     }
 
     Set-FailurePoint -Stage "RepositoryBinding" -Code "RepositoryDirty"
-    if ((Get-RepositoryStatus).Count -ne 0) {
+    if (@(Get-RepositoryStatus).Count -ne 0) {
         throw "The repository worktree is not clean."
     }
 
@@ -1986,7 +1986,7 @@ if ($cleanupFailures.Count -ne 0) {
 
 if (-not $primaryFailure -and $cleanupFailures.Count -eq 0) {
     Set-FailurePoint -Stage "RepositoryBinding" -Code "RepositoryChanged"
-    if ((Get-RepositoryStatus).Count -ne 0 -or (Get-RepositoryHead) -ne $repositoryHead) {
+    if (@(Get-RepositoryStatus).Count -ne 0 -or (Get-RepositoryHead) -ne $repositoryHead) {
         $primaryFailure = $true
     }
 }

@@ -1667,6 +1667,14 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(smoke, "$cleanupFailures.Count -ne 0");
         StringAssert.Contains(smoke, "$failureCode = \"CleanupEvidenceIncomplete\"");
         StringAssert.Contains(smoke, "scan-artifacts $evidenceStagingRoot M4_DPAPI_USER_BOUNDARY $caseId");
+        Assert.AreEqual(
+            2,
+            Regex.Count(smoke, @"@\(Get-RepositoryStatus\)\.Count"),
+            "Both repository cleanliness checks must preserve an empty result under Windows PowerShell StrictMode.");
+        Assert.AreEqual(
+            0,
+            Regex.Count(smoke, @"(?<!@)\(Get-RepositoryStatus\)\.Count"),
+            "An empty clean-tree result must not be dereferenced as null under Windows PowerShell StrictMode.");
 
         string[] cleanupSteps =
         [
