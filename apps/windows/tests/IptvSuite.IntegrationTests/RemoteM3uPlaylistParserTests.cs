@@ -131,6 +131,26 @@ public sealed class RemoteM3uPlaylistParserTests
         Assert.IsLessThanOrEqualTo(250L, p95);
     }
 
+    [TestMethod]
+    public async Task DeterministicMalformedByteCorpusNeverEscapesTheTypedResultBoundary()
+    {
+        var random = new Random(20260820);
+        for (int iteration = 0; iteration < 256; iteration++)
+        {
+            int length = iteration % 2 == 0 ? random.Next(8, 4_097) : random.Next(0, 4_097);
+            byte[] payload = new byte[length];
+            random.NextBytes(payload);
+            if (iteration % 2 == 0)
+            {
+                byte[] header = Encoding.UTF8.GetBytes("#EXTM3U\n");
+                header.CopyTo(payload, 0);
+            }
+
+            ParseSnapshot result = await ParseAsync(payload);
+            Assert.IsTrue(result.IsSuccess || result.ErrorCode is not null);
+        }
+    }
+
     private static async Task<ParseSnapshot> ParseAsync(byte[] payload, CancellationToken cancellationToken = default)
     {
         await using var stream = new MemoryStream(payload, writable: false);
