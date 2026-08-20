@@ -372,7 +372,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M6 | Xtream Live contract variants |
 | M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
 | M8 | `COMPLETED`: same-SQLite-transaction persistence, clean 5k–50k ×20 Decision ve gerçek ayrı-process kill/recovery tamamlandı; 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB`, cancellation p95 `12,390 ms`; migration/fault/crash, canary, source lifecycle ve query/cache acceptance PASS. [Kanıt](M8_COMPLETION_EVIDENCE.md) |
-| M9 | IN PROGRESS: bounded source/category/search/page query, 250 ms debounce, stale-result suppression, virtualized WinUI browse surface ve bounded same-origin logo pipeline/cache local `292/292 × 2` PASS; clean 50k ×20 Decision first/category/search p95 `7,704`/`8,352`/`22,490 ms`, reopen+first-page `7,443 ms` ile query/cached component bütçeleri PASS; frame/realized-container ve packaged UIA/keyboard kanıtı açık. [Kanıt](M9_CATALOG_QUERY_DECISION_EVIDENCE.md) |
+| M9 | IN PROGRESS: bounded source/category/search/page query, 250 ms debounce, stale-result suppression, virtualized WinUI browse surface ve bounded same-origin logo pipeline/cache local `292/292 × 2` PASS; clean 50k ×20 Decision first/category/search p95 `7,704`/`8,352`/`22,490 ms`, reopen+first-page `7,443 ms` ile query/cached component bütçeleri PASS; basic packaged name/role/Tab-order smoke IMPLEMENTED fakat hosted UNVERIFIED, frame/realized-container ve data-bearing UIA kanıtı açık. [Kanıt](M9_CATALOG_QUERY_DECISION_EVIDENCE.md) |
 | M10 | Compatibility/license/MSIX hard gate |
 | M11 | Fake+real player adapter contract |
 | M12 | Lifecycle/rapid-switch/UI automation |
@@ -398,7 +398,7 @@ Otomasyon şunların yerini tutmaz:
 - Tier B hangi kombinasyonların marketing support matrix'ine gireceği M10 + hukuk sonucudur.
 - Engineering minimum M1'de Windows 11 build 10.0.26100/x64 olarak pinlendi; product support minimumu, ARM64 ve reference hardware M15'te kapanacak.
 - Player A/V sync için sayısal ölçüm düzeneği M10'da seçilecek; yalnız “gözle iyi” kabul değildir.
-- M2 yalnız packaged visible-launch smoke kullanır. Feature-level UIA aracının exact seçimi M9/M12 öncesi bakım/flakiness spike'ıyla yapılacak; launch smoke UIA/accessibility kanıtı değildir.
+- Signed package smoke M9'da Windows UI Automation ile basic catalog name/role ve source→category→search Tab focus sırasını da fail-closed sınar. Bu dar smoke data-bearing browse davranışı, realized-container/frame bütçesi, Narrator exploratory acceptance veya genel accessibility conformance kanıtı değildir.
 
 ## Kaynaklar
 

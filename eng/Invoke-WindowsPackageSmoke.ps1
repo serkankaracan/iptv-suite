@@ -9,6 +9,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
 
 $activationInterop = @'
 using System;
@@ -124,6 +126,25 @@ namespace IptvSuite.PackageSmoke
             IntPtr windowHandle,
             out uint processId);
     }
+
+    public static class KeyboardInspector
+    {
+        private const byte VirtualKeyTab = 0x09;
+        private const uint KeyEventKeyUp = 0x0002;
+
+        [DllImport("user32.dll")]
+        private static extern void keybd_event(
+            byte virtualKey,
+            byte scanCode,
+            uint flags,
+            UIntPtr extraInfo);
+
+        public static void PressTab()
+        {
+            keybd_event(VirtualKeyTab, 0, 0, UIntPtr.Zero);
+            keybd_event(VirtualKeyTab, 0, KeyEventKeyUp, UIntPtr.Zero);
+        }
+    }
 }
 '@
 Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
@@ -151,6 +172,8 @@ $primaryFailure = $null
 $successEvidence = $null
 $successMessage = $null
 $protectedStoreDirectoryInitialized = $false
+$catalogUiaContractVerified = $false
+$catalogKeyboardFocusOrderVerified = $false
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
     AppxBundle                    = "Never"
@@ -687,6 +710,54 @@ function Remove-ExactDevelopmentPackage {
     }
 }
 
+function Get-RequiredAutomationElement {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Root,
+
+        [Parameter(Mandatory)]
+        [string]$AutomationId,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.ControlType]$ControlType,
+
+        [Parameter(Mandatory)]
+        [string]$AccessibleName
+    )
+
+    $condition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $AutomationId)
+    $element = $Root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $condition)
+    if ($null -eq $element -or
+        $element.Current.ControlType -ne $ControlType -or
+        $element.Current.Name -ne $AccessibleName) {
+        throw "The packaged catalog UI Automation contract is invalid."
+    }
+
+    return $element
+}
+
+function Assert-FocusedAutomationElement {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ExpectedAutomationId
+    )
+
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    for ($depth = 0; $null -ne $focused -and $depth -lt 8; $depth++) {
+        if ($focused.Current.AutomationId -eq $ExpectedAutomationId) {
+            return
+        }
+
+        $focused = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($focused)
+    }
+
+    throw "The packaged catalog keyboard focus order is invalid."
+}
+
 try {
     foreach ($staleEvidencePath in @($evidencePath, $failureEvidencePath)) {
         if (Test-Path -LiteralPath $staleEvidencePath) {
@@ -870,6 +941,39 @@ try {
         throw "The packaged application remained running but did not create a visible window before the launch deadline."
     }
 
+    $automationRoot = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
+    if ($null -eq $automationRoot) {
+        throw "The packaged application window has no UI Automation root."
+    }
+    $sourceElement = Get-RequiredAutomationElement $automationRoot "CatalogSourceSelector" `
+        ([System.Windows.Automation.ControlType]::ComboBox) "Playlist source"
+    $categoryElement = Get-RequiredAutomationElement $automationRoot "CatalogCategorySelector" `
+        ([System.Windows.Automation.ControlType]::ComboBox) "Channel category"
+    $null = Get-RequiredAutomationElement $automationRoot "CatalogSearchBox" `
+        ([System.Windows.Automation.ControlType]::Group) "Search channels"
+    $null = Get-RequiredAutomationElement $automationRoot "CatalogChannelList" `
+        ([System.Windows.Automation.ControlType]::List) "Channels"
+    $catalogUiaContractVerified = $true
+
+    $focusReadyDeadline = (Get-Date).AddSeconds(15)
+    while ((-not $sourceElement.Current.IsEnabled -or -not $categoryElement.Current.IsEnabled) -and
+        (Get-Date) -lt $focusReadyDeadline) {
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $sourceElement.Current.IsEnabled -or -not $categoryElement.Current.IsEnabled) {
+        throw "The packaged catalog controls did not become keyboard-focusable."
+    }
+    $sourceElement.SetFocus()
+    Start-Sleep -Milliseconds 150
+    Assert-FocusedAutomationElement "CatalogSourceSelector"
+    [IptvSuite.PackageSmoke.KeyboardInspector]::PressTab()
+    Start-Sleep -Milliseconds 150
+    Assert-FocusedAutomationElement "CatalogCategorySelector"
+    [IptvSuite.PackageSmoke.KeyboardInspector]::PressTab()
+    Start-Sleep -Milliseconds 150
+    Assert-FocusedAutomationElement "CatalogSearchBox"
+    $catalogKeyboardFocusOrderVerified = $true
+
     Start-Sleep -Seconds 2
     $launchedProcess.Refresh()
     if ($launchedProcess.HasExited) {
@@ -950,6 +1054,8 @@ try {
         SignatureStatus   = $signature.Status.ToString()
         PayloadLeakGate   = $true
         ProtectedStoreDirectoryInitialized = $protectedStoreDirectoryInitialized
+        CatalogUiaContractVerified = $catalogUiaContractVerified
+        CatalogKeyboardFocusOrderVerified = $catalogKeyboardFocusOrderVerified
         NormalClose       = $true
         PackageRemoved    = $true
     }

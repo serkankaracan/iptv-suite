@@ -48,8 +48,8 @@
             <ProgressRing x:Name="LoadingIndicator" HorizontalAlignment="Right" AutomationProperties.Name="Loading catalog" IsActive="False" />
         </Grid>
         <StackPanel Grid.Row="4" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
-            <Button x:Name="PreviousButton" AutomationProperties.Name="Previous channel page" Click="PreviousButton_Click" Content="Previous" />
-            <Button x:Name="NextButton" AutomationProperties.Name="Next channel page" Click="NextButton_Click" Content="Next" />
+            <Button x:Name="PreviousButton" AutomationProperties.AutomationId="CatalogPreviousPage" AutomationProperties.Name="Previous channel page" Click="PreviousButton_Click" Content="Previous" />
+            <Button x:Name="NextButton" AutomationProperties.AutomationId="CatalogNextPage" AutomationProperties.Name="Next channel page" Click="NextButton_Click" Content="Next" />
         </StackPanel>
     </Grid>
 </Page>

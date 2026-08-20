@@ -937,6 +937,15 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$null = $launchedProcess.Handle");
         StringAssert.Contains(packageSmoke, "IsWindowVisible($windowHandle)");
         StringAssert.Contains(packageSmoke, "GetWindowThreadProcessId");
+        StringAssert.Contains(packageSmoke, "UIAutomationClient");
+        StringAssert.Contains(packageSmoke, "CatalogSourceSelector");
+        StringAssert.Contains(packageSmoke, "CatalogCategorySelector");
+        StringAssert.Contains(packageSmoke, "CatalogSearchBox");
+        StringAssert.Contains(packageSmoke, "CatalogChannelList");
+        StringAssert.Contains(packageSmoke, "KeyboardInspector]::PressTab()");
+        StringAssert.Contains(packageSmoke, "Assert-FocusedAutomationElement \"CatalogSearchBox\"");
+        StringAssert.Contains(packageSmoke, "CatalogUiaContractVerified = $catalogUiaContractVerified");
+        StringAssert.Contains(packageSmoke, "CatalogKeyboardFocusOrderVerified = $catalogKeyboardFocusOrderVerified");
         StringAssert.Contains(packageSmoke, "Start-Sleep -Seconds 2");
         StringAssert.Contains(packageSmoke, "$null -eq $exitCode");
         StringAssert.Contains(packageSmoke, "[int]$exitCode -ne 0");
