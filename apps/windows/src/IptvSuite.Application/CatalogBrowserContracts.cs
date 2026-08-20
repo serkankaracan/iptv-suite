@@ -12,7 +12,8 @@ public sealed record CatalogChannelItem(
     string StableKey,
     string Name,
     int? Number,
-    bool IsAdult);
+    bool IsAdult,
+    bool HasLogo);
 
 public sealed record CatalogChannelPage(
     IReadOnlyList<CatalogChannelItem> Items,

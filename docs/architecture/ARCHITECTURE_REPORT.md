@@ -300,6 +300,7 @@ M7'de `RemotePlaylistCatalogLoader`, protected locator lease'ini `IStreamingHttp
 - MIME, byte, pixel/dimension, decode ve concurrency sınırı; placeholder ve cancellation.
 - Provisional: network concurrency 4, memory cache 32 MiB, device-local LRU disk cache 200 MiB. M14 ölçümüyle değişir.
 - Loopback/link-local/private destination logo fetch'i default reddedilir; source explicit private origin olarak yapılandırılmışsa aynı-origin policy ayrıca değerlendirilir.
+- M9'un ilk production logo provider'ı yalnız active snapshot'ın exact encrypted channel-logo tuple'ını çözer ve durable source scheme/host/port ile birebir aynı HTTPS origin'i transport öncesinde zorunlu kılar. Cross-origin fetch kapalıdır; response 512 KiB, signature PNG/JPEG/WebP, eşzamanlılık dört ve memory FIFO cache 128 entry ile bounded olur. MIME/pixel/dimension ve genel cross-origin DNS/address policy bu dilimin kanıtı değildir.
 
 ### E.6 Logging, errors, configuration, localization
 

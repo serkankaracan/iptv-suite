@@ -6,7 +6,7 @@ namespace IptvSuite.Windows;
 public partial class App : Microsoft.UI.Xaml.Application
 {
     private ISecretStore? _secretStore;
-    private ICatalogBrowser? _catalogBrowser;
+    private WindowsCatalogServices? _catalogServices;
     private Window? _window;
 
     public App()
@@ -21,8 +21,8 @@ public partial class App : Microsoft.UI.Xaml.Application
         ISecretStore secretStore = secretStoreInitialization.Store ??
             throw new InvalidOperationException("Protected storage is unavailable.");
         _secretStore = secretStore;
-        _catalogBrowser = WindowsCatalogBrowserFactory.Create();
-        _window = new MainWindow(_catalogBrowser);
+        _catalogServices = WindowsCatalogBrowserFactory.Create();
+        _window = new MainWindow(_catalogServices.Browser, _catalogServices.LogoCache);
         _window.Activate();
     }
 }

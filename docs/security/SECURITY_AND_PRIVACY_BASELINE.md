@@ -70,6 +70,8 @@ Run number `#22` UI kaydı, bu threat-model kararı ve production `asInvoker` / 
 | Store/reviewer data exposure | Real account shared for certification | Only developer-owned synthetic service and fake credentials |
 | Unauthorized product use | User connects to unlicensed service | No provider discovery/list, clear BYO-authorized terms, no recording/DRM bypass; Store/legal review |
 
+M9'un mevcut logo dilimi active snapshot'taki exact encrypted `SourceId`/`ChannelId`/purpose/reference tuple'ını çözer; strict UTF-8 ve HTTPS validation'dan sonra endpoint'in durable source scheme/host/port üçlüsüyle birebir aynı olmasını transport çağrısından önce zorunlu kılar. Cross-origin logo bu nedenle transport'a ulaşmadan reddedilir. Response `512 KiB` ile, içerik PNG/JPEG/WebP magic signature'larıyla, fetch eşzamanlılığı dört ve process-memory FIFO cache 128 kayıtla sınırlıdır; page cancellation ile row-generation kontrolü stale UI sonucunu bastırır. Bu dilim MIME header, decoded pixel/dimension, codec-level decompression veya genel cross-origin DNS/address policy kanıtlamaz; bu kontroller gelene kadar cross-origin logo fetch kapalı kalır.
+
 Not protected against: fully compromised Windows user/admin/kernel, screen capture by the OS/user, or a provider itself mishandling data. These limits are stated honestly; “encrypted” is not marketed as complete endpoint protection.
 
 ## 4. Credential ve locator storage

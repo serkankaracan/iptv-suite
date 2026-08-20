@@ -142,7 +142,7 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
         command.Transaction = transaction;
         command.CommandText = """
             SELECT c.channel_id, c.category_id, c.stable_key, c.display_name,
-                   c.channel_number, c.is_adult
+                   c.channel_number, c.is_adult, c.logo_reference IS NOT NULL
             FROM channels AS c
             JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id
             WHERE s.source_id = $source
@@ -177,7 +177,8 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
                 reader.GetString(2),
                 reader.GetString(3),
                 reader.IsDBNull(4) ? null : reader.GetInt32(4),
-                reader.GetInt32(5) == 1));
+                reader.GetInt32(5) == 1,
+                reader.GetInt32(6) == 1));
         }
 
         return new CatalogChannelPage(rows, offset, totalCount);

@@ -99,7 +99,7 @@ public sealed class CatalogBrowseCoordinatorTests
             ChannelId channelId = ChannelId.Generate();
             CategoryId rowCategoryId = CategoryId.Generate();
             return new CatalogChannelPage(
-                [new CatalogChannelItem(channelId, rowCategoryId, "stable", searchText!, null, false)],
+                [new CatalogChannelItem(channelId, rowCategoryId, "stable", searchText!, null, false, false)],
                 offset,
                 1);
         }

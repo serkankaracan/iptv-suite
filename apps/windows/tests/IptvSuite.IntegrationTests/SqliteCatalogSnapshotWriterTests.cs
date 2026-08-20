@@ -15,6 +15,38 @@ public sealed class SqliteCatalogSnapshotWriterTests
     private static readonly string[] ExpectedSingleChannelPage = ["Channel one"];
 
     [TestMethod]
+    public async Task LogoProviderDecryptsExactActiveChannelLocatorAndAcceptsOnlyBoundedImageSignatures()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m9-logo-provider");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(databasePath);
+        TestBatch test = await CreateBatchAsync(itemSuffix: "logo");
+        await ActivateAsync(databasePath, test.Batch);
+        byte[] png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1];
+        var transport = new LogoTransport(png);
+        var provider = new SqliteChannelLogoProvider(databasePath, transport);
+
+        ChannelLogoImage? image = await provider.LoadAsync(test.Source.Id, test.ChannelId);
+
+        Assert.IsNotNull(image);
+        Assert.AreEqual(ChannelLogoFormat.Png, image.Format);
+        CollectionAssert.AreEqual(png, image.Content.ToArray());
+        Assert.AreEqual(SqliteChannelLogoProvider.MaximumLogoBytes, transport.MaximumBytes);
+        Assert.AreEqual("https", transport.Scheme);
+        Assert.IsNull(await provider.LoadAsync(test.Source.Id, ChannelId.Generate()));
+
+        var rejectedProvider = new SqliteChannelLogoProvider(databasePath, new LogoTransport("not-image"u8.ToArray()));
+        Assert.IsNull(await rejectedProvider.LoadAsync(test.Source.Id, test.ChannelId));
+
+        TestBatch crossOrigin = await CreateBatchAsync(test.Source, "cross-origin", "https://images.invalid/logo.png");
+        await ActivateAsync(databasePath, crossOrigin.Batch);
+        var blockedTransport = new LogoTransport(png);
+        var blockedProvider = new SqliteChannelLogoProvider(databasePath, blockedTransport);
+        Assert.IsNull(await blockedProvider.LoadAsync(test.Source.Id, crossOrigin.ChannelId));
+        Assert.AreEqual(0, blockedTransport.Calls);
+    }
+
+    [TestMethod]
     public async Task CatalogBrowserRejectsUnboundedOrControlBearingRequestsBeforeDatabaseAccess()
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m9-query-bounds");
@@ -72,6 +104,7 @@ public sealed class SqliteCatalogSnapshotWriterTests
         Assert.AreEqual(1, matchingPage.TotalCount);
         Assert.HasCount(1, matchingPage.Items);
         Assert.AreEqual(test.ChannelId, matchingPage.Items[0].ChannelId);
+        Assert.IsTrue(matchingPage.Items[0].HasLogo);
         CatalogChannelPage emptyPage = await browser.ReadChannelsAsync(
             test.Source.Id,
             test.CategoryId,
@@ -276,7 +309,10 @@ public sealed class SqliteCatalogSnapshotWriterTests
         Assert.AreEqual(1L, await ScalarInt64Async(reopened, "SELECT count(*) FROM snapshot_keys;"));
     }
 
-    private static async Task<TestBatch> CreateBatchAsync(ContentSource? existingSource = null, string itemSuffix = "item")
+    private static async Task<TestBatch> CreateBatchAsync(
+        ContentSource? existingSource = null,
+        string itemSuffix = "item",
+        string? logoUrl = null)
     {
         var store = new M4InMemorySecretStore();
         ContentSource source = existingSource ?? await CreateSourceAsync(store);
@@ -308,7 +344,7 @@ public sealed class SqliteCatalogSnapshotWriterTests
             $"channel-{itemSuffix}");
         Assert.IsTrue(stableKey.IsSuccess);
         byte[] stream = Encoding.UTF8.GetBytes($"https://fixtures.invalid/live/{itemSuffix}.m3u8");
-        byte[] logo = Encoding.UTF8.GetBytes($"https://fixtures.invalid/logo/{itemSuffix}.png");
+        byte[] logo = Encoding.UTF8.GetBytes(logoUrl ?? $"https://fixtures.invalid/logo/{itemSuffix}.png");
         ProtectedRecordOwner owner = ProtectedRecordOwner.ForChannel(channelId);
         ProtectedLocatorReferenceCreationResult streamCreated = await store.CreateLocatorAsync(
             source.Id,
@@ -640,4 +676,20 @@ public sealed class SqliteCatalogSnapshotWriterTests
         ProtectedLocatorReference StreamReference,
         byte[] StreamPlaintext,
         byte[] LogoPlaintext);
+
+    private sealed class LogoTransport(byte[] content) : IHttpTransport
+    {
+        internal int MaximumBytes { get; private set; }
+        internal string? Scheme { get; private set; }
+        internal int Calls { get; private set; }
+
+        public ValueTask<HttpTransportResult> GetAsync(HttpTransportRequest request, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls++;
+            MaximumBytes = request.MaximumResponseBytes;
+            Scheme = "https";
+            return ValueTask.FromResult(HttpTransportResult.Success(200, HttpResponseLease.CopyFrom(content)));
+        }
+    }
 }

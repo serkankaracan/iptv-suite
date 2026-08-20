@@ -26,16 +26,19 @@
             <ComboBox x:Name="CategorySelector" Grid.Column="1" AutomationProperties.AutomationId="CatalogCategorySelector" AutomationProperties.Name="Channel category" DisplayMemberPath="Name" SelectionChanged="CategorySelector_SelectionChanged" />
             <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" AutomationProperties.AutomationId="CatalogSearchBox" AutomationProperties.Name="Search channels" PlaceholderText="Search channels" QuerySubmitted="SearchBox_QuerySubmitted" TextChanged="SearchBox_TextChanged" />
         </Grid>
-        <ListView x:Name="ChannelList" Grid.Row="2" AutomationProperties.AutomationId="CatalogChannelList" AutomationProperties.Name="Channels" ItemsSource="{x:Bind Channels}">
+        <ListView x:Name="ChannelList" Grid.Row="2" AutomationProperties.AutomationId="CatalogChannelList" AutomationProperties.Name="Channels" ContainerContentChanging="ChannelList_ContainerContentChanging" ItemsSource="{x:Bind Channels}">
             <ListView.ItemsPanel>
                 <ItemsPanelTemplate><ItemsStackPanel CacheLength="1" /></ItemsPanelTemplate>
             </ListView.ItemsPanel>
             <ListView.ItemTemplate>
                 <DataTemplate>
                     <Grid MinHeight="44" Padding="8,4" ColumnSpacing="12">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="56" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                        <TextBlock VerticalAlignment="Center" Text="{Binding Number}" />
-                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="48" /><ColumnDefinition Width="56" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Border Width="36" Height="36" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="4">
+                            <Grid><TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Text="TV" /><Image Source="{Binding LogoSource}" Stretch="Uniform" /></Grid>
+                        </Border>
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding Number}" />
+                        <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                     </Grid>
                 </DataTemplate>
             </ListView.ItemTemplate>

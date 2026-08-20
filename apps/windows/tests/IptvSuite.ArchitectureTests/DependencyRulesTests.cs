@@ -518,8 +518,8 @@ public sealed class DependencyRulesTests
             "        ISecretStore secretStore = secretStoreInitialization.Store ??\n" +
             "            throw new InvalidOperationException(\"Protected storage is unavailable.\");\n" +
             "        _secretStore = secretStore;\n" +
-            "        _catalogBrowser = WindowsCatalogBrowserFactory.Create();\n" +
-            "        _window = new MainWindow(_catalogBrowser);";
+            "        _catalogServices = WindowsCatalogBrowserFactory.Create();\n" +
+            "        _window = new MainWindow(_catalogServices.Browser, _catalogServices.LogoCache);";
         const string neutralProtectedStorePath =
             "Path.Combine(\n" +
             "                localCachePath,\n" +
@@ -577,7 +577,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "await BrowseAsync(debounce: true)");
         StringAssert.Contains(codeBehind, "new CatalogBrowseCoordinator(catalogBrowser)");
         StringAssert.Contains(factory, "ApplicationData.GetDefault().LocalCachePath");
-        StringAssert.Contains(factory, "new SqliteCatalogQuery(Path.Combine(catalogRoot, \"catalog.db\"))");
+        StringAssert.Contains(factory, "new SqliteCatalogQuery(databasePath)");
+        StringAssert.Contains(factory, "new SqliteChannelLogoProvider(databasePath, transport)");
+        StringAssert.Contains(page, "ContainerContentChanging=\"ChannelList_ContainerContentChanging\"");
+        StringAssert.Contains(codeBehind, "_logoPageCancellation.Cancel()");
+        StringAssert.Contains(codeBehind, "row.IsCurrentLogoLoad(generation)");
         Assert.IsFalse(
             page.Contains("MediaPlayer", StringComparison.Ordinal) ||
             codeBehind.Contains("IPlayer", StringComparison.Ordinal),
