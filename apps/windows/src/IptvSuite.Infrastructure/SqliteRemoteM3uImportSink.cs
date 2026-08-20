@@ -27,6 +27,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private AesGcm? _aes;
     private ContentSource? _source;
     private SnapshotId _snapshotId;
+    private Guid _syncRunId;
+    private DateTimeOffset _startedAt;
     private Guid _keyGenerationId;
     private byte[]? _dek;
     private byte[]? _wrappedDek;
@@ -55,6 +57,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
             await _database.InitializeAsync(cancellationToken).ConfigureAwait(false);
             _source = source;
             _snapshotId = SnapshotId.Generate();
+            _syncRunId = Guid.NewGuid();
+            _startedAt = DateTimeOffset.UtcNow;
             _keyGenerationId = Guid.NewGuid();
             _dek = RandomNumberGenerator.GetBytes(32);
             byte[] entropy = BuildEntropy(source.Id.Value, _snapshotId.Value);
@@ -96,6 +100,13 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 cancellationToken,
                 ("$snapshot", Id(_snapshotId.Value)), ("$generation", Id(_keyGenerationId)),
                 ("$wrapped", _wrappedDek)).ConfigureAwait(false);
+            await ExecuteAsync("""
+                INSERT INTO sync_runs(sync_run_id, source_id, started_utc, completed_utc, result_code,
+                    parsed_count, persisted_count, warning_count, failure_code)
+                VALUES ($run, $source, $started, NULL, NULL, 0, 0, 0, NULL);
+                """, cancellationToken,
+                ("$run", Id(_syncRunId)), ("$source", Id(source.Id.Value)),
+                ("$started", _startedAt.ToString("O", CultureInfo.InvariantCulture))).ConfigureAwait(false);
             return DomainResult.Success(true);
         }
         catch (OperationCanceledException)
@@ -248,10 +259,15 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     UPDATE snapshot_keys SET wrapped_dek = NULL, key_state = 2
                     WHERE snapshot_id = (SELECT active_snapshot_id FROM sources WHERE source_id = $source);
                     UPDATE sources SET active_snapshot_id = $snapshot, status = $ready WHERE source_id = $source;
+                    UPDATE sync_runs
+                    SET completed_utc = $completed, result_code = 0, parsed_count = $items,
+                        persisted_count = $items, warning_count = $warnings, failure_code = NULL
+                    WHERE sync_run_id = $run;
                     """, cancellationToken,
                     ("$hash", hash), ("$cache", cache), ("$items", _written), ("$warnings", _warnings),
                     ("$snapshot", Id(_snapshotId.Value)), ("$source", Id(_source.Id.Value)),
-                    ("$ready", (int)ContentSourceStatus.Ready)).ConfigureAwait(false);
+                    ("$ready", (int)ContentSourceStatus.Ready), ("$run", Id(_syncRunId)),
+                    ("$completed", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))).ConfigureAwait(false);
                 await _transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 await DisposeSessionAsync().ConfigureAwait(false);
                 return DomainResult.Success(true);
@@ -556,6 +572,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         _nonces.Clear();
         _source = null;
         _snapshotId = default;
+        _syncRunId = default;
+        _startedAt = default;
         _keyGenerationId = default;
         _written = 0;
         _warnings = 0;

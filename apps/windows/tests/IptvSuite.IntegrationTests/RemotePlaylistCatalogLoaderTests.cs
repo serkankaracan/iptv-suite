@@ -55,8 +55,17 @@ public sealed class RemotePlaylistCatalogLoaderTests
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Pooling=False");
         await connection.OpenAsync();
         await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT count(*) FROM channels WHERE snapshot_id = (SELECT active_snapshot_id FROM sources);";
-        Assert.AreEqual(2L, Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture));
+        command.CommandText = """
+            SELECT
+                (SELECT count(*) FROM channels WHERE snapshot_id = (SELECT active_snapshot_id FROM sources)),
+                (SELECT count(*) FROM sync_runs WHERE completed_utc IS NOT NULL AND result_code = 0
+                    AND parsed_count = 2 AND persisted_count = 2 AND warning_count = 1
+                    AND failure_code IS NULL);
+            """;
+        await using Microsoft.Data.Sqlite.SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(2L, reader.GetInt64(0));
+        Assert.AreEqual(1L, reader.GetInt64(1));
         await connection.CloseAsync();
         byte[] databaseBytes = await File.ReadAllBytesAsync(databasePath);
         Assert.IsFalse(databaseBytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(locator)) >= 0);
@@ -97,8 +106,11 @@ public sealed class RemotePlaylistCatalogLoaderTests
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Pooling=False");
         await connection.OpenAsync();
         await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT count(*) FROM sources;";
-        Assert.AreEqual(0L, Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture));
+        command.CommandText = "SELECT (SELECT count(*) FROM sources), (SELECT count(*) FROM sync_runs);";
+        await using Microsoft.Data.Sqlite.SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(0L, reader.GetInt64(0));
+        Assert.AreEqual(0L, reader.GetInt64(1));
     }
 
     [TestMethod]
@@ -135,11 +147,12 @@ public sealed class RemotePlaylistCatalogLoaderTests
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Pooling=False");
         await connection.OpenAsync();
         await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT (SELECT count(*) FROM snapshots), (SELECT count(*) FROM channels);";
+        command.CommandText = "SELECT (SELECT count(*) FROM snapshots), (SELECT count(*) FROM channels), (SELECT count(*) FROM sync_runs);";
         await using Microsoft.Data.Sqlite.SqliteDataReader reader = await command.ExecuteReaderAsync();
         Assert.IsTrue(await reader.ReadAsync());
         Assert.AreEqual(1L, reader.GetInt64(0));
         Assert.AreEqual(1L, reader.GetInt64(1));
+        Assert.AreEqual(1L, reader.GetInt64(2));
     }
 
     [TestMethod]
