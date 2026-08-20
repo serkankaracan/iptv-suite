@@ -418,7 +418,12 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
                     responseLifetimeToken);
                 return HttpStreamingResult.Success(
                     (int)response.StatusCode,
-                    new HttpStreamingResponseLease(boundedStream, currentUri, owner));
+                    new HttpStreamingResponseLease(
+                        boundedStream,
+                        currentUri,
+                        owner,
+                        NormalizeEntityTag(response.Headers.ETag?.ToString()),
+                        response.Content.Headers.LastModified?.ToUniversalTime()));
             }
         }
         finally
@@ -426,6 +431,24 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
             linkedSource?.Dispose();
             timeoutSource?.Dispose();
         }
+    }
+
+    private static string? NormalizeEntityTag(string? value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 512)
+        {
+            return null;
+        }
+
+        foreach (char character in value)
+        {
+            if (char.IsControl(character))
+            {
+                return null;
+            }
+        }
+
+        return value;
     }
 
     public void Dispose()

@@ -257,16 +257,27 @@ public sealed class HttpStreamingResponseLease : IDisposable
     private Stream? _content;
     private IDisposable? _owner;
 
-    internal HttpStreamingResponseLease(Stream content, Uri effectiveUri, IDisposable owner)
+    internal HttpStreamingResponseLease(
+        Stream content,
+        Uri effectiveUri,
+        IDisposable owner,
+        string? entityTag = null,
+        DateTimeOffset? lastModified = null)
     {
         _content = content ?? throw new ArgumentNullException(nameof(content));
         EffectiveUri = effectiveUri ?? throw new ArgumentNullException(nameof(effectiveUri));
         _owner = owner ?? throw new ArgumentNullException(nameof(owner));
+        EntityTag = entityTag;
+        LastModified = lastModified;
     }
 
     public Stream Content => _content ?? throw new ObjectDisposedException(nameof(HttpStreamingResponseLease));
 
     internal Uri EffectiveUri { get; }
+
+    public string? EntityTag { get; }
+
+    public DateTimeOffset? LastModified { get; }
 
     public void Dispose()
     {

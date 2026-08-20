@@ -1598,7 +1598,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(loaderSource, "responseLease.EffectiveUri");
         StringAssert.Contains(loaderSource, "responseLease.Content");
         StringAssert.Contains(loaderSource, "IRemoteM3uImportSink sink");
-        StringAssert.Contains(loaderSource, "_sink.BeginAsync(source, cancellationToken)");
+        StringAssert.Contains(loaderSource, "responseLease.EntityTag");
+        StringAssert.Contains(loaderSource, "responseLease.LastModified");
+        StringAssert.Contains(sqliteSinkSource, "http_etag");
+        StringAssert.Contains(sqliteSinkSource, "http_last_modified_utc");
         StringAssert.Contains(loaderSource, "_sink.CompleteAsync(parsed.Value, cancellationToken)");
         StringAssert.Contains(loaderSource, "_sink.AbortAsync(CancellationToken.None)");
         StringAssert.Contains(loaderSource, "RemoteM3uPlaylistParser.ParseToSinkAsync(");

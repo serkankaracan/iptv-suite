@@ -60,12 +60,16 @@ public sealed class RemotePlaylistCatalogLoaderTests
                 (SELECT count(*) FROM channels WHERE snapshot_id = (SELECT active_snapshot_id FROM sources)),
                 (SELECT count(*) FROM sync_runs WHERE completed_utc IS NOT NULL AND result_code = 0
                     AND parsed_count = 2 AND persisted_count = 2 AND warning_count = 1
-                    AND failure_code IS NULL);
+                    AND failure_code IS NULL),
+                (SELECT count(*) FROM snapshots WHERE http_etag = '"catalog-v1"'
+                    AND http_last_modified_utc = '2026-08-21T12:34:56.0000000+00:00'
+                    AND length(cache_key) = 32);
             """;
         await using Microsoft.Data.Sqlite.SqliteDataReader reader = await command.ExecuteReaderAsync();
         Assert.IsTrue(await reader.ReadAsync());
         Assert.AreEqual(2L, reader.GetInt64(0));
         Assert.AreEqual(1L, reader.GetInt64(1));
+        Assert.AreEqual(1L, reader.GetInt64(2));
         await connection.CloseAsync();
         byte[] databaseBytes = await File.ReadAllBytesAsync(databasePath);
         Assert.IsFalse(databaseBytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(locator)) >= 0);
@@ -93,7 +97,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
             [databasePath],
             null)!;
         MethodInfo begin = sinkType.GetMethod("BeginAsync")!;
-        object beginValueTask = begin.Invoke(sink, [source, CancellationToken.None])!;
+        object beginValueTask = begin.Invoke(sink, [source, null, null, CancellationToken.None])!;
         Task beginTask = (Task)beginValueTask.GetType().GetMethod("AsTask")!.Invoke(beginValueTask, null)!;
         await beginTask;
         object beginResult = beginTask.GetType().GetProperty("Result")!.GetValue(beginTask)!;
@@ -185,7 +189,10 @@ public sealed class RemotePlaylistCatalogLoaderTests
             [databasePath],
             null)!;
         await using IAsyncDisposable sinkScope = (IAsyncDisposable)sink;
-        await InvokeDomainValueTaskAsync(sinkType.GetMethod("BeginAsync")!, sink, [source, CancellationToken.None]);
+        await InvokeDomainValueTaskAsync(
+            sinkType.GetMethod("BeginAsync")!,
+            sink,
+            [source, null, null, CancellationToken.None]);
         Type entryType = assembly.GetType("IptvSuite.Infrastructure.RemoteM3uEntry", true)!;
         object entry = Activator.CreateInstance(
             entryType,
@@ -434,7 +441,13 @@ public sealed class RemotePlaylistCatalogLoaderTests
             ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
                 BindingFlags.Instance | BindingFlags.NonPublic).Single();
             var lease = (HttpStreamingResponseLease)constructor.Invoke(
-                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyResponseOwner()]);
+                [
+                    stream,
+                    new Uri("https://fixtures.invalid/catalog/final/list.m3u"),
+                    new EmptyResponseOwner(),
+                    "\"catalog-v1\"",
+                    new DateTimeOffset(2026, 8, 21, 12, 34, 56, TimeSpan.Zero),
+                ]);
             return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
         }
     }
@@ -449,7 +462,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
             ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
                 BindingFlags.Instance | BindingFlags.NonPublic).Single();
             var lease = (HttpStreamingResponseLease)constructor.Invoke(
-                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyResponseOwner()]);
+                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyResponseOwner(), null, null]);
             return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
         }
     }

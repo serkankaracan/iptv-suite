@@ -264,7 +264,7 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
                 BindingFlags.Instance | BindingFlags.NonPublic).Single();
             var lease = (HttpStreamingResponseLease)constructor.Invoke(
-                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyOwner()]);
+                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyOwner(), null, null]);
             return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
         }
     }
@@ -282,7 +282,7 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
                 BindingFlags.Instance | BindingFlags.NonPublic).Single();
             var lease = (HttpStreamingResponseLease)constructor.Invoke(
-                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyOwner()]);
+                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyOwner(), null, null]);
             return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
         }
     }

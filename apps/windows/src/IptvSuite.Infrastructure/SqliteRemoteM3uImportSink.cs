@@ -29,6 +29,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private SnapshotId _snapshotId;
     private Guid _syncRunId;
     private DateTimeOffset _startedAt;
+    private string? _entityTag;
+    private DateTimeOffset? _lastModified;
     private Guid _keyGenerationId;
     private byte[]? _dek;
     private byte[]? _wrappedDek;
@@ -43,6 +45,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
 
     public async ValueTask<DomainResult<bool>> BeginAsync(
         ContentSource source,
+        string? entityTag,
+        DateTimeOffset? lastModified,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -59,6 +63,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
             _snapshotId = SnapshotId.Generate();
             _syncRunId = Guid.NewGuid();
             _startedAt = DateTimeOffset.UtcNow;
+            _entityTag = entityTag;
+            _lastModified = lastModified?.ToUniversalTime();
             _keyGenerationId = Guid.NewGuid();
             _dek = RandomNumberGenerator.GetBytes(32);
             byte[] entropy = BuildEntropy(source.Id.Value, _snapshotId.Value);
@@ -91,10 +97,14 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 INSERT INTO snapshots(snapshot_id, source_id, retrieved_utc, content_hash, http_etag,
                     http_last_modified_utc, parser_version, normalization_version, schema_version,
                     item_count, warning_count, state, cache_key)
-                VALUES ($snapshot, $source, $retrieved, zeroblob(32), NULL, NULL, 1, 1, 2, 0, 0, 0, NULL);
+                VALUES ($snapshot, $source, $retrieved, zeroblob(32), $etag, $modified, 1, 1, 2, 0, 0, 0, NULL);
                 """, cancellationToken,
                 ("$snapshot", Id(_snapshotId.Value)), ("$source", Id(source.Id.Value)),
-                ("$retrieved", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))).ConfigureAwait(false);
+                ("$retrieved", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)),
+                ("$etag", _entityTag ?? (object)DBNull.Value),
+                ("$modified", _lastModified.HasValue
+                    ? _lastModified.Value.ToString("O", CultureInfo.InvariantCulture)
+                    : DBNull.Value)).ConfigureAwait(false);
             await ExecuteAsync(
                 "INSERT INTO snapshot_keys(snapshot_id, key_generation_id, wrapped_dek, key_state) VALUES ($snapshot, $generation, $wrapped, 0);",
                 cancellationToken,
@@ -247,7 +257,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         try
         {
             byte[] hash = _contentHash.GetHashAndReset();
-            byte[] cache = BuildCacheKey(hash);
+            byte[] cache = BuildCacheKey(hash, _entityTag, _lastModified);
             try
             {
                 await ExecuteAsync("""
@@ -574,6 +584,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         _snapshotId = default;
         _syncRunId = default;
         _startedAt = default;
+        _entityTag = null;
+        _lastModified = null;
         _keyGenerationId = default;
         _written = 0;
         _warnings = 0;
@@ -590,15 +602,33 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         finally { Zero(context); }
     }
 
-    private static byte[] BuildCacheKey(byte[] contentHash)
+    private static byte[] BuildCacheKey(
+        byte[] contentHash,
+        string? entityTag,
+        DateTimeOffset? lastModified)
     {
-        byte[] material = new byte[contentHash.Length + 3];
-        contentHash.CopyTo(material, 0);
-        material[^3] = 1;
-        material[^2] = 1;
-        material[^1] = 2;
-        try { return SHA256.HashData(material); }
-        finally { Zero(material); }
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(contentHash);
+        hash.AppendData([1, 1, 2]);
+        Append(entityTag ?? string.Empty);
+        Append(lastModified?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? string.Empty);
+        return hash.GetHashAndReset();
+
+        void Append(string value)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value);
+            try
+            {
+                Span<byte> length = stackalloc byte[sizeof(int)];
+                BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
+                hash.AppendData(length);
+                hash.AppendData(bytes);
+            }
+            finally
+            {
+                Zero(bytes);
+            }
+        }
     }
 
     private static byte[] BuildAad(Guid source, Guid snapshot, Guid generation, Guid channel, ProtectedValuePurpose purpose, Guid reference)

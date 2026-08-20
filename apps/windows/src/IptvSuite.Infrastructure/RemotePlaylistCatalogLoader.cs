@@ -81,7 +81,11 @@ internal sealed class RemotePlaylistCatalogLoader
             }
 
             using HttpStreamingResponseLease responseLease = response.Response!;
-            DomainResult<bool> begun = await _sink.BeginAsync(source, cancellationToken).ConfigureAwait(false);
+            DomainResult<bool> begun = await _sink.BeginAsync(
+                source,
+                responseLease.EntityTag,
+                responseLease.LastModified,
+                cancellationToken).ConfigureAwait(false);
             if (!begun.IsSuccess)
             {
                 return DomainResult.Failure<RemoteM3uParseResult>(begun.Error!.Code);

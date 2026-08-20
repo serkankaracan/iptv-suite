@@ -141,7 +141,10 @@ public sealed class BoundedHttpTransportTests
                 return Task.FromResult(redirect);
             }
 
-            return Task.FromResult(Response(HttpStatusCode.OK, Encoding.UTF8.GetBytes("#EXTM3U\n")));
+            HttpResponseMessage response = Response(HttpStatusCode.OK, Encoding.UTF8.GetBytes("#EXTM3U\n"));
+            response.Headers.ETag = new EntityTagHeaderValue("\"catalog-v1\"");
+            response.Content.Headers.LastModified = new DateTimeOffset(2026, 8, 21, 12, 34, 56, TimeSpan.Zero);
+            return Task.FromResult(response);
         });
         using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
         using HttpTransportRequest request = CreateRequest("https://example.test/start", 64);
@@ -150,6 +153,10 @@ public sealed class BoundedHttpTransportTests
 
         Assert.IsTrue(result.IsSuccess);
         using HttpStreamingResponseLease lease = result.Response!;
+        Assert.AreEqual("\"catalog-v1\"", lease.EntityTag);
+        Assert.AreEqual(
+            new DateTimeOffset(2026, 8, 21, 12, 34, 56, TimeSpan.Zero),
+            lease.LastModified);
         using var reader = new StreamReader(lease.Content, Encoding.UTF8, leaveOpen: true);
         Assert.AreEqual("#EXTM3U", await reader.ReadLineAsync());
     }

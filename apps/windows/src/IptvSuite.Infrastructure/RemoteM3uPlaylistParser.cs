@@ -72,7 +72,11 @@ internal interface IRemoteM3uEntrySink
 
 internal interface IRemoteM3uImportSink : IRemoteM3uEntrySink
 {
-    ValueTask<DomainResult<bool>> BeginAsync(ContentSource source, CancellationToken cancellationToken);
+    ValueTask<DomainResult<bool>> BeginAsync(
+        ContentSource source,
+        string? entityTag,
+        DateTimeOffset? lastModified,
+        CancellationToken cancellationToken);
 
     ValueTask<DomainResult<bool>> CompleteAsync(
         RemoteM3uParseResult parseResult,
