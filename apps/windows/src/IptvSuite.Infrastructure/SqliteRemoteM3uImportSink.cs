@@ -18,7 +18,11 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private readonly HashSet<string> _nonces = new(StringComparer.Ordinal);
     private SqliteConnection? _connection;
     private SqliteTransaction? _transaction;
+    private SqliteCommand? _categoryInsert;
+    private SqliteCommand? _locatorInsert;
+    private SqliteCommand? _channelInsert;
     private IncrementalHash? _contentHash;
+    private AesGcm? _aes;
     private ContentSource? _source;
     private SnapshotId _snapshotId;
     private Guid _keyGenerationId;
@@ -74,6 +78,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 .ConfigureAwait(false);
             _transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(cancellationToken)
                 .ConfigureAwait(false);
+            _aes = new AesGcm(_dek, 16);
+            await InitializePreparedCommandsAsync(cancellationToken).ConfigureAwait(false);
             await UpsertSourceAsync(source, cancellationToken).ConfigureAwait(false);
             await ExecuteAsync("""
                 INSERT INTO snapshots(snapshot_id, source_id, retrieved_utc, content_hash, http_etag,
@@ -131,12 +137,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     return DomainResult.Failure<bool>(category.Error!.Code);
                 }
 
-                await ExecuteAsync(
-                    "INSERT INTO categories(category_id, snapshot_id, stable_key, display_name, sort_order) VALUES ($id, $snapshot, $key, $name, $sort);",
-                    cancellationToken,
-                    ("$id", Id(categoryId.Value)), ("$snapshot", Id(_snapshotId.Value)),
-                    ("$key", category.Value!.ProviderKey ?? $"synthetic:{categoryId.Value:N}"),
-                    ("$name", category.Value.NormalizedName), ("$sort", category.Value.SortOrder)).ConfigureAwait(false);
+                await InsertCategoryAsync(category.Value!, cancellationToken).ConfigureAwait(false);
                 _categories.Add(groupName, categoryId);
             }
 
@@ -363,18 +364,18 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         byte[] aad = BuildAad(_source!.Id.Value, _snapshotId.Value, _keyGenerationId, channelId.Value, purpose, key.RecordIdentifier);
         try
         {
-            using var aes = new AesGcm(_dek!, 16);
-            aes.Encrypt(nonce, plaintext, ciphertext, tag, aad);
-            await ExecuteAsync("""
-                INSERT INTO protected_locators(locator_reference, snapshot_id, key_generation_id,
-                    owner_kind, owner_id, purpose, nonce, authentication_tag, ciphertext)
-                VALUES ($reference, $snapshot, $generation, $ownerKind, $owner, $purpose, $nonce, $tag, $ciphertext);
-                """, cancellationToken,
-                ("$reference", $"locator-ref-v1:{key.RecordIdentifier:N}"),
-                ("$snapshot", Id(_snapshotId.Value)), ("$generation", Id(_keyGenerationId)),
-                ("$ownerKind", (int)ProtectedRecordOwnerKind.Channel), ("$owner", Id(channelId.Value)),
-                ("$purpose", (int)purpose), ("$nonce", nonce), ("$tag", tag), ("$ciphertext", ciphertext))
-                .ConfigureAwait(false);
+            _aes!.Encrypt(nonce, plaintext, ciphertext, tag, aad);
+            SqliteParameterCollection parameters = _locatorInsert!.Parameters;
+            parameters["$reference"].Value = $"locator-ref-v1:{key.RecordIdentifier:N}";
+            parameters["$snapshot"].Value = Id(_snapshotId.Value);
+            parameters["$generation"].Value = Id(_keyGenerationId);
+            parameters["$ownerKind"].Value = (int)ProtectedRecordOwnerKind.Channel;
+            parameters["$owner"].Value = Id(channelId.Value);
+            parameters["$purpose"].Value = (int)purpose;
+            parameters["$nonce"].Value = nonce;
+            parameters["$tag"].Value = tag;
+            parameters["$ciphertext"].Value = ciphertext;
+            await _locatorInsert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -386,25 +387,40 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         }
     }
 
-    private Task InsertChannelAsync(
+    private async Task InsertChannelAsync(
         LiveChannel channel,
         SecretStoreKey streamKey,
         SecretStoreKey? logoKey,
-        CancellationToken cancellationToken) => ExecuteAsync("""
-            INSERT INTO channels(channel_id, snapshot_id, category_id, stable_key_version, stable_key,
-                display_name, channel_number, stream_reference, logo_reference, provider_item_kind,
-                provider_item_id, container_hint, is_adult, warning_flags)
-            VALUES ($id, $snapshot, $category, $version, $key, $name, $number, $stream, $logo,
-                NULL, NULL, $container, $adult, $warnings);
-            """, cancellationToken,
-            ("$id", Id(channel.Id.Value)), ("$snapshot", Id(_snapshotId.Value)),
-            ("$category", Id(channel.CategoryId.Value)), ("$version", channel.StableKey.AlgorithmVersion),
-            ("$key", channel.StableKey.Value), ("$name", channel.Name),
-            ("$number", channel.Number ?? (object)DBNull.Value),
-            ("$stream", $"locator-ref-v1:{streamKey.RecordIdentifier:N}"),
-            ("$logo", logoKey.HasValue ? $"locator-ref-v1:{logoKey.Value.RecordIdentifier:N}" : DBNull.Value),
-            ("$container", channel.ContainerHint?.ToString() ?? (object)DBNull.Value),
-            ("$adult", channel.IsAdultHint == true ? 1 : 0), ("$warnings", (int)channel.NormalizationWarnings));
+        CancellationToken cancellationToken)
+    {
+        SqliteParameterCollection parameters = _channelInsert!.Parameters;
+        parameters["$id"].Value = Id(channel.Id.Value);
+        parameters["$snapshot"].Value = Id(_snapshotId.Value);
+        parameters["$category"].Value = Id(channel.CategoryId.Value);
+        parameters["$version"].Value = channel.StableKey.AlgorithmVersion;
+        parameters["$key"].Value = channel.StableKey.Value;
+        parameters["$name"].Value = channel.Name;
+        parameters["$number"].Value = channel.Number ?? (object)DBNull.Value;
+        parameters["$stream"].Value = $"locator-ref-v1:{streamKey.RecordIdentifier:N}";
+        parameters["$logo"].Value = logoKey.HasValue
+            ? $"locator-ref-v1:{logoKey.Value.RecordIdentifier:N}"
+            : DBNull.Value;
+        parameters["$container"].Value = channel.ContainerHint?.ToString() ?? (object)DBNull.Value;
+        parameters["$adult"].Value = channel.IsAdultHint == true ? 1 : 0;
+        parameters["$warnings"].Value = (int)channel.NormalizationWarnings;
+        await _channelInsert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task InsertCategoryAsync(ChannelCategory category, CancellationToken cancellationToken)
+    {
+        SqliteParameterCollection parameters = _categoryInsert!.Parameters;
+        parameters["$id"].Value = Id(category.Id.Value);
+        parameters["$snapshot"].Value = Id(_snapshotId.Value);
+        parameters["$key"].Value = category.ProviderKey ?? $"synthetic:{category.Id.Value:N}";
+        parameters["$name"].Value = category.NormalizedName;
+        parameters["$sort"].Value = category.SortOrder;
+        await _categoryInsert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private void AppendHash(RemoteM3uEntry entry)
     {
@@ -445,8 +461,62 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task InitializePreparedCommandsAsync(CancellationToken cancellationToken)
+    {
+        _categoryInsert = CreatePreparedCommand("""
+            INSERT INTO categories(category_id, snapshot_id, stable_key, display_name, sort_order)
+            VALUES ($id, $snapshot, $key, $name, $sort);
+            """, "$id", "$snapshot", "$key", "$name", "$sort");
+        _locatorInsert = CreatePreparedCommand("""
+            INSERT INTO protected_locators(locator_reference, snapshot_id, key_generation_id,
+                owner_kind, owner_id, purpose, nonce, authentication_tag, ciphertext)
+            VALUES ($reference, $snapshot, $generation, $ownerKind, $owner, $purpose, $nonce, $tag, $ciphertext);
+            """, "$reference", "$snapshot", "$generation", "$ownerKind", "$owner", "$purpose", "$nonce", "$tag", "$ciphertext");
+        _channelInsert = CreatePreparedCommand("""
+            INSERT INTO channels(channel_id, snapshot_id, category_id, stable_key_version, stable_key,
+                display_name, channel_number, stream_reference, logo_reference, provider_item_kind,
+                provider_item_id, container_hint, is_adult, warning_flags)
+            VALUES ($id, $snapshot, $category, $version, $key, $name, $number, $stream, $logo,
+                NULL, NULL, $container, $adult, $warnings);
+            """, "$id", "$snapshot", "$category", "$version", "$key", "$name", "$number", "$stream", "$logo", "$container", "$adult", "$warnings");
+        await _categoryInsert.PrepareAsync(cancellationToken).ConfigureAwait(false);
+        await _locatorInsert.PrepareAsync(cancellationToken).ConfigureAwait(false);
+        await _channelInsert.PrepareAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private SqliteCommand CreatePreparedCommand(string sql, params string[] parameterNames)
+    {
+        SqliteCommand command = _connection!.CreateCommand();
+        command.Transaction = _transaction;
+        command.CommandText = sql;
+        foreach (string parameterName in parameterNames)
+        {
+            command.Parameters.Add(new SqliteParameter(parameterName, DBNull.Value));
+        }
+
+        return command;
+    }
+
     private async ValueTask DisposeSessionAsync()
     {
+        if (_categoryInsert is not null)
+        {
+            await _categoryInsert.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (_locatorInsert is not null)
+        {
+            await _locatorInsert.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (_channelInsert is not null)
+        {
+            await _channelInsert.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _categoryInsert = null;
+        _locatorInsert = null;
+        _channelInsert = null;
         if (_transaction is not null)
         {
             await _transaction.DisposeAsync().ConfigureAwait(false);
@@ -461,6 +531,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         _connection = null;
         _contentHash?.Dispose();
         _contentHash = null;
+        _aes?.Dispose();
+        _aes = null;
         _categories.Clear();
         _stableKeyOccurrences.Clear();
         _nonces.Clear();
