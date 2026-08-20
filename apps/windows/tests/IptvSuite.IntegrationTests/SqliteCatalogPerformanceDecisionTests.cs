@@ -71,7 +71,11 @@ public sealed class SqliteCatalogPerformanceDecisionTests
                 samples.Add(new Sample(
                     stopwatch.Elapsed.TotalMilliseconds,
                     allocatedAfter - allocatedBefore,
-                    ReadSinkWriteAllocatedBytes(loader),
+                    ReadSinkMetric(loader, "MeasuredWriteAllocatedBytes"),
+                    ReadSinkMetric(loader, "MeasuredPreparationAllocatedBytes"),
+                    ReadSinkMetric(loader, "MeasuredLocatorAllocatedBytes"),
+                    ReadSinkMetric(loader, "MeasuredChannelAllocatedBytes"),
+                    ReadSinkMetric(loader, "MeasuredHashAllocatedBytes"),
                     Math.Max(0, workingSetAfter - workingSetBefore),
                     new FileInfo(databasePath).Length));
             }
@@ -83,6 +87,10 @@ public sealed class SqliteCatalogPerformanceDecisionTests
                 durationMilliseconds = Summary(samples.Select(sample => sample.DurationMilliseconds)),
                 allocatedBytes = Summary(samples.Select(sample => (double)sample.AllocatedBytes)),
                 sinkWriteAllocatedBytes = Summary(samples.Select(sample => (double)sample.SinkWriteAllocatedBytes)),
+                sinkPreparationAllocatedBytes = Summary(samples.Select(sample => (double)sample.SinkPreparationAllocatedBytes)),
+                sinkLocatorAllocatedBytes = Summary(samples.Select(sample => (double)sample.SinkLocatorAllocatedBytes)),
+                sinkChannelAllocatedBytes = Summary(samples.Select(sample => (double)sample.SinkChannelAllocatedBytes)),
+                sinkHashAllocatedBytes = Summary(samples.Select(sample => (double)sample.SinkHashAllocatedBytes)),
                 workingSetDeltaBytes = Summary(samples.Select(sample => (double)sample.WorkingSetDeltaBytes)),
                 databaseBytes = Summary(samples.Select(sample => (double)sample.DatabaseBytes)),
                 rawSamples = samples,
@@ -193,12 +201,12 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             null)!;
     }
 
-    private static long ReadSinkWriteAllocatedBytes(object loader)
+    private static long ReadSinkMetric(object loader, string propertyName)
     {
         object sink = loader.GetType().GetField("_sink", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(loader)!;
         return (long)sink.GetType().GetProperty(
-            "MeasuredWriteAllocatedBytes",
+            propertyName,
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(sink)!;
     }
 
@@ -262,6 +270,10 @@ public sealed class SqliteCatalogPerformanceDecisionTests
         double DurationMilliseconds,
         long AllocatedBytes,
         long SinkWriteAllocatedBytes,
+        long SinkPreparationAllocatedBytes,
+        long SinkLocatorAllocatedBytes,
+        long SinkChannelAllocatedBytes,
+        long SinkHashAllocatedBytes,
         long WorkingSetDeltaBytes,
         long DatabaseBytes);
 

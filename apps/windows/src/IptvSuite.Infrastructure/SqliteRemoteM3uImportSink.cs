@@ -41,6 +41,10 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private int _written;
     private int _warnings;
     private long _measuredWriteAllocatedBytes;
+    private long _measuredPreparationAllocatedBytes;
+    private long _measuredLocatorAllocatedBytes;
+    private long _measuredChannelAllocatedBytes;
+    private long _measuredHashAllocatedBytes;
 
     internal SqliteRemoteM3uImportSink(string databasePath) : this(databasePath, false)
     {
@@ -54,6 +58,10 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     }
 
     internal long MeasuredWriteAllocatedBytes => _measuredWriteAllocatedBytes;
+    internal long MeasuredPreparationAllocatedBytes => _measuredPreparationAllocatedBytes;
+    internal long MeasuredLocatorAllocatedBytes => _measuredLocatorAllocatedBytes;
+    internal long MeasuredChannelAllocatedBytes => _measuredChannelAllocatedBytes;
+    internal long MeasuredHashAllocatedBytes => _measuredHashAllocatedBytes;
 
     public async ValueTask<DomainResult<bool>> BeginAsync(
         ContentSource source,
@@ -157,6 +165,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         }
 
         long allocatedBefore = _measureWriteAllocations ? GC.GetAllocatedBytesForCurrentThread() : 0;
+        long allocationCursor = allocatedBefore;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -228,6 +237,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 return ValueTask.FromResult(DomainResult.Failure<bool>(channel.Error!.Code));
             }
 
+            MeasureAllocation(ref allocationCursor, ref _measuredPreparationAllocatedBytes);
+
             EncryptAndInsert(
                 channelId,
                 ProtectedValuePurpose.ChannelStreamLocator,
@@ -248,6 +259,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     cancellationToken);
             }
 
+            MeasureAllocation(ref allocationCursor, ref _measuredLocatorAllocatedBytes);
+
             InsertChannel(
                 channel.Value!,
                 category.Text,
@@ -255,12 +268,14 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 streamReferenceText,
                 logoReferenceText,
                 cancellationToken);
+            MeasureAllocation(ref allocationCursor, ref _measuredChannelAllocatedBytes);
             AppendHash(entry);
             _written++;
             if (entry.Warnings != ChannelNormalizationWarnings.None)
             {
                 _warnings++;
             }
+            MeasureAllocation(ref allocationCursor, ref _measuredHashAllocatedBytes);
 
             return ValueTask.FromResult(DomainResult.Success(true));
         }
@@ -723,6 +738,18 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private static void Zero(byte[]? value)
     {
         if (value is not null) CryptographicOperations.ZeroMemory(value);
+    }
+
+    private void MeasureAllocation(ref long cursor, ref long total)
+    {
+        if (!_measureWriteAllocations)
+        {
+            return;
+        }
+
+        long current = GC.GetAllocatedBytesForCurrentThread();
+        total += current - cursor;
+        cursor = current;
     }
 
     private readonly record struct Nonce96(uint First, uint Second, uint Third)
