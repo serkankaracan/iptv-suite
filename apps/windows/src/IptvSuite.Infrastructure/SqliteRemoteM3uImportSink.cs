@@ -15,7 +15,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
 {
     private readonly string _databasePath;
     private readonly SqliteCatalogDatabase _database;
-    private readonly Dictionary<string, CategoryId> _categories = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CategoryBinding> _categories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _stableKeyOccurrences = new(StringComparer.Ordinal);
     private readonly HashSet<Nonce96> _nonces = [];
     private SqliteConnection? _connection;
@@ -31,6 +31,9 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private DateTimeOffset _startedAt;
     private string? _entityTag;
     private DateTimeOffset? _lastModified;
+    private string? _sourceText;
+    private string? _snapshotText;
+    private string? _keyGenerationText;
     private Guid _keyGenerationId;
     private byte[]? _dek;
     private byte[]? _wrappedDek;
@@ -61,11 +64,14 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
             await _database.InitializeAsync(cancellationToken).ConfigureAwait(false);
             _source = source;
             _snapshotId = SnapshotId.Generate();
+            _keyGenerationId = Guid.NewGuid();
             _syncRunId = Guid.NewGuid();
             _startedAt = DateTimeOffset.UtcNow;
             _entityTag = entityTag;
             _lastModified = lastModified?.ToUniversalTime();
-            _keyGenerationId = Guid.NewGuid();
+            _sourceText = Id(source.Id.Value);
+            _snapshotText = Id(_snapshotId.Value);
+            _keyGenerationText = Id(_keyGenerationId);
             _dek = RandomNumberGenerator.GetBytes(32);
             byte[] entropy = BuildEntropy(source.Id.Value, _snapshotId.Value);
             try
@@ -99,7 +105,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     item_count, warning_count, state, cache_key)
                 VALUES ($snapshot, $source, $retrieved, zeroblob(32), $etag, $modified, 1, 1, 2, 0, 0, 0, NULL);
                 """, cancellationToken,
-                ("$snapshot", Id(_snapshotId.Value)), ("$source", Id(source.Id.Value)),
+                ("$snapshot", _snapshotText), ("$source", _sourceText),
                 ("$retrieved", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)),
                 ("$etag", _entityTag ?? (object)DBNull.Value),
                 ("$modified", _lastModified.HasValue
@@ -108,14 +114,14 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
             await ExecuteAsync(
                 "INSERT INTO snapshot_keys(snapshot_id, key_generation_id, wrapped_dek, key_state) VALUES ($snapshot, $generation, $wrapped, 0);",
                 cancellationToken,
-                ("$snapshot", Id(_snapshotId.Value)), ("$generation", Id(_keyGenerationId)),
+                ("$snapshot", _snapshotText), ("$generation", _keyGenerationText),
                 ("$wrapped", _wrappedDek)).ConfigureAwait(false);
             await ExecuteAsync("""
                 INSERT INTO sync_runs(sync_run_id, source_id, started_utc, completed_utc, result_code,
                     parsed_count, persisted_count, warning_count, failure_code)
                 VALUES ($run, $source, $started, NULL, NULL, 0, 0, 0, NULL);
                 """, cancellationToken,
-                ("$run", Id(_syncRunId)), ("$source", Id(source.Id.Value)),
+                ("$run", Id(_syncRunId)), ("$source", _sourceText),
                 ("$started", _startedAt.ToString("O", CultureInfo.InvariantCulture))).ConfigureAwait(false);
             return DomainResult.Success(true);
         }
@@ -145,26 +151,29 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         {
             cancellationToken.ThrowIfCancellationRequested();
             string groupName = string.IsNullOrWhiteSpace(entry.GroupTitle) ? "Uncategorized" : entry.GroupTitle;
-            if (!_categories.TryGetValue(groupName, out CategoryId categoryId))
+            if (!_categories.TryGetValue(groupName, out CategoryBinding category))
             {
-                categoryId = CategoryId.Generate();
-                DomainResult<ChannelCategory> category = ChannelCategory.Create(
+                CategoryId categoryId = CategoryId.Generate();
+                DomainResult<ChannelCategory> categoryResult = ChannelCategory.Create(
                     categoryId,
                     _snapshotId,
                     entry.GroupTitle,
                     groupName,
                     _categories.Count,
                     string.IsNullOrWhiteSpace(entry.GroupTitle));
-                if (!category.IsSuccess)
+                if (!categoryResult.IsSuccess)
                 {
-                    return ValueTask.FromResult(DomainResult.Failure<bool>(category.Error!.Code));
+                    return ValueTask.FromResult(DomainResult.Failure<bool>(categoryResult.Error!.Code));
                 }
 
-                InsertCategory(category.Value!, cancellationToken);
-                _categories.Add(groupName, categoryId);
+                string categoryText = Id(categoryId.Value);
+                InsertCategory(categoryResult.Value!, categoryText, cancellationToken);
+                category = new CategoryBinding(categoryId, categoryText);
+                _categories.Add(groupName, category);
             }
 
             ChannelId channelId = ChannelId.Generate();
+            string channelText = Id(channelId.Value);
             DomainResult<ChannelStableKey> stableKey = BuildStableKey(entry, cancellationToken);
             if (!stableKey.IsSuccess)
             {
@@ -175,8 +184,10 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 _source.Id,
                 ProtectedValuePurpose.ChannelStreamLocator,
                 ProtectedRecordOwner.ForChannel(channelId));
+            string streamReferenceText = $"locator-ref-v1:{streamKey.RecordIdentifier:N}";
             ProtectedLocatorReference? logoReference = null;
             SecretStoreKey? logoKey = null;
+            string? logoReferenceText = null;
             if (!string.IsNullOrWhiteSpace(entry.Logo))
             {
                 (ProtectedLocatorReference issued, SecretStoreKey key) = SecretStoreKey.IssueLocator(
@@ -185,13 +196,14 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     ProtectedRecordOwner.ForChannel(channelId));
                 logoReference = issued;
                 logoKey = key;
+                logoReferenceText = $"locator-ref-v1:{key.RecordIdentifier:N}";
             }
 
             DomainResult<LiveChannel> channel = LiveChannel.Create(
                 channelId,
                 stableKey.Value,
                 _snapshotId,
-                categoryId,
+                category.Id,
                 entry.TvgId,
                 providerPlaybackKey: null,
                 entry.Name,
@@ -210,6 +222,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 channelId,
                 ProtectedValuePurpose.ChannelStreamLocator,
                 streamKey,
+                channelText,
+                streamReferenceText,
                 entry.Locator,
                 cancellationToken);
             if (logoKey.HasValue)
@@ -218,11 +232,19 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     channelId,
                     ProtectedValuePurpose.ChannelLogoLocator,
                     logoKey.Value,
+                    channelText,
+                    logoReferenceText!,
                     entry.Logo!,
                     cancellationToken);
             }
 
-            InsertChannel(channel.Value!, streamKey, logoKey, cancellationToken);
+            InsertChannel(
+                channel.Value!,
+                category.Text,
+                channelText,
+                streamReferenceText,
+                logoReferenceText,
+                cancellationToken);
             AppendHash(entry);
             _written++;
             if (entry.Warnings != ChannelNormalizationWarnings.None)
@@ -275,7 +297,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     WHERE sync_run_id = $run;
                     """, cancellationToken,
                     ("$hash", hash), ("$cache", cache), ("$items", _written), ("$warnings", _warnings),
-                    ("$snapshot", Id(_snapshotId.Value)), ("$source", Id(_source.Id.Value)),
+                    ("$snapshot", _snapshotText!), ("$source", _sourceText!),
                     ("$ready", (int)ContentSourceStatus.Ready), ("$run", Id(_syncRunId)),
                     ("$completed", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))).ConfigureAwait(false);
                 await _transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -389,6 +411,8 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         ChannelId channelId,
         ProtectedValuePurpose purpose,
         SecretStoreKey key,
+        string channelText,
+        string referenceText,
         string plaintextText,
         CancellationToken cancellationToken)
     {
@@ -401,11 +425,11 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         {
             _aes!.Encrypt(nonce, plaintext, ciphertext, tag, aad);
             SqliteParameterCollection parameters = _locatorInsert!.Parameters;
-            parameters["$reference"].Value = $"locator-ref-v1:{key.RecordIdentifier:N}";
-            parameters["$snapshot"].Value = Id(_snapshotId.Value);
-            parameters["$generation"].Value = Id(_keyGenerationId);
+            parameters["$reference"].Value = referenceText;
+            parameters["$snapshot"].Value = _snapshotText!;
+            parameters["$generation"].Value = _keyGenerationText!;
             parameters["$ownerKind"].Value = (int)ProtectedRecordOwnerKind.Channel;
-            parameters["$owner"].Value = Id(channelId.Value);
+            parameters["$owner"].Value = channelText;
             parameters["$purpose"].Value = (int)purpose;
             parameters["$nonce"].Value = nonce;
             parameters["$tag"].Value = tag;
@@ -425,22 +449,22 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
 
     private void InsertChannel(
         LiveChannel channel,
-        SecretStoreKey streamKey,
-        SecretStoreKey? logoKey,
+        string categoryText,
+        string channelText,
+        string streamReferenceText,
+        string? logoReferenceText,
         CancellationToken cancellationToken)
     {
         SqliteParameterCollection parameters = _channelInsert!.Parameters;
-        parameters["$id"].Value = Id(channel.Id.Value);
-        parameters["$snapshot"].Value = Id(_snapshotId.Value);
-        parameters["$category"].Value = Id(channel.CategoryId.Value);
+        parameters["$id"].Value = channelText;
+        parameters["$snapshot"].Value = _snapshotText!;
+        parameters["$category"].Value = categoryText;
         parameters["$version"].Value = channel.StableKey.AlgorithmVersion;
         parameters["$key"].Value = channel.StableKey.Value;
         parameters["$name"].Value = channel.Name;
         parameters["$number"].Value = channel.Number ?? (object)DBNull.Value;
-        parameters["$stream"].Value = $"locator-ref-v1:{streamKey.RecordIdentifier:N}";
-        parameters["$logo"].Value = logoKey.HasValue
-            ? $"locator-ref-v1:{logoKey.Value.RecordIdentifier:N}"
-            : DBNull.Value;
+        parameters["$stream"].Value = streamReferenceText;
+        parameters["$logo"].Value = logoReferenceText ?? (object)DBNull.Value;
         parameters["$container"].Value = channel.ContainerHint?.ToString() ?? (object)DBNull.Value;
         parameters["$adult"].Value = channel.IsAdultHint == true ? 1 : 0;
         parameters["$warnings"].Value = (int)channel.NormalizationWarnings;
@@ -448,11 +472,14 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         _channelInsert.ExecuteNonQuery();
     }
 
-    private void InsertCategory(ChannelCategory category, CancellationToken cancellationToken)
+    private void InsertCategory(
+        ChannelCategory category,
+        string categoryText,
+        CancellationToken cancellationToken)
     {
         SqliteParameterCollection parameters = _categoryInsert!.Parameters;
-        parameters["$id"].Value = Id(category.Id.Value);
-        parameters["$snapshot"].Value = Id(_snapshotId.Value);
+        parameters["$id"].Value = categoryText;
+        parameters["$snapshot"].Value = _snapshotText!;
         parameters["$key"].Value = category.ProviderKey ?? $"synthetic:{category.Id.Value:N}";
         parameters["$name"].Value = category.NormalizedName;
         parameters["$sort"].Value = category.SortOrder;
@@ -586,6 +613,9 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         _startedAt = default;
         _entityTag = null;
         _lastModified = null;
+        _sourceText = null;
+        _snapshotText = null;
+        _keyGenerationText = null;
         _keyGenerationId = default;
         _written = 0;
         _warnings = 0;
@@ -685,5 +715,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
             BinaryPrimitives.ReadUInt32BigEndian(value[4..]),
             BinaryPrimitives.ReadUInt32BigEndian(value[8..]));
     }
+
+    private readonly record struct CategoryBinding(CategoryId Id, string Text);
 
 }
