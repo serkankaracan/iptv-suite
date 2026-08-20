@@ -15,5 +15,7 @@
     <ProjectReference Include="..\..\src\IptvSuite.Application\IptvSuite.Application.csproj" />
     <ProjectReference Include="..\..\src\IptvSuite.Infrastructure\IptvSuite.Infrastructure.csproj" />
     <ProjectReference Include="..\IptvSuite.Testing\IptvSuite.Testing.csproj" />
+    <ProjectReference Include="..\IptvSuite.CatalogCrashHarness\IptvSuite.CatalogCrashHarness.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

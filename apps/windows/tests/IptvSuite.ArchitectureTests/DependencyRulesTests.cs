@@ -65,9 +65,15 @@ public sealed class DependencyRulesTests
         new(
             "IptvSuite.IntegrationTests",
             "apps/windows/tests/IptvSuite.IntegrationTests/IptvSuite.IntegrationTests.csproj",
-            ["IptvSuite.Application", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
+            ["IptvSuite.Application", "IptvSuite.CatalogCrashHarness", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
             [],
             ["MSTest"]),
+        new(
+            "IptvSuite.CatalogCrashHarness",
+            "apps/windows/tests/IptvSuite.CatalogCrashHarness/IptvSuite.CatalogCrashHarness.csproj",
+            ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure"],
+            [],
+            []),
         new(
             "IptvSuite.SecretStoreSpike",
             "apps/windows/tests/IptvSuite.SecretStoreSpike/IptvSuite.SecretStoreSpike.csproj",
@@ -130,6 +136,7 @@ public sealed class DependencyRulesTests
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.ProtectedCatalogSpike");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PackageLifecycleHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.DpapiUserBoundaryHarness");
+        AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.CatalogCrashHarness");
     }
 
     [TestMethod]
@@ -261,6 +268,7 @@ public sealed class DependencyRulesTests
         const string protectedCatalogSpikeProjectGuid = "{E7CD0B28-6FCC-4E20-86AF-7D7BD4FC7E6E}";
         const string lifecycleHarnessProjectGuid = "{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}";
         const string dpapiUserBoundaryHarnessProjectGuid = "{9E610CDF-2461-4D7B-A289-84B41BB4F55A}";
+        const string catalogCrashHarnessProjectGuid = "{A1C743E8-9472-45B9-9A34-8B73FCA4D120}";
         const string testsFolderGuid = "{0AB3BF05-4346-4AA6-1389-037BE0695223}";
 
         StringAssert.Contains(
@@ -269,6 +277,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             solution,
             $"{dpapiUserBoundaryHarnessProjectGuid} = {testsFolderGuid}");
+        StringAssert.Contains(
+            solution,
+            $"{catalogCrashHarnessProjectGuid} = {testsFolderGuid}");
 
         foreach (string configuration in new[] { "Debug", "Release" })
         {
@@ -284,6 +295,9 @@ public sealed class DependencyRulesTests
             StringAssert.Contains(
                 solution,
                 $"{dpapiUserBoundaryHarnessProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
+            StringAssert.Contains(
+                solution,
+                $"{catalogCrashHarnessProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
             Assert.IsFalse(
                 solution.Contains(
                     $"{protectedCatalogSpikeProjectGuid}.{configuration}|x64.Deploy.0",
@@ -299,6 +313,11 @@ public sealed class DependencyRulesTests
                     $"{dpapiUserBoundaryHarnessProjectGuid}.{configuration}|x64.Deploy.0",
                     StringComparison.Ordinal),
                 "The test-only DPAPI user-boundary harness must never deploy as part of a solution build.");
+            Assert.IsFalse(
+                solution.Contains(
+                    $"{catalogCrashHarnessProjectGuid}.{configuration}|x64.Deploy.0",
+                    StringComparison.Ordinal),
+                "The test-only catalog crash harness must never deploy as part of a solution build.");
         }
     }
 
@@ -823,6 +842,7 @@ public sealed class DependencyRulesTests
                 content.Contains("IptvSuite.ProtectedCatalogSpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.PackageLifecycleHarness", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.DpapiUserBoundaryHarness", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.CatalogCrashHarness", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.AspNetCore.App", StringComparison.Ordinal) ||
                 content.Contains("IPTVSUITE_TEST_ONLY_CANARY_V1", StringComparison.Ordinal),
@@ -852,6 +872,16 @@ public sealed class DependencyRulesTests
         Assert.AreEqual("x64", GetProperty(protectedCatalogSpikeProject, "PlatformTarget"));
         Assert.AreEqual("false", GetProperty(protectedCatalogSpikeProject, "Prefer32Bit"));
 
+        XDocument catalogCrashHarnessProject = LoadXml(
+            "apps/windows/tests/IptvSuite.CatalogCrashHarness/IptvSuite.CatalogCrashHarness.csproj");
+        Assert.AreEqual("Exe", GetProperty(catalogCrashHarnessProject, "OutputType"));
+        Assert.AreEqual("false", GetProperty(catalogCrashHarnessProject, "IsTestProject"));
+        Assert.AreEqual("false", GetProperty(catalogCrashHarnessProject, "IsPackable"));
+        Assert.AreEqual("false", GetProperty(catalogCrashHarnessProject, "IsPublishable"));
+        Assert.AreEqual("x64", GetProperty(catalogCrashHarnessProject, "Platforms"));
+        Assert.AreEqual("x64", GetProperty(catalogCrashHarnessProject, "PlatformTarget"));
+        Assert.AreEqual("false", GetProperty(catalogCrashHarnessProject, "Prefer32Bit"));
+
         string packageSmoke = File.ReadAllText(
             Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageSmoke.ps1"));
         StringAssert.Contains(packageSmoke, "IptvSuite\\.SecretStoreSpike(?:\\..*)?");
@@ -862,6 +892,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             packageSmoke,
             "$entry.Name -match '^(?i:IptvSuite\\.DpapiUserBoundaryHarness(?:\\..*)?)$'");
+        StringAssert.Contains(
+            packageSmoke,
+            "$entry.Name -match '^(?i:IptvSuite\\.CatalogCrashHarness(?:\\..*)?)$'");
         StringAssert.Contains(packageSmoke, "PackagedApplicationActivator]::Activate($aumid)");
         StringAssert.Contains(packageSmoke, "CoCreateInstance");
         StringAssert.Contains(packageSmoke, "LocalServer = 0x00000004");
@@ -1661,6 +1694,35 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             workflow.Contains("Invoke-WindowsCatalogPersistenceDecision.ps1", StringComparison.Ordinal),
             "The normal hosted workflow must not run the opt-in M8 performance Decision.");
+    }
+
+    [TestMethod]
+    public void M8CatalogCrashHarnessIsIsolatedAndKillsOnlyItsTrackedProcess()
+    {
+        string harness = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.CatalogCrashHarness",
+            "Program.cs"));
+        string crashTest = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.IntegrationTests",
+            "SqliteCatalogCrashRecoveryTests.cs"));
+
+        StringAssert.Contains(harness, "new BlockingTransport(replacement");
+        StringAssert.Contains(harness, "Task.Delay(Timeout.InfiniteTimeSpan");
+        StringAssert.Contains(crashTest, "process.Kill(entireProcessTree: true)");
+        StringAssert.Contains(crashTest, "Assert.AreEqual(\"Old channel\", reader.GetString(4))");
+        StringAssert.Contains(crashTest, "AssertNoHotRollbackJournal");
+        StringAssert.Contains(crashTest, "File.Exists(databasePath + \"-wal\")");
+        StringAssert.Contains(crashTest, "File.Exists(databasePath + \"-shm\")");
+        Assert.IsFalse(crashTest.Contains("GetProcesses", StringComparison.Ordinal));
+        Assert.IsFalse(crashTest.Contains("ProcessName", StringComparison.Ordinal));
     }
 
     [TestMethod]
