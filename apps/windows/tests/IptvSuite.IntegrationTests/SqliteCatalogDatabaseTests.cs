@@ -23,6 +23,8 @@ public sealed class SqliteCatalogDatabaseTests
     [
         "ix_categories_snapshot_sort",
         "ix_channels_snapshot_category",
+        "ix_channels_snapshot_category_name",
+        "ix_channels_snapshot_name",
         "ix_channels_snapshot_number",
         "ix_locators_snapshot_owner",
         "ix_snapshots_source_cache",
@@ -41,7 +43,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection connection = await OpenAsync(databasePath);
-        Assert.AreEqual(2L, await ExecuteScalarInt64Async(connection, "PRAGMA user_version;"));
+        Assert.AreEqual(3L, await ExecuteScalarInt64Async(connection, "PRAGMA user_version;"));
         CollectionAssert.AreEqual(ExpectedTables, await ReadObjectNamesAsync(connection, "table"));
         CollectionAssert.AreEqual(ExpectedIndexes, await ReadObjectNamesAsync(connection, "index", "ix_%"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(connection, "PRAGMA foreign_keys;"));
@@ -66,7 +68,7 @@ public sealed class SqliteCatalogDatabaseTests
 
     [TestMethod]
     [Timeout(30_000)]
-    public async Task VersionOneSchemaMigratesAtomicallyToVersionTwo()
+    public async Task VersionOneSchemaMigratesAtomicallyToCurrentVersion()
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-migration");
         string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
@@ -75,6 +77,8 @@ public sealed class SqliteCatalogDatabaseTests
         {
             await ExecuteAsync(connection, """
                 DROP INDEX ix_snapshots_source_cache;
+                DROP INDEX ix_channels_snapshot_name;
+                DROP INDEX ix_channels_snapshot_category_name;
                 ALTER TABLE snapshots DROP COLUMN cache_key;
                 PRAGMA user_version = 1;
                 """);
@@ -83,13 +87,40 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection migrated = await OpenAsync(databasePath);
-        Assert.AreEqual(2L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(3L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(
             migrated,
             "SELECT count(*) FROM pragma_table_info('snapshots') WHERE name = 'cache_key';"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(
             migrated,
             "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_snapshots_source_cache';"));
+        Assert.AreEqual(1L, await ExecuteScalarInt64Async(
+            migrated,
+            "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_channels_snapshot_name';"));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task VersionTwoSchemaAddsCatalogBrowseIndexesAtomically()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m9-sqlite-query-index-migration");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeAsync(databasePath);
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_channels_snapshot_name;
+                DROP INDEX ix_channels_snapshot_category_name;
+                PRAGMA user_version = 2;
+                """);
+        }
+
+        await InitializeAsync(databasePath);
+
+        await using SqliteConnection migrated = await OpenAsync(databasePath);
+        Assert.AreEqual(3L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        CollectionAssert.Contains(await ReadObjectNamesAsync(migrated, "index", "ix_%"), "ix_channels_snapshot_name");
+        CollectionAssert.Contains(await ReadObjectNamesAsync(migrated, "index", "ix_%"), "ix_channels_snapshot_category_name");
     }
 
     [TestMethod]
@@ -103,6 +134,8 @@ public sealed class SqliteCatalogDatabaseTests
         {
             await ExecuteAsync(connection, """
                 DROP INDEX ix_snapshots_source_cache;
+                DROP INDEX ix_channels_snapshot_name;
+                DROP INDEX ix_channels_snapshot_category_name;
                 ALTER TABLE snapshots DROP COLUMN cache_key;
                 CREATE TABLE ix_snapshots_source_cache(value INTEGER) STRICT;
                 PRAGMA user_version = 1;

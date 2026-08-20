@@ -4,7 +4,7 @@ namespace IptvSuite.Infrastructure;
 
 internal sealed class SqliteCatalogDatabase
 {
-    internal const int SchemaVersion = 2;
+    internal const int SchemaVersion = 3;
 
     private static readonly string[] RequiredTables =
     [
@@ -58,6 +58,12 @@ internal sealed class SqliteCatalogDatabase
             return;
         }
 
+        if (version == 2)
+        {
+            await MigrateVersionTwoAsync(connection, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (version != SchemaVersion)
         {
             throw new InvalidDataException("Catalog schema version is unsupported.");
@@ -83,10 +89,42 @@ internal sealed class SqliteCatalogDatabase
             "CREATE INDEX ix_snapshots_source_cache ON snapshots(source_id, cache_key);",
             cancellationToken,
             transaction).ConfigureAwait(false);
+        await CreateCatalogBrowseIndexesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task MigrateVersionTwoAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await CreateCatalogBrowseIndexesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
+            .ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task CreateCatalogBrowseIndexesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(
+            connection,
+            "CREATE INDEX ix_channels_snapshot_name ON channels(snapshot_id, display_name COLLATE NOCASE, channel_id);",
+            cancellationToken,
+            transaction).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection,
+            "CREATE INDEX ix_channels_snapshot_category_name ON channels(snapshot_id, category_id, display_name COLLATE NOCASE, channel_id);",
+            cancellationToken,
+            transaction).ConfigureAwait(false);
     }
 
     private static async Task CreateSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
@@ -302,6 +340,8 @@ internal sealed class SqliteCatalogDatabase
         CREATE INDEX ix_snapshots_source_cache ON snapshots(source_id, cache_key);
         CREATE INDEX ix_categories_snapshot_sort ON categories(snapshot_id, sort_order, category_id);
         CREATE INDEX ix_channels_snapshot_category ON channels(snapshot_id, category_id, display_name, channel_id);
+        CREATE INDEX ix_channels_snapshot_name ON channels(snapshot_id, display_name COLLATE NOCASE, channel_id);
+        CREATE INDEX ix_channels_snapshot_category_name ON channels(snapshot_id, category_id, display_name COLLATE NOCASE, channel_id);
         CREATE INDEX ix_channels_snapshot_number ON channels(snapshot_id, channel_number, channel_id);
         CREATE INDEX ix_locators_snapshot_owner ON protected_locators(snapshot_id, owner_kind, owner_id);
         CREATE INDEX ix_sync_runs_source_started ON sync_runs(source_id, started_utc DESC);
