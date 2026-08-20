@@ -163,14 +163,20 @@ public static class HttpTransportLimits
 public sealed class HttpResponseLease : IDisposable
 {
     private byte[] _content;
+    private readonly Uri? _effectiveUri;
 
-    internal HttpResponseLease(byte[] content)
+    internal HttpResponseLease(byte[] content, Uri? effectiveUri = null)
     {
         ArgumentNullException.ThrowIfNull(content);
         _content = content;
+        _effectiveUri = effectiveUri;
     }
 
     public ReadOnlyMemory<byte> Content => _content;
+
+    internal Uri? EffectiveUri => _effectiveUri;
+
+    internal Stream OpenReadStream() => new MemoryStream(_content, writable: false);
 
     public static HttpResponseLease CopyFrom(ReadOnlySpan<byte> content)
     {

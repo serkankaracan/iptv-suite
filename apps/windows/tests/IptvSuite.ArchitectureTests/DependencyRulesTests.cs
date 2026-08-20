@@ -1558,6 +1558,13 @@ public sealed class DependencyRulesTests
             "src",
             "IptvSuite.Infrastructure",
             "RemoteM3uPlaylistParser.cs"));
+        string loaderSource = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "RemotePlaylistCatalogLoader.cs"));
 
         StringAssert.Contains(parserSource, "internal static class RemoteM3uPlaylistParser");
         StringAssert.Contains(parserSource, "MaximumEntries = 50_000");
@@ -1571,6 +1578,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(parserSource, "public override string ToString() => \"[REMOTE-M3U-ENTRY]\"");
         Assert.IsFalse(parserSource.Contains("public sealed class RemoteM3uEntry", StringComparison.Ordinal));
         Assert.IsFalse(parserSource.Contains("HttpClient", StringComparison.Ordinal));
+        StringAssert.Contains(loaderSource, "ReadLocatorAsync(");
+        StringAssert.Contains(loaderSource, "ProtectedValuePurpose.RemotePlaylistLocator");
+        StringAssert.Contains(loaderSource, "ProtectedRecordOwner.ForSourceConfiguration");
+        StringAssert.Contains(loaderSource, "ProtectedSourcePayloadDecoder.TryDecodeRemotePlaylist");
+        StringAssert.Contains(loaderSource, "responseLease.EffectiveUri ?? requestUri");
+        StringAssert.Contains(loaderSource, "responseLease.OpenReadStream()");
+        Assert.IsFalse(loaderSource.Contains("public sealed class RemotePlaylistCatalogLoader", StringComparison.Ordinal));
     }
 
     [TestMethod]
