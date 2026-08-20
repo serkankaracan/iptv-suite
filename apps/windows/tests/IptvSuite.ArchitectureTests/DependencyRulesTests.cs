@@ -1727,6 +1727,49 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M9CatalogQueryDecisionIsExplicitCleanBoundAndExcludedFromNormalWorkflow()
+    {
+        string wrapper = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsCatalogQueryDecision.ps1"));
+        string decisionTest = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.IntegrationTests",
+            "SqliteCatalogPerformanceDecisionTests.cs"));
+        string qualityGate = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsQualityGate.ps1"));
+        string workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-quality.yml"));
+
+        StringAssert.Contains(wrapper, "[switch]$AllowDecision");
+        StringAssert.Contains(wrapper, "status --porcelain=v1");
+        StringAssert.Contains(wrapper, "$finalHead -ne $initialHead");
+        StringAssert.Contains(wrapper, "IPTVSUITE_M9_QUERY_DECISION");
+        StringAssert.Contains(wrapper, "Measure50kIndexedCatalogQueryDecision");
+        StringAssert.Contains(decisionTest, "recordCount = 50_000");
+        StringAssert.Contains(decisionTest, "iterations = Iterations");
+        StringAssert.Contains(decisionTest, "indexedQueryBudgetMilliseconds = 100");
+        StringAssert.Contains(decisionTest, "cachedFirstVisibleBudgetMilliseconds = 500");
+        StringAssert.Contains(decisionTest, "Assert.IsLessThanOrEqualTo(100d");
+        StringAssert.Contains(decisionTest, "Assert.IsLessThanOrEqualTo(500d");
+        Assert.IsFalse(
+            qualityGate.Contains("Invoke-WindowsCatalogQueryDecision.ps1", StringComparison.Ordinal),
+            "The normal quality gate must not run the opt-in M9 query Decision.");
+        Assert.IsFalse(
+            workflow.Contains("Invoke-WindowsCatalogQueryDecision.ps1", StringComparison.Ordinal),
+            "The normal hosted workflow must not run the opt-in M9 query Decision.");
+    }
+
+    [TestMethod]
     public void M8CatalogCrashHarnessIsIsolatedAndKillsOnlyItsTrackedProcess()
     {
         string harness = File.ReadAllText(Path.Combine(

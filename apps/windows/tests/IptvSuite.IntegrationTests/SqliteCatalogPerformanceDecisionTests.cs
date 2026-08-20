@@ -14,6 +14,9 @@ public sealed class SqliteCatalogPerformanceDecisionTests
     private const string OptInVariable = "IPTVSUITE_M8_CATALOG_DECISION";
     private const string EvidenceRootVariable = "IPTVSUITE_M8_CATALOG_EVIDENCE_ROOT";
     private const string CommitVariable = "IPTVSUITE_M8_CATALOG_COMMIT";
+    private const string M9OptInVariable = "IPTVSUITE_M9_QUERY_DECISION";
+    private const string M9EvidenceRootVariable = "IPTVSUITE_M9_QUERY_EVIDENCE_ROOT";
+    private const string M9CommitVariable = "IPTVSUITE_M9_QUERY_COMMIT";
     private const int Iterations = 20;
     private static readonly int[] Scales = [5_000, 10_000, 20_000, 50_000];
     private static readonly JsonSerializerOptions EvidenceJsonOptions = new() { WriteIndented = true };
@@ -149,6 +152,113 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             JsonSerializer.Serialize(evidence, EvidenceJsonOptions),
             new UTF8Encoding(false));
         File.Move(temporaryEvidence, evidencePath);
+    }
+
+    [TestMethod]
+    [Timeout(5 * 60 * 1000)]
+    public async Task Measure50kIndexedCatalogQueryDecision()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable(M9OptInVariable), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Assert.IsTrue(OperatingSystem.IsWindows());
+        string evidenceRoot = RequireAbsoluteDirectory(Environment.GetEnvironmentVariable(M9EvidenceRootVariable));
+        string commit = Environment.GetEnvironmentVariable(M9CommitVariable) ?? string.Empty;
+        Assert.IsTrue(commit.Length == 40 && commit.All(char.IsAsciiHexDigit));
+        Directory.CreateDirectory(evidenceRoot);
+        string evidencePath = Path.Combine(evidenceRoot, "decision-summary.json");
+        if (File.Exists(evidencePath)) File.Delete(evidencePath);
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m9-query-decision");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        var store = new M4InMemorySecretStore();
+        ContentSource source = await CreateSourceAsync(store);
+        object loader = CreateLoader(store, new DecisionTransport(BuildPlaylist(50_000)), databasePath);
+        Assert.IsTrue(await InvokeLoaderAsync(loader, source));
+        Assert.AreEqual(50_000L, await ReadChannelCountAsync(databasePath));
+
+        var browser = new SqliteCatalogQuery(databasePath);
+        IReadOnlyList<CatalogCategoryItem> categories = await browser.ReadCategoriesAsync(source.Id);
+        Assert.HasCount(1, categories);
+        await browser.ReadChannelsAsync(source.Id, null, null, 0, 200);
+
+        var sourceSamples = new List<double>(Iterations);
+        var categorySamples = new List<double>(Iterations);
+        var firstPageSamples = new List<double>(Iterations);
+        var categoryPageSamples = new List<double>(Iterations);
+        var searchSamples = new List<double>(Iterations);
+        var reopenFirstVisibleSamples = new List<double>(Iterations);
+        for (int iteration = 0; iteration < Iterations; iteration++)
+        {
+            sourceSamples.Add(await MeasureAsync(() => browser.ReadSourcesAsync().AsTask()));
+            categorySamples.Add(await MeasureAsync(() => browser.ReadCategoriesAsync(source.Id).AsTask()));
+            firstPageSamples.Add(await MeasureAsync(async () =>
+            {
+                CatalogChannelPage page = await browser.ReadChannelsAsync(source.Id, null, null, 0, 200);
+                Assert.HasCount(200, page.Items);
+                Assert.AreEqual(50_000, page.TotalCount);
+            }));
+            categoryPageSamples.Add(await MeasureAsync(async () =>
+            {
+                CatalogChannelPage page = await browser.ReadChannelsAsync(source.Id, categories[0].CategoryId, null, 400, 200);
+                Assert.HasCount(200, page.Items);
+                Assert.AreEqual(50_000, page.TotalCount);
+            }));
+            searchSamples.Add(await MeasureAsync(async () =>
+            {
+                CatalogChannelPage page = await browser.ReadChannelsAsync(source.Id, null, "C49999", 0, 200);
+                Assert.HasCount(1, page.Items);
+                Assert.AreEqual("C49999", page.Items[0].Name);
+            }));
+            reopenFirstVisibleSamples.Add(await MeasureAsync(async () =>
+            {
+                var reopened = new SqliteCatalogQuery(databasePath);
+                CatalogChannelPage page = await reopened.ReadChannelsAsync(source.Id, null, null, 0, 200);
+                Assert.HasCount(200, page.Items);
+            }));
+        }
+
+        Assert.IsLessThanOrEqualTo(100d, Percentile(firstPageSamples.Order().ToArray(), 0.95));
+        Assert.IsLessThanOrEqualTo(100d, Percentile(categoryPageSamples.Order().ToArray(), 0.95));
+        Assert.IsLessThanOrEqualTo(100d, Percentile(searchSamples.Order().ToArray(), 0.95));
+        Assert.IsLessThanOrEqualTo(500d, Percentile(reopenFirstVisibleSamples.Order().ToArray(), 0.95));
+        Assert.IsFalse(await ContainsLocatorCanaryAsync(databasePath));
+
+        var evidence = new
+        {
+            schemaVersion = 1,
+            milestone = "M9",
+            evidenceKind = "indexed-catalog-query-decision",
+            configuration = "Release",
+            platform = "x64",
+            commitSha = commit.ToLowerInvariant(),
+            sdkVersion = Environment.Version.ToString(),
+            recordCount = 50_000,
+            iterations = Iterations,
+            pageSize = SqliteCatalogQuery.MaximumPageSize,
+            sourceQueryMilliseconds = Summary(sourceSamples),
+            categoryQueryMilliseconds = Summary(categorySamples),
+            firstPageQueryMilliseconds = Summary(firstPageSamples),
+            categoryPageQueryMilliseconds = Summary(categoryPageSamples),
+            exactSearchQueryMilliseconds = Summary(searchSamples),
+            reopenFirstVisibleMilliseconds = Summary(reopenFirstVisibleSamples),
+            indexedQueryBudgetMilliseconds = 100,
+            cachedFirstVisibleBudgetMilliseconds = 500,
+            plaintextLocatorCanaryScan = "passed",
+            note = "Local component measurement; WinUI layout, input response, frame timing and image fetch are excluded.",
+        };
+        string temporaryEvidence = evidencePath + ".tmp";
+        await File.WriteAllTextAsync(temporaryEvidence, JsonSerializer.Serialize(evidence, EvidenceJsonOptions), new UTF8Encoding(false));
+        File.Move(temporaryEvidence, evidencePath);
+    }
+
+    private static async Task<double> MeasureAsync(Func<Task> action)
+    {
+        long started = Stopwatch.GetTimestamp();
+        await action();
+        return Stopwatch.GetElapsedTime(started).TotalMilliseconds;
     }
 
     private static string BuildPlaylist(int count)
