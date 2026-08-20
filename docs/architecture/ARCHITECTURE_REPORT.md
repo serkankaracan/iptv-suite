@@ -280,6 +280,8 @@ bounded response bytes
 
 Complete download tek string'e çevrilmez. Unknown directives bounded warning olarak sayılır; raw payload loglanmaz. `.m3u8` uzantısı katalog kararı değildir; içerik sniffing HLS manifest ile channel catalog'u ayırır. Valid HLS master/media manifest catalog parser'a sokulmaz; source display name ile tek `LiveChannel` snapshot'ına route edilir ve manifest locator'ı protected kalır.
 
+M7'de `RemotePlaylistCatalogLoader`, protected locator lease'ini `IStreamingHttpTransport` üzerinden tüketir ve `RemoteM3uPlaylistParser.ParseToSinkAsync` ile accepted entry'leri mandatory internal `IRemoteM3uEntrySink` sınırına tek tek aktarır. Diagnostic parser overload'u yalnız test ölçümü için liste üretebilir; production loader bu overload'u çağıramaz ve architecture guard bunu kilitler. Sink'in durable SQLite/protected locator implementation'ı ile atomik snapshot activation M8'e bırakılmıştır.
+
 ### E.5 Persistence, cache ve images
 
 - SQLite normalized metadata, index ve snapshot state.

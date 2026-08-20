@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M2 quality infrastructure, M3 domain gate, M4 secure-storage foundation, M5 network/transport foundation ve M6 provider adapter `COMPLETED`; M7 remote M3U parser sıradaki milestone
+**Durum:** M2 quality infrastructure ile M3–M7 foundation/adapter/parser gate'leri `COMPLETED`; M8 persistence, cache ve indexing sıradaki milestone
 
 ## 1. İlke
 
@@ -117,6 +117,8 @@ Table-driven testler:
 URL normalization stream'i bozacak biçimde query ordering/value değiştirmemeli; display-safe endpoint ayrı, raw protected locator ayrı olmalıdır.
 
 ### 3.2 M3U incremental parser
+
+M7 implementation `COMPLETED, 2026-08-20`: production loader response body'yi string'e çevirmeden streaming parser'a verir ve accepted entry'leri mandatory internal sink'e tek tek aktarır. Deterministik malformed-byte corpus, exact 50k/limit+1, HLS routing, final-origin resolution, consumption-time byte cap ve mid-stream cancellation testleri bu sınırı kapsar. Local exact-SDK gate architecture 19 + unit 157 + integration 84 = **260/260 ×2** PASS'tir; ayrıntı [M7 completion evidence](M7_COMPLETION_EVIDENCE.md) belgesindedir.
 
 Golden corpus en az:
 
@@ -366,7 +368,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M4 | COMPLETED, 2026-08-20: tarihsel protected-store v1 hosted foundation/source-draft/package initialization 153/153 iki-run PASS; internal decoder 159/159 ve owner-v2 171/171 local snapshot'ları PASS; exact configuration-record deletion primitive'i dahil tarihsel local gate 183/183 x2 PASS; channel deletion primitive'i dahil tarihsel local snapshot 198/198 x2 PASS; DPAPI user-boundary harness'ı ve statik contract guard'ları dahil güncel local worktree gate 204/204 x2 PASS, summary `commitSha=null`; normal full gate gerçek-user executable'ını çalıştırmadı; commit `6da2fc92a223c23d07f7a902de7607e16b1cbb8a` run number `#15`te ilk owner-v2/same-version lifecycle, deletion primitive commit'i `3e806edd9a9482b87cccbf000ac8a81823562f6a` ise run number `#16`da 3/3 iş ve üç artifact ile hosted workflow/UI evidence VERIFIED; `#16` toplam süre `8m24s`; signed `0.0.1.0 → 0.0.2.0` test-family update lane'i commit `bfe5960d5bc911e21ba1e1e1675deb575400e531` için run number `#18`de 3/3 iş, üç artifact ve `9m16s` ile; hardened schema-v3 disposable reset + live-state uninstall/reinstall fresh-state lane'i commit `6f30e3fa92f329c1fa26333c591edb5148261cec` için run number `#20`de 3/3 iş, üç artifact ve `8m14s` ile; channel deletion primitive'i commit `0ef0da5793dc4fd1f4e83dbe38cd49d7a7ccb56f` için run number `#21`de 3/3 iş, üç artifact ve `9m25s` ile workflow/UI düzeyinde VERIFIED; artifact içerikleri ve tam digest bağları bağımsız doğrulanmadı; per-record 5k–50k ×20 Decision VERIFIED fakat 50k create p95 `151,447 s` ve allocation `668,007 MiB` nedeniyle bulk locator için REJECTED (`INFERENCE`); protected-catalog 5k–50k ×20 comparative `Decision` clean commit `7cd5bf739712a5cbdcf47634275a113faab8c48e` ve summary SHA-256 `4a219e802dcff959644bda42489f0ee5231be63df1eb37d034e2ed16ff0859de` ile VERIFIED, comparative gate CLOSED, immutable cross-file container production `NO-GO`; durable authoritative owner metadata/source-wide deletion-reconciliation M8, tuple/origin policy M5, production SQLite transaction/end-to-end/crash kanıtı M8, production PFN/repair/identity/Store kabulü M15 kapsamında açık |
 | M5 | HTTP fault/redirect/TLS/timeout/cancel suite |
 | M6 | Xtream Live contract variants |
-| M7 | M3U golden/fuzz/large/cancel suite |
+| M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
 | M8 | Migration/atomic refresh/deletion/fault tests |
 | M9 | 50k query/virtualization/UIA smoke |
 | M10 | Compatibility/license/MSIX hard gate |

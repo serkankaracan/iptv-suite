@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 implementation plan; M1–M6 completed, M7 sıradaki milestone
+**Durum:** Phase 0 implementation plan; M1–M7 completed, M8 sıradaki milestone
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -352,6 +352,8 @@ Geliştirici-owned fake Xtream source'tan alınan, secretsiz Live category/chann
 - Ayrıntılı sınır ve doğrulama [M6 completion evidence](../quality/M6_COMPLETION_EVIDENCE.md) belgesindedir.
 
 ## M7 — Remote M3U/M3U8 download ve incremental parser
+
+**Implementation status:** `COMPLETED, 2026-08-20`. Streaming response lease, strict UTF-8/BOM incremental parser, bounded metadata/locator policy, final-origin relative resolution, typed HLS routing, duplicate warning, 50k/cancellation ölçümü ve mandatory internal entry-sink handoff tamamlandı. Durable sink, protected row persistence ve active snapshot transaction'ı M8 kapsamındadır. Kanıt: [M7 completion evidence](../quality/M7_COMPLETION_EVIDENCE.md).
 
 ### Amaç
 
