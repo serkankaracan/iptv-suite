@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M2 quality infrastructure ile M3–M7 foundation/adapter/parser gate'leri `COMPLETED`; M8 persistence, cache ve indexing sıradaki milestone
+**Durum:** M2 quality infrastructure ile M3–M7 foundation/adapter/parser gate'leri `COMPLETED`; M8 persistence, cache ve indexing `IN PROGRESS`
 
 ## 1. İlke
 
@@ -369,7 +369,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M5 | HTTP fault/redirect/TLS/timeout/cancel suite |
 | M6 | Xtream Live contract variants |
 | M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
-| M8 | Migration/atomic refresh/deletion/fault tests |
+| M8 | `IN PROGRESS`: same-SQLite-transaction foundation ve clean 5k–50k ×20 Decision tamamlandı; 50k duration/working-set/cancellation hedef altında, allocation p95 `263,579 MiB` ile `≤150 MiB` hedef üstünde; migration/crash/fault acceptance açık. [Kanıt](M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) |
 | M9 | 50k query/virtualization/UIA smoke |
 | M10 | Compatibility/license/MSIX hard gate |
 | M11 | Fake+real player adapter contract |

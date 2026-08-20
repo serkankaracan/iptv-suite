@@ -402,6 +402,8 @@ Uzak sentetik M3U'dan incremental üretilen category/channel records, warning ö
 
 ## M8 — Local persistence, cache ve indexing
 
+**Implementation status:** `IN PROGRESS, 2026-08-21`. Versioned SQLite schema, same-transaction DPAPI-wrapped snapshot key + AES-GCM locator rows, streaming parser sink, atomik activation, query/cache, favorite reconciliation, prune, delete ve startup reconciliation foundation'ı uygulanmıştır. Clean 5k–50k ×20 Decision ölçümünde 50k import p95 `2.736 s`, working-set delta p95 `7,387 MiB` ve cancellation p95 `13,020 ms` hedeflerin altında; allocation p95 `263,579 MiB` ise `≤150 MiB` hedefinin üstündedir. Allocation ve kalan crash/migration acceptance kanıtları kapanmadan milestone tamamlanmaz. Kanıt: [M8 catalog persistence Decision evidence](../quality/M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md).
+
 ### Amaç
 
 Büyük katalogları atomik refresh, hızlı restart/query ve tam delete lifecycle ile device-local saklamak.
