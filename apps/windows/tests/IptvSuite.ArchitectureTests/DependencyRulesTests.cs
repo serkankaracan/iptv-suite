@@ -37,7 +37,7 @@ public sealed class DependencyRulesTests
             "apps/windows/src/IptvSuite.Infrastructure/IptvSuite.Infrastructure.csproj",
             ["IptvSuite.Application"],
             [],
-            ["System.Security.Cryptography.ProtectedData"]),
+            ["Microsoft.Data.Sqlite", "System.Security.Cryptography.ProtectedData"]),
         new(
             "IptvSuite.Windows",
             "apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj",
@@ -171,6 +171,7 @@ public sealed class DependencyRulesTests
             ["Microsoft.WindowsAppSDK"] = "2.3.1",
             ["Microsoft.Windows.SDK.BuildTools"] = "10.0.26100.8249",
             ["Microsoft.Extensions.TimeProvider.Testing"] = "10.8.0",
+            ["Microsoft.Data.Sqlite"] = "10.0.11",
             ["MSTest"] = "4.3.3",
             ["System.Security.Cryptography.ProtectedData"] = "10.0.10",
         };
