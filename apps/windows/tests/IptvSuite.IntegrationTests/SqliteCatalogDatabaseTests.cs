@@ -94,6 +94,38 @@ public sealed class SqliteCatalogDatabaseTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task MigrationFailureRollsBackSchemaAndVersionAtomically()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-migration-rollback");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeAsync(databasePath);
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_snapshots_source_cache;
+                ALTER TABLE snapshots DROP COLUMN cache_key;
+                CREATE TABLE ix_snapshots_source_cache(value INTEGER) STRICT;
+                PRAGMA user_version = 1;
+                """);
+        }
+
+        await Assert.ThrowsExactlyAsync<SqliteException>(async () => await InitializeAsync(databasePath));
+
+        await using SqliteConnection unchanged = await OpenAsync(databasePath);
+        Assert.AreEqual(1L, await ExecuteScalarInt64Async(unchanged, "PRAGMA user_version;"));
+        Assert.AreEqual(0L, await ExecuteScalarInt64Async(
+            unchanged,
+            "SELECT count(*) FROM pragma_table_info('snapshots') WHERE name = 'cache_key';"));
+        Assert.AreEqual(1L, await ExecuteScalarInt64Async(
+            unchanged,
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'ix_snapshots_source_cache';"));
+        Assert.AreEqual(0L, await ExecuteScalarInt64Async(
+            unchanged,
+            "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_snapshots_source_cache';"));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task UnsupportedOrIncompleteSchemaFailsClosed()
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-invalid");
