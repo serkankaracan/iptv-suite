@@ -71,6 +71,7 @@ public sealed class SqliteCatalogPerformanceDecisionTests
                 samples.Add(new Sample(
                     stopwatch.Elapsed.TotalMilliseconds,
                     allocatedAfter - allocatedBefore,
+                    ReadSinkWriteAllocatedBytes(loader),
                     Math.Max(0, workingSetAfter - workingSetBefore),
                     new FileInfo(databasePath).Length));
             }
@@ -81,6 +82,7 @@ public sealed class SqliteCatalogPerformanceDecisionTests
                 iterations = Iterations,
                 durationMilliseconds = Summary(samples.Select(sample => sample.DurationMilliseconds)),
                 allocatedBytes = Summary(samples.Select(sample => (double)sample.AllocatedBytes)),
+                sinkWriteAllocatedBytes = Summary(samples.Select(sample => (double)sample.SinkWriteAllocatedBytes)),
                 workingSetDeltaBytes = Summary(samples.Select(sample => (double)sample.WorkingSetDeltaBytes)),
                 databaseBytes = Summary(samples.Select(sample => (double)sample.DatabaseBytes)),
                 rawSamples = samples,
@@ -180,7 +182,7 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             sinkType,
             BindingFlags.Instance | BindingFlags.NonPublic,
             null,
-            [databasePath],
+            [databasePath, true],
             null)!;
         Type loaderType = assembly.GetType("IptvSuite.Infrastructure.RemotePlaylistCatalogLoader", true)!;
         return Activator.CreateInstance(
@@ -189,6 +191,15 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             null,
             [store, transport, sink],
             null)!;
+    }
+
+    private static long ReadSinkWriteAllocatedBytes(object loader)
+    {
+        object sink = loader.GetType().GetField("_sink", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(loader)!;
+        return (long)sink.GetType().GetProperty(
+            "MeasuredWriteAllocatedBytes",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(sink)!;
     }
 
     private static async Task<bool> InvokeLoaderAsync(
@@ -250,6 +261,7 @@ public sealed class SqliteCatalogPerformanceDecisionTests
     private sealed record Sample(
         double DurationMilliseconds,
         long AllocatedBytes,
+        long SinkWriteAllocatedBytes,
         long WorkingSetDeltaBytes,
         long DatabaseBytes);
 

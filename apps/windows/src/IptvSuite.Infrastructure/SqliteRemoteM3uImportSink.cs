@@ -15,6 +15,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
 {
     private readonly string _databasePath;
     private readonly SqliteCatalogDatabase _database;
+    private readonly bool _measureWriteAllocations;
     private readonly Dictionary<string, CategoryBinding> _categories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _stableKeyOccurrences = new(StringComparer.Ordinal);
     private readonly HashSet<Nonce96> _nonces = [];
@@ -39,12 +40,20 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private byte[]? _wrappedDek;
     private int _written;
     private int _warnings;
+    private long _measuredWriteAllocatedBytes;
 
-    internal SqliteRemoteM3uImportSink(string databasePath)
+    internal SqliteRemoteM3uImportSink(string databasePath) : this(databasePath, false)
+    {
+    }
+
+    internal SqliteRemoteM3uImportSink(string databasePath, bool measureWriteAllocations)
     {
         _database = new SqliteCatalogDatabase(databasePath);
         _databasePath = Path.GetFullPath(databasePath);
+        _measureWriteAllocations = measureWriteAllocations;
     }
+
+    internal long MeasuredWriteAllocatedBytes => _measuredWriteAllocatedBytes;
 
     public async ValueTask<DomainResult<bool>> BeginAsync(
         ContentSource source,
@@ -147,6 +156,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
             return ValueTask.FromResult(DomainResult.Failure<bool>(DomainErrorCode.DomainInvariantViolation));
         }
 
+        long allocatedBefore = _measureWriteAllocations ? GC.GetAllocatedBytesForCurrentThread() : 0;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -261,6 +271,13 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         catch (Exception exception) when (exception is SqliteException or CryptographicException or IOException)
         {
             return ValueTask.FromResult(DomainResult.Failure<bool>(DomainErrorCode.StorageUnavailable));
+        }
+        finally
+        {
+            if (_measureWriteAllocations)
+            {
+                _measuredWriteAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            }
         }
     }
 
