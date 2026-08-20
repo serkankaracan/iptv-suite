@@ -8,11 +8,16 @@ internal sealed class RemotePlaylistCatalogLoader
 {
     private readonly ISecretStore _secretStore;
     private readonly IStreamingHttpTransport _transport;
+    private readonly IRemoteM3uEntrySink _sink;
 
-    internal RemotePlaylistCatalogLoader(ISecretStore secretStore, IStreamingHttpTransport transport)
+    internal RemotePlaylistCatalogLoader(
+        ISecretStore secretStore,
+        IStreamingHttpTransport transport,
+        IRemoteM3uEntrySink sink)
     {
         _secretStore = secretStore ?? throw new ArgumentNullException(nameof(secretStore));
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
+        _sink = sink ?? throw new ArgumentNullException(nameof(sink));
     }
 
     internal async ValueTask<DomainResult<RemoteM3uParseResult>> LoadAsync(
@@ -78,9 +83,10 @@ internal sealed class RemotePlaylistCatalogLoader
             using HttpStreamingResponseLease responseLease = response.Response!;
             try
             {
-                DomainResult<RemoteM3uParseResult> parsed = await RemoteM3uPlaylistParser.ParseAsync(
+                DomainResult<RemoteM3uParseResult> parsed = await RemoteM3uPlaylistParser.ParseToSinkAsync(
                     responseLease.Content,
                     responseLease.EffectiveUri,
+                    _sink,
                     cancellationToken).ConfigureAwait(false);
                 return !parsed.IsSuccess &&
                        parsed.Error!.Code == DomainErrorCode.OperationCancelled &&

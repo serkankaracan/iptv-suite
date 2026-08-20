@@ -43,21 +43,31 @@ internal sealed class RemoteM3uParseResult
     internal RemoteM3uParseResult(
         PlaylistContentKind contentKind,
         IReadOnlyList<RemoteM3uEntry> entries,
+        int processedEntryCount,
         int skippedEntryCount,
         string? hlsLocator = null)
     {
         ContentKind = contentKind;
         Entries = entries;
+        ProcessedEntryCount = processedEntryCount;
         SkippedEntryCount = skippedEntryCount;
         HlsLocator = hlsLocator;
     }
 
     internal PlaylistContentKind ContentKind { get; }
     internal IReadOnlyList<RemoteM3uEntry> Entries { get; }
+    internal int ProcessedEntryCount { get; }
     internal int SkippedEntryCount { get; }
     internal string? HlsLocator { get; }
 
-    public override string ToString() => $"[REMOTE-M3U-RESULT:{Entries.Count}]";
+    public override string ToString() => $"[REMOTE-M3U-RESULT:{ProcessedEntryCount}]";
+}
+
+internal interface IRemoteM3uEntrySink
+{
+    ValueTask<DomainResult<bool>> WriteAsync(
+        RemoteM3uEntry entry,
+        CancellationToken cancellationToken);
 }
 
 internal static class RemoteM3uPlaylistParser
@@ -72,6 +82,25 @@ internal static class RemoteM3uPlaylistParser
         Stream content,
         Uri finalPlaylistUri,
         CancellationToken cancellationToken = default)
+        => await ParseCoreAsync(content, finalPlaylistUri, sink: null, cancellationToken)
+            .ConfigureAwait(false);
+
+    internal static async ValueTask<DomainResult<RemoteM3uParseResult>> ParseToSinkAsync(
+        Stream content,
+        Uri finalPlaylistUri,
+        IRemoteM3uEntrySink sink,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+        return await ParseCoreAsync(content, finalPlaylistUri, sink, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static async ValueTask<DomainResult<RemoteM3uParseResult>> ParseCoreAsync(
+        Stream content,
+        Uri finalPlaylistUri,
+        IRemoteM3uEntrySink? sink,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(finalPlaylistUri);
@@ -81,8 +110,9 @@ internal static class RemoteM3uPlaylistParser
             return Unsupported();
         }
 
-        var entries = new List<RemoteM3uEntry>();
+        List<RemoteM3uEntry>? entries = sink is null ? [] : null;
         var tvgIdentifiers = new HashSet<string>(StringComparer.Ordinal);
+        int processedEntryCount = 0;
         int skipped = 0;
         int totalCharacters = 0;
         PendingMetadata? pending = null;
@@ -140,7 +170,7 @@ internal static class RemoteM3uPlaylistParser
 
                 if (trimmed.StartsWith("#EXT-X-", StringComparison.Ordinal))
                 {
-                    if (entries.Count > 0)
+                    if (processedEntryCount > 0)
                     {
                         return Unsupported();
                     }
@@ -188,7 +218,7 @@ internal static class RemoteM3uPlaylistParser
                     continue;
                 }
 
-                if (entries.Count == MaximumEntries)
+                if (processedEntryCount == MaximumEntries)
                 {
                     return Unsupported();
                 }
@@ -203,7 +233,22 @@ internal static class RemoteM3uPlaylistParser
                     };
                 }
 
-                entries.Add(completed.ToEntry(locator));
+                RemoteM3uEntry entry = completed.ToEntry(locator);
+                if (sink is null)
+                {
+                    entries!.Add(entry);
+                }
+                else
+                {
+                    DomainResult<bool> write = await sink.WriteAsync(entry, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (!write.IsSuccess)
+                    {
+                        return DomainResult.Failure<RemoteM3uParseResult>(write.Error!);
+                    }
+                }
+
+                processedEntryCount++;
                 pending = null;
             }
         }
@@ -232,13 +277,15 @@ internal static class RemoteM3uPlaylistParser
                     ? PlaylistContentKind.HlsMasterManifest
                     : PlaylistContentKind.HlsMediaManifest,
                 [],
+                processedEntryCount: 0,
                 skippedEntryCount: 0,
                 finalPlaylistUri.AbsoluteUri));
         }
 
         return DomainResult.Success(new RemoteM3uParseResult(
             PlaylistContentKind.ExtendedM3uCatalog,
-            entries,
+            entries ?? [],
+            processedEntryCount,
             skipped));
     }
 

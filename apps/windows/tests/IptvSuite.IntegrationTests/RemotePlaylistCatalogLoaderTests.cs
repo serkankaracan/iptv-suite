@@ -65,11 +65,15 @@ public sealed class RemotePlaylistCatalogLoaderTests
     {
         Type type = typeof(BoundedHttpTransport).Assembly.GetType(
             "IptvSuite.Infrastructure.RemotePlaylistCatalogLoader", true)!;
+        Type sinkType = typeof(BoundedHttpTransport).Assembly.GetType(
+            "IptvSuite.Infrastructure.IRemoteM3uEntrySink", true)!;
+        object sink = DispatchProxy.Create(sinkType, typeof(RemoteM3uSinkProxy));
+        var sinkProxy = (RemoteM3uSinkProxy)sink;
         object loader = Activator.CreateInstance(
             type,
             BindingFlags.Instance | BindingFlags.NonPublic,
             binder: null,
-            args: [store, transport],
+            args: [store, transport, sink],
             culture: null)!;
         MethodInfo method = type.GetMethod("LoadAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
         object valueTask = method.Invoke(loader, [source, CancellationToken.None])!;
@@ -84,12 +88,9 @@ public sealed class RemotePlaylistCatalogLoaderTests
         }
 
         object parsed = result.GetType().GetProperty("Value")!.GetValue(result)!;
-        var entries = (System.Collections.IList)parsed.GetType().GetProperty(
-            "Entries", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(parsed)!;
-        object first = entries[0]!;
-        string locator = (string)first.GetType().GetProperty(
-            "Locator", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(first)!;
-        return new(true, null, entries.Count, locator);
+        int processedEntryCount = (int)parsed.GetType().GetProperty(
+            "ProcessedEntryCount", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(parsed)!;
+        return new(true, null, processedEntryCount, sinkProxy.FirstLocator);
     }
 
     private sealed record LoaderSnapshot(
@@ -97,6 +98,20 @@ public sealed class RemotePlaylistCatalogLoaderTests
         DomainErrorCode? ErrorCode,
         int EntryCount,
         string? FirstLocator);
+
+    public class RemoteM3uSinkProxy : DispatchProxy
+    {
+        internal string? FirstLocator { get; private set; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            Assert.AreEqual("WriteAsync", targetMethod!.Name);
+            object entry = args![0]!;
+            FirstLocator ??= (string)entry.GetType().GetProperty(
+                "Locator", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(entry)!;
+            return new ValueTask<DomainResult<bool>>(DomainResult.Success(true));
+        }
+    }
 
     private sealed class SingleResponseTransport : IStreamingHttpTransport
     {
