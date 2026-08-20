@@ -35,7 +35,7 @@ public sealed record XtreamCategoryInput(string ProviderIdentifier, string Name)
 
 [DebuggerDisplay("[XTREAM-STREAM-INPUT]")]
 public sealed record XtreamStreamInput(
-    string ProviderIdentifier,
+    ProviderItemKey ProviderPlaybackKey,
     string Name,
     string? CategoryIdentifier,
     int? Number,

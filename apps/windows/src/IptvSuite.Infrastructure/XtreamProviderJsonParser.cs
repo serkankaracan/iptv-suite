@@ -122,8 +122,15 @@ public static class XtreamProviderJsonParser
                 bool? isAdult = TryGetBoolean(element, "is_adult", out bool parsedAdult)
                     ? parsedAdult
                     : null;
+                DomainResult<ProviderItemKey> playbackKey = ProviderItemKey.Create(identifier);
+                if (!playbackKey.IsSuccess)
+                {
+                    skipped++;
+                    continue;
+                }
+
                 items.Add(new XtreamStreamInput(
-                    identifier!,
+                    playbackKey.Value!,
                     name!,
                     categoryIdentifier,
                     number,

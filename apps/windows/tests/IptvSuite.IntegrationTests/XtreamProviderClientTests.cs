@@ -70,6 +70,69 @@ public sealed class XtreamProviderClientTests
     }
 
     [TestMethod]
+    public async Task TransportFailuresMapToStableDomainErrors()
+    {
+        (HttpTransportFailure Transport, HttpTransportRetryability Retry, int Status, DomainErrorCode Expected)[] cases =
+        [
+            (HttpTransportFailure.AuthenticationRejected, HttpTransportRetryability.Never, 403,
+                DomainErrorCode.AuthenticationRejected),
+            (HttpTransportFailure.RequestRejected, HttpTransportRetryability.BoundedTransient, 429,
+                DomainErrorCode.PlaylistDownloadFailed),
+            (HttpTransportFailure.RequestRejected, HttpTransportRetryability.BoundedTransient, 500,
+                DomainErrorCode.PlaylistDownloadFailed),
+            (HttpTransportFailure.RequestTimedOut, HttpTransportRetryability.BoundedTransient, 0,
+                DomainErrorCode.RequestTimedOut),
+            (HttpTransportFailure.ResponseTooLarge, HttpTransportRetryability.Never, 200,
+                DomainErrorCode.PlaylistDownloadFailed),
+        ];
+
+        foreach ((HttpTransportFailure transportFailure, HttpTransportRetryability retry, int status,
+                     DomainErrorCode expected) in cases)
+        {
+            using var store = new CredentialMemoryStore();
+            ContentSource source = await CreateSourceAsync(store);
+            var transport = new ScriptedTransport(HttpTransportResult.Failed(
+                transportFailure,
+                retry,
+                status));
+            var client = new XtreamProviderClient(store, transport);
+
+            DomainResult<XtreamLiveCatalog> result = await client.LoadLiveCatalogAsync(source);
+
+            Assert.IsFalse(result.IsSuccess);
+            Assert.AreEqual(expected, result.Error!.Code);
+        }
+    }
+
+    [TestMethod]
+    public async Task EmptyCatalogIsValidAndMalformedPartialResponseStopsDeterministically()
+    {
+        using var emptyStore = new CredentialMemoryStore();
+        ContentSource emptySource = await CreateSourceAsync(emptyStore);
+        var emptyClient = new XtreamProviderClient(
+            emptyStore,
+            new ScriptedTransport("""{"user_info":{"auth":true}}""", "[]", "[]"));
+        DomainResult<XtreamLiveCatalog> empty = await emptyClient.LoadLiveCatalogAsync(emptySource);
+        Assert.IsTrue(empty.IsSuccess);
+        Assert.IsEmpty(empty.Value!.Categories.Items);
+        Assert.IsEmpty(empty.Value.Streams.Items);
+
+        using var malformedStore = new CredentialMemoryStore();
+        ContentSource malformedSource = await CreateSourceAsync(malformedStore);
+        var malformedTransport = new ScriptedTransport(
+            """{"user_info":{"auth":true}}""",
+            "{");
+        var malformedClient = new XtreamProviderClient(malformedStore, malformedTransport);
+        DomainResult<XtreamLiveCatalog> malformed =
+            await malformedClient.LoadLiveCatalogAsync(malformedSource);
+        Assert.IsFalse(malformed.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, malformed.Error!.Code);
+        CollectionAssert.AreEqual(
+            new[] { string.Empty, "get_live_categories" },
+            malformedTransport.Actions);
+    }
+
+    [TestMethod]
     public async Task CancellationIsPreservedAndCredentialLeaseIsZeroed()
     {
         using var store = new CredentialMemoryStore();

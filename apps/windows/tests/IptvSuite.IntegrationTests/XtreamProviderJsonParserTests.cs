@@ -98,7 +98,7 @@ public sealed class XtreamProviderJsonParserTests
 
         Assert.IsTrue(result.IsSuccess);
         XtreamStreamInput stream = result.Value!.Items.Single();
-        Assert.AreEqual("42", stream.ProviderIdentifier);
+        Assert.AreEqual("42", stream.ProviderPlaybackKey.Value);
         Assert.AreEqual("Synthetic Live", stream.Name);
         Assert.AreEqual("7", stream.CategoryIdentifier);
         Assert.AreEqual(12, stream.Number);
@@ -124,6 +124,61 @@ public sealed class XtreamProviderJsonParserTests
             Assert.IsFalse(result.IsSuccess);
             Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, result.Error!.Code);
         }
+    }
+
+    [TestMethod]
+    public void DeclaredItemBudgetsRejectExcessiveLiveArrays()
+    {
+        string categories = string.Concat(
+            "[",
+            string.Join(',', Enumerable.Repeat("{}", XtreamProviderJsonParser.MaximumCategoryCount + 1)),
+            "]");
+        string streams = string.Concat(
+            "[",
+            string.Join(',', Enumerable.Repeat("{}", XtreamProviderJsonParser.MaximumStreamCount + 1)),
+            "]");
+
+        DomainResult<XtreamProviderPage<XtreamCategoryInput>> categoryResult =
+            XtreamProviderJsonParser.ParseCategories(Utf8(categories));
+        DomainResult<XtreamProviderPage<XtreamStreamInput>> streamResult =
+            XtreamProviderJsonParser.ParseLiveStreams(Utf8(streams));
+
+        Assert.IsFalse(categoryResult.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, categoryResult.Error!.Code);
+        Assert.IsFalse(streamResult.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, streamResult.Error!.Code);
+    }
+
+    [TestMethod]
+    public void MaximumLiveStreamBudgetProducesAllTypedPlaybackKeys()
+    {
+        var document = new StringBuilder(XtreamProviderJsonParser.MaximumStreamCount * 48);
+        document.Append('[');
+        for (int index = 0; index < XtreamProviderJsonParser.MaximumStreamCount; index++)
+        {
+            if (index > 0)
+            {
+                document.Append(',');
+            }
+
+            document.Append("{\"stream_id\":")
+                .Append(index + 1)
+                .Append(",\"name\":\"Synthetic\"}");
+        }
+
+        document.Append(']');
+        byte[] input = Encoding.UTF8.GetBytes(document.ToString());
+        Assert.IsLessThan(HttpTransportLimits.MaximumAllowedResponseBytes, input.Length);
+
+        DomainResult<XtreamProviderPage<XtreamStreamInput>> result =
+            XtreamProviderJsonParser.ParseLiveStreams(input);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(XtreamProviderJsonParser.MaximumStreamCount, result.Value!.Items);
+        Assert.AreEqual("1", result.Value.Items[0].ProviderPlaybackKey.Value);
+        Assert.AreEqual(
+            XtreamProviderJsonParser.MaximumStreamCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            result.Value.Items[^1].ProviderPlaybackKey.Value);
     }
 
     private static ReadOnlyMemory<byte> Utf8(string value) => Encoding.UTF8.GetBytes(value);

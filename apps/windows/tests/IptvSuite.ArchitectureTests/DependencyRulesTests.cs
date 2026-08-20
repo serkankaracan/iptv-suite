@@ -1533,6 +1533,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(parserSource, "document.RootElement.ValueKind != JsonValueKind.Array");
         StringAssert.Contains(parserSource, "HashSet<string> identifiers = new(StringComparer.Ordinal)");
         StringAssert.Contains(contractSource, "sealed record XtreamStreamInput(");
+        StringAssert.Contains(contractSource, "ProviderItemKey ProviderPlaybackKey");
         Assert.IsFalse(contractSource.Contains("DirectSource", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(contractSource.Contains("StreamUrl", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(parserSource.Contains("get_vod", StringComparison.OrdinalIgnoreCase));
