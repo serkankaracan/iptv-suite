@@ -1612,6 +1612,50 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M8CatalogPerformanceDecisionIsExplicitCleanBoundAndExcludedFromNormalWorkflow()
+    {
+        string wrapper = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsCatalogPersistenceDecision.ps1"));
+        string decisionTest = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.IntegrationTests",
+            "SqliteCatalogPerformanceDecisionTests.cs"));
+        string qualityGate = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsQualityGate.ps1"));
+        string workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-quality.yml"));
+
+        StringAssert.Contains(wrapper, "[switch]$AllowDecision");
+        StringAssert.Contains(wrapper, "if (-not $AllowDecision)");
+        StringAssert.Contains(wrapper, "status --porcelain=v1");
+        StringAssert.Contains(wrapper, "$finalHead -ne $initialHead");
+        StringAssert.Contains(wrapper, "$finalStatus.Count -ne 0");
+        StringAssert.Contains(wrapper, "IPTVSUITE_M8_CATALOG_DECISION");
+        StringAssert.Contains(wrapper, "SqliteCatalogPerformanceDecisionTests.MeasureParserToProtectedSqliteDecisionMatrix");
+        StringAssert.Contains(decisionTest, "private const int Iterations = 20;");
+        StringAssert.Contains(decisionTest, "[5_000, 10_000, 20_000, 50_000]");
+        StringAssert.Contains(decisionTest, "Assert.IsFalse(File.Exists(databasePath + \"-wal\"))");
+        StringAssert.Contains(decisionTest, "Assert.IsFalse(File.Exists(databasePath + \"-shm\"))");
+        StringAssert.Contains(decisionTest, "ContainsLocatorCanaryAsync");
+        Assert.IsFalse(
+            qualityGate.Contains("Invoke-WindowsCatalogPersistenceDecision.ps1", StringComparison.Ordinal),
+            "The normal quality gate must not run the opt-in M8 performance Decision.");
+        Assert.IsFalse(
+            workflow.Contains("Invoke-WindowsCatalogPersistenceDecision.ps1", StringComparison.Ordinal),
+            "The normal hosted workflow must not run the opt-in M8 performance Decision.");
+    }
+
+    [TestMethod]
     public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
     {
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
