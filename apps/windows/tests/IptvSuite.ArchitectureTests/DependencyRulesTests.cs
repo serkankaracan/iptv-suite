@@ -1504,6 +1504,36 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M6XtreamParserIsLiveOnlyBoundedAndDoesNotRetainDirectLocators()
+    {
+        string parserSource = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "XtreamProviderJsonParser.cs"));
+        string contractSource = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "XtreamProviderContracts.cs"));
+
+        StringAssert.Contains(parserSource, "MaximumCategoryCount = 10_000");
+        StringAssert.Contains(parserSource, "MaximumStreamCount = 50_000");
+        StringAssert.Contains(parserSource, "document.RootElement.ValueKind != JsonValueKind.Array");
+        StringAssert.Contains(parserSource, "HashSet<string> identifiers = new(StringComparer.Ordinal)");
+        StringAssert.Contains(contractSource, "sealed record XtreamStreamInput(");
+        Assert.IsFalse(contractSource.Contains("DirectSource", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(contractSource.Contains("StreamUrl", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(parserSource.Contains("get_vod", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(parserSource.Contains("get_series", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(parserSource.Contains("get_epg", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
     public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
     {
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
