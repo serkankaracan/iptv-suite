@@ -9,6 +9,7 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
 {
     public const int MaximumPageSize = 200;
     public const int MaximumCategoryCount = 2_000;
+    public const int MaximumSourceCount = 100;
     public const int MaximumSearchLength = 100;
     private readonly string _databasePath;
     private readonly SqliteCatalogDatabase _database;
@@ -17,6 +18,47 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
     {
         _database = new SqliteCatalogDatabase(databasePath);
         _databasePath = Path.GetFullPath(databasePath);
+    }
+
+    public async ValueTask<IReadOnlyList<CatalogSourceItem>> ReadSourcesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _database.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await using SqliteConnection connection = await OpenReadConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT source_id, display_name
+            FROM sources
+            WHERE active_snapshot_id IS NOT NULL
+            ORDER BY display_name COLLATE NOCASE, source_id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$limit", MaximumSourceCount + 1);
+        var rows = new List<CatalogSourceItem>();
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (rows.Count == MaximumSourceCount)
+            {
+                throw new InvalidDataException("Catalog source count exceeds the supported limit.");
+            }
+
+            if (!Guid.TryParseExact(reader.GetString(0), "N", out Guid sourceGuid))
+            {
+                throw new InvalidDataException("Catalog identifier is invalid.");
+            }
+
+            DomainResult<SourceId> sourceId = SourceId.Create(sourceGuid);
+            if (!sourceId.IsSuccess)
+            {
+                throw new InvalidDataException("Catalog identifier is invalid.");
+            }
+
+            rows.Add(new(sourceId.Value, reader.GetString(1)));
+        }
+
+        return rows;
     }
 
     public async ValueTask<IReadOnlyList<CatalogCategoryItem>> ReadCategoriesAsync(

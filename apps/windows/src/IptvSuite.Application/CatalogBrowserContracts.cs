@@ -4,6 +4,8 @@ namespace IptvSuite.Application;
 
 public sealed record CatalogCategoryItem(CategoryId CategoryId, string Name, int SortOrder);
 
+public sealed record CatalogSourceItem(SourceId SourceId, string Name);
+
 public sealed record CatalogChannelItem(
     ChannelId ChannelId,
     CategoryId CategoryId,
@@ -19,6 +21,9 @@ public sealed record CatalogChannelPage(
 
 public interface ICatalogBrowser
 {
+    ValueTask<IReadOnlyList<CatalogSourceItem>> ReadSourcesAsync(
+        CancellationToken cancellationToken = default);
+
     ValueTask<IReadOnlyList<CatalogCategoryItem>> ReadCategoriesAsync(
         SourceId sourceId,
         CancellationToken cancellationToken = default);

@@ -54,6 +54,10 @@ public sealed class SqliteCatalogSnapshotWriterTests
         CollectionAssert.AreEqual(firstPage, reopenedPage);
 
         var browser = new SqliteCatalogQuery(databasePath);
+        IReadOnlyList<CatalogSourceItem> sources = await browser.ReadSourcesAsync();
+        Assert.HasCount(1, sources);
+        Assert.AreEqual(test.Source.Id, sources[0].SourceId);
+        Assert.AreEqual(test.Source.DisplayName, sources[0].Name);
         IReadOnlyList<CatalogCategoryItem> categories = await browser.ReadCategoriesAsync(test.Source.Id);
         Assert.HasCount(1, categories);
         Assert.AreEqual(test.CategoryId, categories[0].CategoryId);

@@ -372,7 +372,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M6 | Xtream Live contract variants |
 | M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
 | M8 | `COMPLETED`: same-SQLite-transaction persistence, clean 5k–50k ×20 Decision ve gerçek ayrı-process kill/recovery tamamlandı; 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB`, cancellation p95 `12,390 ms`; migration/fault/crash, canary, source lifecycle ve query/cache acceptance PASS. [Kanıt](M8_COMPLETION_EVIDENCE.md) |
-| M9 | 50k query/virtualization/UIA smoke |
+| M9 | IN PROGRESS: bounded source/category/search/page query, 250 ms debounce, stale-result suppression ve virtualized WinUI browse surface local `286/286 × 2` PASS; 50k query/frame/realized-container, logo cache ve packaged UIA/keyboard kanıtı açık |
 | M10 | Compatibility/license/MSIX hard gate |
 | M11 | Fake+real player adapter contract |
 | M12 | Lifecycle/rapid-switch/UI automation |

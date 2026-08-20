@@ -518,7 +518,8 @@ public sealed class DependencyRulesTests
             "        ISecretStore secretStore = secretStoreInitialization.Store ??\n" +
             "            throw new InvalidOperationException(\"Protected storage is unavailable.\");\n" +
             "        _secretStore = secretStore;\n" +
-            "        _window = new MainWindow();";
+            "        _catalogBrowser = WindowsCatalogBrowserFactory.Create();\n" +
+            "        _window = new MainWindow(_catalogBrowser);";
         const string neutralProtectedStorePath =
             "Path.Combine(\n" +
             "                localCachePath,\n" +
@@ -552,6 +553,35 @@ public sealed class DependencyRulesTests
                 "\"[^\"]*iptv[^\"]*\"u8",
                 RegexOptions.IgnoreCase),
             "The unverified codename must not become part of the durable protected-record format.");
+    }
+
+    [TestMethod]
+    public void M9CatalogUiKeepsQueriesBoundedVirtualizedAndAccessible()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
+        string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+        string factory = File.ReadAllText(Path.Combine(windowsRoot, "WindowsCatalogBrowserFactory.cs"));
+
+        StringAssert.Contains(page, "<ItemsStackPanel CacheLength=\"1\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSourceSelector\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogCategorySelector\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSearchBox\"");
+        StringAssert.Contains(page, "AutomationProperties.LiveSetting=\"Polite\"");
+        StringAssert.Contains(codeBehind, "private const int PageSize = 200;");
+        StringAssert.Contains(codeBehind, "await BrowseAsync(debounce: true)");
+        StringAssert.Contains(codeBehind, "new CatalogBrowseCoordinator(catalogBrowser)");
+        StringAssert.Contains(factory, "ApplicationData.GetDefault().LocalCachePath");
+        StringAssert.Contains(factory, "new SqliteCatalogQuery(Path.Combine(catalogRoot, \"catalog.db\"))");
+        Assert.IsFalse(
+            page.Contains("MediaPlayer", StringComparison.Ordinal) ||
+            codeBehind.Contains("IPlayer", StringComparison.Ordinal),
+            "M9 catalog browsing must not pull M10 playback into the presentation graph.");
     }
 
     [TestMethod]

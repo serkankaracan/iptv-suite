@@ -454,6 +454,8 @@ Long transaction/index veya protected-locator yazımının import bütçesini a�
 
 Player eklemeden 50.000 kanalı hızlı, klavye/erişilebilirlik uyumlu biçimde gezdirmek.
 
+**Implementation status:** IN PROGRESS — bounded `ICatalogBrowser` source/category/search/page port'u, real SQLite query adapter'ı, 200 kayıtlık page sınırı, 250 ms debounce ve generation-bound stale-result suppression uygulanmıştır. WinUI composition root device-local `Catalog\v2\catalog.db` query adapter'ını kurar; source/category/search/paging, virtualized `ItemsStackPanel`, loading/empty/failure durumu ve UIA adları olan player'sız katalog ekranı derlenmektedir. Exact-SDK local gate architecture 23 + unit 160 + integration 103 = `286/286 × 2`, Debug/Release 0 warning/error, fixture/sentinel/canary PASS'tir. Bu checkpoint indexed-query/frame/realized-container ölçümü, logo fetch/cache ve packaged UIA/keyboard acceptance'ını henüz kanıtlamaz; M9 tamamlanmamıştır.
+
 ### Kapsam
 
 - Source ve category seçimi; indexed windowed channel query.
