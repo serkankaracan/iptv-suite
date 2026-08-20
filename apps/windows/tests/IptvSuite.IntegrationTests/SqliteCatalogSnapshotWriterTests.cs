@@ -176,6 +176,55 @@ public sealed class SqliteCatalogSnapshotWriterTests
         }
     }
 
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task StartupReconciliationRemovesOnlyInactiveImportingSnapshots()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-reconcile");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(databasePath);
+        TestBatch active = await CreateBatchAsync(itemSuffix: "active");
+        await ActivateAsync(databasePath, active.Batch);
+        Guid abandonedSnapshot = Guid.NewGuid();
+        Guid abandonedGeneration = Guid.NewGuid();
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await ExecuteAsync(
+                connection,
+                """
+                INSERT INTO snapshots(snapshot_id, source_id, retrieved_utc, content_hash,
+                    parser_version, normalization_version, schema_version, item_count,
+                    warning_count, state)
+                VALUES ($snapshot, $source, $retrieved, zeroblob(32), 1, 1, 2, 0, 0, 0);
+                INSERT INTO snapshot_keys(snapshot_id, key_generation_id, wrapped_dek, key_state)
+                VALUES ($snapshot, $generation, randomblob(64), 0);
+                """,
+                ("$snapshot", Id(abandonedSnapshot)),
+                ("$source", Id(active.Source.Id.Value)),
+                ("$retrieved", new DateTimeOffset(2026, 8, 20, 15, 0, 0, TimeSpan.Zero).ToString("O")),
+                ("$generation", Id(abandonedGeneration)));
+        }
+
+        await ReconcileAsync(databasePath);
+
+        await using SqliteConnection reopened = await OpenAsync(databasePath);
+        Assert.AreEqual(1L, await ScalarInt64Async(reopened, "SELECT count(*) FROM snapshots;"));
+        Assert.AreEqual(0L, await ScalarInt64Async(
+            reopened,
+            "SELECT count(*) FROM snapshots WHERE snapshot_id = $snapshot;",
+            ("$snapshot", Id(abandonedSnapshot))));
+        Assert.AreEqual(Id(active.Snapshot.Id.Value), await ScalarStringAsync(
+            reopened,
+            "SELECT active_snapshot_id FROM sources WHERE source_id = $source;",
+            ("$source", Id(active.Source.Id.Value))));
+        Assert.AreEqual(1L, await ScalarInt64Async(reopened, "SELECT count(*) FROM snapshot_keys;"));
+    }
+
     private static async Task<TestBatch> CreateBatchAsync(ContentSource? existingSource = null, string itemSuffix = "item")
     {
         var store = new M4InMemorySecretStore();
@@ -440,6 +489,17 @@ public sealed class SqliteCatalogSnapshotWriterTests
             deletion.GetType().GetMethod("PruneRetiredSnapshotsAsync", BindingFlags.Instance | BindingFlags.NonPublic)!,
             deletion,
             [sourceId, CancellationToken.None]);
+    }
+
+    private static async Task ReconcileAsync(string databasePath)
+    {
+        object deletion = CreateInfrastructureInstance(
+            "IptvSuite.Infrastructure.SqliteCatalogSourceDeletion",
+            databasePath);
+        await InvokeValueTaskAsync(
+            deletion.GetType().GetMethod("ReconcileAsync", BindingFlags.Instance | BindingFlags.NonPublic)!,
+            deletion,
+            [CancellationToken.None]);
     }
 
     private static async Task<string[]> ReadChannelNamesAsync(

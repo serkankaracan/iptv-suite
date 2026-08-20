@@ -9,6 +9,9 @@ namespace IptvSuite.IntegrationTests;
 [TestClass]
 public sealed class RemotePlaylistCatalogLoaderTests
 {
+    private static readonly string[] OldChannelPage = ["Old channel"];
+    private static readonly string[] NewChannelPage = ["New channel"];
+
     [TestMethod]
     [Timeout(30_000)]
     public async Task StreamingLoaderCommitsDirectlyIntoEncryptedSqliteCatalog()
@@ -140,6 +143,76 @@ public sealed class RemotePlaylistCatalogLoaderTests
     }
 
     [TestMethod]
+    [Timeout(30_000)]
+    public async Task ConcurrentReaderSeesOldSnapshotUntilStreamingRefreshCommits()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-streaming-concurrent-read");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        var store = new M4InMemorySecretStore();
+        ContentSource source = await CreateSourceAsync(store);
+        DomainResultSnapshot initial = await InvokeSqliteLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                "#EXTM3U\n#EXTINF:-1 tvg-id=\"old\",Old channel\nhttps://fixtures.invalid/old.m3u8\n"),
+            source,
+            databasePath);
+        Assert.IsTrue(initial.IsSuccess);
+
+        Assembly assembly = typeof(BoundedHttpTransport).Assembly;
+        Type sinkType = assembly.GetType("IptvSuite.Infrastructure.SqliteRemoteM3uImportSink", true)!;
+        object sink = Activator.CreateInstance(
+            sinkType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [databasePath],
+            null)!;
+        await using IAsyncDisposable sinkScope = (IAsyncDisposable)sink;
+        await InvokeDomainValueTaskAsync(sinkType.GetMethod("BeginAsync")!, sink, [source, CancellationToken.None]);
+        Type entryType = assembly.GetType("IptvSuite.Infrastructure.RemoteM3uEntry", true)!;
+        object entry = Activator.CreateInstance(
+            entryType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [
+                "https://fixtures.invalid/new.m3u8",
+                "New channel",
+                "new",
+                null,
+                null,
+                "News",
+                null,
+                ChannelNormalizationWarnings.None,
+            ],
+            null)!;
+        await InvokeDomainValueTaskAsync(sinkType.GetMethod("WriteAsync")!, sink, [entry, CancellationToken.None]);
+
+        CollectionAssert.AreEqual(OldChannelPage, await ReadActiveChannelNamesAsync(databasePath));
+
+        Type parseResultType = assembly.GetType("IptvSuite.Infrastructure.RemoteM3uParseResult", true)!;
+        Type entryListType = typeof(List<>).MakeGenericType(entryType);
+        object entries = Activator.CreateInstance(entryListType)!;
+        entryListType.GetMethod("Add")!.Invoke(entries, [entry]);
+        object parseResult = Activator.CreateInstance(
+            parseResultType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [PlaylistContentKind.ExtendedM3uCatalog, entries, 1, 0, null],
+            null)!;
+        await InvokeDomainValueTaskAsync(
+            sinkType.GetMethod("CompleteAsync")!,
+            sink,
+            [parseResult, CancellationToken.None]);
+
+        CollectionAssert.AreEqual(NewChannelPage, await ReadActiveChannelNamesAsync(databasePath));
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+    }
+
+    [TestMethod]
     public async Task AuthoritativeProtectedLocatorDownloadsAndParsesCatalog()
     {
         var store = new M4InMemorySecretStore();
@@ -251,6 +324,45 @@ public sealed class RemotePlaylistCatalogLoaderTests
         object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
         bool success = (bool)result.GetType().GetProperty("IsSuccess")!.GetValue(result)!;
         return new(success);
+    }
+
+    private static async Task InvokeDomainValueTaskAsync(
+        MethodInfo method,
+        object instance,
+        object?[] arguments)
+    {
+        object valueTask = method.Invoke(instance, arguments)!;
+        Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
+        await task;
+        object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
+        Assert.IsTrue((bool)result.GetType().GetProperty("IsSuccess")!.GetValue(result)!);
+    }
+
+    private static async Task<string[]> ReadActiveChannelNamesAsync(string databasePath)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+            new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
+                Pooling = false,
+            }.ToString());
+        await connection.OpenAsync();
+        await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.display_name
+            FROM channels c
+            JOIN sources s ON s.active_snapshot_id = c.snapshot_id
+            ORDER BY c.display_name;
+            """;
+        var names = new List<string>();
+        await using Microsoft.Data.Sqlite.SqliteDataReader reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names.ToArray();
     }
 
     private sealed record LoaderSnapshot(
