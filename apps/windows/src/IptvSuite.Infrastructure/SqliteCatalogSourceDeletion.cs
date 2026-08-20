@@ -83,6 +83,36 @@ internal sealed class SqliteCatalogSourceDeletion
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    internal async ValueTask PruneRetiredSnapshotsAsync(
+        SourceId sourceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (sourceId.IsEmpty)
+        {
+            throw new ArgumentException("A non-empty source identifier is required.", nameof(sourceId));
+        }
+
+        await _database.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = _databasePath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false,
+        }.ToString());
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            PRAGMA foreign_keys = ON;
+            DELETE FROM snapshots
+            WHERE source_id = $source
+              AND snapshot_id <> (
+                  SELECT active_snapshot_id FROM sources WHERE source_id = $source
+              );
+            """;
+        command.Parameters.AddWithValue("$source", sourceId.Value.ToString("N"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     private static async Task ExecuteAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,

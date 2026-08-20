@@ -29,6 +29,9 @@ public sealed class SqliteCatalogSnapshotWriterTests
         TestBatch test = await CreateBatchAsync(itemSuffix: "one");
 
         await ActivateAsync(databasePath, test.Batch);
+        await SetFavoriteAsync(databasePath, test.Source.Id, test.StableKey, true);
+        await SetFavoriteAsync(databasePath, test.Source.Id, test.StableKey, true);
+        Assert.IsTrue(await IsFavoriteAsync(databasePath, test.Source.Id, test.StableKey));
 
         string[] firstPage = await ReadChannelNamesAsync(databasePath, test.Source.Id, 0, 200);
         string[] reopenedPage = await ReadChannelNamesAsync(databasePath, test.Source.Id, 0, 200);
@@ -117,6 +120,10 @@ public sealed class SqliteCatalogSnapshotWriterTests
         Assert.AreEqual(1L, await ScalarInt64Async(
             reopened,
             "SELECT count(*) FROM snapshot_keys WHERE key_state = 1 AND wrapped_dek IS NOT NULL;"));
+        await reopened.CloseAsync();
+        await PruneSnapshotsAsync(databasePath, initial.Source.Id);
+        await using SqliteConnection pruned = await OpenAsync(databasePath);
+        Assert.AreEqual(1L, await ScalarInt64Async(pruned, "SELECT count(*) FROM snapshots;"));
     }
 
     [TestMethod]
@@ -246,7 +253,7 @@ public sealed class SqliteCatalogSnapshotWriterTests
         object batch = Activator.CreateInstance(
             batchType,
             [source, snapshot.Value!, new[] { category.Value! }, new[] { channel.Value! }, locators])!;
-        return new(batch, source, snapshot.Value!, channelId, streamCreated.Reference!, stream, logo);
+        return new(batch, source, snapshot.Value!, channelId, stableKey.Value.Value, streamCreated.Reference!, stream, logo);
     }
 
     private static async Task<ContentSource> CreateSourceAsync(M4InMemorySecretStore store)
@@ -424,6 +431,17 @@ public sealed class SqliteCatalogSnapshotWriterTests
             [source, CancellationToken.None]);
     }
 
+    private static async Task PruneSnapshotsAsync(string databasePath, SourceId sourceId)
+    {
+        object deletion = CreateInfrastructureInstance(
+            "IptvSuite.Infrastructure.SqliteCatalogSourceDeletion",
+            databasePath);
+        await InvokeValueTaskAsync(
+            deletion.GetType().GetMethod("PruneRetiredSnapshotsAsync", BindingFlags.Instance | BindingFlags.NonPublic)!,
+            deletion,
+            [sourceId, CancellationToken.None]);
+    }
+
     private static async Task<string[]> ReadChannelNamesAsync(
         string databasePath,
         SourceId sourceId,
@@ -448,11 +466,56 @@ public sealed class SqliteCatalogSnapshotWriterTests
             .ToArray();
     }
 
+    private static async Task SetFavoriteAsync(
+        string databasePath,
+        SourceId sourceId,
+        string stableKey,
+        bool value)
+    {
+        object favorites = CreateInfrastructureInstance("IptvSuite.Infrastructure.SqliteCatalogFavorites", databasePath);
+        MethodInfo method = favorites.GetType().GetMethod("SetAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        await InvokeValueTaskAsync(method, favorites, [
+            sourceId,
+            ChannelStableKeyBuilder.AlgorithmVersion,
+            stableKey,
+            value,
+            new DateTimeOffset(2026, 8, 20, 14, 0, 0, TimeSpan.Zero),
+            CancellationToken.None,
+        ]);
+    }
+
+    private static async Task<bool> IsFavoriteAsync(string databasePath, SourceId sourceId, string stableKey)
+    {
+        object favorites = CreateInfrastructureInstance("IptvSuite.Infrastructure.SqliteCatalogFavorites", databasePath);
+        MethodInfo method = favorites.GetType().GetMethod("IsFavoriteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        object valueTask = method.Invoke(favorites, [
+            sourceId,
+            ChannelStableKeyBuilder.AlgorithmVersion,
+            stableKey,
+            CancellationToken.None,
+        ])!;
+        Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
+        await task;
+        return (bool)task.GetType().GetProperty("Result")!.GetValue(task)!;
+    }
+
+    private static object CreateInfrastructureInstance(string typeName, string databasePath)
+    {
+        Type type = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly.GetType(typeName, true)!;
+        return Activator.CreateInstance(
+            type,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [databasePath],
+            null)!;
+    }
+
     private sealed record TestBatch(
         object Batch,
         ContentSource Source,
         PlaylistSnapshot Snapshot,
         ChannelId ChannelId,
+        string StableKey,
         ProtectedLocatorReference StreamReference,
         byte[] StreamPlaintext,
         byte[] LogoPlaintext);
