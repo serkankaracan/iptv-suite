@@ -15,6 +15,21 @@ public sealed class SqliteCatalogSnapshotWriterTests
     private static readonly string[] ExpectedSingleChannelPage = ["Channel one"];
 
     [TestMethod]
+    public async Task CatalogBrowserRejectsUnboundedOrControlBearingRequestsBeforeDatabaseAccess()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m9-query-bounds");
+        var browser = new SqliteCatalogQuery(Path.Combine(temporary.FullPath, "catalog.db"));
+        SourceId sourceId = SourceId.Generate();
+
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(async () =>
+            await browser.ReadChannelsAsync(sourceId, null, null, 0, 201));
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(async () =>
+            await browser.ReadChannelsAsync(sourceId, null, new string('a', 101), 0, 50));
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(async () =>
+            await browser.ReadChannelsAsync(sourceId, null, "bad\nsearch", 0, 50));
+    }
+
+    [TestMethod]
     [Timeout(30_000)]
     public async Task CompleteSnapshotActivatesAtomicallyWithEncryptedLocatorRows()
     {
@@ -37,6 +52,38 @@ public sealed class SqliteCatalogSnapshotWriterTests
         string[] reopenedPage = await ReadChannelNamesAsync(databasePath, test.Source.Id, 0, 200);
         CollectionAssert.AreEqual(ExpectedSingleChannelPage, firstPage);
         CollectionAssert.AreEqual(firstPage, reopenedPage);
+
+        var browser = new SqliteCatalogQuery(databasePath);
+        IReadOnlyList<CatalogCategoryItem> categories = await browser.ReadCategoriesAsync(test.Source.Id);
+        Assert.HasCount(1, categories);
+        Assert.AreEqual(test.CategoryId, categories[0].CategoryId);
+        Assert.AreEqual("Group one", categories[0].Name);
+        CatalogChannelPage matchingPage = await browser.ReadChannelsAsync(
+            test.Source.Id,
+            test.CategoryId,
+            "  channel ONE  ",
+            0,
+            50);
+        Assert.AreEqual(0, matchingPage.Offset);
+        Assert.AreEqual(1, matchingPage.TotalCount);
+        Assert.HasCount(1, matchingPage.Items);
+        Assert.AreEqual(test.ChannelId, matchingPage.Items[0].ChannelId);
+        CatalogChannelPage emptyPage = await browser.ReadChannelsAsync(
+            test.Source.Id,
+            test.CategoryId,
+            "missing",
+            0,
+            50);
+        Assert.AreEqual(0, emptyPage.TotalCount);
+        Assert.IsEmpty(emptyPage.Items);
+        CatalogChannelPage beyondEnd = await browser.ReadChannelsAsync(
+            test.Source.Id,
+            null,
+            null,
+            200,
+            50);
+        Assert.AreEqual(1, beyondEnd.TotalCount);
+        Assert.IsEmpty(beyondEnd.Items);
 
         (SecretLease? lease, string failure) = await ReadLocatorAsync(
             databasePath,
@@ -302,7 +349,16 @@ public sealed class SqliteCatalogSnapshotWriterTests
         object batch = Activator.CreateInstance(
             batchType,
             [source, snapshot.Value!, new[] { category.Value! }, new[] { channel.Value! }, locators])!;
-        return new(batch, source, snapshot.Value!, channelId, stableKey.Value.Value, streamCreated.Reference!, stream, logo);
+        return new(
+            batch,
+            source,
+            snapshot.Value!,
+            categoryId,
+            channelId,
+            stableKey.Value.Value,
+            streamCreated.Reference!,
+            stream,
+            logo);
     }
 
     private static async Task<ContentSource> CreateSourceAsync(M4InMemorySecretStore store)
@@ -512,7 +568,7 @@ public sealed class SqliteCatalogSnapshotWriterTests
         Type queryType = assembly.GetType("IptvSuite.Infrastructure.SqliteCatalogQuery", true)!;
         object query = Activator.CreateInstance(
             queryType,
-            BindingFlags.Instance | BindingFlags.NonPublic,
+            BindingFlags.Instance | BindingFlags.Public,
             null,
             [databasePath],
             null)!;
@@ -574,6 +630,7 @@ public sealed class SqliteCatalogSnapshotWriterTests
         object Batch,
         ContentSource Source,
         PlaylistSnapshot Snapshot,
+        CategoryId CategoryId,
         ChannelId ChannelId,
         string StableKey,
         ProtectedLocatorReference StreamReference,

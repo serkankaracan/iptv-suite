@@ -1726,6 +1726,34 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M9CatalogBrowserContractIsBoundedAndDoesNotExposeSqlite()
+    {
+        string contract = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "CatalogBrowserContracts.cs"));
+        string adapter = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "SqliteCatalogQuery.cs"));
+
+        StringAssert.Contains(contract, "public interface ICatalogBrowser");
+        StringAssert.Contains(contract, "ValueTask<CatalogChannelPage> ReadChannelsAsync(");
+        Assert.IsFalse(contract.Contains("Sqlite", StringComparison.Ordinal));
+        Assert.IsFalse(contract.Contains("IptvSuite.Infrastructure", StringComparison.Ordinal));
+        StringAssert.Contains(adapter, "public const int MaximumPageSize = 200;");
+        StringAssert.Contains(adapter, "public const int MaximumSearchLength = 100;");
+        StringAssert.Contains(adapter, "BeginTransactionAsync(cancellationToken)");
+        Assert.IsFalse(adapter.Contains("SELECT *", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
     public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
     {
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
