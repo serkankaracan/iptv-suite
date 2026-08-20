@@ -74,6 +74,7 @@ internal static class RemoteM3uPlaylistParser
         }
 
         var entries = new List<RemoteM3uEntry>();
+        var tvgIdentifiers = new HashSet<string>(StringComparer.Ordinal);
         int skipped = 0;
         int totalCharacters = 0;
         PendingMetadata? pending = null;
@@ -167,7 +168,17 @@ internal static class RemoteM3uPlaylistParser
                     return Unsupported();
                 }
 
-                entries.Add(pending.Value.ToEntry(locator));
+                PendingMetadata completed = pending.Value;
+                if (completed.TvgId is not null && !tvgIdentifiers.Add(completed.TvgId))
+                {
+                    completed = completed with
+                    {
+                        Warnings = completed.Warnings |
+                            ChannelNormalizationWarnings.DuplicateProviderIdentifier,
+                    };
+                }
+
+                entries.Add(completed.ToEntry(locator));
                 pending = null;
             }
         }

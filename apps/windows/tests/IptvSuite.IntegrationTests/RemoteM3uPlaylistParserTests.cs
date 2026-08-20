@@ -58,6 +58,23 @@ public sealed class RemoteM3uPlaylistParserTests
     }
 
     [TestMethod]
+    public async Task DuplicateTvgIdentifierIsFirstWinsVisibleWarning()
+    {
+        const string playlist = "#EXTM3U\n" +
+            "#EXTINF:-1 tvg-id=\"duplicate\" group-title=\"News\",First\nfirst.ts\n" +
+            "#EXTINF:-1 tvg-id=\"duplicate\" group-title=\"News\",Second\nsecond.ts\n";
+
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(2, result.Entries);
+        Assert.AreEqual(ChannelNormalizationWarnings.None, result.Entries[0].Warnings);
+        Assert.AreEqual(
+            ChannelNormalizationWarnings.DuplicateProviderIdentifier,
+            result.Entries[1].Warnings);
+    }
+
+    [TestMethod]
     public async Task ExactMaximumEntryCountSucceedsAndLimitPlusOneFailsClosed()
     {
         ParseSnapshot success = await ParseAsync(Encoding.UTF8.GetBytes(CreatePlaylist(50_000)));
