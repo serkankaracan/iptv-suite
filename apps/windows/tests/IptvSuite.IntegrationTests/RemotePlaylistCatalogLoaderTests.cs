@@ -71,6 +71,25 @@ public sealed class RemotePlaylistCatalogLoaderTests
         Assert.AreEqual(1L, reader.GetInt64(1));
         Assert.AreEqual(1L, reader.GetInt64(2));
         await connection.CloseAsync();
+
+        object history = Activator.CreateInstance(
+            assembly.GetType("IptvSuite.Infrastructure.SqliteCatalogSyncHistory", true)!,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [databasePath],
+            null)!;
+        MethodInfo readRecent = history.GetType().GetMethod("ReadRecentAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        object historyValueTask = readRecent.Invoke(history, [source.Id, 10, CancellationToken.None])!;
+        Task historyTask = (Task)historyValueTask.GetType().GetMethod("AsTask")!.Invoke(historyValueTask, null)!;
+        await historyTask;
+        object historyResult = historyTask.GetType().GetProperty("Result")!.GetValue(historyTask)!;
+        Assert.AreEqual(1, (int)historyResult.GetType().GetProperty("Count")!.GetValue(historyResult)!);
+        object summary = historyResult.GetType().GetProperty("Item")!.GetValue(historyResult, [0])!;
+        Assert.AreEqual(0, (int?)summary.GetType().GetProperty("ResultCode")!.GetValue(summary));
+        Assert.AreEqual(2, (int)summary.GetType().GetProperty("ParsedCount")!.GetValue(summary)!);
+        Assert.AreEqual(2, (int)summary.GetType().GetProperty("PersistedCount")!.GetValue(summary)!);
+        Assert.AreEqual(1, (int)summary.GetType().GetProperty("WarningCount")!.GetValue(summary)!);
+        Assert.IsNull(summary.GetType().GetProperty("FailureCode")!.GetValue(summary));
         byte[] databaseBytes = await File.ReadAllBytesAsync(databasePath);
         Assert.IsFalse(databaseBytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(locator)) >= 0);
     }

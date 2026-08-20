@@ -148,6 +148,20 @@ public sealed class SqliteCatalogDatabaseTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task CorruptedDatabaseFailsClosedWithoutReplacement()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-corrupt");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        byte[] corruption = "not-a-sqlite-catalog"u8.ToArray();
+        await File.WriteAllBytesAsync(databasePath, corruption);
+
+        await Assert.ThrowsExactlyAsync<SqliteException>(async () => await InitializeAsync(databasePath));
+
+        CollectionAssert.AreEqual(corruption, await File.ReadAllBytesAsync(databasePath));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task SchemaContainsOnlyOpaqueOrEncryptedLocatorStorage()
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-confidentiality");
