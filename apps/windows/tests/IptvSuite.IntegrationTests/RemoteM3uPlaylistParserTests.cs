@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Diagnostics;
 using System.Text;
 using IptvSuite.Domain;
 using IptvSuite.Infrastructure;
@@ -29,20 +30,27 @@ public sealed class RemoteM3uPlaylistParserTests
     }
 
     [TestMethod]
-    [DataRow("#EXTM3U\n#EXT-X-TARGETDURATION:10\nsegment.ts", true)]
-    [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttp://fixtures.invalid/live.ts", false)]
-    [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttps://user:pass@fixtures.invalid/live.ts", false)]
-    [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttps://fixtures.invalid/live.ts#fragment", false)]
-    public async Task HlsOrUnsafeLocatorFailsClosed(string playlist, bool wholePlaylistFailure)
+    [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttp://fixtures.invalid/live.ts")]
+    [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttps://user:pass@fixtures.invalid/live.ts")]
+    [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttps://fixtures.invalid/live.ts#fragment")]
+    public async Task UnsafeLocatorIsSkipped(string playlist)
     {
         ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
-        Assert.AreEqual(!wholePlaylistFailure, result.IsSuccess);
-        if (wholePlaylistFailure) Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, result.ErrorCode);
-        else
-        {
-            Assert.IsEmpty(result.Entries);
-            Assert.AreEqual(1, result.SkippedEntryCount);
-        }
+        Assert.IsTrue(result.IsSuccess);
+        Assert.IsEmpty(result.Entries);
+        Assert.AreEqual(1, result.SkippedEntryCount);
+    }
+
+    [TestMethod]
+    [DataRow("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvariant.m3u8", PlaylistContentKind.HlsMasterManifest)]
+    [DataRow("#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:10,\nsegment.ts\n#EXT-X-ENDLIST", PlaylistContentKind.HlsMediaManifest)]
+    public async Task ValidHlsIsRoutedWithoutCatalogEntries(string playlist, PlaylistContentKind expected)
+    {
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(expected, result.ContentKind);
+        Assert.IsEmpty(result.Entries);
+        Assert.AreEqual("https://fixtures.invalid/catalog/list.m3u", result.HlsLocator);
     }
 
     [TestMethod]
@@ -85,11 +93,56 @@ public sealed class RemoteM3uPlaylistParserTests
         Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, failure.ErrorCode);
     }
 
+    [TestMethod]
+    public async Task FiftyThousandEntryParserStaysWithinReferenceStageBudget()
+    {
+        byte[] payload = Encoding.UTF8.GetBytes(CreatePlaylist(50_000));
+        var samples = new List<long>();
+        for (int iteration = 0; iteration < 10; iteration++)
+        {
+            long started = Stopwatch.GetTimestamp();
+            ParseSnapshot result = await ParseAsync(payload);
+            samples.Add((long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            Assert.IsTrue(result.IsSuccess);
+        }
+
+        samples.Sort();
+        long p95 = samples[(int)Math.Ceiling(samples.Count * 0.95) - 1];
+        Assert.IsLessThanOrEqualTo(2_000L, p95);
+    }
+
+    [TestMethod]
+    public async Task MidStreamCancellationCompletesWithinBoundaryBudget()
+    {
+        byte[] payload = Encoding.UTF8.GetBytes(CreatePlaylist(50_000));
+        var latencies = new List<long>();
+        for (int iteration = 0; iteration < 20; iteration++)
+        {
+            using var cancellation = new CancellationTokenSource();
+            await using var stream = new CancellingChunkStream(payload, cancellation, cancelAfterReads: 3);
+            long started = Stopwatch.GetTimestamp();
+            ParseSnapshot result = await InvokeParserAsync(stream, cancellation.Token);
+            latencies.Add((long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            Assert.AreEqual(DomainErrorCode.OperationCancelled, result.ErrorCode);
+        }
+
+        latencies.Sort();
+        long p95 = latencies[(int)Math.Ceiling(latencies.Count * 0.95) - 1];
+        Assert.IsLessThanOrEqualTo(250L, p95);
+    }
+
     private static async Task<ParseSnapshot> ParseAsync(byte[] payload, CancellationToken cancellationToken = default)
+    {
+        await using var stream = new MemoryStream(payload, writable: false);
+        return await InvokeParserAsync(stream, cancellationToken);
+    }
+
+    private static async Task<ParseSnapshot> InvokeParserAsync(
+        Stream stream,
+        CancellationToken cancellationToken)
     {
         Type parserType = typeof(BoundedHttpTransport).Assembly.GetType("IptvSuite.Infrastructure.RemoteM3uPlaylistParser", true)!;
         MethodInfo method = parserType.GetMethod("ParseAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
-        await using var stream = new MemoryStream(payload, writable: false);
         object valueTask = method.Invoke(null, [stream, new Uri("https://fixtures.invalid/catalog/list.m3u"), cancellationToken])!;
         Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
         await task;
@@ -99,7 +152,7 @@ public sealed class RemoteM3uPlaylistParserTests
         {
             object error = result.GetType().GetProperty("Error")!.GetValue(result)!;
             var code = (DomainErrorCode)error.GetType().GetProperty("Code")!.GetValue(error)!;
-            return new(false, code, [], 0);
+            return new(false, code, PlaylistContentKind.Unknown, [], 0, null);
         }
 
         object parsed = result.GetType().GetProperty("Value")!.GetValue(result)!;
@@ -113,7 +166,13 @@ public sealed class RemoteM3uPlaylistParserTests
                 Get<int?>(entry, "Number"), Get<ChannelNormalizationWarnings>(entry, "Warnings"), entry.ToString()!));
         }
 
-        return new(true, null, entries, (int)GetProperty(parsed, "SkippedEntryCount")!);
+        return new(
+            true,
+            null,
+            (PlaylistContentKind)GetProperty(parsed, "ContentKind")!,
+            entries,
+            (int)GetProperty(parsed, "SkippedEntryCount")!,
+            (string?)GetProperty(parsed, "HlsLocator"));
     }
 
     private static object? GetProperty(object instance, string name) =>
@@ -130,6 +189,33 @@ public sealed class RemoteM3uPlaylistParserTests
         return builder.ToString();
     }
 
-    private sealed record ParseSnapshot(bool IsSuccess, DomainErrorCode? ErrorCode, IReadOnlyList<EntrySnapshot> Entries, int SkippedEntryCount);
+    private sealed record ParseSnapshot(
+        bool IsSuccess,
+        DomainErrorCode? ErrorCode,
+        PlaylistContentKind ContentKind,
+        IReadOnlyList<EntrySnapshot> Entries,
+        int SkippedEntryCount,
+        string? HlsLocator);
     private sealed record EntrySnapshot(string Locator, string Name, string? TvgId, string? TvgName, string? Logo, string? GroupTitle, int? Number, ChannelNormalizationWarnings Warnings, string RedactedText);
+
+    private sealed class CancellingChunkStream(
+        byte[] payload,
+        CancellationTokenSource cancellation,
+        int cancelAfterReads) : MemoryStream(payload, writable: false)
+    {
+        private int _reads;
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _reads) == cancelAfterReads)
+            {
+                cancellation.Cancel();
+            }
+
+            int requested = Math.Min(buffer.Length, 256);
+            return base.ReadAsync(buffer[..requested], cancellationToken);
+        }
+    }
 }

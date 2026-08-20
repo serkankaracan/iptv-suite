@@ -40,14 +40,22 @@ internal sealed class RemoteM3uEntry
 
 internal sealed class RemoteM3uParseResult
 {
-    internal RemoteM3uParseResult(IReadOnlyList<RemoteM3uEntry> entries, int skippedEntryCount)
+    internal RemoteM3uParseResult(
+        PlaylistContentKind contentKind,
+        IReadOnlyList<RemoteM3uEntry> entries,
+        int skippedEntryCount,
+        string? hlsLocator = null)
     {
+        ContentKind = contentKind;
         Entries = entries;
         SkippedEntryCount = skippedEntryCount;
+        HlsLocator = hlsLocator;
     }
 
+    internal PlaylistContentKind ContentKind { get; }
     internal IReadOnlyList<RemoteM3uEntry> Entries { get; }
     internal int SkippedEntryCount { get; }
+    internal string? HlsLocator { get; }
 
     public override string ToString() => $"[REMOTE-M3U-RESULT:{Entries.Count}]";
 }
@@ -78,6 +86,9 @@ internal static class RemoteM3uPlaylistParser
         int skipped = 0;
         int totalCharacters = 0;
         PendingMetadata? pending = null;
+        bool hlsSeen = false;
+        bool hlsMasterSeen = false;
+        bool hlsMediaSeen = false;
 
         try
         {
@@ -129,7 +140,21 @@ internal static class RemoteM3uPlaylistParser
 
                 if (trimmed.StartsWith("#EXT-X-", StringComparison.Ordinal))
                 {
-                    return Unsupported();
+                    if (entries.Count > 0)
+                    {
+                        return Unsupported();
+                    }
+
+                    hlsSeen = true;
+                    pending = null;
+                    hlsMasterSeen |= IsHlsMasterDirective(trimmed);
+                    hlsMediaSeen |= IsHlsMediaDirective(trimmed);
+                    continue;
+                }
+
+                if (hlsSeen)
+                {
+                    continue;
                 }
 
                 if (trimmed.StartsWith("#EXTINF:", StringComparison.Ordinal))
@@ -195,7 +220,26 @@ internal static class RemoteM3uPlaylistParser
             return DomainResult.Failure<RemoteM3uParseResult>(DomainErrorCode.OperationCancelled);
         }
 
-        return DomainResult.Success(new RemoteM3uParseResult(entries, skipped));
+        if (hlsSeen)
+        {
+            if (hlsMasterSeen == hlsMediaSeen)
+            {
+                return Unsupported();
+            }
+
+            return DomainResult.Success(new RemoteM3uParseResult(
+                hlsMasterSeen
+                    ? PlaylistContentKind.HlsMasterManifest
+                    : PlaylistContentKind.HlsMediaManifest,
+                [],
+                skippedEntryCount: 0,
+                finalPlaylistUri.AbsoluteUri));
+        }
+
+        return DomainResult.Success(new RemoteM3uParseResult(
+            PlaylistContentKind.ExtendedM3uCatalog,
+            entries,
+            skipped));
     }
 
     private static async ValueTask<string?> ReadBoundedLineAsync(
@@ -284,6 +328,22 @@ internal static class RemoteM3uPlaylistParser
 
         return -1;
     }
+
+    private static bool IsHlsMasterDirective(ReadOnlySpan<char> line) =>
+        IsDirective(line, "#EXT-X-STREAM-INF") ||
+        IsDirective(line, "#EXT-X-I-FRAME-STREAM-INF") ||
+        IsDirective(line, "#EXT-X-MEDIA");
+
+    private static bool IsHlsMediaDirective(ReadOnlySpan<char> line) =>
+        IsDirective(line, "#EXT-X-TARGETDURATION") ||
+        IsDirective(line, "#EXT-X-MEDIA-SEQUENCE") ||
+        IsDirective(line, "#EXT-X-ENDLIST") ||
+        IsDirective(line, "#EXT-X-KEY") ||
+        IsDirective(line, "#EXT-X-MAP");
+
+    private static bool IsDirective(ReadOnlySpan<char> line, string directive) =>
+        line.StartsWith(directive, StringComparison.Ordinal) &&
+        (line.Length == directive.Length || line[directive.Length] == ':');
 
     private static bool TryResolveLocator(Uri baseUri, ReadOnlySpan<char> value, out string locator)
     {
