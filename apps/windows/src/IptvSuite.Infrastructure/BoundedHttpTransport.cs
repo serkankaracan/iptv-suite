@@ -195,7 +195,9 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
                     request.MaximumResponseBytes,
                     linkedSource.Token).ConfigureAwait(false);
                 return Finish(
-                    HttpTransportResult.Success((int)response.StatusCode, new HttpResponseLease(content, currentUri)),
+                    HttpTransportResult.Success(
+                        (int)response.StatusCode,
+                        new HttpResponseLease(content).BindEffectiveUri(currentUri)),
                     content.Length);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

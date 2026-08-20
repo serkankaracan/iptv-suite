@@ -163,13 +163,12 @@ public static class HttpTransportLimits
 public sealed class HttpResponseLease : IDisposable
 {
     private byte[] _content;
-    private readonly Uri? _effectiveUri;
+    private Uri? _effectiveUri;
 
-    internal HttpResponseLease(byte[] content, Uri? effectiveUri = null)
+    internal HttpResponseLease(byte[] content)
     {
         ArgumentNullException.ThrowIfNull(content);
         _content = content;
-        _effectiveUri = effectiveUri;
     }
 
     public ReadOnlyMemory<byte> Content => _content;
@@ -177,6 +176,18 @@ public sealed class HttpResponseLease : IDisposable
     internal Uri? EffectiveUri => _effectiveUri;
 
     internal Stream OpenReadStream() => new MemoryStream(_content, writable: false);
+
+    internal HttpResponseLease BindEffectiveUri(Uri effectiveUri)
+    {
+        ArgumentNullException.ThrowIfNull(effectiveUri);
+        if (_effectiveUri is not null)
+        {
+            throw new InvalidOperationException("The effective URI is already bound.");
+        }
+
+        _effectiveUri = effectiveUri;
+        return this;
+    }
 
     public static HttpResponseLease CopyFrom(ReadOnlySpan<byte> content)
     {
