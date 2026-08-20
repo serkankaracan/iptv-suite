@@ -240,9 +240,9 @@ internal sealed class SqliteCatalogSnapshotWriter
             """
             INSERT INTO snapshots(snapshot_id, source_id, retrieved_utc, content_hash, http_etag,
                 http_last_modified_utc, parser_version, normalization_version, schema_version,
-                item_count, warning_count, state)
+                item_count, warning_count, state, cache_key)
             VALUES ($id, $source, $retrieved, $hash, $etag, $modified, $parser, $normalization,
-                $schema, $items, $warnings, $state);
+                $schema, $items, $warnings, $state, $cache);
             """,
             cancellationToken,
             ("$id", Id(snapshot.Id.Value)),
@@ -256,7 +256,28 @@ internal sealed class SqliteCatalogSnapshotWriter
             ("$schema", snapshot.SchemaVersion),
             ("$items", snapshot.ItemCount),
             ("$warnings", snapshot.WarningCount),
-            ("$state", (int)snapshot.State));
+            ("$state", (int)snapshot.State),
+            ("$cache", BuildCacheKey(snapshot)));
+
+    private static byte[] BuildCacheKey(PlaylistSnapshot snapshot)
+    {
+        byte[] material = Encoding.UTF8.GetBytes(string.Join(
+            '\0',
+            snapshot.ContentHash,
+            snapshot.EntityTag ?? string.Empty,
+            snapshot.LastModified?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
+            snapshot.ParserVersion.ToString(CultureInfo.InvariantCulture),
+            snapshot.NormalizationVersion.ToString(CultureInfo.InvariantCulture),
+            snapshot.SchemaVersion.ToString(CultureInfo.InvariantCulture)));
+        try
+        {
+            return SHA256.HashData(material);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(material);
+        }
+    }
 
     private static Task InsertSnapshotKeyAsync(
         SqliteConnection connection,

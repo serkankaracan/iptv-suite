@@ -25,6 +25,7 @@ public sealed class SqliteCatalogDatabaseTests
         "ix_channels_snapshot_category",
         "ix_channels_snapshot_number",
         "ix_locators_snapshot_owner",
+        "ix_snapshots_source_cache",
         "ix_snapshots_source_state",
         "ix_sources_status",
         "ix_sync_runs_source_started",
@@ -40,7 +41,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection connection = await OpenAsync(databasePath);
-        Assert.AreEqual(1L, await ExecuteScalarInt64Async(connection, "PRAGMA user_version;"));
+        Assert.AreEqual(2L, await ExecuteScalarInt64Async(connection, "PRAGMA user_version;"));
         CollectionAssert.AreEqual(ExpectedTables, await ReadObjectNamesAsync(connection, "table"));
         CollectionAssert.AreEqual(ExpectedIndexes, await ReadObjectNamesAsync(connection, "index", "ix_%"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(connection, "PRAGMA foreign_keys;"));
@@ -61,6 +62,34 @@ public sealed class SqliteCatalogDatabaseTests
 
         byte[] after = await File.ReadAllBytesAsync(databasePath);
         CollectionAssert.AreEqual(before, after);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task VersionOneSchemaMigratesAtomicallyToVersionTwo()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-migration");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeAsync(databasePath);
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_snapshots_source_cache;
+                ALTER TABLE snapshots DROP COLUMN cache_key;
+                PRAGMA user_version = 1;
+                """);
+        }
+
+        await InitializeAsync(databasePath);
+
+        await using SqliteConnection migrated = await OpenAsync(databasePath);
+        Assert.AreEqual(2L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(1L, await ExecuteScalarInt64Async(
+            migrated,
+            "SELECT count(*) FROM pragma_table_info('snapshots') WHERE name = 'cache_key';"));
+        Assert.AreEqual(1L, await ExecuteScalarInt64Async(
+            migrated,
+            "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_snapshots_source_cache';"));
     }
 
     [TestMethod]

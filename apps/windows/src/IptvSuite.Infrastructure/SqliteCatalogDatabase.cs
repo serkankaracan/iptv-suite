@@ -4,7 +4,7 @@ namespace IptvSuite.Infrastructure;
 
 internal sealed class SqliteCatalogDatabase
 {
-    internal const int SchemaVersion = 1;
+    internal const int SchemaVersion = 2;
 
     private static readonly string[] RequiredTables =
     [
@@ -52,11 +52,40 @@ internal sealed class SqliteCatalogDatabase
             return;
         }
 
+        if (version == 1)
+        {
+            await MigrateVersionOneAsync(connection, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (version != SchemaVersion)
         {
             throw new InvalidDataException("Catalog schema version is unsupported.");
         }
 
+        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task MigrateVersionOneAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await ExecuteAsync(
+            connection,
+            "ALTER TABLE snapshots ADD COLUMN cache_key BLOB NULL CHECK (cache_key IS NULL OR length(cache_key) = 32);",
+            cancellationToken,
+            transaction).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection,
+            "CREATE INDEX ix_snapshots_source_cache ON snapshots(source_id, cache_key);",
+            cancellationToken,
+            transaction).ConfigureAwait(false);
+        await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
+            .ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
@@ -195,7 +224,8 @@ internal sealed class SqliteCatalogDatabase
             schema_version INTEGER NOT NULL,
             item_count INTEGER NOT NULL CHECK (item_count >= 0),
             warning_count INTEGER NOT NULL CHECK (warning_count >= 0),
-            state INTEGER NOT NULL
+            state INTEGER NOT NULL,
+            cache_key BLOB NULL CHECK (cache_key IS NULL OR length(cache_key) = 32)
         ) STRICT;
 
         CREATE TABLE snapshot_keys (
@@ -269,6 +299,7 @@ internal sealed class SqliteCatalogDatabase
 
         CREATE INDEX ix_sources_status ON sources(status);
         CREATE INDEX ix_snapshots_source_state ON snapshots(source_id, state, retrieved_utc DESC);
+        CREATE INDEX ix_snapshots_source_cache ON snapshots(source_id, cache_key);
         CREATE INDEX ix_categories_snapshot_sort ON categories(snapshot_id, sort_order, category_id);
         CREATE INDEX ix_channels_snapshot_category ON channels(snapshot_id, category_id, display_name, channel_id);
         CREATE INDEX ix_channels_snapshot_number ON channels(snapshot_id, channel_number, channel_id);
