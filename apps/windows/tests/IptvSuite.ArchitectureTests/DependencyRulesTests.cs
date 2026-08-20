@@ -1549,6 +1549,31 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M7RemoteM3uParserIsInternalBoundedAndRedactsLocatorStringification()
+    {
+        string parserSource = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "RemoteM3uPlaylistParser.cs"));
+
+        StringAssert.Contains(parserSource, "internal static class RemoteM3uPlaylistParser");
+        StringAssert.Contains(parserSource, "MaximumEntries = 50_000");
+        StringAssert.Contains(parserSource, "MaximumLineCharacters = 8_192");
+        StringAssert.Contains(parserSource, "MaximumTotalCharacters = 32 * 1024 * 1024");
+        StringAssert.Contains(parserSource, "new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)");
+        StringAssert.Contains(parserSource, "trimmed.StartsWith(\"#EXT-X-\"");
+        StringAssert.Contains(parserSource, "uri.Scheme.Equals(Uri.UriSchemeHttps");
+        StringAssert.Contains(parserSource, "string.IsNullOrEmpty(uri.UserInfo)");
+        StringAssert.Contains(parserSource, "string.IsNullOrEmpty(uri.Fragment)");
+        StringAssert.Contains(parserSource, "public override string ToString() => \"[REMOTE-M3U-ENTRY]\"");
+        Assert.IsFalse(parserSource.Contains("public sealed class RemoteM3uEntry", StringComparison.Ordinal));
+        Assert.IsFalse(parserSource.Contains("HttpClient", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
     {
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
