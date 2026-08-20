@@ -369,7 +369,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M5 | HTTP fault/redirect/TLS/timeout/cancel suite |
 | M6 | Xtream Live contract variants |
 | M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
-| M8 | `IN PROGRESS`: same-SQLite-transaction foundation ve clean 5k–50k ×20 Decision tamamlandı; güncel 50k duration p95 `3,053 s` ile `≤3 s` sınırının az üstünde, allocation p95 `236,880 MiB` ile `≤150 MiB` hedef üstünde; working-set/cancellation hedef altında, atomik migration rollback PASS, crash acceptance açık. [Kanıt](M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) |
+| M8 | `IN PROGRESS`: same-SQLite-transaction foundation ve clean 5k–50k ×20 Decision tamamlandı; güncel 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB` ve cancellation p95 `12,390 ms` ile bütün component hedefleri karşılandı; atomik migration rollback PASS, gerçek process-crash acceptance açık. [Kanıt](M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) |
 | M9 | 50k query/virtualization/UIA smoke |
 | M10 | Compatibility/license/MSIX hard gate |
 | M11 | Fake+real player adapter contract |

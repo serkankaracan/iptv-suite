@@ -4,13 +4,13 @@
 
 ## Kanıt bağı
 
-2026-08-21 tarihinde güncel production şekli için clean commit `c1752a4d86d32af4eaae875ae394a17e957c4c66` üzerinde aşağıdaki opt-in komut çalıştırıldı:
+2026-08-21 tarihinde güncel production şekli için clean commit `3f547a7ad625f04f929ade96ba0e2f4660ced24c` üzerinde aşağıdaki opt-in komut çalıştırıldı:
 
 ```powershell
 .\eng\Invoke-WindowsCatalogPersistenceDecision.ps1 -AllowDecision
 ```
 
-Koşu exact SDK `10.0.302` ve runtime `10.0.10` ile tamamlandı. Sanitized summary `.artifacts/m8-catalog-performance/evidence/decision-summary.json` dosyasında `18.798` byte olarak üretildi; dosyanın SHA-256 değeri `50690c72a5aec12e287922397347ed6ba47cfa5b731ea3d42bda7ff9b271d27f`dir. Summary clean repository binding, `DELETE` journal mode, sentetik workload, canary ve cleanup sonuçlarını taşır. Artifact repository'ye eklenmez; bu belge tekrar üretilebilir exact bağı kaydeder.
+Koşu exact SDK `10.0.302` ve runtime `10.0.10` ile tamamlandı. Sanitized summary `.artifacts/m8-catalog-performance/evidence/decision-summary.json` dosyasında `40.929` byte olarak üretildi; dosyanın SHA-256 değeri `c65320b7e2a89fd640fa3bcd704aff17b39cdcbdca9071daf989d334ff878109`dur. Summary clean repository binding, `DELETE` journal mode, sentetik workload, canary, cleanup ve sink allocation attribution sonuçlarını taşır. Artifact repository'ye eklenmez; bu belge tekrar üretilebilir exact bağı kaydeder.
 
 ## Ölçülen sonuçlar
 
@@ -18,19 +18,19 @@ Her ölçekte 20 tur gerçek incremental M3U parser → normalize → AES-GCM pr
 
 | Kayıt | Import p95 | Allocation p95 | Working-set delta p95 | DB boyutu |
 |---:|---:|---:|---:|---:|
-| 5.000 | `194,634 ms` | `24,740 MiB` | `5,317 MiB` | `5.640.192` byte |
-| 10.000 | `369,556 ms` | `47,461 MiB` | `1,301 MiB` | `11.120.640` byte |
-| 20.000 | `890,747 ms` | `95,392 MiB` | `1,613 MiB` | `22.056.960` byte |
-| 50.000 | `3.052,637 ms` | `236,880 MiB` | `4,512 MiB` | `55.103.488` byte |
+| 5.000 | `141,540 ms` | `12,221 MiB` | `4,266 MiB` | `5.648.384` byte |
+| 10.000 | `276,889 ms` | `23,349 MiB` | `4,434 MiB` | `11.116.544` byte |
+| 20.000 | `810,005 ms` | `47,169 MiB` | `4,059 MiB` | `22.048.768` byte |
+| 50.000 | `2.738,759 ms` | `116,330 MiB` | `6,164 MiB` | `55.148.544` byte |
 
-20 cancellation örneğinde p95 `16,285 ms`; residual source/snapshot/category/channel/locator/favorite/sync-run satırı, WAL ve SHM sayısı `0`dır.
+20 cancellation örneğinde p95 `12,390 ms`; residual source/snapshot/category/channel/locator/favorite/sync-run satırı, WAL ve SHM sayısı `0`dır.
 
 ## Karar
 
-`VERIFIED`: Bu commit, host ve sentetik workload sınırında 50k component import süresini `3.052,637 ms` ölçmüştür; bu değer birleşik normalize + protected persistence + index hedefi olan `≤3 s` sınırını az farkla aşar. Working-set delta `≤250 MiB` ve cancellation p95 `≤250 ms` altında kalmıştır.
+`VERIFIED`: Bu commit, host ve sentetik workload sınırında 50k component import süresini `2.738,759 ms` ölçmüştür; birleşik normalize + protected persistence + index hedefi `≤3 s`, managed allocation `≤150 MiB`, working-set delta `≤250 MiB` ve cancellation p95 `≤250 ms` sınırlarının tamamı karşılanmıştır.
 
-`VERIFIED`: 50k managed allocation p95 `236,880 MiB` olup bütün-import `≤150 MiB` hedefini karşılamamıştır. Identifier-binding reuse öncesindeki clean ölçüme göre allocation azalmıştır; bu iyileşme acceptance için yeterli değildir.
+`VERIFIED`: 50k managed allocation p95 `116,330 MiB`dir. Attribution p95 değerlerinde bütün sink write katmanı `57,117 MiB`; preparation `36,234 MiB`, encrypted locator `19,355 MiB`, channel insert `0,006 MiB` ve hash yaklaşık `0 MiB`dir. Fixed SQL statement'ların aynı connection/transaction üzerindeki native prepared binding'e geçirilmesi, provider `ExecuteNonQuery` per-row allocation'ını kaldırmıştır.
 
-`INFERENCE`: Same-SQLite-transaction yönü önceki per-record protected-file yerleşimine göre güçlü kalır; ancak güncel duration ve allocation hedefleri karşılanmadığı için M8 acceptance kapanmaz. Hedefler sonuçtan sonra gevşetilmez. Kalan iş hot-path duration/allocation azaltma veya ayrıca incelenmiş bir budget kararı, crash kanıtı ve diğer M8 acceptance maddeleridir.
+`INFERENCE`: Same-SQLite-transaction yönünün component performans gate'i kapanmıştır. Bu sonuç milestone'u tek başına tamamlamaz; gerçek process-crash recovery ve kalan M8 acceptance kanıtları hâlâ gereklidir.
 
 Runner performans threshold'u uygulamaz; sıfır exit yalnız workload, invariant, canary, cleanup ve evidence üretiminin geçtiğini gösterir. Ölçüm sentetik local host kapsamındadır; UI, network, reference-device thermal/power davranışı veya gerçek kullanıcı verisi kanıtı değildir.
