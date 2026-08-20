@@ -20,7 +20,12 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
     private bool _disposed;
 
     public BoundedHttpTransport()
-        : this(CreateProductionHandler(), DefaultRequestTimeout)
+        : this(observer: null)
+    {
+    }
+
+    public BoundedHttpTransport(IHttpTransportObserver? observer)
+        : this(CreateProductionHandler(), DefaultRequestTimeout, Task.Delay, observer)
     {
     }
 

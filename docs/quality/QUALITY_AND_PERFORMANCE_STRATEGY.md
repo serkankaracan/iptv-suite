@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M2 quality infrastructure, M3 domain gate ve M4 secure-storage foundation `COMPLETED`; M5 network/transport foundation in progress
+**Durum:** M2 quality infrastructure, M3 domain gate, M4 secure-storage foundation ve M5 network/transport foundation `COMPLETED`; M6 provider adapter sıradaki milestone
 
 ## 1. İlke
 

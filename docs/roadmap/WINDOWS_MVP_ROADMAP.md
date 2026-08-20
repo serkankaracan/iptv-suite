@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 implementation plan; M1–M4 completed, M5 in progress
+**Durum:** Phase 0 implementation plan; M1–M5 completed, M6 sıradaki milestone
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -252,7 +252,7 @@ Canary secret'ın kaydedilip restart sonrası okunması, her output'ta maskelenm
 
 ## M5 — HTTP/networking ve connection probe
 
-**Implementation status:** IN PROGRESS — Application `IHttpTransport` contract'ı ve Infrastructure `BoundedHttpTransport` ilk dikey dilimi implemented; yalnız HTTPS expected-origin binding, long-lived client, auto-redirect/cookie yasağı, bounded manual redirect, total timeout, cancellation ve response byte cap'i typed sonuçlarla uygulanmıştır. Local full gate architecture 17 + unit 154 + integration 47 = 218/218 testi iki deterministic koşuda geçmiştir. Transient retry/`Retry-After`, credential-bearing forwarding policy, gerçek HTTPS fixture/TLS-negatifleri ve connection-probe application operation'ı henüz açıktır.
+**Implementation status:** COMPLETED, 2026-08-20 — Application `IHttpTransport` contract'ı, `ConnectionProbeService` ve Infrastructure `BoundedHttpTransport` uygulanmıştır. HTTPS expected-origin binding, long-lived client, disabled automatic redirects/cookies, bounded manual redirects, downgrade ve cross-origin credential reddi, connect/total timeout, caller cancellation, decompression sonrası response byte cap'i, typed status/TLS/network sonuçları, en fazla üç safe transient attempt, capped `Retry-After`, zeroing response/request buffer'ları ve URI/header taşımayan safe operation observation sözleşmesi fail-closed çalışır. Local full gate architecture 17 + unit 157 + integration 54 = 228/228 testi iki deterministic koşuda geçmiştir; fixture/sentinel/scanner/artifact-canary kontrolleri de PASS'tir. Provider endpoint semantiği M6'ya devredilmiştir.
 
 ### Amaç
 

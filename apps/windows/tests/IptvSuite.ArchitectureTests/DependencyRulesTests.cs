@@ -1493,6 +1493,7 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(applicationSource.Contains("HttpTransportObservation(string", StringComparison.Ordinal));
         StringAssert.Contains(infrastructureSource, "AllowAutoRedirect = false");
         StringAssert.Contains(infrastructureSource, "UseCookies = false");
+        StringAssert.Contains(infrastructureSource, "public BoundedHttpTransport(IHttpTransportObserver? observer)");
         StringAssert.Contains(infrastructureSource, "HttpCompletionOption.ResponseHeadersRead");
         StringAssert.Contains(infrastructureSource, "RedirectTargetPolicy.Evaluate");
         StringAssert.Contains(infrastructureSource, "OriginRelation == RedirectOriginRelation.CrossOrigin");
