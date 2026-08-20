@@ -1,7 +1,7 @@
 # M5 network/transport completion evidence
 
-**Tarih:** 2026-08-20  
-**Milestone:** M5 — HTTP/networking ve connection probe  
+**Tarih:** 2026-08-20
+**Milestone:** M5 — HTTP/networking ve connection probe
 **Durum:** `COMPLETED`
 
 ## Tamamlanan sınır
