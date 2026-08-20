@@ -99,6 +99,47 @@ public sealed class RemotePlaylistCatalogLoaderTests
     }
 
     [TestMethod]
+    [Timeout(30_000)]
+    public async Task ParserFailureAfterStreamingWritePreservesPreviousActiveSnapshot()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-streaming-fault");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        var store = new M4InMemorySecretStore();
+        ContentSource source = await CreateSourceAsync(store);
+        DomainResultSnapshot initial = await InvokeSqliteLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                "#EXTM3U\n#EXTINF:-1 tvg-id=\"stable\",Stable\nhttps://fixtures.invalid/stable.m3u8\n"),
+            source,
+            databasePath);
+        Assert.IsTrue(initial.IsSuccess);
+        byte[] validPrefix = Encoding.UTF8.GetBytes(
+            "#EXTM3U\n#EXTINF:-1 tvg-id=\"replacement\",Replacement\nhttps://fixtures.invalid/replacement.m3u8\n");
+        byte[] malformed = [.. validPrefix, 0xFF, 0x0A];
+
+        DomainResultSnapshot failed = await InvokeSqliteLoaderAsync(
+            store,
+            new ByteResponseTransport(malformed),
+            source,
+            databasePath);
+
+        Assert.IsFalse(failed.IsSuccess);
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Pooling=False");
+        await connection.OpenAsync();
+        await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT (SELECT count(*) FROM snapshots), (SELECT count(*) FROM channels);";
+        await using Microsoft.Data.Sqlite.SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(1L, reader.GetInt64(0));
+        Assert.AreEqual(1L, reader.GetInt64(1));
+    }
+
+    [TestMethod]
     public async Task AuthoritativeProtectedLocatorDownloadsAndParsesCatalog()
     {
         var store = new M4InMemorySecretStore();
@@ -182,11 +223,43 @@ public sealed class RemotePlaylistCatalogLoaderTests
         return new(true, null, processedEntryCount, sinkProxy.FirstLocator);
     }
 
+    private static async Task<DomainResultSnapshot> InvokeSqliteLoaderAsync(
+        ISecretStore store,
+        IStreamingHttpTransport transport,
+        ContentSource source,
+        string databasePath)
+    {
+        Assembly assembly = typeof(BoundedHttpTransport).Assembly;
+        Type sinkType = assembly.GetType("IptvSuite.Infrastructure.SqliteRemoteM3uImportSink", true)!;
+        object sink = Activator.CreateInstance(
+            sinkType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [databasePath],
+            null)!;
+        Type loaderType = assembly.GetType("IptvSuite.Infrastructure.RemotePlaylistCatalogLoader", true)!;
+        object loader = Activator.CreateInstance(
+            loaderType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [store, transport, sink],
+            null)!;
+        MethodInfo method = loaderType.GetMethod("LoadAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        object valueTask = method.Invoke(loader, [source, CancellationToken.None])!;
+        Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
+        await task;
+        object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
+        bool success = (bool)result.GetType().GetProperty("IsSuccess")!.GetValue(result)!;
+        return new(success);
+    }
+
     private sealed record LoaderSnapshot(
         bool IsSuccess,
         DomainErrorCode? ErrorCode,
         int EntryCount,
         string? FirstLocator);
+
+    private sealed record DomainResultSnapshot(bool IsSuccess);
 
     public class RemoteM3uSinkProxy : DispatchProxy
     {
@@ -236,10 +309,30 @@ public sealed class RemotePlaylistCatalogLoaderTests
             ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
                 BindingFlags.Instance | BindingFlags.NonPublic).Single();
             var lease = (HttpStreamingResponseLease)constructor.Invoke(
-                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyOwner()]);
+                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyResponseOwner()]);
             return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
         }
+    }
 
-        private sealed class EmptyOwner : IDisposable { public void Dispose() { } }
+    private sealed class ByteResponseTransport(byte[] body) : IStreamingHttpTransport
+    {
+        public ValueTask<HttpStreamingResult> GetStreamAsync(
+            HttpTransportRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            var stream = new MemoryStream(body, writable: false);
+            ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
+                BindingFlags.Instance | BindingFlags.NonPublic).Single();
+            var lease = (HttpStreamingResponseLease)constructor.Invoke(
+                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyResponseOwner()]);
+            return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
+        }
+    }
+
+    private sealed class EmptyResponseOwner : IDisposable
+    {
+        public void Dispose()
+        {
+        }
     }
 }
