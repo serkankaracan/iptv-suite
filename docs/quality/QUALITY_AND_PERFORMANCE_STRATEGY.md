@@ -2,7 +2,9 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M2 quality infrastructure ile M3–M7 foundation/adapter/parser gate'leri `COMPLETED`; M8 persistence, cache ve indexing `IN PROGRESS`
+**Durum:** M2 quality infrastructure ile M3–M8 foundation/adapter/parser/persistence gate'leri `COMPLETED`; M9 virtualized query/UI sıradaki aktif milestone
+
+M8 completion kaydı, aşağıdaki tarihsel M4 comparative paragraflarındaki “M8 Proposed/uygulanmamış/açık” ifadelerini supersede eder. Güncel acceptance bağı [M8 completion evidence](M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
 ## 1. İlke
 
@@ -369,7 +371,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M5 | HTTP fault/redirect/TLS/timeout/cancel suite |
 | M6 | Xtream Live contract variants |
 | M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
-| M8 | `IN PROGRESS`: same-SQLite-transaction foundation ve clean 5k–50k ×20 Decision tamamlandı; güncel 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB` ve cancellation p95 `12,390 ms` ile bütün component hedefleri karşılandı; atomik migration rollback PASS, gerçek process-crash acceptance açık. [Kanıt](M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) |
+| M8 | `COMPLETED`: same-SQLite-transaction persistence, clean 5k–50k ×20 Decision ve gerçek ayrı-process kill/recovery tamamlandı; 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB`, cancellation p95 `12,390 ms`; migration/fault/crash, canary, source lifecycle ve query/cache acceptance PASS. [Kanıt](M8_COMPLETION_EVIDENCE.md) |
 | M9 | 50k query/virtualization/UIA smoke |
 | M10 | Compatibility/license/MSIX hard gate |
 | M11 | Fake+real player adapter contract |

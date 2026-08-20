@@ -2,7 +2,9 @@
 
 **Tarih:** 2026-08-09
 
-**Belge durumu:** Windows yönü kararlaştırıldı; protected-catalog comparative gate'i kapandı; production SQLite transaction yerleşimi, playback ve Samsung kararları kendi milestone'larında açık
+**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; playback ve Samsung kararları kendi milestone'larında açık
+
+M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8'e bırakıldı”, `Proposed` veya “açık” ifadelerini supersede eder; exact kabul bağı [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
 **Ürün adı:** “IPTV Suite” yalnız doğrulanmamış iç codename'dir.
 
@@ -430,7 +432,7 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 | ID | Durum | Soru/varsayım | Kapatma yöntemi | Owner/milestone |
 |---|---|---|---|---|
 | O1 | UNVERIFIED | Non-GPL libVLC hedef corpus, WinUI surface ve MSIX'i geçer mi? | M10 full matrix, SBOM, WACK | Playback / M10 |
-| O2 | INFERENCE / OPEN, 2026-08-14 | Comparative gate kapandı; security-reviewed aynı-SQLite-transaction yönü production crash/recovery ve end-to-end bütçelerini karşılar mı? | [Baseline evidence](../quality/M4_SECRET_STORE_DECISION_EVIDENCE.md) + [candidate Decision evidence](../quality/M4_PROTECTED_CATALOG_DECISION_EVIDENCE.md) + M8 production implementation/fault injection/end-to-end benchmark | Security/Data / M4–M8 |
+| O2 | VERIFIED / CLOSED, 2026-08-21 | Aynı-SQLite-transaction production yönü component bütçelerini ve process-crash old-or-new recovery invariant'ını karşılar mı? | [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) + [Decision evidence](../quality/M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) | Security/Data / M4–M8 |
 | O3 | UNVERIFIED | M1 engineering sınırı 10.0.26100/x64; nihai product minimumu ve ARM64 release talebi nedir? | Market/support data + clean devices | Product / M15 |
 | O4 | UNVERIFIED | Microsoft Store BYO IPTV modelini kabul eder mi? | Partner Center private/pre-certification | Product/Legal / M15 |
 | O5 | UNVERIFIED | Bundled codec patent/redistribution sonucu nedir? | Exact binary list + uzman hukuk görüşü | Legal / M10–M15 |

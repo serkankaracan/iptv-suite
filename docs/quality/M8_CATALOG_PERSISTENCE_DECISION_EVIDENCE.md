@@ -1,6 +1,6 @@
 # M8 catalog persistence Decision kanıtı
 
-**Durum:** `VERIFIED` local ölçüm; M8 `IN PROGRESS`
+**Durum:** `VERIFIED` local ölçüm; performance gate `CLOSED`; M8 daha sonra `COMPLETED`
 
 ## Kanıt bağı
 
@@ -31,6 +31,6 @@ Her ölçekte 20 tur gerçek incremental M3U parser → normalize → AES-GCM pr
 
 `VERIFIED`: 50k managed allocation p95 `116,330 MiB`dir. Attribution p95 değerlerinde bütün sink write katmanı `57,117 MiB`; preparation `36,234 MiB`, encrypted locator `19,355 MiB`, channel insert `0,006 MiB` ve hash yaklaşık `0 MiB`dir. Fixed SQL statement'ların aynı connection/transaction üzerindeki native prepared binding'e geçirilmesi, provider `ExecuteNonQuery` per-row allocation'ını kaldırmıştır.
 
-`INFERENCE`: Same-SQLite-transaction yönünün component performans gate'i kapanmıştır. Bu sonuç milestone'u tek başına tamamlamaz; gerçek process-crash recovery ve kalan M8 acceptance kanıtları hâlâ gereklidir.
+`INFERENCE`: Same-SQLite-transaction yönünün component performans gate'i kapanmıştır. Bu ölçüm milestone'u tek başına tamamlamamıştır; takip process-crash ve lifecycle acceptance kanıtları [M8 completion evidence](M8_COMPLETION_EVIDENCE.md) ile daha sonra tamamlanmıştır.
 
 Runner performans threshold'u uygulamaz; sıfır exit yalnız workload, invariant, canary, cleanup ve evidence üretiminin geçtiğini gösterir. Ölçüm sentetik local host kapsamındadır; UI, network, reference-device thermal/power davranışı veya gerçek kullanıcı verisi kanıtı değildir.

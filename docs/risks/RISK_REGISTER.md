@@ -1,5 +1,7 @@
 # Risk kaydı
 
+**M8 disposition, 2026-08-21:** R08'in production parser→protected SQLite 50k süre/allocation riski measured component bütçeleriyle; R28'in cross-file activation riski ise immutable container'ı reddedip aynı SQLite transaction domain'ini process-crash recovery ile doğrulayarak azaltılmıştır. Tablodaki M4 dönemine ait “önerilen/uygulanmamış/ACTIVE” açıklamaları tarihsel tetikleyici kaydıdır; M8 kabulünü geri açmaz. Reference-device UI bütçeleri M9/M14, production PFN/provider lifecycle M15 kapsamındadır.
+
 **Tarih:** 2026-08-14
 
 **Durum:** Phase 0 baseline; M4 residual-risk ve protected-catalog aday kararı işlendi, production seçimi açık

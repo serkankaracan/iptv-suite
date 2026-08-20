@@ -402,7 +402,7 @@ Uzak sentetik M3U'dan incremental üretilen category/channel records, warning ö
 
 ## M8 — Local persistence, cache ve indexing
 
-**Implementation status:** `IN PROGRESS, 2026-08-21`. Versioned SQLite schema, same-transaction DPAPI-wrapped snapshot key + AES-GCM locator rows, streaming parser sink, atomik activation, query/cache + HTTP validator binding, sanitized sync history, favorite reconciliation, prune, delete, startup reconciliation ve atomik migration rollback foundation'ı uygulanmıştır. Güncel clean 5k–50k ×20 Decision ölçümünde 50k import p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB` ve cancellation p95 `12,390 ms`dir; bütün component hedefleri karşılanmıştır. Kalan gerçek process-crash acceptance kanıtı kapanmadan milestone tamamlanmaz. Kanıt: [M8 catalog persistence Decision evidence](../quality/M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md).
+**Implementation status:** `COMPLETED, 2026-08-21`. Versioned SQLite schema, same-transaction DPAPI-wrapped snapshot key + AES-GCM locator rows, streaming parser sink, atomik activation, query/cache + HTTP validator binding, sanitized sync history, favorite reconciliation, prune, delete, startup reconciliation ve atomik migration rollback uygulanmıştır. Clean 5k–50k ×20 Decision ölçümünde 50k import p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB` ve cancellation p95 `12,390 ms`dir. Gerçek ayrı-process kill testi açık replacement transaction'ını öldürür; startup recovery önceki complete snapshot'ı tek active result olarak bırakır ve hot rollback journal/WAL/SHM kalmaz. Kanıt: [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md).
 
 ### Amaç
 

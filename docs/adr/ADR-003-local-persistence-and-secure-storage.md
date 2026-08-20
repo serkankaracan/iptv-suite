@@ -1,8 +1,10 @@
 # ADR-003 — Yerel persistence ve güvenli saklama
 
-**Status:** Proposed
+**Status:** Accepted
 
-**Date:** 2026-08-09
+**Date:** 2026-08-09; M8 acceptance: 2026-08-21
+
+2026-08-21 M8 acceptance'ı, aşağıdaki M4 dönemine ait `Proposed`/uygulanmamış ifadelerini güncel durum olarak geçersiz kılar: same-SQLite-transaction production layout uygulanmış, performance/lifecycle/process-crash matrisi geçilmiş ve karar `Accepted` olmuştur. M15 production PFN/Store identity/repair doğrulaması ayrı kalır.
 
 ## Context / Problem
 
@@ -137,7 +139,7 @@ M4/M8/M15'te, aşağıda ayrıca belirtilen milestone sınırlarıyla:
 - 20/21 hesap senaryosuyla Credential Locker kararının tekrar kontrolü;
 - source silme ve startup orphan reconciliation contract testleri.
 
-M8 production transaction layout'u ve recovery matrisi tamamlanmadan exact encryption layout `Accepted` yapılmaz. Performans alternatifi için threat model, key rotation, nonce uniqueness, authenticated encryption ve recovery security review'u M8 kararının parçasıdır.
+2026-08-21 M8 acceptance'ında production transaction layout'u ve recovery matrisi tamamlanmıştır. DPAPI `CurrentUser` ile sarılan fresh per-snapshot DEK, per-row AES-256-GCM locator ve snapshot/key/active-pointer state'i aynı SQLite transaction domain'inde tutulur. Clean 50k Decision component bütçelerini karşılamış; fault/cancellation, atomik migration ve gerçek ayrı-process kill recovery önceki complete snapshot'ı korumuş; source delete/reconciliation ile DB/sidecar canary kontrolleri geçmiştir. Bu nedenle exact M8 layout kararı `Accepted`dır. Production PFN/Store lifecycle ve repair M15 acceptance'ını bekler; bu takip işi kabul edilmiş persistence kararını geri açmaz.
 
 ## Revisit triggers
 

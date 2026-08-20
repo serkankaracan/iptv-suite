@@ -1,5 +1,7 @@
 # Güvenlik ve gizlilik baseline'ı
 
+**Güncel M8 sonucu (2026-08-21):** same-SQLite-transaction protected catalog, durable source lifecycle/reconciliation, 50k component bütçeleri ve gerçek process-crash recovery tamamlanmış; ADR-003 `Accepted`dır. Aşağıdaki M4 zaman çizelgesindeki `Proposed`/uygulanmamış/açık M8 ifadeleri tarihsel bağlamdır ve bu kaydı geçersiz kılmaz. Production PFN/Store identity/repair M15'te açık kalır.
+
 **Tarih:** 2026-08-09
 
 **Durum:** M3 validation/redaction contract'ı ve M4 CurrentUser protected-storage foundation `COMPLETED`; M8 transactional layout ve M15 production package lifecycle acceptance pending
