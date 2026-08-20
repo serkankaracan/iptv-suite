@@ -157,6 +157,56 @@ public sealed class SourceChannelProtectedRecordDeletionServiceTests
     }
 
     [TestMethod]
+    public async Task RemoteChannelWithoutLogoDeletesOnlyItsStream()
+    {
+        var store = new ChannelDeletionProbeSecretStore();
+        var service = new SourceChannelProtectedRecordDeletionService(store);
+        SourceId sourceId = SourceId.Generate();
+        ContentSource source = CreateSource(sourceId, ContentSourceStatus.DeletionPending);
+        PlaylistSnapshot snapshot = CreateSnapshot(sourceId);
+        LiveChannel channel = CreateRemoteChannel(sourceId, snapshot.Id, includeLogo: false);
+
+        SecretStoreOperationResult result = await service.DeleteAsync(source, snapshot, channel);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(1, store.LocatorDeleteCalls);
+        AssertDeleteCall(
+            store.LocatorDeleteCalls.Single(),
+            source,
+            channel,
+            ProtectedValuePurpose.ChannelStreamLocator,
+            channel.StreamReference!,
+            expectedCanBeCanceled: false);
+    }
+
+    [TestMethod]
+    [DataRow(PlaylistSnapshotState.Importing)]
+    [DataRow(PlaylistSnapshotState.Rejected)]
+    public async Task DeletionAcceptsRetainedOrIncompleteSnapshotRecords(
+        PlaylistSnapshotState snapshotState)
+    {
+        var store = new ChannelDeletionProbeSecretStore();
+        var service = new SourceChannelProtectedRecordDeletionService(store);
+        SourceId sourceId = SourceId.Generate();
+        SnapshotId activeSnapshotId = SnapshotId.Generate();
+        ContentSource source = CreateSource(
+            sourceId,
+            ContentSourceStatus.DeletionPending,
+            activeSnapshotId);
+        PlaylistSnapshot snapshot = CreateSnapshot(
+            sourceId,
+            snapshotId: SnapshotId.Generate(),
+            state: snapshotState);
+        Assert.AreNotEqual(source.ActiveSnapshotId, snapshot.Id);
+        LiveChannel channel = CreateRemoteChannel(sourceId, snapshot.Id);
+
+        SecretStoreOperationResult result = await service.DeleteAsync(source, snapshot, channel);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(2, store.LocatorDeleteCalls);
+    }
+
+    [TestMethod]
     public async Task ProviderChannelDeletesOnlyItsOptionalLogo()
     {
         var store = new ChannelDeletionProbeSecretStore();
@@ -339,12 +389,15 @@ public sealed class SourceChannelProtectedRecordDeletionServiceTests
         Assert.AreEqual(expectedCanBeCanceled, call.CancellationToken.CanBeCanceled);
     }
 
-    private static ContentSource CreateSource(SourceId sourceId, ContentSourceStatus status)
+    private static ContentSource CreateSource(
+        SourceId sourceId,
+        ContentSourceStatus status,
+        SnapshotId? activeSnapshotId = null)
     {
-        SnapshotId? activeSnapshotId = status is ContentSourceStatus.Ready
+        activeSnapshotId ??= status is ContentSourceStatus.Ready
             ? SnapshotId.Generate()
             : null;
-        DateTimeOffset? lastSuccessfulSyncAt = status is ContentSourceStatus.Ready
+        DateTimeOffset? lastSuccessfulSyncAt = activeSnapshotId.HasValue
             ? FixedInstant
             : null;
         DomainErrorCode? lastErrorCode = status is ContentSourceStatus.Failed
@@ -363,7 +416,10 @@ public sealed class SourceChannelProtectedRecordDeletionServiceTests
             : throw new InvalidOperationException("A synthetic source could not be created.");
     }
 
-    private static PlaylistSnapshot CreateSnapshot(SourceId sourceId, SnapshotId? snapshotId = null)
+    private static PlaylistSnapshot CreateSnapshot(
+        SourceId sourceId,
+        SnapshotId? snapshotId = null,
+        PlaylistSnapshotState state = PlaylistSnapshotState.Complete)
     {
         DomainResult<PlaylistSnapshot> result = PlaylistSnapshot.Create(
             snapshotId ?? SnapshotId.Generate(),
@@ -375,7 +431,7 @@ public sealed class SourceChannelProtectedRecordDeletionServiceTests
             schemaVersion: 1,
             itemCount: 1,
             warningCount: 0,
-            PlaylistSnapshotState.Complete);
+            state);
         return result.IsSuccess
             ? result.Value!
             : throw new InvalidOperationException("A synthetic playlist snapshot could not be created.");
@@ -384,7 +440,8 @@ public sealed class SourceChannelProtectedRecordDeletionServiceTests
     private static LiveChannel CreateRemoteChannel(
         SourceId sourceId,
         SnapshotId snapshotId,
-        SourceId? stableKeySourceId = null)
+        SourceId? stableKeySourceId = null,
+        bool includeLogo = true)
     {
         ChannelId channelId = ChannelId.Generate();
         DomainResult<LiveChannel> result = LiveChannel.Create(
@@ -396,7 +453,7 @@ public sealed class SourceChannelProtectedRecordDeletionServiceTests
             providerPlaybackKey: null,
             "Synthetic Remote Channel",
             number: 1,
-            SourceDraftTestFixtures.CreateLocatorReference(),
+            includeLogo ? SourceDraftTestFixtures.CreateLocatorReference() : null,
             SourceDraftTestFixtures.CreateLocatorReference(),
             ChannelContainerHint.Hls,
             isAdultHint: false,
