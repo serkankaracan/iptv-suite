@@ -94,7 +94,35 @@ public static class ChannelStableKeyBuilder
             return DomainResult.Failure<ChannelStableKey>(DomainErrorCode.DomainInvariantViolation);
         }
 
-        return Build(sourceId, "m3u-tvg-id", occurrenceDiscriminator, normalizedTvgId);
+        return BuildM3uTvgId(sourceId, occurrenceDiscriminator, normalizedTvgId);
+    }
+
+    private static DomainResult<ChannelStableKey> BuildM3uTvgId(
+        SourceId sourceId,
+        int occurrenceDiscriminator,
+        string normalizedTvgId)
+    {
+        Span<byte> material = stackalloc byte[4096];
+        int offset = 0;
+        AppendPart(material, ref offset, "CHANNEL-STABLE-KEY");
+        AppendPart(material, ref offset, "2");
+        Span<char> sourceText = stackalloc char[36];
+        sourceId.Value.TryFormat(sourceText, out int sourceLength, "D");
+        AppendPart(material, ref offset, sourceText[..sourceLength]);
+        AppendPart(material, ref offset, "m3u-tvg-id");
+        AppendPart(material, ref offset, normalizedTvgId);
+        Span<char> occurrenceText = stackalloc char[11];
+        occurrenceDiscriminator.TryFormat(
+            occurrenceText,
+            out int occurrenceLength,
+            provider: CultureInfo.InvariantCulture);
+        AppendPart(material, ref offset, occurrenceText[..occurrenceLength]);
+        Span<byte> digest = stackalloc byte[32];
+        SHA256.HashData(material[..offset], digest);
+        return DomainResult.Success(new ChannelStableKey(
+            sourceId,
+            AlgorithmVersion,
+            Convert.ToHexString(digest)));
     }
 
     public static DomainResult<ChannelStableKey> FromFallback(
@@ -155,5 +183,13 @@ public static class ChannelStableKeyBuilder
         BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
         hash.AppendData(length);
         hash.AppendData(bytes);
+    }
+
+    private static void AppendPart(Span<byte> destination, ref int offset, ReadOnlySpan<char> value)
+    {
+        int byteCount = Encoding.UTF8.GetByteCount(value);
+        BinaryPrimitives.WriteInt32BigEndian(destination.Slice(offset, sizeof(int)), byteCount);
+        offset += sizeof(int);
+        offset += Encoding.UTF8.GetBytes(value, destination[offset..]);
     }
 }

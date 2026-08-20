@@ -1647,6 +1647,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(decisionTest, "Assert.IsFalse(File.Exists(databasePath + \"-wal\"))");
         StringAssert.Contains(decisionTest, "Assert.IsFalse(File.Exists(databasePath + \"-shm\"))");
         StringAssert.Contains(decisionTest, "ContainsLocatorCanaryAsync");
+        StringAssert.Contains(decisionTest, "new CancellingDecisionTransport(cancellationPlaylist, cancellation)");
+        StringAssert.Contains(decisionTest, "activeOrStagingRowsAfterCompletion = 0");
+        StringAssert.Contains(decisionTest, "trigger = \"second-stream-read\"");
         Assert.IsFalse(
             qualityGate.Contains("Invoke-WindowsCatalogPersistenceDecision.ps1", StringComparison.Ordinal),
             "The normal quality gate must not run the opt-in M8 performance Decision.");

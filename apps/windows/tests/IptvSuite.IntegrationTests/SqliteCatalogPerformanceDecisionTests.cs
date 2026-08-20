@@ -87,6 +87,30 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             });
         }
 
+        string cancellationPlaylist = BuildPlaylist(50_000);
+        var cancellationSamples = new List<double>(Iterations);
+        for (int iteration = 0; iteration < Iterations; iteration++)
+        {
+            using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-catalog-cancel-decision");
+            string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+            var store = new M4InMemorySecretStore();
+            ContentSource source = await CreateSourceAsync(store);
+            using var cancellation = new CancellationTokenSource();
+            object loader = CreateLoader(
+                store,
+                new CancellingDecisionTransport(cancellationPlaylist, cancellation),
+                databasePath);
+            var stopwatch = Stopwatch.StartNew();
+            bool success = await InvokeLoaderAsync(loader, source, cancellation.Token);
+            stopwatch.Stop();
+            Assert.IsFalse(success);
+            Assert.IsTrue(cancellation.IsCancellationRequested);
+            Assert.AreEqual(0L, await ReadChannelCountAsync(databasePath));
+            Assert.IsFalse(File.Exists(databasePath + "-wal"));
+            Assert.IsFalse(File.Exists(databasePath + "-shm"));
+            cancellationSamples.Add(stopwatch.Elapsed.TotalMilliseconds);
+        }
+
         var evidence = new
         {
             schemaVersion = 1,
@@ -98,6 +122,13 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             sdkVersion = Environment.Version.ToString(),
             iterations = Iterations,
             scales = scaleResults,
+            cancellation = new
+            {
+                samples = Iterations,
+                trigger = "second-stream-read",
+                completionLatencyMilliseconds = Summary(cancellationSamples),
+                activeOrStagingRowsAfterCompletion = 0,
+            },
             plaintextLocatorCanaryScan = "passed",
             journalMode = "DELETE",
             note = "Component measurement; parser, normalization, protected persistence and indexes are included; UI and network are excluded.",
@@ -160,10 +191,13 @@ public sealed class SqliteCatalogPerformanceDecisionTests
             null)!;
     }
 
-    private static async Task<bool> InvokeLoaderAsync(object loader, ContentSource source)
+    private static async Task<bool> InvokeLoaderAsync(
+        object loader,
+        ContentSource source,
+        CancellationToken cancellationToken = default)
     {
         MethodInfo method = loader.GetType().GetMethod("LoadAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        object valueTask = method.Invoke(loader, [source, CancellationToken.None])!;
+        object valueTask = method.Invoke(loader, [source, cancellationToken])!;
         Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
         await task;
         object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
@@ -233,6 +267,70 @@ public sealed class SqliteCatalogPerformanceDecisionTests
                 [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyOwner()]);
             return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
         }
+    }
+
+    private sealed class CancellingDecisionTransport(
+        string playlist,
+        CancellationTokenSource cancellation) : IStreamingHttpTransport
+    {
+        public ValueTask<HttpStreamingResult> GetStreamAsync(
+            HttpTransportRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            var inner = new MemoryStream(Encoding.UTF8.GetBytes(playlist), writable: false);
+            var stream = new CancellingReadStream(inner, cancellation);
+            ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
+                BindingFlags.Instance | BindingFlags.NonPublic).Single();
+            var lease = (HttpStreamingResponseLease)constructor.Invoke(
+                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyOwner()]);
+            return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
+        }
+    }
+
+    private sealed class CancellingReadStream(Stream inner, CancellationTokenSource cancellation) : Stream
+    {
+        private int _reads;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int read = inner.Read(buffer, offset, count);
+            Signal();
+            return read;
+        }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            int read = await inner.ReadAsync(buffer, cancellationToken);
+            Signal();
+            return read;
+        }
+
+        private void Signal()
+        {
+            if (Interlocked.Increment(ref _reads) == 2)
+            {
+                cancellation.Cancel();
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class EmptyOwner : IDisposable
