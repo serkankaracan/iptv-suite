@@ -28,6 +28,19 @@ public sealed class SqliteCatalogSnapshotWriterTests
 
         await ActivateAsync(databasePath, test.Batch);
 
+        (SecretLease? lease, string failure) = await ReadLocatorAsync(
+            databasePath,
+            test.Source.Id,
+            test.ChannelId,
+            ProtectedValuePurpose.ChannelStreamLocator,
+            test.StreamReference);
+        Assert.AreEqual("None", failure);
+        Assert.IsNotNull(lease);
+        using (lease)
+        {
+            CollectionAssert.AreEqual(test.StreamPlaintext, lease.Value.ToArray());
+        }
+
         await using SqliteConnection connection = await OpenAsync(databasePath);
         Assert.AreEqual(Id(test.Snapshot.Id.Value), await ScalarStringAsync(
             connection,
@@ -41,6 +54,17 @@ public sealed class SqliteCatalogSnapshotWriterTests
         Assert.AreEqual(test.StreamPlaintext.Length, ciphertext.Length);
         string schema = await ScalarStringAsync(connection, "SELECT lower(group_concat(sql, ' ')) FROM sqlite_master WHERE sql IS NOT NULL;");
         Assert.DoesNotContain(Encoding.UTF8.GetString(test.StreamPlaintext), schema, StringComparison.Ordinal);
+
+        await ExecuteAsync(connection, "UPDATE protected_locators SET authentication_tag = zeroblob(16) WHERE purpose = $purpose;",
+            ("$purpose", (int)ProtectedValuePurpose.ChannelStreamLocator));
+        (SecretLease? tamperedLease, string tamperedFailure) = await ReadLocatorAsync(
+            databasePath,
+            test.Source.Id,
+            test.ChannelId,
+            ProtectedValuePurpose.ChannelStreamLocator,
+            test.StreamReference);
+        Assert.IsNull(tamperedLease);
+        Assert.AreEqual("AuthenticationFailed", tamperedFailure);
     }
 
     [TestMethod]
@@ -110,6 +134,32 @@ public sealed class SqliteCatalogSnapshotWriterTests
         await using SqliteConnection connection = await OpenAsync(databasePath);
         Assert.AreEqual(0L, await ScalarInt64Async(connection, "SELECT count(*) FROM sources;"));
         Assert.AreEqual(0L, await ScalarInt64Async(connection, "SELECT count(*) FROM snapshots;"));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task DeletionPendingSourceRemovesEntireCatalogIdempotently()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-source-delete");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(databasePath);
+        TestBatch test = await CreateBatchAsync(itemSuffix: "delete");
+        await ActivateAsync(databasePath, test.Batch);
+        ContentSource deletionPending = await CreateDeletionPendingSourceAsync(test.Source.Id);
+
+        await DeleteSourceAsync(databasePath, deletionPending);
+        await DeleteSourceAsync(databasePath, deletionPending);
+
+        await using SqliteConnection connection = await OpenAsync(databasePath);
+        foreach (string table in new[] { "sources", "snapshots", "snapshot_keys", "categories", "channels", "protected_locators" })
+        {
+            Assert.AreEqual(0L, await ScalarInt64Async(connection, $"SELECT count(*) FROM {table};"), table);
+        }
     }
 
     private static async Task<TestBatch> CreateBatchAsync(ContentSource? existingSource = null, string itemSuffix = "item")
@@ -189,7 +239,7 @@ public sealed class SqliteCatalogSnapshotWriterTests
         object batch = Activator.CreateInstance(
             batchType,
             [source, snapshot.Value!, new[] { category.Value! }, new[] { channel.Value! }, locators])!;
-        return new(batch, source, snapshot.Value!, stream, logo);
+        return new(batch, source, snapshot.Value!, channelId, streamCreated.Reference!, stream, logo);
     }
 
     private static async Task<ContentSource> CreateSourceAsync(M4InMemorySecretStore store)
@@ -204,6 +254,22 @@ public sealed class SqliteCatalogSnapshotWriterTests
         DomainResult<ContentSource> source = ContentSource.Create(
             draft.Value,
             ContentSourceStatus.Testing,
+            now,
+            now);
+        Assert.IsTrue(source.IsSuccess);
+        return source.Value!;
+    }
+
+    private static async Task<ContentSource> CreateDeletionPendingSourceAsync(SourceId sourceId)
+    {
+        var store = new M4InMemorySecretStore();
+        DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(store)
+            .ProtectRemotePlaylistAsync(sourceId, "Deletion pending", "https://fixtures.invalid/delete/list.m3u");
+        Assert.IsTrue(draft.IsSuccess);
+        DateTimeOffset now = new(2026, 8, 20, 13, 0, 0, TimeSpan.Zero);
+        DomainResult<ContentSource> source = ContentSource.Create(
+            draft.Value,
+            ContentSourceStatus.DeletionPending,
             now,
             now);
         Assert.IsTrue(source.IsSuccess);
@@ -247,6 +313,21 @@ public sealed class SqliteCatalogSnapshotWriterTests
         }
 
         return await command.ExecuteScalarAsync();
+    }
+
+    private static async Task ExecuteAsync(
+        SqliteConnection connection,
+        string sql,
+        params (string Name, object Value)[] parameters)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        foreach ((string name, object value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
+
+        await command.ExecuteNonQueryAsync();
     }
 
     private static string Id(Guid value) => value.ToString("N", System.Globalization.CultureInfo.InvariantCulture);
@@ -295,10 +376,53 @@ public sealed class SqliteCatalogSnapshotWriterTests
         await (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
     }
 
+    private static async Task<(SecretLease? Lease, string Failure)> ReadLocatorAsync(
+        string databasePath,
+        SourceId sourceId,
+        ChannelId channelId,
+        ProtectedValuePurpose purpose,
+        ProtectedLocatorReference reference)
+    {
+        Assembly assembly = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly;
+        Type readerType = assembly.GetType("IptvSuite.Infrastructure.SqliteCatalogLocatorReader", true)!;
+        object reader = Activator.CreateInstance(
+            readerType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [databasePath],
+            null)!;
+        MethodInfo method = readerType.GetMethod("ReadAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        object valueTask = method.Invoke(reader, [sourceId, channelId, purpose, reference, CancellationToken.None])!;
+        Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
+        await task;
+        object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
+        var lease = (SecretLease?)result.GetType().GetProperty("Lease")!.GetValue(result);
+        string failure = result.GetType().GetProperty("Failure")!.GetValue(result)!.ToString()!;
+        return (lease, failure);
+    }
+
+    private static async Task DeleteSourceAsync(string databasePath, ContentSource source)
+    {
+        Assembly assembly = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly;
+        Type deletionType = assembly.GetType("IptvSuite.Infrastructure.SqliteCatalogSourceDeletion", true)!;
+        object deletion = Activator.CreateInstance(
+            deletionType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [databasePath],
+            null)!;
+        await InvokeValueTaskAsync(
+            deletionType.GetMethod("DeleteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!,
+            deletion,
+            [source, CancellationToken.None]);
+    }
+
     private sealed record TestBatch(
         object Batch,
         ContentSource Source,
         PlaylistSnapshot Snapshot,
+        ChannelId ChannelId,
+        ProtectedLocatorReference StreamReference,
         byte[] StreamPlaintext,
         byte[] LogoPlaintext);
 }
