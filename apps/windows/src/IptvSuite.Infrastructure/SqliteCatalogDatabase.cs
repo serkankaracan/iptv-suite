@@ -239,7 +239,7 @@ internal sealed class SqliteCatalogDatabase
         CREATE TABLE categories (
             category_id TEXT NOT NULL PRIMARY KEY CHECK (length(category_id) = 32),
             snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id) ON DELETE CASCADE,
-            stable_key TEXT NOT NULL CHECK (length(stable_key) BETWEEN 1 AND 256),
+            stable_key TEXT NOT NULL CHECK (length(stable_key) BETWEEN 1 AND 512),
             display_name TEXT NOT NULL CHECK (length(display_name) BETWEEN 1 AND 256),
             sort_order INTEGER NOT NULL,
             UNIQUE(snapshot_id, stable_key)

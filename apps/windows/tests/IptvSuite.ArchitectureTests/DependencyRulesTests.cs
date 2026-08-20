@@ -1566,6 +1566,13 @@ public sealed class DependencyRulesTests
             "src",
             "IptvSuite.Infrastructure",
             "RemotePlaylistCatalogLoader.cs"));
+        string sqliteSinkSource = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "SqliteRemoteM3uImportSink.cs"));
 
         StringAssert.Contains(parserSource, "internal static class RemoteM3uPlaylistParser");
         StringAssert.Contains(parserSource, "MaximumEntries = 50_000");
@@ -1597,6 +1604,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(loaderSource, "RemoteM3uPlaylistParser.ParseToSinkAsync(");
         Assert.IsFalse(loaderSource.Contains("RemoteM3uPlaylistParser.ParseAsync(", StringComparison.Ordinal));
         Assert.IsFalse(loaderSource.Contains("public sealed class RemotePlaylistCatalogLoader", StringComparison.Ordinal));
+        StringAssert.Contains(sqliteSinkSource, "IRemoteM3uImportSink, IAsyncDisposable");
+        StringAssert.Contains(sqliteSinkSource, "BeginTransactionAsync");
+        StringAssert.Contains(sqliteSinkSource, "CommitAsync");
+        StringAssert.Contains(sqliteSinkSource, "RollbackAsync");
+        Assert.IsFalse(sqliteSinkSource.Contains("List<RemoteM3uEntry>", StringComparison.Ordinal));
     }
 
     [TestMethod]
