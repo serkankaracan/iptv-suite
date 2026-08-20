@@ -1460,6 +1460,41 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M5HttpTransportIsBoundedAndInfrastructureOwned()
+    {
+        string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
+        string applicationSource = File.ReadAllText(Path.Combine(
+            sourceRoot,
+            "IptvSuite.Application",
+            "HttpTransportContracts.cs"));
+        string infrastructureSource = File.ReadAllText(Path.Combine(
+            sourceRoot,
+            "IptvSuite.Infrastructure",
+            "BoundedHttpTransport.cs"));
+        string domainSource = string.Join(
+            '\n',
+            Directory.EnumerateFiles(
+                    Path.Combine(sourceRoot, "IptvSuite.Domain"),
+                    "*.cs",
+                    SearchOption.AllDirectories)
+                .Where(path => !IsBuildOutputPath(Path.Combine(sourceRoot, "IptvSuite.Domain"), path))
+                .Select(File.ReadAllText));
+
+        StringAssert.Contains(applicationSource, "public interface IHttpTransport");
+        StringAssert.Contains(applicationSource, "MaximumAllowedResponseBytes = 4 * 1024 * 1024");
+        StringAssert.Contains(applicationSource, "MaximumRedirects = 5");
+        StringAssert.Contains(applicationSource, "CryptographicOperations.ZeroMemory(content)");
+        StringAssert.Contains(infrastructureSource, "AllowAutoRedirect = false");
+        StringAssert.Contains(infrastructureSource, "UseCookies = false");
+        StringAssert.Contains(infrastructureSource, "HttpCompletionOption.ResponseHeadersRead");
+        StringAssert.Contains(infrastructureSource, "RedirectTargetPolicy.Evaluate");
+        StringAssert.Contains(infrastructureSource, "ArrayPool<byte>.Shared.Rent(maximumBytes)");
+        StringAssert.Contains(infrastructureSource, "Array.Clear(contentBuffer, 0, contentBuffer.Length)");
+        Assert.IsFalse(domainSource.Contains("HttpClient", StringComparison.Ordinal));
+        Assert.IsFalse(domainSource.Contains("HttpRequestMessage", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
     {
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");

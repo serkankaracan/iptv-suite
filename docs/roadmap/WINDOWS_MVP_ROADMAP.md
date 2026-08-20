@@ -252,6 +252,8 @@ Canary secret'ın kaydedilip restart sonrası okunması, her output'ta maskelenm
 
 ## M5 — HTTP/networking ve connection probe
 
+**Implementation status:** IN PROGRESS — Application `IHttpTransport` contract'ı ve Infrastructure `BoundedHttpTransport` ilk dikey dilimi implemented; yalnız HTTPS expected-origin binding, long-lived client, auto-redirect/cookie yasağı, bounded manual redirect, total timeout, cancellation ve response byte cap'i typed sonuçlarla uygulanmıştır. Local full gate architecture 17 + unit 154 + integration 47 = 218/218 testi iki deterministic koşuda geçmiştir. Transient retry/`Retry-After`, credential-bearing forwarding policy, gerçek HTTPS fixture/TLS-negatifleri ve connection-probe application operation'ı henüz açıktır.
+
 ### Amaç
 
 Provider ve playlist trafiği için tek, bounded, cancel edilebilir ve redacted transport oluşturmak.

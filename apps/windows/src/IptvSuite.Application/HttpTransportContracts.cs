@@ -1,0 +1,142 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+
+namespace IptvSuite.Application;
+
+public enum HttpTransportFailure
+{
+    InvalidRequest,
+    RedirectRejected,
+    RedirectLimitExceeded,
+    AuthenticationRejected,
+    ResourceNotFound,
+    RequestRejected,
+    ResponseTooLarge,
+    RequestTimedOut,
+    NetworkUnavailable,
+    TlsValidationFailed,
+}
+
+public enum HttpTransportRetryability
+{
+    Never,
+    BoundedTransient,
+    Manual,
+}
+
+[DebuggerDisplay("[HTTP-TRANSPORT-REQUEST]")]
+public sealed class HttpTransportRequest
+{
+    private HttpTransportRequest(Uri requestUri, SafeEndpoint expectedEndpoint, int maximumResponseBytes)
+    {
+        RequestUri = requestUri;
+        ExpectedEndpoint = expectedEndpoint;
+        MaximumResponseBytes = maximumResponseBytes;
+    }
+
+    internal Uri RequestUri { get; }
+
+    internal SafeEndpoint ExpectedEndpoint { get; }
+
+    public int MaximumResponseBytes { get; }
+
+    public static HttpTransportRequest Create(
+        Uri requestUri,
+        SafeEndpoint expectedEndpoint,
+        int maximumResponseBytes)
+    {
+        ArgumentNullException.ThrowIfNull(requestUri);
+        ArgumentNullException.ThrowIfNull(expectedEndpoint);
+        if (!requestUri.IsAbsoluteUri ||
+            !string.Equals(requestUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrEmpty(requestUri.UserInfo) ||
+            !string.IsNullOrEmpty(requestUri.Fragment) ||
+            !SafeEndpoint.TryCreate(requestUri, out SafeEndpoint? actualEndpoint) ||
+            !expectedEndpoint.Equals(actualEndpoint))
+        {
+            throw new ArgumentException(
+                "The request URI must be an absolute HTTPS URI bound to the expected endpoint.",
+                nameof(requestUri));
+        }
+
+        if (maximumResponseBytes <= 0 || maximumResponseBytes > HttpTransportLimits.MaximumAllowedResponseBytes)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumResponseBytes));
+        }
+
+        return new HttpTransportRequest(new Uri(requestUri.AbsoluteUri), expectedEndpoint, maximumResponseBytes);
+    }
+
+    public override string ToString() => "[HTTP-TRANSPORT-REQUEST]";
+}
+
+public static class HttpTransportLimits
+{
+    public const int MaximumAllowedResponseBytes = 4 * 1024 * 1024;
+    public const int MaximumRedirects = 5;
+}
+
+public sealed class HttpResponseLease : IDisposable
+{
+    private byte[] _content;
+
+    internal HttpResponseLease(byte[] content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        _content = content;
+    }
+
+    public ReadOnlyMemory<byte> Content => _content;
+
+    public void Dispose()
+    {
+        byte[] content = Interlocked.Exchange(ref _content, []);
+        if (content.Length > 0)
+        {
+            CryptographicOperations.ZeroMemory(content);
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}
+
+public sealed class HttpTransportResult
+{
+    private HttpTransportResult(
+        int statusCode,
+        HttpResponseLease? response,
+        HttpTransportFailure? failure,
+        HttpTransportRetryability retryability)
+    {
+        StatusCode = statusCode;
+        Response = response;
+        Failure = failure;
+        Retryability = retryability;
+    }
+
+    public bool IsSuccess => Response is not null;
+
+    public int StatusCode { get; }
+
+    public HttpResponseLease? Response { get; }
+
+    public HttpTransportFailure? Failure { get; }
+
+    public HttpTransportRetryability Retryability { get; }
+
+    public static HttpTransportResult Success(int statusCode, HttpResponseLease response) =>
+        new(statusCode, response, null, HttpTransportRetryability.Never);
+
+    public static HttpTransportResult Failed(
+        HttpTransportFailure failure,
+        HttpTransportRetryability retryability,
+        int statusCode = 0) =>
+        new(statusCode, null, failure, retryability);
+}
+
+public interface IHttpTransport
+{
+    ValueTask<HttpTransportResult> GetAsync(
+        HttpTransportRequest request,
+        CancellationToken cancellationToken = default);
+}
