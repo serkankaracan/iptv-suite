@@ -12,6 +12,8 @@ namespace IptvSuite.IntegrationTests;
 [SupportedOSPlatform("windows")]
 public sealed class SqliteCatalogSnapshotWriterTests
 {
+    private static readonly string[] ExpectedSingleChannelPage = ["Channel one"];
+
     [TestMethod]
     [Timeout(30_000)]
     public async Task CompleteSnapshotActivatesAtomicallyWithEncryptedLocatorRows()
@@ -27,6 +29,11 @@ public sealed class SqliteCatalogSnapshotWriterTests
         TestBatch test = await CreateBatchAsync(itemSuffix: "one");
 
         await ActivateAsync(databasePath, test.Batch);
+
+        string[] firstPage = await ReadChannelNamesAsync(databasePath, test.Source.Id, 0, 200);
+        string[] reopenedPage = await ReadChannelNamesAsync(databasePath, test.Source.Id, 0, 200);
+        CollectionAssert.AreEqual(ExpectedSingleChannelPage, firstPage);
+        CollectionAssert.AreEqual(firstPage, reopenedPage);
 
         (SecretLease? lease, string failure) = await ReadLocatorAsync(
             databasePath,
@@ -415,6 +422,30 @@ public sealed class SqliteCatalogSnapshotWriterTests
             deletionType.GetMethod("DeleteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!,
             deletion,
             [source, CancellationToken.None]);
+    }
+
+    private static async Task<string[]> ReadChannelNamesAsync(
+        string databasePath,
+        SourceId sourceId,
+        int offset,
+        int limit)
+    {
+        Assembly assembly = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly;
+        Type queryType = assembly.GetType("IptvSuite.Infrastructure.SqliteCatalogQuery", true)!;
+        object query = Activator.CreateInstance(
+            queryType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [databasePath],
+            null)!;
+        MethodInfo method = queryType.GetMethod("ReadChannelPageAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        object valueTask = method.Invoke(query, [sourceId, offset, limit, CancellationToken.None])!;
+        Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
+        await task;
+        var rows = (System.Collections.IEnumerable)task.GetType().GetProperty("Result")!.GetValue(task)!;
+        return rows.Cast<object>()
+            .Select(row => (string)row.GetType().GetProperty("Name")!.GetValue(row)!)
+            .ToArray();
     }
 
     private sealed record TestBatch(
