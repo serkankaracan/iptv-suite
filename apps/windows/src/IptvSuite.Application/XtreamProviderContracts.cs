@@ -44,3 +44,28 @@ public sealed record XtreamStreamInput(
 {
     public override string ToString() => "[XTREAM-STREAM-INPUT]";
 }
+
+[DebuggerDisplay("[XTREAM-LIVE-CATALOG]")]
+public sealed class XtreamLiveCatalog
+{
+    internal XtreamLiveCatalog(
+        XtreamProviderPage<XtreamCategoryInput> categories,
+        XtreamProviderPage<XtreamStreamInput> streams)
+    {
+        Categories = categories ?? throw new ArgumentNullException(nameof(categories));
+        Streams = streams ?? throw new ArgumentNullException(nameof(streams));
+    }
+
+    public XtreamProviderPage<XtreamCategoryInput> Categories { get; }
+
+    public XtreamProviderPage<XtreamStreamInput> Streams { get; }
+
+    public override string ToString() => "[XTREAM-LIVE-CATALOG]";
+}
+
+public interface IXtreamProviderClient
+{
+    ValueTask<DomainResult<XtreamLiveCatalog>> LoadLiveCatalogAsync(
+        ContentSource source,
+        CancellationToken cancellationToken = default);
+}

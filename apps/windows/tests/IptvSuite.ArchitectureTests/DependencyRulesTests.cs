@@ -1520,6 +1520,13 @@ public sealed class DependencyRulesTests
             "src",
             "IptvSuite.Application",
             "XtreamProviderContracts.cs"));
+        string clientSource = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "XtreamProviderClient.cs"));
 
         StringAssert.Contains(parserSource, "MaximumCategoryCount = 10_000");
         StringAssert.Contains(parserSource, "MaximumStreamCount = 50_000");
@@ -1531,6 +1538,13 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(parserSource.Contains("get_vod", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(parserSource.Contains("get_series", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(parserSource.Contains("get_epg", StringComparison.OrdinalIgnoreCase));
+        StringAssert.Contains(clientSource, "action=get_live_categories");
+        StringAssert.Contains(clientSource, "action=get_live_streams");
+        StringAssert.Contains(clientSource, "ReadCredentialsAsync");
+        StringAssert.Contains(clientSource, "ProtectedRecordOwner.ForSourceConfiguration");
+        Assert.IsFalse(clientSource.Contains("get_vod", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(clientSource.Contains("get_series", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(clientSource.Contains("get_epg", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]

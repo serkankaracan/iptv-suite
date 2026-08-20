@@ -172,6 +172,16 @@ public sealed class HttpResponseLease : IDisposable
 
     public ReadOnlyMemory<byte> Content => _content;
 
+    public static HttpResponseLease CopyFrom(ReadOnlySpan<byte> content)
+    {
+        if (content.IsEmpty || content.Length > HttpTransportLimits.MaximumAllowedResponseBytes)
+        {
+            throw new ArgumentOutOfRangeException(nameof(content));
+        }
+
+        return new HttpResponseLease(content.ToArray());
+    }
+
     public void Dispose()
     {
         byte[] content = Interlocked.Exchange(ref _content, []);
