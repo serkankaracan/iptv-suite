@@ -8,12 +8,12 @@ internal sealed class RemotePlaylistCatalogLoader
 {
     private readonly ISecretStore _secretStore;
     private readonly IStreamingHttpTransport _transport;
-    private readonly IRemoteM3uEntrySink _sink;
+    private readonly IRemoteM3uImportSink _sink;
 
     internal RemotePlaylistCatalogLoader(
         ISecretStore secretStore,
         IStreamingHttpTransport transport,
-        IRemoteM3uEntrySink sink)
+        IRemoteM3uImportSink sink)
     {
         _secretStore = secretStore ?? throw new ArgumentNullException(nameof(secretStore));
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
@@ -81,6 +81,12 @@ internal sealed class RemotePlaylistCatalogLoader
             }
 
             using HttpStreamingResponseLease responseLease = response.Response!;
+            DomainResult<bool> begun = await _sink.BeginAsync(source, cancellationToken).ConfigureAwait(false);
+            if (!begun.IsSuccess)
+            {
+                return DomainResult.Failure<RemoteM3uParseResult>(begun.Error!.Code);
+            }
+
             try
             {
                 DomainResult<RemoteM3uParseResult> parsed = await RemoteM3uPlaylistParser.ParseToSinkAsync(
@@ -88,15 +94,35 @@ internal sealed class RemotePlaylistCatalogLoader
                     responseLease.EffectiveUri,
                     _sink,
                     cancellationToken).ConfigureAwait(false);
-                return !parsed.IsSuccess &&
-                       parsed.Error!.Code == DomainErrorCode.OperationCancelled &&
-                       !cancellationToken.IsCancellationRequested
-                    ? DomainResult.Failure<RemoteM3uParseResult>(DomainErrorCode.RequestTimedOut)
-                    : parsed;
+                if (!parsed.IsSuccess || parsed.Value!.ContentKind != PlaylistContentKind.ExtendedM3uCatalog)
+                {
+                    await _sink.AbortAsync(CancellationToken.None).ConfigureAwait(false);
+                    return !parsed.IsSuccess &&
+                           parsed.Error!.Code == DomainErrorCode.OperationCancelled &&
+                           !cancellationToken.IsCancellationRequested
+                        ? DomainResult.Failure<RemoteM3uParseResult>(DomainErrorCode.RequestTimedOut)
+                        : parsed;
+                }
+
+                DomainResult<bool> completed = await _sink.CompleteAsync(parsed.Value, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!completed.IsSuccess)
+                {
+                    await _sink.AbortAsync(CancellationToken.None).ConfigureAwait(false);
+                    return DomainResult.Failure<RemoteM3uParseResult>(completed.Error!.Code);
+                }
+
+                return parsed;
             }
             catch (IOException)
             {
+                await _sink.AbortAsync(CancellationToken.None).ConfigureAwait(false);
                 return DomainResult.Failure<RemoteM3uParseResult>(DomainErrorCode.PlaylistDownloadFailed);
+            }
+            catch
+            {
+                await _sink.AbortAsync(CancellationToken.None).ConfigureAwait(false);
+                throw;
             }
         }
     }

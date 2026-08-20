@@ -66,7 +66,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
         Type type = typeof(BoundedHttpTransport).Assembly.GetType(
             "IptvSuite.Infrastructure.RemotePlaylistCatalogLoader", true)!;
         Type sinkType = typeof(BoundedHttpTransport).Assembly.GetType(
-            "IptvSuite.Infrastructure.IRemoteM3uEntrySink", true)!;
+            "IptvSuite.Infrastructure.IRemoteM3uImportSink", true)!;
         object sink = DispatchProxy.Create(sinkType, typeof(RemoteM3uSinkProxy));
         var sinkProxy = (RemoteM3uSinkProxy)sink;
         object loader = Activator.CreateInstance(
@@ -105,11 +105,21 @@ public sealed class RemotePlaylistCatalogLoaderTests
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
-            Assert.AreEqual("WriteAsync", targetMethod!.Name);
-            object entry = args![0]!;
-            FirstLocator ??= (string)entry.GetType().GetProperty(
-                "Locator", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(entry)!;
-            return new ValueTask<DomainResult<bool>>(DomainResult.Success(true));
+            switch (targetMethod!.Name)
+            {
+                case "BeginAsync":
+                case "CompleteAsync":
+                    return new ValueTask<DomainResult<bool>>(DomainResult.Success(true));
+                case "AbortAsync":
+                    return ValueTask.CompletedTask;
+                case "WriteAsync":
+                    object entry = args![0]!;
+                    FirstLocator ??= (string)entry.GetType().GetProperty(
+                        "Locator", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(entry)!;
+                    return new ValueTask<DomainResult<bool>>(DomainResult.Success(true));
+                default:
+                    throw new InvalidOperationException("Unexpected import-sink method.");
+            }
         }
     }
 

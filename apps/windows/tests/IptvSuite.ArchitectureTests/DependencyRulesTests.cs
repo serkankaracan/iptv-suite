@@ -1578,6 +1578,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(parserSource, "string.IsNullOrEmpty(uri.Fragment)");
         StringAssert.Contains(parserSource, "public override string ToString() => \"[REMOTE-M3U-ENTRY]\"");
         StringAssert.Contains(parserSource, "internal interface IRemoteM3uEntrySink");
+        StringAssert.Contains(parserSource, "internal interface IRemoteM3uImportSink : IRemoteM3uEntrySink");
         StringAssert.Contains(parserSource, "ParseToSinkAsync(");
         Assert.IsFalse(parserSource.Contains("public sealed class RemoteM3uEntry", StringComparison.Ordinal));
         Assert.IsFalse(parserSource.Contains("HttpClient", StringComparison.Ordinal));
@@ -1589,7 +1590,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(loaderSource, "GetStreamAsync(request");
         StringAssert.Contains(loaderSource, "responseLease.EffectiveUri");
         StringAssert.Contains(loaderSource, "responseLease.Content");
-        StringAssert.Contains(loaderSource, "IRemoteM3uEntrySink sink");
+        StringAssert.Contains(loaderSource, "IRemoteM3uImportSink sink");
+        StringAssert.Contains(loaderSource, "_sink.BeginAsync(source, cancellationToken)");
+        StringAssert.Contains(loaderSource, "_sink.CompleteAsync(parsed.Value, cancellationToken)");
+        StringAssert.Contains(loaderSource, "_sink.AbortAsync(CancellationToken.None)");
         StringAssert.Contains(loaderSource, "RemoteM3uPlaylistParser.ParseToSinkAsync(");
         Assert.IsFalse(loaderSource.Contains("RemoteM3uPlaylistParser.ParseAsync(", StringComparison.Ordinal));
         Assert.IsFalse(loaderSource.Contains("public sealed class RemotePlaylistCatalogLoader", StringComparison.Ordinal));

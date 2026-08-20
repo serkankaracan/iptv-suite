@@ -70,6 +70,17 @@ internal interface IRemoteM3uEntrySink
         CancellationToken cancellationToken);
 }
 
+internal interface IRemoteM3uImportSink : IRemoteM3uEntrySink
+{
+    ValueTask<DomainResult<bool>> BeginAsync(ContentSource source, CancellationToken cancellationToken);
+
+    ValueTask<DomainResult<bool>> CompleteAsync(
+        RemoteM3uParseResult parseResult,
+        CancellationToken cancellationToken);
+
+    ValueTask AbortAsync(CancellationToken cancellationToken);
+}
+
 internal static class RemoteM3uPlaylistParser
 {
     internal const int MaximumEntries = 50_000;
