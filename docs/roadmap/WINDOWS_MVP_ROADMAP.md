@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 implementation plan; M1–M5 completed, M6 sıradaki milestone
+**Durum:** Phase 0 implementation plan; M1–M6 completed, M7 sıradaki milestone
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -298,6 +298,8 @@ Sentetik endpoint'e başarılı probe ile invalid TLS, bounded timeout ve güven
 
 ## M6 — Xtream-compatible Live TV adapter
 
+**Implementation status:** COMPLETED, 2026-08-20 — local exact-SDK acceptance ve commit-bound hosted workflow PASS
+
 ### Amaç
 
 Kullanıcının yetkili Xtream-compatible source'undan yalnız MVP için gereken Live TV katalog verisini almak.
@@ -338,6 +340,16 @@ VOD, Series, EPG, catch-up, real playback, provider-specific undocumented workar
 ### Demo çıktısı
 
 Geliştirici-owned fake Xtream source'tan alınan, secretsiz Live category/channel listesi ve variant contract report.
+
+### Uygulama kanıtı
+
+- `IXtreamProviderClient` / `XtreamProviderClient`, authoritative source-configuration owner ve opaque credential reference ile `ISecretStore` lease'ini okur; lease bütün operation boyunca sahiplenilir ve başarı/hata/iptalde dispose edilerek owned plaintext buffer sıfırlanır.
+- Endpoint builder protected locator'ın exact HTTPS origin bağını yeniden doğrular, mevcut base path altındaki `player_api.php` için yalnız account, `get_live_categories` ve `get_live_streams` query'lerini üretir. Credential içeren URI/string'ler operation-local managed temsil olarak kalır; result, observation, persistence veya diagnostic yüzeyine verilmez.
+- Account parser string/number/Boolean `auth` varyantını kabul eder; 200-body auth false ve HTTP 401/403 `AuthenticationRejected` olur. 429/5xx/timeout/oversize safe typed domain hatasına eşlenir; category/stream response budget'ları sırasıyla 10k/50k item ve transport byte cap'i ile sınırlıdır.
+- Tolerant parser unknown alanları ve `direct_source` değerini tutmaz; first-wins duplicate identifier ile skipped/duplicate sayaçlarını yayımlar. Stream sonucu full URL yerine bounded `ProviderItemKey` taşır. VOD/Series/EPG production endpoint/symbol'ü yoktur.
+- Sentetik scripted provider suite success/empty/partial/malformed, body auth fail, 401/403/429/5xx/timeout/oversize, scalar/null/unknown/duplicate, exact 50k success ve limit+1 rejection senaryolarını kapsar. Local exact SDK full gate Debug/Release x64 0 warning/error; architecture 18 + unit 157 + integration 68 = **243/243 ×2**, fixture/sentinel/scanner/artifact-canary PASS'tir. `23.204` byte local summary SHA-256 `6cc5c020cd15bcc2232205d41dae0ea48234e849ad8f66c0191450a2ee98e60b` ve `commitSha=null` taşır; commit-bound hosted kanıt değildir.
+- [GitHub Actions run `32404441692`](https://github.com/serkankaracan/iptv-suite/actions/runs/32404441692), commit `d5b1161e9ff88552cbebe52524b556e7aaf976bc` için dört zorunlu Windows işinin 4/4'ünü `9m05s` içinde başarıyla tamamlamıştır. Bu commit-bound workflow sonucu M6 implementation ve regression zincirini workflow/UI düzeyinde **VERIFIED** yapar; gerçek provider/account uyumluluğu veya indirilmemiş artifact içerik/digest doğrulaması değildir.
+- Ayrıntılı sınır ve doğrulama [M6 completion evidence](../quality/M6_COMPLETION_EVIDENCE.md) belgesindedir.
 
 ## M7 — Remote M3U/M3U8 download ve incremental parser
 
