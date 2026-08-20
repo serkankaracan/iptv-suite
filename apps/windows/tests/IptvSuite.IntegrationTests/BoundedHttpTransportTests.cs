@@ -130,6 +130,51 @@ public sealed class BoundedHttpTransportTests
     }
 
     [TestMethod]
+    public async Task StreamingResponseFollowsAuthorizedRedirectWithoutBufferingBody()
+    {
+        using StubHandler handler = new((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/start")
+            {
+                HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+                redirect.Headers.Location = new Uri("/final/list.m3u", UriKind.Relative);
+                return Task.FromResult(redirect);
+            }
+
+            return Task.FromResult(Response(HttpStatusCode.OK, Encoding.UTF8.GetBytes("#EXTM3U\n")));
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateRequest("https://example.test/start", 64);
+
+        HttpStreamingResult result = await transport.GetStreamAsync(request);
+
+        Assert.IsTrue(result.IsSuccess);
+        using HttpStreamingResponseLease lease = result.Response!;
+        using var reader = new StreamReader(lease.Content, Encoding.UTF8, leaveOpen: true);
+        Assert.AreEqual("#EXTM3U", await reader.ReadLineAsync());
+    }
+
+    [TestMethod]
+    public async Task StreamingChunkedBodyEnforcesLimitDuringConsumption()
+    {
+        using StubHandler handler = new((_, _) =>
+        {
+            HttpResponseMessage response = Response(HttpStatusCode.OK, new byte[65]);
+            response.Content.Headers.ContentLength = null;
+            return Task.FromResult(response);
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateRequest("https://example.test/list", 64);
+        HttpStreamingResult result = await transport.GetStreamAsync(request);
+        Assert.IsTrue(result.IsSuccess);
+
+        using HttpStreamingResponseLease lease = result.Response!;
+        await using var destination = new MemoryStream();
+        await Assert.ThrowsAsync<IOException>(async () =>
+            await lease.Content.CopyToAsync(destination));
+    }
+
+    [TestMethod]
     public async Task ChunkedBodyBeyondLimitFailsWithoutReturningContent()
     {
         using StubHandler handler = new((_, _) =>

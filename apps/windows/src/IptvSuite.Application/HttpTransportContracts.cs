@@ -251,3 +251,65 @@ public interface IHttpTransport
         HttpTransportRequest request,
         CancellationToken cancellationToken = default);
 }
+
+public sealed class HttpStreamingResponseLease : IDisposable
+{
+    private Stream? _content;
+    private IDisposable? _owner;
+
+    internal HttpStreamingResponseLease(Stream content, Uri effectiveUri, IDisposable owner)
+    {
+        _content = content ?? throw new ArgumentNullException(nameof(content));
+        EffectiveUri = effectiveUri ?? throw new ArgumentNullException(nameof(effectiveUri));
+        _owner = owner ?? throw new ArgumentNullException(nameof(owner));
+    }
+
+    public Stream Content => _content ?? throw new ObjectDisposedException(nameof(HttpStreamingResponseLease));
+
+    internal Uri EffectiveUri { get; }
+
+    public void Dispose()
+    {
+        Stream? content = Interlocked.Exchange(ref _content, null);
+        IDisposable? owner = Interlocked.Exchange(ref _owner, null);
+        content?.Dispose();
+        owner?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+}
+
+public sealed class HttpStreamingResult
+{
+    private HttpStreamingResult(
+        int statusCode,
+        HttpStreamingResponseLease? response,
+        HttpTransportFailure? failure,
+        HttpTransportRetryability retryability)
+    {
+        StatusCode = statusCode;
+        Response = response;
+        Failure = failure;
+        Retryability = retryability;
+    }
+
+    public bool IsSuccess => Response is not null;
+    public int StatusCode { get; }
+    public HttpStreamingResponseLease? Response { get; }
+    public HttpTransportFailure? Failure { get; }
+    public HttpTransportRetryability Retryability { get; }
+
+    public static HttpStreamingResult Success(int statusCode, HttpStreamingResponseLease response) =>
+        new(statusCode, response, null, HttpTransportRetryability.Never);
+
+    public static HttpStreamingResult Failed(
+        HttpTransportFailure failure,
+        HttpTransportRetryability retryability,
+        int statusCode = 0) => new(statusCode, null, failure, retryability);
+}
+
+public interface IStreamingHttpTransport
+{
+    ValueTask<HttpStreamingResult> GetStreamAsync(
+        HttpTransportRequest request,
+        CancellationToken cancellationToken = default);
+}

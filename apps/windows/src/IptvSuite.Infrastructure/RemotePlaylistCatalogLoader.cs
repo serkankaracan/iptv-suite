@@ -7,9 +7,9 @@ namespace IptvSuite.Infrastructure;
 internal sealed class RemotePlaylistCatalogLoader
 {
     private readonly ISecretStore _secretStore;
-    private readonly IHttpTransport _transport;
+    private readonly IStreamingHttpTransport _transport;
 
-    internal RemotePlaylistCatalogLoader(ISecretStore secretStore, IHttpTransport transport)
+    internal RemotePlaylistCatalogLoader(ISecretStore secretStore, IStreamingHttpTransport transport)
     {
         _secretStore = secretStore ?? throw new ArgumentNullException(nameof(secretStore));
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
@@ -69,18 +69,29 @@ internal sealed class RemotePlaylistCatalogLoader
 
         using (request)
         {
-            HttpTransportResult response = await _transport.GetAsync(request, cancellationToken).ConfigureAwait(false);
+            HttpStreamingResult response = await _transport.GetStreamAsync(request, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccess)
             {
                 return DomainResult.Failure<RemoteM3uParseResult>(MapTransportFailure(response.Failure));
             }
 
-            using HttpResponseLease responseLease = response.Response!;
-            using Stream responseStream = responseLease.OpenReadStream();
-            return await RemoteM3uPlaylistParser.ParseAsync(
-                responseStream,
-                responseLease.EffectiveUri ?? requestUri,
-                cancellationToken).ConfigureAwait(false);
+            using HttpStreamingResponseLease responseLease = response.Response!;
+            try
+            {
+                DomainResult<RemoteM3uParseResult> parsed = await RemoteM3uPlaylistParser.ParseAsync(
+                    responseLease.Content,
+                    responseLease.EffectiveUri,
+                    cancellationToken).ConfigureAwait(false);
+                return !parsed.IsSuccess &&
+                       parsed.Error!.Code == DomainErrorCode.OperationCancelled &&
+                       !cancellationToken.IsCancellationRequested
+                    ? DomainResult.Failure<RemoteM3uParseResult>(DomainErrorCode.RequestTimedOut)
+                    : parsed;
+            }
+            catch (IOException)
+            {
+                return DomainResult.Failure<RemoteM3uParseResult>(DomainErrorCode.PlaylistDownloadFailed);
+            }
         }
     }
 

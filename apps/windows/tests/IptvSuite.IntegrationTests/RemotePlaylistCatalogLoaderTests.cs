@@ -21,7 +21,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
 
         Assert.IsTrue(result.IsSuccess);
         Assert.AreEqual(1, result.EntryCount);
-        Assert.AreEqual("https://fixtures.invalid/catalog/stream/news.ts", result.FirstLocator);
+        Assert.AreEqual("https://fixtures.invalid/catalog/final/stream/news.ts", result.FirstLocator);
     }
 
     [TestMethod]
@@ -29,7 +29,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
     {
         var store = new M4InMemorySecretStore();
         ContentSource source = await CreateSourceAsync(store);
-        var transport = new SingleResponseTransport(HttpTransportResult.Failed(
+        var transport = new SingleResponseTransport(HttpStreamingResult.Failed(
             HttpTransportFailure.TlsValidationFailed,
             HttpTransportRetryability.Never));
 
@@ -60,7 +60,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
 
     private static async Task<LoaderSnapshot> InvokeLoaderAsync(
         ISecretStore store,
-        IHttpTransport transport,
+        IStreamingHttpTransport transport,
         ContentSource source)
     {
         Type type = typeof(BoundedHttpTransport).Assembly.GetType(
@@ -98,25 +98,34 @@ public sealed class RemotePlaylistCatalogLoaderTests
         int EntryCount,
         string? FirstLocator);
 
-    private sealed class SingleResponseTransport : IHttpTransport
+    private sealed class SingleResponseTransport : IStreamingHttpTransport
     {
-        private readonly HttpTransportResult _result;
+        private readonly string? _body;
+        private readonly HttpStreamingResult? _failure;
 
         internal SingleResponseTransport(string body)
-            : this(HttpTransportResult.Success(200, HttpResponseLease.CopyFrom(Encoding.UTF8.GetBytes(body))))
         {
+            _body = body;
         }
 
-        internal SingleResponseTransport(HttpTransportResult result) => _result = result;
+        internal SingleResponseTransport(HttpStreamingResult failure) => _failure = failure;
 
         internal string? RequestText { get; private set; }
 
-        public ValueTask<HttpTransportResult> GetAsync(
+        public ValueTask<HttpStreamingResult> GetStreamAsync(
             HttpTransportRequest request,
             CancellationToken cancellationToken = default)
         {
             RequestText = request.ToString();
-            return ValueTask.FromResult(_result);
+            if (_failure is not null) return ValueTask.FromResult(_failure);
+            var stream = new MemoryStream(Encoding.UTF8.GetBytes(_body!), writable: false);
+            ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
+                BindingFlags.Instance | BindingFlags.NonPublic).Single();
+            var lease = (HttpStreamingResponseLease)constructor.Invoke(
+                [stream, new Uri("https://fixtures.invalid/catalog/final/list.m3u"), new EmptyOwner()]);
+            return ValueTask.FromResult(HttpStreamingResult.Success(200, lease));
         }
+
+        private sealed class EmptyOwner : IDisposable { public void Dispose() { } }
     }
 }

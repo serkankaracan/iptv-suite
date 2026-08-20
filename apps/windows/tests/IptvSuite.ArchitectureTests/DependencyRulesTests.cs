@@ -1582,8 +1582,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(loaderSource, "ProtectedValuePurpose.RemotePlaylistLocator");
         StringAssert.Contains(loaderSource, "ProtectedRecordOwner.ForSourceConfiguration");
         StringAssert.Contains(loaderSource, "ProtectedSourcePayloadDecoder.TryDecodeRemotePlaylist");
-        StringAssert.Contains(loaderSource, "responseLease.EffectiveUri ?? requestUri");
-        StringAssert.Contains(loaderSource, "responseLease.OpenReadStream()");
+        StringAssert.Contains(loaderSource, "IStreamingHttpTransport");
+        StringAssert.Contains(loaderSource, "GetStreamAsync(request");
+        StringAssert.Contains(loaderSource, "responseLease.EffectiveUri");
+        StringAssert.Contains(loaderSource, "responseLease.Content");
         Assert.IsFalse(loaderSource.Contains("public sealed class RemotePlaylistCatalogLoader", StringComparison.Ordinal));
     }
 
