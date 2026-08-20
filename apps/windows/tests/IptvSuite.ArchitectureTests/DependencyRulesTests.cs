@@ -1484,10 +1484,12 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(applicationSource, "MaximumAllowedResponseBytes = 4 * 1024 * 1024");
         StringAssert.Contains(applicationSource, "MaximumRedirects = 5");
         StringAssert.Contains(applicationSource, "CryptographicOperations.ZeroMemory(content)");
+        StringAssert.Contains(applicationSource, "CryptographicOperations.ZeroMemory(authorizationValue)");
         StringAssert.Contains(infrastructureSource, "AllowAutoRedirect = false");
         StringAssert.Contains(infrastructureSource, "UseCookies = false");
         StringAssert.Contains(infrastructureSource, "HttpCompletionOption.ResponseHeadersRead");
         StringAssert.Contains(infrastructureSource, "RedirectTargetPolicy.Evaluate");
+        StringAssert.Contains(infrastructureSource, "OriginRelation == RedirectOriginRelation.CrossOrigin");
         StringAssert.Contains(infrastructureSource, "ArrayPool<byte>.Shared.Rent(maximumBytes)");
         StringAssert.Contains(infrastructureSource, "Array.Clear(contentBuffer, 0, contentBuffer.Length)");
         Assert.IsFalse(domainSource.Contains("HttpClient", StringComparison.Ordinal));

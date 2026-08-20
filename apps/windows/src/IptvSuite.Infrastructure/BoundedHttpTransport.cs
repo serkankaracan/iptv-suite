@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Authentication;
+using System.Text;
 using IptvSuite.Application;
 using IptvSuite.Domain;
 
@@ -10,8 +11,10 @@ namespace IptvSuite.Infrastructure;
 public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
 {
     private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan MaximumRetryAfter = TimeSpan.FromSeconds(2);
     private readonly HttpClient _client;
     private readonly TimeSpan _requestTimeout;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private bool _disposed;
 
     public BoundedHttpTransport()
@@ -20,8 +23,17 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
     }
 
     internal BoundedHttpTransport(HttpMessageHandler handler, TimeSpan requestTimeout)
+        : this(handler, requestTimeout, Task.Delay)
+    {
+    }
+
+    internal BoundedHttpTransport(
+        HttpMessageHandler handler,
+        TimeSpan requestTimeout,
+        Func<TimeSpan, CancellationToken, Task> delayAsync)
     {
         ArgumentNullException.ThrowIfNull(handler);
+        ArgumentNullException.ThrowIfNull(delayAsync);
         if (requestTimeout <= TimeSpan.Zero || requestTimeout > TimeSpan.FromMinutes(2))
         {
             throw new ArgumentOutOfRangeException(nameof(requestTimeout));
@@ -32,6 +44,7 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
             Timeout = Timeout.InfiniteTimeSpan,
         };
         _requestTimeout = requestTimeout;
+        _delayAsync = delayAsync;
     }
 
     public async ValueTask<HttpTransportResult> GetAsync(
@@ -48,10 +61,18 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
 
         Uri currentUri = request.RequestUri;
         SafeEndpoint currentEndpoint = request.ExpectedEndpoint;
-        for (int redirectCount = 0; ; redirectCount++)
+        int redirectCount = 0;
+        int retryCount = 0;
+        while (true)
         {
             using HttpRequestMessage message = new(HttpMethod.Get, currentUri);
             message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+            if (request.HasAuthorization)
+            {
+                message.Headers.TryAddWithoutValidation(
+                    "Authorization",
+                    Encoding.ASCII.GetString(request.AuthorizationValue));
+            }
 
             HttpResponseMessage? response = null;
             try
@@ -89,14 +110,43 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
                             (int)response.StatusCode);
                     }
 
+                    if (request.HasAuthorization &&
+                        assessment.Value!.OriginRelation == RedirectOriginRelation.CrossOrigin)
+                    {
+                        return HttpTransportResult.Failed(
+                            HttpTransportFailure.RedirectRejected,
+                            HttpTransportRetryability.Never,
+                            (int)response.StatusCode);
+                    }
+
                     currentUri = redirectUri;
                     currentEndpoint = assessment.Value!.TargetEndpoint;
+                    redirectCount++;
                     continue;
                 }
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return ClassifyStatus(response.StatusCode);
+                    HttpTransportResult statusResult = ClassifyStatus(response.StatusCode);
+                    if (statusResult.Retryability == HttpTransportRetryability.BoundedTransient && retryCount < 2)
+                    {
+                        retryCount++;
+                        if (!await DelayBeforeRetryAsync(
+                            GetRetryDelay(response.Headers.RetryAfter, retryCount),
+                            cancellationToken,
+                            linkedSource.Token).ConfigureAwait(false))
+                        {
+                            return HttpTransportResult.Failed(
+                                HttpTransportFailure.RequestTimedOut,
+                                HttpTransportRetryability.BoundedTransient);
+                        }
+                        currentUri = request.RequestUri;
+                        currentEndpoint = request.ExpectedEndpoint;
+                        redirectCount = 0;
+                        continue;
+                    }
+
+                    return statusResult;
                 }
 
                 long? declaredLength = response.Content.Headers.ContentLength;
@@ -135,6 +185,24 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
             }
             catch (HttpRequestException)
             {
+                if (retryCount < 2)
+                {
+                    retryCount++;
+                    if (!await DelayBeforeRetryAsync(
+                        GetRetryDelay(retryAfter: null, retryCount),
+                        cancellationToken,
+                        linkedSource.Token).ConfigureAwait(false))
+                    {
+                        return HttpTransportResult.Failed(
+                            HttpTransportFailure.RequestTimedOut,
+                            HttpTransportRetryability.BoundedTransient);
+                    }
+                    currentUri = request.RequestUri;
+                    currentEndpoint = request.ExpectedEndpoint;
+                    redirectCount = 0;
+                    continue;
+                }
+
                 return HttpTransportResult.Failed(
                     HttpTransportFailure.NetworkUnavailable,
                     HttpTransportRetryability.Manual);
@@ -218,6 +286,40 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
             (int)statusCode),
     };
 
+    private static TimeSpan GetRetryDelay(RetryConditionHeaderValue? retryAfter, int retryCount)
+    {
+        int baseMilliseconds = retryCount == 1 ? 100 : 300;
+        TimeSpan fallback = TimeSpan.FromMilliseconds(baseMilliseconds + Random.Shared.Next(0, 101));
+        TimeSpan? requested = retryAfter?.Delta;
+        if (requested is null && retryAfter?.Date is DateTimeOffset date)
+        {
+            requested = date - DateTimeOffset.UtcNow;
+        }
+
+        if (requested is null || requested <= TimeSpan.Zero)
+        {
+            return fallback;
+        }
+
+        return requested > MaximumRetryAfter ? MaximumRetryAfter : requested.Value;
+    }
+
+    private async Task<bool> DelayBeforeRetryAsync(
+        TimeSpan delay,
+        CancellationToken callerCancellationToken,
+        CancellationToken linkedCancellationToken)
+    {
+        try
+        {
+            await _delayAsync(delay, linkedCancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) when (!callerCancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
     private static async Task<byte[]> ReadBoundedAsync(
         HttpContent content,
         int maximumBytes,
@@ -257,6 +359,11 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
 
     private static bool IsTlsFailure(HttpRequestException exception)
     {
+        if (exception.HttpRequestError == HttpRequestError.SecureConnectionError)
+        {
+            return true;
+        }
+
         Exception? current = exception;
         for (int depth = 0; current is not null && depth < 8; depth++)
         {

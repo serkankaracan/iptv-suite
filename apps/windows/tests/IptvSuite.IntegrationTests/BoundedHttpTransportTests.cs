@@ -5,6 +5,7 @@ using System.Text;
 using IptvSuite.Application;
 using IptvSuite.Domain;
 using IptvSuite.Infrastructure;
+using IptvSuite.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace IptvSuite.IntegrationTests;
@@ -12,6 +13,10 @@ namespace IptvSuite.IntegrationTests;
 [TestClass]
 public sealed class BoundedHttpTransportTests
 {
+    private static readonly string[] SingleAuthorization = ["Bearer synthetic-boundary-marker"];
+    private static readonly string[] RedirectedAuthorization =
+        ["Bearer synthetic-boundary-marker", "Bearer synthetic-boundary-marker"];
+
     [TestMethod]
     public async Task SuccessReturnsBoundedOwnedContentAndLeaseZeroesOnDispose()
     {
@@ -74,6 +79,57 @@ public sealed class BoundedHttpTransportTests
     }
 
     [TestMethod]
+    public async Task CredentialBearingCrossOriginRedirectIsRejectedWithoutForwarding()
+    {
+        List<string?> authorizationValues = [];
+        using StubHandler handler = new((request, _) =>
+        {
+            authorizationValues.Add(request.Headers.Authorization?.ToString());
+            HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+            redirect.Headers.Location = new Uri("https://other.example/final");
+            return Task.FromResult(redirect);
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateAuthorizedRequest(
+            "https://example.test/start",
+            "Bearer synthetic-boundary-marker"u8);
+
+        HttpTransportResult result = await transport.GetAsync(request);
+
+        Assert.AreEqual(HttpTransportFailure.RedirectRejected, result.Failure);
+        Assert.HasCount(1, handler.RequestUris);
+        CollectionAssert.AreEqual(SingleAuthorization, authorizationValues);
+    }
+
+    [TestMethod]
+    public async Task CredentialBearingSameOriginRedirectPreservesAuthorization()
+    {
+        List<string?> authorizationValues = [];
+        using StubHandler handler = new((request, _) =>
+        {
+            authorizationValues.Add(request.Headers.Authorization?.ToString());
+            if (request.RequestUri!.AbsolutePath == "/start")
+            {
+                HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+                redirect.Headers.Location = new Uri("/final", UriKind.Relative);
+                return Task.FromResult(redirect);
+            }
+
+            return Task.FromResult(Response(HttpStatusCode.OK, [9]));
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateAuthorizedRequest(
+            "https://example.test/start",
+            "Bearer synthetic-boundary-marker"u8);
+
+        HttpTransportResult result = await transport.GetAsync(request);
+
+        Assert.IsTrue(result.IsSuccess);
+        CollectionAssert.AreEqual(RedirectedAuthorization, authorizationValues);
+        result.Response!.Dispose();
+    }
+
+    [TestMethod]
     public async Task ChunkedBodyBeyondLimitFailsWithoutReturningContent()
     {
         using StubHandler handler = new((_, _) =>
@@ -124,6 +180,40 @@ public sealed class BoundedHttpTransportTests
     }
 
     [TestMethod]
+    public async Task InternalTimeoutDuringRetryDelayReturnsTypedTransientFailure()
+    {
+        using StubHandler handler = new((_, _) =>
+            Task.FromResult(Response(HttpStatusCode.ServiceUnavailable, [])));
+        using BoundedHttpTransport transport = CreateTransport(
+            handler,
+            TimeSpan.FromMilliseconds(20),
+            (_, cancellationToken) => Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken));
+
+        HttpTransportResult result = await transport.GetAsync(CreateRequest("https://example.test/list", 64));
+
+        Assert.AreEqual(HttpTransportFailure.RequestTimedOut, result.Failure);
+        Assert.AreEqual(HttpTransportRetryability.BoundedTransient, result.Retryability);
+        Assert.HasCount(1, handler.RequestUris);
+    }
+
+    [TestMethod]
+    public async Task ProductionTlsValidationRejectsSyntheticUntrustedCertificate()
+    {
+        await using LocalHttpFixtureServer fixture = await LocalHttpFixtureServer.StartHttpsAsync(
+            new Dictionary<string, FixtureHttpResponse>
+            {
+                ["/list"] = new(200, "application/octet-stream", new byte[] { 1 }),
+            });
+        using BoundedHttpTransport transport = new();
+
+        HttpTransportResult result = await transport.GetAsync(
+            CreateRequest(new Uri(fixture.BaseAddress, "/list").AbsoluteUri, 64));
+
+        Assert.AreEqual(HttpTransportFailure.TlsValidationFailed, result.Failure);
+        Assert.IsNull(result.Response);
+    }
+
+    [TestMethod]
     public async Task RedirectCountIsBounded()
     {
         using StubHandler handler = new((_, _) =>
@@ -138,6 +228,42 @@ public sealed class BoundedHttpTransportTests
 
         Assert.AreEqual(HttpTransportFailure.RedirectLimitExceeded, result.Failure);
         Assert.HasCount(HttpTransportLimits.MaximumRedirects + 1, handler.RequestUris);
+    }
+
+    [TestMethod]
+    public async Task TransientStatusRetriesWithinBoundAndHonorsRetryAfterCap()
+    {
+        int responseCount = 0;
+        List<TimeSpan> delays = [];
+        using StubHandler handler = new((_, _) =>
+        {
+            responseCount++;
+            if (responseCount < 3)
+            {
+                HttpResponseMessage transient = Response(HttpStatusCode.TooManyRequests, []);
+                transient.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromMinutes(5));
+                return Task.FromResult(transient);
+            }
+
+            return Task.FromResult(Response(HttpStatusCode.OK, [7]));
+        });
+        using BoundedHttpTransport transport = CreateTransport(
+            handler,
+            TimeSpan.FromSeconds(1),
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+
+        HttpTransportResult result = await transport.GetAsync(CreateRequest("https://example.test/list", 64));
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(3, handler.RequestUris);
+        CollectionAssert.AreEqual(
+            new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2) },
+            delays);
+        result.Response!.Dispose();
     }
 
     [TestMethod]
@@ -171,6 +297,20 @@ public sealed class BoundedHttpTransportTests
         return HttpTransportRequest.Create(uri, prepared.Value!.SafeEndpoint, maximumBytes);
     }
 
+    private static HttpTransportRequest CreateAuthorizedRequest(
+        string locator,
+        ReadOnlySpan<byte> authorizationValue)
+    {
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
+            SourceConfigurationValidator.PrepareRemotePlaylist("Synthetic", locator);
+        Assert.IsTrue(prepared.IsSuccess);
+        return HttpTransportRequest.CreateWithAuthorization(
+            new Uri(locator),
+            prepared.Value!.SafeEndpoint,
+            64,
+            authorizationValue);
+    }
+
     private static BoundedHttpTransport CreateTransport(HttpMessageHandler handler, TimeSpan timeout)
     {
         ConstructorInfo constructor = typeof(BoundedHttpTransport).GetConstructor(
@@ -179,6 +319,19 @@ public sealed class BoundedHttpTransportTests
             [typeof(HttpMessageHandler), typeof(TimeSpan)],
             modifiers: null) ?? throw new InvalidOperationException("The test seam constructor is unavailable.");
         return (BoundedHttpTransport)constructor.Invoke([handler, timeout]);
+    }
+
+    private static BoundedHttpTransport CreateTransport(
+        HttpMessageHandler handler,
+        TimeSpan timeout,
+        Func<TimeSpan, CancellationToken, Task> delayAsync)
+    {
+        ConstructorInfo constructor = typeof(BoundedHttpTransport).GetConstructor(
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            [typeof(HttpMessageHandler), typeof(TimeSpan), typeof(Func<TimeSpan, CancellationToken, Task>)],
+            modifiers: null) ?? throw new InvalidOperationException("The retry test seam constructor is unavailable.");
+        return (BoundedHttpTransport)constructor.Invoke([handler, timeout, delayAsync]);
     }
 
     private static HttpResponseMessage Response(HttpStatusCode statusCode, byte[] body) => new(statusCode)

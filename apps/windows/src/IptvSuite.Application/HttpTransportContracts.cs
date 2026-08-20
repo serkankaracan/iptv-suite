@@ -25,13 +25,21 @@ public enum HttpTransportRetryability
 }
 
 [DebuggerDisplay("[HTTP-TRANSPORT-REQUEST]")]
-public sealed class HttpTransportRequest
+public sealed class HttpTransportRequest : IDisposable
 {
-    private HttpTransportRequest(Uri requestUri, SafeEndpoint expectedEndpoint, int maximumResponseBytes)
+    private byte[] _authorizationValue;
+    private bool _disposed;
+
+    private HttpTransportRequest(
+        Uri requestUri,
+        SafeEndpoint expectedEndpoint,
+        int maximumResponseBytes,
+        byte[] authorizationValue)
     {
         RequestUri = requestUri;
         ExpectedEndpoint = expectedEndpoint;
         MaximumResponseBytes = maximumResponseBytes;
+        _authorizationValue = authorizationValue;
     }
 
     internal Uri RequestUri { get; }
@@ -39,6 +47,24 @@ public sealed class HttpTransportRequest
     internal SafeEndpoint ExpectedEndpoint { get; }
 
     public int MaximumResponseBytes { get; }
+
+    internal bool HasAuthorization
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _authorizationValue.Length > 0;
+        }
+    }
+
+    internal ReadOnlySpan<byte> AuthorizationValue
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _authorizationValue;
+        }
+    }
 
     public static HttpTransportRequest Create(
         Uri requestUri,
@@ -64,10 +90,55 @@ public sealed class HttpTransportRequest
             throw new ArgumentOutOfRangeException(nameof(maximumResponseBytes));
         }
 
-        return new HttpTransportRequest(new Uri(requestUri.AbsoluteUri), expectedEndpoint, maximumResponseBytes);
+        return new HttpTransportRequest(new Uri(requestUri.AbsoluteUri), expectedEndpoint, maximumResponseBytes, []);
+    }
+
+    public static HttpTransportRequest CreateWithAuthorization(
+        Uri requestUri,
+        SafeEndpoint expectedEndpoint,
+        int maximumResponseBytes,
+        ReadOnlySpan<byte> authorizationValue)
+    {
+        HttpTransportRequest request = Create(requestUri, expectedEndpoint, maximumResponseBytes);
+        if (authorizationValue.IsEmpty || authorizationValue.Length > 4096)
+        {
+            request.Dispose();
+            throw new ArgumentOutOfRangeException(nameof(authorizationValue));
+        }
+
+        foreach (byte value in authorizationValue)
+        {
+            if (value is < 0x20 or > 0x7e)
+            {
+                request.Dispose();
+                throw new ArgumentException(
+                    "The authorization value must contain only visible ASCII bytes.",
+                    nameof(authorizationValue));
+            }
+        }
+
+        request._authorizationValue = authorizationValue.ToArray();
+        return request;
     }
 
     public override string ToString() => "[HTTP-TRANSPORT-REQUEST]";
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        byte[] authorizationValue = Interlocked.Exchange(ref _authorizationValue, []);
+        if (authorizationValue.Length > 0)
+        {
+            CryptographicOperations.ZeroMemory(authorizationValue);
+        }
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
+    }
 }
 
 public static class HttpTransportLimits
