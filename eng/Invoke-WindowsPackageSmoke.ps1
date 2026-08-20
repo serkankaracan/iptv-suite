@@ -155,6 +155,8 @@ $expectedApplicationId = "App"
 $testCanaryMarker = "IPTVSUITE_TEST_ONLY_CANARY_V1"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"
+$catalogUiHarnessProjectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.CatalogUiAcceptanceHarness\IptvSuite.CatalogUiAcceptanceHarness.csproj"
+$catalogUiHarnessAssemblyPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.CatalogUiAcceptanceHarness\bin\x64\$Configuration\net10.0\IptvSuite.CatalogUiAcceptanceHarness.dll"
 $sourceManifestPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\Package.appxmanifest"
 $artifactRoot = Join-Path $repositoryRoot ".artifacts\msix-smoke"
 $runId = [Guid]::NewGuid().ToString("N")
@@ -174,6 +176,10 @@ $successMessage = $null
 $protectedStoreDirectoryInitialized = $false
 $catalogUiaContractVerified = $false
 $catalogKeyboardFocusOrderVerified = $false
+$catalog50kSeedVerified = $false
+$catalogRealizedContainerBoundVerified = $false
+$catalogRealizedContainerCount = 0
+$catalogInputResponseP95Milliseconds = 0.0
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
     AppxBundle                    = "Never"
@@ -550,6 +556,10 @@ function Assert-ProductionPackagePayload {
             if ($entry.Name -match '^(?i:IptvSuite\.CatalogCrashHarness(?:\..*)?)$') {
                 throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
             }
+
+            if ($entry.Name -match '^(?i:IptvSuite\.CatalogUiAcceptanceHarness(?:\..*)?)$') {
+                throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
+            }
         }
 
         $payloadFiles = @($payloadEntries | Where-Object { -not $_.PSIsContainer })
@@ -740,6 +750,35 @@ function Get-RequiredAutomationElement {
     return $element
 }
 
+function Get-AutomationElementById {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Root,
+
+        [Parameter(Mandatory)]
+        [string]$AutomationId
+    )
+
+    $condition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $AutomationId)
+    return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+}
+
+function Get-Percentile95 {
+    param(
+        [Parameter(Mandatory)]
+        [double[]]$Samples
+    )
+
+    if ($Samples.Count -eq 0) {
+        throw "At least one UI response sample is required."
+    }
+    $ordered = @($Samples | Sort-Object)
+    $index = [Math]::Ceiling(0.95 * $ordered.Count) - 1
+    return [double]$ordered[[Math]::Max(0, [int]$index)]
+}
+
 function Assert-FocusedAutomationElement {
     param(
         [Parameter(Mandatory)]
@@ -837,6 +876,12 @@ try {
         throw "Signed MSIX build failed."
     }
 
+    & $DotNetPath build $catalogUiHarnessProjectPath -c $Configuration -p:Platform=x64 `
+        --no-restore --nologo -m:1 -nr:false
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $catalogUiHarnessAssemblyPath -PathType Leaf)) {
+        throw "The catalog UI acceptance harness build failed."
+    }
+
     $packages = @(
         Get-ChildItem -Path $packageOutput -Filter "IptvSuite.Windows_*.msix" -Recurse -File |
             Where-Object { $_.FullName -notmatch "[\\/]Dependencies[\\/]" }
@@ -881,6 +926,15 @@ try {
     if ($installedPackage.Architecture -ne "X64") {
         throw "Expected an x64 package, received $($installedPackage.Architecture)."
     }
+
+    $packageFamilyName = $installedPackage.PackageFamilyName
+    $catalogDatabasePath = Join-Path $env:LOCALAPPDATA `
+        "Packages\$packageFamilyName\LocalCache\Catalog\v2\catalog.db"
+    & $DotNetPath $catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $catalogDatabasePath -PathType Leaf)) {
+        throw "The disposable 50k packaged catalog seed failed."
+    }
+    $catalog50kSeedVerified = $true
 
     $installedManifest = $installedPackage | Get-AppxPackageManifest
     [xml]$installedManifestXml = $installedManifest.Package.OuterXml
@@ -949,11 +1003,70 @@ try {
         ([System.Windows.Automation.ControlType]::ComboBox) "Playlist source"
     $categoryElement = Get-RequiredAutomationElement $automationRoot "CatalogCategorySelector" `
         ([System.Windows.Automation.ControlType]::ComboBox) "Channel category"
-    $null = Get-RequiredAutomationElement $automationRoot "CatalogSearchBox" `
+    $searchElement = Get-RequiredAutomationElement $automationRoot "CatalogSearchBox" `
         ([System.Windows.Automation.ControlType]::Group) "Search channels"
-    $null = Get-RequiredAutomationElement $automationRoot "CatalogChannelList" `
+    $channelListElement = Get-RequiredAutomationElement $automationRoot "CatalogChannelList" `
         ([System.Windows.Automation.ControlType]::List) "Channels"
+    $statusElement = Get-AutomationElementById $automationRoot "CatalogStatusText"
+    if ($null -eq $statusElement) {
+        throw "The packaged catalog status automation element is missing."
+    }
     $catalogUiaContractVerified = $true
+
+    $expectedCatalogStatus = "Showing 1$([char]0x2013)200 of 50000 channels."
+    $catalogReadyDeadline = (Get-Date).AddSeconds(30)
+    while ($statusElement.Current.Name -ne $expectedCatalogStatus -and
+        (Get-Date) -lt $catalogReadyDeadline) {
+        Start-Sleep -Milliseconds 100
+    }
+    if ($statusElement.Current.Name -ne $expectedCatalogStatus) {
+        throw "The packaged application did not expose the seeded 50k catalog page."
+    }
+
+    $listItemCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    $realizedDeadline = (Get-Date).AddSeconds(10)
+    do {
+        $realizedItems = $channelListElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $listItemCondition)
+        $catalogRealizedContainerCount = $realizedItems.Count
+        if ($catalogRealizedContainerCount -gt 0) { break }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $realizedDeadline)
+    if ($catalogRealizedContainerCount -lt 1 -or $catalogRealizedContainerCount -gt 300) {
+        throw "The packaged catalog realized-container bound failed."
+    }
+    $catalogRealizedContainerBoundVerified = $true
+
+    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit)
+    $searchEdit = $searchElement.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $editCondition)
+    $valuePatternObject = $null
+    if ($null -eq $searchEdit -or
+        -not $searchEdit.TryGetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern,
+            [ref]$valuePatternObject)) {
+        throw "The packaged catalog search value pattern is unavailable."
+    }
+    $valuePattern = [System.Windows.Automation.ValuePattern]$valuePatternObject
+    $inputSamples = [System.Collections.Generic.List[double]]::new()
+    for ($sample = 0; $sample -lt 20; $sample++) {
+        $value = if (($sample % 2) -eq 0) { "Synthetic" } else { "channel" }
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        $valuePattern.SetValue($value)
+        $watch.Stop()
+        $inputSamples.Add($watch.Elapsed.TotalMilliseconds)
+    }
+    $valuePattern.SetValue("")
+    $catalogInputResponseP95Milliseconds = Get-Percentile95 $inputSamples.ToArray()
+    if ($catalogInputResponseP95Milliseconds -gt 100.0) {
+        throw "The packaged catalog input response budget failed."
+    }
 
     $focusReadyDeadline = (Get-Date).AddSeconds(15)
     while ((-not $sourceElement.Current.IsEnabled -or -not $categoryElement.Current.IsEnabled) -and
@@ -980,7 +1093,6 @@ try {
         throw ("The packaged application exited during the launch stability interval (exit code 0x{0:X8})." -f [int]$launchedProcess.ExitCode)
     }
 
-    $packageFamilyName = $installedPackage.PackageFamilyName
     $protectedStoreDirectoryExists = $false
     $protectedStoreAttributes = [System.IO.FileAttributes]0
     try {
@@ -1056,6 +1168,10 @@ try {
         ProtectedStoreDirectoryInitialized = $protectedStoreDirectoryInitialized
         CatalogUiaContractVerified = $catalogUiaContractVerified
         CatalogKeyboardFocusOrderVerified = $catalogKeyboardFocusOrderVerified
+        Catalog50kSeedVerified = $catalog50kSeedVerified
+        CatalogRealizedContainerBoundVerified = $catalogRealizedContainerBoundVerified
+        CatalogRealizedContainerCount = $catalogRealizedContainerCount
+        CatalogInputResponseP95Milliseconds = [Math]::Round($catalogInputResponseP95Milliseconds, 3)
         NormalClose       = $true
         PackageRemoved    = $true
     }

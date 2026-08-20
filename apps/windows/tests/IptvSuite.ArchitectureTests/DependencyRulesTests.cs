@@ -75,6 +75,12 @@ public sealed class DependencyRulesTests
             [],
             []),
         new(
+            "IptvSuite.CatalogUiAcceptanceHarness",
+            "apps/windows/tests/IptvSuite.CatalogUiAcceptanceHarness/IptvSuite.CatalogUiAcceptanceHarness.csproj",
+            ["IptvSuite.Application", "IptvSuite.Infrastructure"],
+            [],
+            ["Microsoft.Data.Sqlite"]),
+        new(
             "IptvSuite.SecretStoreSpike",
             "apps/windows/tests/IptvSuite.SecretStoreSpike/IptvSuite.SecretStoreSpike.csproj",
             ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
@@ -137,6 +143,7 @@ public sealed class DependencyRulesTests
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PackageLifecycleHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.DpapiUserBoundaryHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.CatalogCrashHarness");
+        AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.CatalogUiAcceptanceHarness");
     }
 
     [TestMethod]
@@ -269,6 +276,7 @@ public sealed class DependencyRulesTests
         const string lifecycleHarnessProjectGuid = "{9F66D0D7-C578-4A79-BF47-4D5D8E0FB460}";
         const string dpapiUserBoundaryHarnessProjectGuid = "{9E610CDF-2461-4D7B-A289-84B41BB4F55A}";
         const string catalogCrashHarnessProjectGuid = "{A1C743E8-9472-45B9-9A34-8B73FCA4D120}";
+        const string catalogUiAcceptanceHarnessProjectGuid = "{B70AA8A6-304A-4922-8365-EAA421A02726}";
         const string testsFolderGuid = "{0AB3BF05-4346-4AA6-1389-037BE0695223}";
 
         StringAssert.Contains(
@@ -280,6 +288,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             solution,
             $"{catalogCrashHarnessProjectGuid} = {testsFolderGuid}");
+        StringAssert.Contains(
+            solution,
+            $"{catalogUiAcceptanceHarnessProjectGuid} = {testsFolderGuid}");
 
         foreach (string configuration in new[] { "Debug", "Release" })
         {
@@ -298,6 +309,9 @@ public sealed class DependencyRulesTests
             StringAssert.Contains(
                 solution,
                 $"{catalogCrashHarnessProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
+            StringAssert.Contains(
+                solution,
+                $"{catalogUiAcceptanceHarnessProjectGuid}.{configuration}|x64.Build.0 = {configuration}|x64");
             Assert.IsFalse(
                 solution.Contains(
                     $"{protectedCatalogSpikeProjectGuid}.{configuration}|x64.Deploy.0",
@@ -318,6 +332,11 @@ public sealed class DependencyRulesTests
                     $"{catalogCrashHarnessProjectGuid}.{configuration}|x64.Deploy.0",
                     StringComparison.Ordinal),
                 "The test-only catalog crash harness must never deploy as part of a solution build.");
+            Assert.IsFalse(
+                solution.Contains(
+                    $"{catalogUiAcceptanceHarnessProjectGuid}.{configuration}|x64.Deploy.0",
+                    StringComparison.Ordinal),
+                "The test-only catalog UI acceptance harness must never deploy as part of a solution build.");
         }
     }
 
@@ -567,11 +586,24 @@ public sealed class DependencyRulesTests
         string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
         string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
         string factory = File.ReadAllText(Path.Combine(windowsRoot, "WindowsCatalogBrowserFactory.cs"));
+        string acceptanceHarness = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.CatalogUiAcceptanceHarness",
+            "Program.cs"));
+        string packageSmoke = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1"));
 
         StringAssert.Contains(page, "<ItemsStackPanel CacheLength=\"1\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSourceSelector\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogCategorySelector\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSearchBox\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogPreviousPage\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogNextPage\"");
         StringAssert.Contains(page, "AutomationProperties.LiveSetting=\"Polite\"");
         StringAssert.Contains(codeBehind, "private const int PageSize = 200;");
         StringAssert.Contains(codeBehind, "await BrowseAsync(debounce: true)");
@@ -582,6 +614,21 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(page, "ContainerContentChanging=\"ChannelList_ContainerContentChanging\"");
         StringAssert.Contains(codeBehind, "_logoPageCancellation.Cancel()");
         StringAssert.Contains(codeBehind, "row.IsCurrentLogoLoad(generation)");
+        StringAssert.Contains(acceptanceHarness, "private const int RequiredChannelCount = 50_000;");
+        StringAssert.Contains(acceptanceHarness, "args is not [\"seed\", string databasePath, \"50000\"]");
+        StringAssert.Contains(acceptanceHarness, "new SqliteCatalogQuery(path)");
+        StringAssert.Contains(acceptanceHarness, "provider_item_kind");
+        StringAssert.Contains(acceptanceHarness, "File.Exists(path)");
+        Assert.IsFalse(
+            acceptanceHarness.Contains("ProtectedData", StringComparison.Ordinal) ||
+            acceptanceHarness.Contains("HttpClient", StringComparison.Ordinal) ||
+            acceptanceHarness.Contains("ProtectedLocator", StringComparison.Ordinal),
+            "The M9 UI seed must remain synthetic and avoid credentials, protected locators, and network.");
+        StringAssert.Contains(packageSmoke, "$catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000");
+        StringAssert.Contains(packageSmoke, "$catalogRealizedContainerCount -gt 300");
+        StringAssert.Contains(packageSmoke, "$catalogInputResponseP95Milliseconds -gt 100.0");
+        StringAssert.Contains(packageSmoke, "Catalog50kSeedVerified = $catalog50kSeedVerified");
+        StringAssert.Contains(packageSmoke, "CatalogRealizedContainerBoundVerified = $catalogRealizedContainerBoundVerified");
         Assert.IsFalse(
             page.Contains("MediaPlayer", StringComparison.Ordinal) ||
             codeBehind.Contains("IPlayer", StringComparison.Ordinal),
@@ -929,6 +976,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             packageSmoke,
             "$entry.Name -match '^(?i:IptvSuite\\.CatalogCrashHarness(?:\\..*)?)$'");
+        StringAssert.Contains(
+            packageSmoke,
+            "$entry.Name -match '^(?i:IptvSuite\\.CatalogUiAcceptanceHarness(?:\\..*)?)$'");
         StringAssert.Contains(packageSmoke, "PackagedApplicationActivator]::Activate($aumid)");
         StringAssert.Contains(packageSmoke, "CoCreateInstance");
         StringAssert.Contains(packageSmoke, "LocalServer = 0x00000004");
