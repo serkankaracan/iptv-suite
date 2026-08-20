@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-14
 
-**Durum:** Decision workload `VERIFIED`; per-record DPAPI yerleşimi 50k hedefi için `REJECTED` (`INFERENCE`); M4 `IN PROGRESS`; ADR-003 `Proposed`
+**Durum:** Decision workload `VERIFIED`; per-record DPAPI yerleşimi 50k hedefi için `REJECTED` (`INFERENCE`); M4 foundation `COMPLETED`; ADR-003 `Proposed`
 
 ## 1. Sonuç
 

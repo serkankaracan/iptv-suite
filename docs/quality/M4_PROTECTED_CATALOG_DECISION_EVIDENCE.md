@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-14
 
-**Durum:** comparative `Decision` workload `VERIFIED`; comparative gate `CLOSED`; test-only immutable container production için `NO-GO`; aynı SQLite transaction domain'i yönü M8 için `Proposed` ve uygulanmamış; M4 `IN PROGRESS`; ADR-003 `Proposed`
+**Durum:** comparative `Decision` workload `VERIFIED`; comparative gate `CLOSED`; test-only immutable container production için `NO-GO`; aynı SQLite transaction domain'i yönü M8 için `Proposed` ve uygulanmamış; M4 foundation `COMPLETED`; ADR-003 `Proposed`
 
 ## 1. Sonuç
 
@@ -10,7 +10,7 @@
 
 50k create-and-activate p95 `173,128 ms`, managed allocation p95 `36.360.200 byte` (`34,676 MiB`) ve before/after working-set boundary delta p95 `16.625.664 byte` (`15,855 MiB`) oldu. Aynı workload hash'ine bağlı reddedilmiş file-per-record DPAPI baseline'ında create p95 `151,447 s`, allocation p95 `668,007 MiB` idi. Aday sırasıyla `874,766×` hızlanma / `%99,886` süre azalması ve `19,264×` / `%94,809` allocation azalması gösterdi. Bu nedenle immutable-container'ın karşılaştırmalı crypto + sequential persistence sorusunu kapattığı kararı **INFERENCE**dır.
 
-Bu olumlu karşılaştırma container'ı production tasarımı yapmaz. Ayrı container ile katalog metadata/active pointer arasında tek transaction yoktur; crash/power-loss, packaged lifecycle, wrong-user, reconciliation ve end-to-end parser/normalize/index kanıtı açık kalır. Container production için `NO-GO`dur. DPAPI-wrapped snapshot DEK, record-başına AES-256-GCM ciphertext, snapshot metadata ve active pointer'ın aynı SQLite transaction domain'inde tutulması tercih edilen **M8 `Proposed` yönüdür**; uygulanmış veya doğrulanmış değildir. M4 `IN PROGRESS`, ADR-003 `Proposed` kalır.
+Bu olumlu karşılaştırma container'ı production tasarımı yapmaz. Ayrı container ile katalog metadata/active pointer arasında tek transaction yoktur; crash/power-loss, packaged lifecycle, wrong-user, reconciliation ve end-to-end parser/normalize/index kanıtı açık kalır. Container production için `NO-GO`dur. DPAPI-wrapped snapshot DEK, record-başına AES-256-GCM ciphertext, snapshot metadata ve active pointer'ın aynı SQLite transaction domain'inde tutulması tercih edilen **M8 `Proposed` yönüdür**; uygulanmış veya doğrulanmış değildir. M4 foundation `COMPLETED`, ADR-003 `Proposed` kalır.
 
 ## 2. Değişmez kanıt bağı
 
