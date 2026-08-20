@@ -24,6 +24,19 @@ public enum HttpTransportRetryability
     Manual,
 }
 
+public readonly record struct HttpTransportObservation(
+    int AttemptCount,
+    int RedirectCount,
+    int StatusCode,
+    int ResponseBytes,
+    long ElapsedMilliseconds,
+    HttpTransportFailure? Failure);
+
+public interface IHttpTransportObserver
+{
+    void Observe(HttpTransportObservation observation);
+}
+
 [DebuggerDisplay("[HTTP-TRANSPORT-REQUEST]")]
 public sealed class HttpTransportRequest : IDisposable
 {

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Authentication;
@@ -15,6 +16,7 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
     private readonly HttpClient _client;
     private readonly TimeSpan _requestTimeout;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
+    private readonly IHttpTransportObserver? _observer;
     private bool _disposed;
 
     public BoundedHttpTransport()
@@ -31,6 +33,15 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
         HttpMessageHandler handler,
         TimeSpan requestTimeout,
         Func<TimeSpan, CancellationToken, Task> delayAsync)
+        : this(handler, requestTimeout, delayAsync, observer: null)
+    {
+    }
+
+    internal BoundedHttpTransport(
+        HttpMessageHandler handler,
+        TimeSpan requestTimeout,
+        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        IHttpTransportObserver? observer)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(delayAsync);
@@ -45,6 +56,7 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
         };
         _requestTimeout = requestTimeout;
         _delayAsync = delayAsync;
+        _observer = observer;
     }
 
     public async ValueTask<HttpTransportResult> GetAsync(
@@ -63,6 +75,20 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
         SafeEndpoint currentEndpoint = request.ExpectedEndpoint;
         int redirectCount = 0;
         int retryCount = 0;
+        int attemptCount = 0;
+        long startedAt = Stopwatch.GetTimestamp();
+        HttpTransportResult Finish(HttpTransportResult result, int responseBytes = 0)
+        {
+            _observer?.Observe(new HttpTransportObservation(
+                attemptCount,
+                redirectCount,
+                result.StatusCode,
+                responseBytes,
+                (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds,
+                result.Failure));
+            return result;
+        }
+
         while (true)
         {
             using HttpRequestMessage message = new(HttpMethod.Get, currentUri);
@@ -77,6 +103,7 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
             HttpResponseMessage? response = null;
             try
             {
+                attemptCount++;
                 response = await _client.SendAsync(
                     message,
                     HttpCompletionOption.ResponseHeadersRead,
@@ -86,37 +113,37 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
                 {
                     if (redirectCount >= HttpTransportLimits.MaximumRedirects)
                     {
-                        return HttpTransportResult.Failed(
+                        return Finish(HttpTransportResult.Failed(
                             HttpTransportFailure.RedirectLimitExceeded,
                             HttpTransportRetryability.Never,
-                            (int)response.StatusCode);
+                            (int)response.StatusCode));
                     }
 
                     if (!TryResolveRedirect(currentUri, response.Headers.Location, out Uri? redirectUri))
                     {
-                        return HttpTransportResult.Failed(
+                        return Finish(HttpTransportResult.Failed(
                             HttpTransportFailure.RedirectRejected,
                             HttpTransportRetryability.Never,
-                            (int)response.StatusCode);
+                            (int)response.StatusCode));
                     }
 
                     DomainResult<RedirectTargetAssessment> assessment =
                         RedirectTargetPolicy.Evaluate(currentEndpoint, redirectUri!.AbsoluteUri);
                     if (!assessment.IsSuccess)
                     {
-                        return HttpTransportResult.Failed(
+                        return Finish(HttpTransportResult.Failed(
                             HttpTransportFailure.RedirectRejected,
                             HttpTransportRetryability.Never,
-                            (int)response.StatusCode);
+                            (int)response.StatusCode));
                     }
 
                     if (request.HasAuthorization &&
                         assessment.Value!.OriginRelation == RedirectOriginRelation.CrossOrigin)
                     {
-                        return HttpTransportResult.Failed(
+                        return Finish(HttpTransportResult.Failed(
                             HttpTransportFailure.RedirectRejected,
                             HttpTransportRetryability.Never,
-                            (int)response.StatusCode);
+                            (int)response.StatusCode));
                     }
 
                     currentUri = redirectUri;
@@ -136,9 +163,9 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
                             cancellationToken,
                             linkedSource.Token).ConfigureAwait(false))
                         {
-                            return HttpTransportResult.Failed(
+                            return Finish(HttpTransportResult.Failed(
                                 HttpTransportFailure.RequestTimedOut,
-                                HttpTransportRetryability.BoundedTransient);
+                                HttpTransportRetryability.BoundedTransient));
                         }
                         currentUri = request.RequestUri;
                         currentEndpoint = request.ExpectedEndpoint;
@@ -146,42 +173,44 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
                         continue;
                     }
 
-                    return statusResult;
+                    return Finish(statusResult);
                 }
 
                 long? declaredLength = response.Content.Headers.ContentLength;
                 if (declaredLength is < 0 || declaredLength > request.MaximumResponseBytes)
                 {
-                    return HttpTransportResult.Failed(
+                    return Finish(HttpTransportResult.Failed(
                         HttpTransportFailure.ResponseTooLarge,
                         HttpTransportRetryability.Never,
-                        (int)response.StatusCode);
+                        (int)response.StatusCode));
                 }
 
                 byte[] content = await ReadBoundedAsync(
                     response.Content,
                     request.MaximumResponseBytes,
                     linkedSource.Token).ConfigureAwait(false);
-                return HttpTransportResult.Success((int)response.StatusCode, new HttpResponseLease(content));
+                return Finish(
+                    HttpTransportResult.Success((int)response.StatusCode, new HttpResponseLease(content)),
+                    content.Length);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                return HttpTransportResult.Failed(
+                return Finish(HttpTransportResult.Failed(
                     HttpTransportFailure.RequestTimedOut,
-                    HttpTransportRetryability.BoundedTransient);
+                    HttpTransportRetryability.BoundedTransient));
             }
             catch (HttpResponseTooLargeException)
             {
-                return HttpTransportResult.Failed(
+                return Finish(HttpTransportResult.Failed(
                     HttpTransportFailure.ResponseTooLarge,
                     HttpTransportRetryability.Never,
-                    (int)(response?.StatusCode ?? 0));
+                    (int)(response?.StatusCode ?? 0)));
             }
             catch (HttpRequestException exception) when (IsTlsFailure(exception))
             {
-                return HttpTransportResult.Failed(
+                return Finish(HttpTransportResult.Failed(
                     HttpTransportFailure.TlsValidationFailed,
-                    HttpTransportRetryability.Never);
+                    HttpTransportRetryability.Never));
             }
             catch (HttpRequestException)
             {
@@ -193,9 +222,9 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
                         cancellationToken,
                         linkedSource.Token).ConfigureAwait(false))
                     {
-                        return HttpTransportResult.Failed(
+                        return Finish(HttpTransportResult.Failed(
                             HttpTransportFailure.RequestTimedOut,
-                            HttpTransportRetryability.BoundedTransient);
+                            HttpTransportRetryability.BoundedTransient));
                     }
                     currentUri = request.RequestUri;
                     currentEndpoint = request.ExpectedEndpoint;
@@ -203,9 +232,9 @@ public sealed class BoundedHttpTransport : IHttpTransport, IDisposable
                     continue;
                 }
 
-                return HttpTransportResult.Failed(
+                return Finish(HttpTransportResult.Failed(
                     HttpTransportFailure.NetworkUnavailable,
-                    HttpTransportRetryability.Manual);
+                    HttpTransportRetryability.Manual));
             }
             finally
             {

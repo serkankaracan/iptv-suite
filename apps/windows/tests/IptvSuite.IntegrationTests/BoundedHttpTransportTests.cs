@@ -267,6 +267,63 @@ public sealed class BoundedHttpTransportTests
     }
 
     [TestMethod]
+    public async Task SafeObservationContainsOnlyBoundedOperationFacts()
+    {
+        int responseCount = 0;
+        RecordingObserver observer = new();
+        using StubHandler handler = new((_, _) =>
+        {
+            responseCount++;
+            return Task.FromResult(responseCount == 1
+                ? Response(HttpStatusCode.ServiceUnavailable, [])
+                : Response(HttpStatusCode.OK, new byte[] { 8, 9 }));
+        });
+        using BoundedHttpTransport transport = CreateTransport(
+            handler,
+            TimeSpan.FromSeconds(1),
+            (_, _) => Task.CompletedTask,
+            observer);
+
+        HttpTransportResult result = await transport.GetAsync(CreateRequest("https://example.test/list", 64));
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(1, observer.Observations);
+        HttpTransportObservation observation = observer.Observations[0];
+        Assert.AreEqual(2, observation.AttemptCount);
+        Assert.AreEqual(0, observation.RedirectCount);
+        Assert.AreEqual(200, observation.StatusCode);
+        Assert.AreEqual(2, observation.ResponseBytes);
+        Assert.IsNull(observation.Failure);
+        Assert.IsGreaterThanOrEqualTo(0, observation.ElapsedMilliseconds);
+        result.Response!.Dispose();
+    }
+
+    [TestMethod]
+    public async Task NetworkFailureUsesOnlyThreeAttemptsBeforeManualFailure()
+    {
+        List<TimeSpan> delays = [];
+        using StubHandler handler = new((_, _) =>
+            Task.FromException<HttpResponseMessage>(new HttpRequestException("synthetic")));
+        using BoundedHttpTransport transport = CreateTransport(
+            handler,
+            TimeSpan.FromSeconds(1),
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+
+        HttpTransportResult result = await transport.GetAsync(CreateRequest("https://example.test/list", 64));
+
+        Assert.AreEqual(HttpTransportFailure.NetworkUnavailable, result.Failure);
+        Assert.AreEqual(HttpTransportRetryability.Manual, result.Retryability);
+        Assert.HasCount(3, handler.RequestUris);
+        Assert.HasCount(2, delays);
+        Assert.IsTrue(delays.All(delay => delay >= TimeSpan.FromMilliseconds(100)));
+        Assert.IsTrue(delays.All(delay => delay <= TimeSpan.FromMilliseconds(400)));
+    }
+
+    [TestMethod]
     [DataRow(401, HttpTransportFailure.AuthenticationRejected, HttpTransportRetryability.Never)]
     [DataRow(403, HttpTransportFailure.AuthenticationRejected, HttpTransportRetryability.Never)]
     [DataRow(404, HttpTransportFailure.ResourceNotFound, HttpTransportRetryability.Never)]
@@ -334,6 +391,25 @@ public sealed class BoundedHttpTransportTests
         return (BoundedHttpTransport)constructor.Invoke([handler, timeout, delayAsync]);
     }
 
+    private static BoundedHttpTransport CreateTransport(
+        HttpMessageHandler handler,
+        TimeSpan timeout,
+        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        IHttpTransportObserver observer)
+    {
+        ConstructorInfo constructor = typeof(BoundedHttpTransport).GetConstructor(
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            [
+                typeof(HttpMessageHandler),
+                typeof(TimeSpan),
+                typeof(Func<TimeSpan, CancellationToken, Task>),
+                typeof(IHttpTransportObserver),
+            ],
+            modifiers: null) ?? throw new InvalidOperationException("The observation test seam is unavailable.");
+        return (BoundedHttpTransport)constructor.Invoke([handler, timeout, delayAsync, observer]);
+    }
+
     private static HttpResponseMessage Response(HttpStatusCode statusCode, byte[] body) => new(statusCode)
     {
         Content = new ByteArrayContent(body),
@@ -353,5 +429,12 @@ public sealed class BoundedHttpTransportTests
             RequestUris.Add(new Uri(request.RequestUri!.AbsoluteUri));
             return _send(request, cancellationToken);
         }
+    }
+
+    private sealed class RecordingObserver : IHttpTransportObserver
+    {
+        public List<HttpTransportObservation> Observations { get; } = [];
+
+        public void Observe(HttpTransportObservation observation) => Observations.Add(observation);
     }
 }

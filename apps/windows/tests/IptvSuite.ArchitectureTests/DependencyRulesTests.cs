@@ -1485,6 +1485,12 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(applicationSource, "MaximumRedirects = 5");
         StringAssert.Contains(applicationSource, "CryptographicOperations.ZeroMemory(content)");
         StringAssert.Contains(applicationSource, "CryptographicOperations.ZeroMemory(authorizationValue)");
+        StringAssert.Contains(applicationSource, "public readonly record struct HttpTransportObservation(");
+        StringAssert.Contains(applicationSource, "int AttemptCount,");
+        StringAssert.Contains(applicationSource, "int ResponseBytes,");
+        StringAssert.Contains(applicationSource, "HttpTransportFailure? Failure);");
+        Assert.IsFalse(applicationSource.Contains("HttpTransportObservation(Uri", StringComparison.Ordinal));
+        Assert.IsFalse(applicationSource.Contains("HttpTransportObservation(string", StringComparison.Ordinal));
         StringAssert.Contains(infrastructureSource, "AllowAutoRedirect = false");
         StringAssert.Contains(infrastructureSource, "UseCookies = false");
         StringAssert.Contains(infrastructureSource, "HttpCompletionOption.ResponseHeadersRead");
