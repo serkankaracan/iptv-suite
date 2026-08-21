@@ -102,6 +102,8 @@ Hosted `windows-quality.yml` bütün pull request, `merge_group`, `main` push ve
 
 [Run `31327398270`](https://github.com/serkankaracan/iptv-suite/actions/runs/31327398270), commit `79cf619c6683fa9c4213846455e376fb1b0cb11c` için quality, packaged-smoke ve `Required Windows gate` işlerini başarıyla tamamladı; indirilen iki allowlist'li artifact `14/14` alan/hash assertion'ını geçti. Kalıcı değerler [M2 completion evidence](M2_COMPLETION_EVIDENCE.md) belgesindedir. Coordinator'ın yeşil olması merge policy enforcement kanıtı değildir: 2026-08-09 preflight'ında mevcut private-repository planı branch protection endpoint'inde `403` verdiği için check henüz branch policy tarafından required değildir.
 
+2026-08-21 güncellemesi: özel `windows-2025-vs2026` label'ında üç ardışık iş sıfır step ve `runner_id=0` ile tahsis edilemedi. Workflow bu nedenle, 2026-06 sonrasında aynı Windows Server 2025 + VS2026 image ailesine yönlenen GA `windows-2025` label'ına taşındı [S114]. Exact .NET SDK setup ve runtime verification, dört required job, fail-closed coordinator ve bütün security/package gate'leri değişmeden kalır.
+
 ## 3. Feature test planı
 
 ### 3.1 Validation ve endpoint construction

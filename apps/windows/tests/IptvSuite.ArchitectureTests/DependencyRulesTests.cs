@@ -2558,7 +2558,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(workflow, "push:\n    branches:\n      - main\n");
         StringAssert.Contains(workflow, "workflow_dispatch:");
         StringAssert.Contains(workflow, "permissions:\n  contents: read\n");
-        StringAssert.Contains(workflow, "runs-on: windows-2025-vs2026");
+        StringAssert.Contains(workflow, "runs-on: windows-2025");
         StringAssert.Contains(workflow, "persist-credentials: false");
         StringAssert.Contains(workflow, "dotnet-version: \"10.0.302\"");
         StringAssert.Contains(workflow, "shell: powershell\n        run: .\\eng\\Invoke-WindowsPackageSmoke.ps1");
