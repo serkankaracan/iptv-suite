@@ -101,6 +101,10 @@ namespace IptvSuite.NativePlaybackSmoke
         private int ioAbortCount;
         private int headRequestCount;
         private int rangeRequestCount;
+        private int openEndedRangeCount;
+        private int suffixRangeCount;
+        private int boundedRangeCount;
+        private long completedBodyBytes;
 
         public TierATlsServer(string root, X509Certificate2 certificate)
         {
@@ -118,6 +122,10 @@ namespace IptvSuite.NativePlaybackSmoke
         public int IoAbortCount { get { return Volatile.Read(ref ioAbortCount); } }
         public int HeadRequestCount { get { return Volatile.Read(ref headRequestCount); } }
         public int RangeRequestCount { get { return Volatile.Read(ref rangeRequestCount); } }
+        public int OpenEndedRangeCount { get { return Volatile.Read(ref openEndedRangeCount); } }
+        public int SuffixRangeCount { get { return Volatile.Read(ref suffixRangeCount); } }
+        public int BoundedRangeCount { get { return Volatile.Read(ref boundedRangeCount); } }
+        public long CompletedBodyBytes { get { return Interlocked.Read(ref completedBodyBytes); } }
 
         private async Task AcceptLoopAsync()
         {
@@ -169,6 +177,7 @@ namespace IptvSuite.NativePlaybackSmoke
                     long start = 0;
                     long end = total - 1;
                     bool partial = false;
+                    int rangeShape = 0;
                     foreach (string line in lines)
                     {
                         if (line.StartsWith("Range: bytes=", StringComparison.OrdinalIgnoreCase))
@@ -179,6 +188,7 @@ namespace IptvSuite.NativePlaybackSmoke
                             { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
                             if (bounds[0].Length == 0)
                             {
+                                rangeShape = 2;
                                 long suffixLength;
                                 if (!Int64.TryParse(bounds[1], NumberStyles.None, CultureInfo.InvariantCulture, out suffixLength) || suffixLength <= 0)
                                 { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
@@ -187,6 +197,7 @@ namespace IptvSuite.NativePlaybackSmoke
                             }
                             else
                             {
+                                rangeShape = bounds[1].Length == 0 ? 1 : 3;
                                 if (!Int64.TryParse(bounds[0], NumberStyles.None, CultureInfo.InvariantCulture, out start) || start < 0 || start >= total)
                                 { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
                                 if (bounds[1].Length > 0 && (!Int64.TryParse(bounds[1], NumberStyles.None, CultureInfo.InvariantCulture, out end) || end < start))
@@ -200,7 +211,13 @@ namespace IptvSuite.NativePlaybackSmoke
                     long contentLength = end - start + 1;
                     Interlocked.Increment(ref requestCount);
                     if (request[0] == "HEAD") Interlocked.Increment(ref headRequestCount);
-                    if (partial) Interlocked.Increment(ref rangeRequestCount);
+                    if (partial)
+                    {
+                        Interlocked.Increment(ref rangeRequestCount);
+                        if (rangeShape == 1) Interlocked.Increment(ref openEndedRangeCount);
+                        else if (rangeShape == 2) Interlocked.Increment(ref suffixRangeCount);
+                        else if (rangeShape == 3) Interlocked.Increment(ref boundedRangeCount);
+                    }
                     var response = new StringBuilder();
                     response.Append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
                     response.Append("Content-Type: ").Append(contentType).Append("\r\n");
@@ -227,6 +244,7 @@ namespace IptvSuite.NativePlaybackSmoke
                         }
                     }
                     await ssl.FlushAsync().ConfigureAwait(false);
+                    if (request[0] == "GET") Interlocked.Add(ref completedBodyBytes, contentLength);
                     Interlocked.Increment(ref completedResponseCount);
                 }
                 catch (IOException) { Interlocked.Increment(ref ioAbortCount); }
@@ -410,7 +428,7 @@ try {
 
     $probe = Get-Content -Raw $packageEvidencePath | ConvertFrom-Json
     if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or [int]$probe.SwitchCount -ne $SwitchCount) {
-        throw "Native playback probe failed with category '$($probe.Failure)': accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
+        throw "Native playback probe failed with category '$($probe.Failure)': accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) { throw "Native playback startup budget failed." }
     if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }
