@@ -188,7 +188,7 @@ public sealed partial class MainPage : Page, IDisposable
         }
 
         args.Handled = true;
-        target.Focus(FocusState.Keyboard);
+        _ = owner.DispatcherQueue.TryEnqueue(() => target.Focus(FocusState.Keyboard));
     }
 
     private static bool IsWithin(DependencyObject? candidate, DependencyObject ancestor)

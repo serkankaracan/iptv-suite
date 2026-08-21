@@ -638,7 +638,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "args.OriginalSource is not DependencyObject origin || !IsWithin(origin, owner)");
         StringAssert.Contains(codeBehind, "InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)");
         StringAssert.Contains(codeBehind, "args.Handled = true;");
-        StringAssert.Contains(codeBehind, "target.Focus(FocusState.Keyboard);");
+        StringAssert.Contains(codeBehind, "owner.DispatcherQueue.TryEnqueue(() => target.Focus(FocusState.Keyboard))");
         StringAssert.Contains(codeBehind, "if (ReferenceEquals(candidate, ancestor)) return true;");
         StringAssert.Contains(codeBehind, "depth < 32");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogPreviousPage\"");
