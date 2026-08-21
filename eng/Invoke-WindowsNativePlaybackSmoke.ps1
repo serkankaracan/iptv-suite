@@ -13,6 +13,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
 
 $activationInterop = @'
 using System;
@@ -290,7 +291,6 @@ function Remove-ExactPackage {
 }
 
 function Assert-PackagePayload([string]$PackagePath) {
-    Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
     $archive = [System.IO.Compression.ZipFile]::OpenRead($PackagePath)
     try {
         $forbidden = @($archive.Entries | Where-Object {

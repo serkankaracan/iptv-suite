@@ -2108,6 +2108,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "Range: bytes=");
         StringAssert.Contains(controller, "StartupP95Milliseconds -gt 3000");
         StringAssert.Contains(controller, "Assert-PackagePayload");
+        StringAssert.Contains(controller, "Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop");
         StringAssert.Contains(controller, "Remove-ExactPackage");
         StringAssert.Contains(controller, "Cert:\\LocalMachine\\Root\\$($tlsCertificate.Thumbprint)");
         Assert.IsFalse(
