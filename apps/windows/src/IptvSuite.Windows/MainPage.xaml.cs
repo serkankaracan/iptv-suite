@@ -39,12 +39,24 @@ public sealed partial class MainPage : Page, IDisposable
             new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus),
             handledEventsToo: true);
         SourceSelector.AddHandler(
+            UIElement.PreviewKeyDownEvent,
+            new KeyEventHandler(CatalogFilter_PreviewKeyDown),
+            handledEventsToo: true);
+        SourceSelector.AddHandler(
             UIElement.KeyDownEvent,
             new KeyEventHandler(SourceSelector_KeyDown),
             handledEventsToo: true);
         CategorySelector.AddHandler(
+            UIElement.PreviewKeyDownEvent,
+            new KeyEventHandler(CatalogFilter_PreviewKeyDown),
+            handledEventsToo: true);
+        CategorySelector.AddHandler(
             UIElement.KeyDownEvent,
             new KeyEventHandler(CategorySelector_KeyDown),
+            handledEventsToo: true);
+        SearchBox.AddHandler(
+            UIElement.PreviewKeyDownEvent,
+            new KeyEventHandler(CatalogFilter_PreviewKeyDown),
             handledEventsToo: true);
         Unloaded += MainPage_Unloaded;
         string assemblyVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
@@ -179,9 +191,37 @@ public sealed partial class MainPage : Page, IDisposable
     private void CategorySelector_KeyDown(object sender, KeyRoutedEventArgs args) =>
         MoveForwardOnTab(args, CategorySelector, SearchBox);
 
+    private void CatalogFilter_PreviewKeyDown(object sender, KeyRoutedEventArgs args)
+    {
+        if (_movingTabFocus || args.Key != VirtualKey.Tab)
+        {
+            return;
+        }
+
+        bool shiftPressed = InputKeyboardSource
+            .GetKeyStateForCurrentThread(VirtualKey.Shift)
+            .HasFlag(CoreVirtualKeyStates.Down);
+        Control? target = sender switch
+        {
+            _ when ReferenceEquals(sender, SourceSelector) && !shiftPressed => CategorySelector,
+            _ when ReferenceEquals(sender, CategorySelector) && shiftPressed => SourceSelector,
+            _ when ReferenceEquals(sender, CategorySelector) => SearchBox,
+            _ when ReferenceEquals(sender, SearchBox) && shiftPressed => CategorySelector,
+            _ => null,
+        };
+        if (target is null || !target.IsEnabled || !target.IsTabStop)
+        {
+            return;
+        }
+
+        _movingTabFocus = true;
+        try { args.Handled = target.Focus(FocusState.Keyboard); }
+        finally { _movingTabFocus = false; }
+    }
+
     private void MoveForwardOnTab(KeyRoutedEventArgs args, Control owner, Control target)
     {
-        if (_movingTabFocus ||
+        if (args.Handled || _movingTabFocus ||
             args.OriginalSource is not DependencyObject origin || !IsWithin(origin, owner) ||
             args.Key != VirtualKey.Tab ||
             InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down))

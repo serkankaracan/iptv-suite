@@ -1440,19 +1440,31 @@ try {
         throw "The packaged catalog did not settle after the input-response probe."
     }
 
-    $focusReadyDeadline = (Get-Date).AddSeconds(15)
-    while ((-not $sourceElement.Current.IsEnabled -or
-            -not $sourceElement.Current.IsKeyboardFocusable -or
-            -not $categoryElement.Current.IsEnabled -or
-            -not $categoryElement.Current.IsKeyboardFocusable) -and
-        (Get-Date) -lt $focusReadyDeadline) {
-        Start-Sleep -Milliseconds 100
-    }
-    if (-not $sourceElement.Current.IsEnabled -or
-        -not $sourceElement.Current.IsKeyboardFocusable -or
-        -not $categoryElement.Current.IsEnabled -or
-        -not $categoryElement.Current.IsKeyboardFocusable) {
-        throw "The packaged catalog controls did not become keyboard-focusable."
+    $focusReadyWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $focusStableWatch = $null
+    do {
+        $focusControlsReady =
+            $statusElement.Current.Name -eq $expectedCatalogStatus -and
+            $sourceElement.Current.IsEnabled -and
+            $sourceElement.Current.IsKeyboardFocusable -and
+            $categoryElement.Current.IsEnabled -and
+            $categoryElement.Current.IsKeyboardFocusable
+        if ($focusControlsReady) {
+            if ($null -eq $focusStableWatch) {
+                $focusStableWatch = [System.Diagnostics.Stopwatch]::StartNew()
+            }
+            if ($focusStableWatch.ElapsedMilliseconds -ge 750) {
+                break
+            }
+        }
+        else {
+            $focusStableWatch = $null
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ($focusReadyWatch.Elapsed -lt [TimeSpan]::FromSeconds(15))
+    if ($null -eq $focusStableWatch -or $focusStableWatch.ElapsedMilliseconds -lt 750) {
+        throw "The packaged catalog controls did not remain keyboard-focusable after the input-response probe."
     }
     Assert-PackagedWindowForeground $windowHandle ([uint32]$activationProcessId)
     Assert-FocusedAutomationElement $sourceElement "CatalogSourceSelector" -RequestFocus

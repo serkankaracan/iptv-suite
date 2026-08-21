@@ -625,6 +625,14 @@ public sealed class DependencyRulesTests
         Assert.HasCount(3, Regex.Matches(page, "IsTabStop=\"True\""));
         StringAssert.Contains(codeBehind, "InitializeComponent();\n        AddHandler(");
         StringAssert.Contains(codeBehind, "SourceSelector.AddHandler(");
+        Assert.HasCount(3, Regex.Matches(codeBehind, "UIElement.PreviewKeyDownEvent"));
+        Assert.HasCount(3, Regex.Matches(codeBehind, @"new KeyEventHandler\(CatalogFilter_PreviewKeyDown\)"));
+        StringAssert.Contains(codeBehind, "ReferenceEquals(sender, SourceSelector) && !shiftPressed => CategorySelector");
+        StringAssert.Contains(codeBehind, "ReferenceEquals(sender, CategorySelector) && shiftPressed => SourceSelector");
+        StringAssert.Contains(codeBehind, "ReferenceEquals(sender, CategorySelector) => SearchBox");
+        StringAssert.Contains(codeBehind, "ReferenceEquals(sender, SearchBox) && shiftPressed => CategorySelector");
+        StringAssert.Contains(codeBehind, "target is null || !target.IsEnabled || !target.IsTabStop");
+        StringAssert.Contains(codeBehind, "args.Handled = target.Focus(FocusState.Keyboard)");
         StringAssert.Contains(codeBehind, "UIElement.LosingFocusEvent");
         StringAssert.Contains(codeBehind, "new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus)");
         StringAssert.Contains(codeBehind, "args.OldFocusedElement as DependencyObject");
@@ -669,6 +677,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$catalogRealizedContainerCount -gt 300");
         StringAssert.Contains(packageSmoke, "$catalogInputResponseP95Milliseconds -gt 100.0");
         StringAssert.Contains(packageSmoke, "$categoryElement.Current.IsKeyboardFocusable");
+        StringAssert.Contains(packageSmoke, "$focusStableWatch.ElapsedMilliseconds -ge 750");
+        StringAssert.Contains(packageSmoke, "did not remain keyboard-focusable after the input-response probe");
         StringAssert.Contains(packageSmoke, "$deadline = (Get-Date).AddSeconds(5)");
         StringAssert.Contains(packageSmoke, "$depth -lt 32");
         StringAssert.Contains(packageSmoke, "Start-Sleep -Milliseconds 50");
@@ -2109,6 +2119,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "DisposeMediaSource(source)");
         StringAssert.Contains(window, "BestEffortDisposeMediaSource(source)");
         StringAssert.Contains(window, "Preserve the primary typed probe failure");
+        StringAssert.Contains(window, "private TaskCompletionSource<long>? _opened;");
+        StringAssert.Contains(window, "long startupStarted = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(window, "long openedTimestamp = await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
+        StringAssert.Contains(window, "Stopwatch.GetElapsedTime(startupStarted, openedTimestamp).TotalMilliseconds");
+        StringAssert.Contains(window, "_opened?.TrySetResult(Stopwatch.GetTimestamp())");
         StringAssert.Contains(window, "await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
         StringAssert.Contains(window, "await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3)");
         StringAssert.Contains(window, "TimeSpan sampleInterval = TimeSpan.FromMinutes(5)");

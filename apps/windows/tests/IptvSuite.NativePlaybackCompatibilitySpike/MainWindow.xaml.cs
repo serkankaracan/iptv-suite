@@ -13,7 +13,7 @@ namespace IptvSuite.NativePlaybackCompatibilitySpike;
 public sealed partial class MainWindow : Window, IDisposable
 {
     private readonly MediaPlayer _mediaPlayer;
-    private TaskCompletionSource? _opened;
+    private TaskCompletionSource<long>? _opened;
     private TaskCompletionSource? _advanced;
     private TaskCompletionSource? _failureSignal;
     private NativePlaybackFailure _mediaFailure;
@@ -66,14 +66,14 @@ public sealed partial class MainWindow : Window, IDisposable
                     request.SwitchCount,
                     cancellationToken);
                 Uri fixture = request.Fixtures[index % request.Fixtures.Count];
-                var stopwatch = Stopwatch.StartNew();
+                long startupStarted = Stopwatch.GetTimestamp();
                 double startupMilliseconds = 0;
                 for (int attempt = 0; attempt < 2; attempt++)
                 {
                     bool retryRequested = false;
                     bool sourceDetached = false;
                     _mediaFailure = NativePlaybackFailure.None;
-                    _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _opened = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
                     _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     _failureSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     MediaSource source = MediaSource.CreateFromUri(fixture);
@@ -81,8 +81,8 @@ public sealed partial class MainWindow : Window, IDisposable
                     {
                         _mediaPlayer.Source = source;
                         _mediaPlayer.Play();
-                        await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-                        startupMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                        long openedTimestamp = await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+                        startupMilliseconds = Stopwatch.GetElapsedTime(startupStarted, openedTimestamp).TotalMilliseconds;
                         timeoutFailure = NativePlaybackFailure.PlaybackAdvanceTimeout;
                         await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
                         sourceDetachSamples.Add(await DetachSourceAsync(
@@ -436,7 +436,7 @@ public sealed partial class MainWindow : Window, IDisposable
         CancellationToken cancellationToken)
     {
         _mediaFailure = NativePlaybackFailure.None;
-        _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _opened = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
         _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _failureSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _mediaPlayer.IsLoopingEnabled = true;
@@ -503,7 +503,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void MediaPlayer_MediaOpened(MediaPlayer sender, object args)
     {
-        _opened?.TrySetResult();
+        _opened?.TrySetResult(Stopwatch.GetTimestamp());
         DispatcherQueue.TryEnqueue(() => StateText.Text = "Opened");
     }
 
