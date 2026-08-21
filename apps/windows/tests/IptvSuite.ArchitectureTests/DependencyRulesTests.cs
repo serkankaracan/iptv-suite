@@ -636,7 +636,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "MoveForwardOnTab(args, CategorySelector)");
         StringAssert.Contains(codeBehind, "MoveForwardOnTab(args, SearchBox)");
         StringAssert.Contains(codeBehind, "InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)");
-        StringAssert.Contains(codeBehind, "args.Handled = target.Focus(FocusState.Keyboard)");
+        StringAssert.Contains(codeBehind, "args.Handled = true;");
+        StringAssert.Contains(codeBehind, "target.Focus(FocusState.Keyboard);");
         StringAssert.Contains(codeBehind, "if (ReferenceEquals(candidate, ancestor)) return true;");
         StringAssert.Contains(codeBehind, "depth < 32");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogPreviousPage\"");

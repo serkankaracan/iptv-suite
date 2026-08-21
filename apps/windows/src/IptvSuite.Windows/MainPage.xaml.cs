@@ -186,7 +186,8 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
 
-        args.Handled = target.Focus(FocusState.Keyboard);
+        args.Handled = true;
+        target.Focus(FocusState.Keyboard);
     }
 
     private static bool IsWithin(DependencyObject? candidate, DependencyObject ancestor)
