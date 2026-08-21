@@ -639,7 +639,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($focused)");
         StringAssert.Contains(
             packageSmoke,
-            "The packaged catalog keyboard focus order is invalid at $ExpectedAutomationId.");
+            "The packaged catalog keyboard focus order is invalid at $ExpectedAutomationId (Observed$observedFocusTarget).");
         StringAssert.Contains(packageSmoke, "DwmGetCompositionTimingInfo(IntPtr.Zero, ref timing)");
         StringAssert.Contains(packageSmoke, "timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo))");
         StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");
@@ -650,6 +650,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "Assert-FocusedAutomationElement $sourceElement \"CatalogSourceSelector\" -RequestFocus");
         StringAssert.Contains(packageSmoke, "if ($RequestFocus)");
         StringAssert.Contains(packageSmoke, "$ExpectedElement.SetFocus()");
+        StringAssert.Contains(packageSmoke, "$observedFocusTarget = if ($null -eq $focused) { \"None\" } else { \"Other\" }");
+        StringAssert.Contains(packageSmoke, "\"CatalogChannelList\"))");
+        StringAssert.Contains(packageSmoke, "(Observed$observedFocusTarget).");
         Assert.IsTrue(
             packageSmoke.IndexOf("The packaged catalog did not settle after the input-response probe.", StringComparison.Ordinal) <
             packageSmoke.IndexOf("Assert-FocusedAutomationElement $sourceElement \"CatalogSourceSelector\" -RequestFocus", StringComparison.Ordinal),

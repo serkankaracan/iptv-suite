@@ -1015,6 +1015,7 @@ function Assert-FocusedAutomationElement {
     )
 
     $deadline = (Get-Date).AddSeconds(5)
+    $observedFocusTarget = "None"
     do {
         if ($RequestFocus) {
             try {
@@ -1027,9 +1028,18 @@ function Assert-FocusedAutomationElement {
         }
 
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $observedFocusTarget = if ($null -eq $focused) { "None" } else { "Other" }
         for ($depth = 0; $null -ne $focused -and $depth -lt 32; $depth++) {
+            $focusedAutomationId = $focused.Current.AutomationId
+            if ($focusedAutomationId -in @(
+                    "CatalogSourceSelector",
+                    "CatalogCategorySelector",
+                    "CatalogSearchBox",
+                    "CatalogChannelList")) {
+                $observedFocusTarget = $focusedAutomationId
+            }
             if ([System.Windows.Automation.Automation]::Compare($focused, $ExpectedElement) -or
-                $focused.Current.AutomationId -eq $ExpectedAutomationId) {
+                $focusedAutomationId -eq $ExpectedAutomationId) {
                 return
             }
 
@@ -1039,7 +1049,7 @@ function Assert-FocusedAutomationElement {
         Start-Sleep -Milliseconds 50
     } while ((Get-Date) -lt $deadline)
 
-    throw "The packaged catalog keyboard focus order is invalid at $ExpectedAutomationId."
+    throw "The packaged catalog keyboard focus order is invalid at $ExpectedAutomationId (Observed$observedFocusTarget)."
 }
 
 function Assert-PackagedWindowForeground {
