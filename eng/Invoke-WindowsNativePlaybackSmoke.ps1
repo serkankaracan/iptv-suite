@@ -538,7 +538,7 @@ $expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
 $expectedRuntimeDependencyPublisher = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
 $expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
 $expectedRuntimeDependencyVersion = "2.3.1.0"
-$expectedRuntimeDependencyCleanupArchitectures = @("X64", "X86")
+$expectedRuntimeDependencyArchitectures = @("X64", "X86")
 $expectedRuntimeNuGetVersion = "2.3.1"
 $projectAssetsPath = Join-Path (Split-Path -Parent $projectPath) "obj\project.assets.json"
 $h264DecoderClass = "Registry::HKEY_CLASSES_ROOT\CLSID\{62CE7E72-4C71-4D20-B15D-452831A87D9D}\InprocServer32"
@@ -587,7 +587,9 @@ $tlsServerDisposed = $false
 $packageRemoved = $false
 $packageAppDataRemoved = $false
 $packageAppDataEmptyRootCleanupUsed = $false
-$runtimePackageGraphRestored = $false
+$runtimePackageBaselinePreserved = $false
+$runtimePackageGraphDisposition = $null
+$runtimePackageSharedAdditionCount = -1
 $environmentRestored = $false
 $signingCertificateRemoved = $false
 $tlsCertificateRemoved = $false
@@ -1137,7 +1139,7 @@ function Invoke-CleanupStep {
     catch {
         if ([string]::Equals(
                 $Code,
-                "RuntimeDependencyCleanupFailed",
+                "RuntimeDependencyValidationFailed",
                 [System.StringComparison]::Ordinal)) {
             Write-Host "Native runtime cleanup diagnostic: $($script:runtimeDependencyCleanupDiagnostic)."
         }
@@ -1276,137 +1278,92 @@ function Test-RuntimeDependencyPackageGraph {
     return $true
 }
 
-function Get-ReviewedAppxDeploymentFailureCodes {
-    param(
-        [Parameter(Mandatory)]
-        [System.Management.Automation.ErrorRecord]$ErrorRecord
-    )
-
-    $reviewedCodes = [System.Collections.Generic.HashSet[string]]::new(
-        [System.StringComparer]::Ordinal)
-    foreach ($code in @(
-            "0x80131620",
-            "0x80004001",
-            "0x80070002",
-            "0x80070005",
-            "0x80070032",
-            "0x80070057",
-            "0x80070490",
-            "0x80073CF1",
-            "0x80073CF3",
-            "0x80073CF7",
-            "0x80073CF9",
-            "0x80073CFA",
-            "0x80073CFE",
-            "0x80073D00",
-            "0x80073D01",
-            "0x80073D02",
-            "0x80073D05",
-            "0x80073D06",
-            "0x80073D1D",
-            "0x80073D23")) {
-        [void]$reviewedCodes.Add($code)
-    }
-
-    $observedCodes = [System.Collections.Generic.List[string]]::new()
-    $observedCodeSet = [System.Collections.Generic.HashSet[string]]::new(
-        [System.StringComparer]::Ordinal)
-    $diagnosticTexts = [System.Collections.Generic.List[string]]::new()
-    if ($null -ne $ErrorRecord.ErrorDetails -and
-        -not [string]::IsNullOrWhiteSpace($ErrorRecord.ErrorDetails.Message)) {
-        $diagnosticTexts.Add($ErrorRecord.ErrorDetails.Message)
-    }
-    $current = $ErrorRecord.Exception
-    for ($depth = 0; $null -ne $current -and $depth -lt 8; $depth++) {
-        $hresult = "0x{0:X8}" -f ([int64]$current.HResult -band 0xFFFFFFFFL)
-        if ($observedCodes.Count -lt 4 -and
-            $reviewedCodes.Contains($hresult) -and
-            $observedCodeSet.Add($hresult)) {
-            $observedCodes.Add($hresult)
-        }
-        if (-not [string]::IsNullOrWhiteSpace($current.Message)) {
-            $diagnosticTexts.Add($current.Message)
-        }
-
-        $current = $current.InnerException
-    }
-
-    foreach ($diagnosticText in $diagnosticTexts) {
-        foreach ($match in [regex]::Matches(
-                $diagnosticText,
-                "(?i)(?<![0-9A-F])0x[0-9A-F]{8}(?![0-9A-F])")) {
-            $candidate = "0x$($match.Value.Substring(2).ToUpperInvariant())"
-            if ($observedCodes.Count -lt 4 -and
-                $reviewedCodes.Contains($candidate) -and
-                $observedCodeSet.Add($candidate)) {
-                $observedCodes.Add($candidate)
-            }
-        }
-    }
-
-    return @($observedCodes.ToArray())
-}
-
-function Restore-RuntimeDependencyPackageGraph {
+function Validate-RuntimeDependencyPackageState {
     $script:runtimeDependencyCleanupDiagnostic = "SnapshotValidation"
     if ($null -eq $script:runtimePackagesBefore) {
         if ($script:installAttempted) {
             throw "The Windows App Runtime package graph snapshot is unavailable."
         }
 
-        $script:runtimePackageGraphRestored = $true
+        $script:runtimePackageBaselinePreserved = $true
+        $script:runtimePackageGraphDisposition = "ExactRestored"
+        $script:runtimePackageSharedAdditionCount = 0
         return
     }
 
     $beforeNames = @($script:runtimePackagesBefore)
+    if ($beforeNames.Count -gt 64) {
+        throw "The Windows App Runtime baseline exceeds its validation bound."
+    }
+    $baselineNameSet = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($baselineFullName in $beforeNames) {
+        if ([string]::IsNullOrWhiteSpace($baselineFullName) -or
+            -not $baselineNameSet.Add($baselineFullName)) {
+            throw "The Windows App Runtime baseline snapshot is invalid."
+        }
+    }
+
     $passiveDeadline = (Get-Date).AddSeconds(5)
     do {
         $script:runtimeDependencyCleanupDiagnostic = "PassiveGraphConvergence"
         if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
             $script:runtimeDependencyCleanupDiagnostic = "Restored"
-            $script:runtimePackageGraphRestored = $true
+            $script:runtimePackageBaselinePreserved = $true
+            $script:runtimePackageGraphDisposition = "ExactRestored"
+            $script:runtimePackageSharedAdditionCount = 0
             return
         }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $passiveDeadline)
 
-    $deadline = (Get-Date).AddSeconds(30)
-    $lastAddedPackageCount = -1
-    $lastValidatedAddedPackageCount = -1
-    do {
-        $script:runtimeDependencyCleanupDiagnostic = "GraphComparison"
-        if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
-            $script:runtimeDependencyCleanupDiagnostic = "Restored"
-            $script:runtimePackageGraphRestored = $true
-            return
-        }
+    $script:runtimeDependencyCleanupDiagnostic = "GraphComparison"
+    if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
+        $script:runtimeDependencyCleanupDiagnostic = "Restored"
+        $script:runtimePackageBaselinePreserved = $true
+        $script:runtimePackageGraphDisposition = "ExactRestored"
+        $script:runtimePackageSharedAdditionCount = 0
+        return
+    }
 
-        $script:runtimeDependencyCleanupDiagnostic = "CurrentGraphRead"
-        $currentPackages = @(Get-RuntimeDependencyPackages)
-        $missingBaselineNames = @($beforeNames | Where-Object {
-            $baselineFullName = $_
-            @($currentPackages | Where-Object {
-                [string]::Equals(
-                    $_.PackageFullName,
-                    $baselineFullName,
-                    [System.StringComparison]::OrdinalIgnoreCase)
-            }).Count -eq 0
-        })
-        if ($missingBaselineNames.Count -ne 0) {
-            $script:runtimeDependencyCleanupDiagnostic =
-                "MissingBaseline(count=$($missingBaselineNames.Count))"
-            throw "A baseline Windows App Runtime registration disappeared during the transaction."
+    $script:runtimeDependencyCleanupDiagnostic = "CurrentGraphRead"
+    $currentPackages = @(Get-RuntimeDependencyPackages)
+    if ($currentPackages.Count -gt 64) {
+        throw "The Windows App Runtime package graph exceeds its validation bound."
+    }
+    $currentNameSet = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($currentPackage in $currentPackages) {
+        if ($null -eq $currentPackage -or
+            [string]::IsNullOrWhiteSpace([string]$currentPackage.PackageFullName) -or
+            -not $currentNameSet.Add([string]$currentPackage.PackageFullName)) {
+            throw "The Windows App Runtime package graph is invalid."
         }
+    }
 
-        $addedPackages = @($currentPackages | Where-Object {
-            $currentFullName = $_.PackageFullName
-            @($beforeNames | Where-Object {
-                [string]::Equals($_, $currentFullName, [System.StringComparison]::OrdinalIgnoreCase)
-            }).Count -eq 0
-        })
-        $lastAddedPackageCount = $addedPackages.Count
-        $validatedAddedPackages = @()
-        foreach ($package in $addedPackages) {
+    $missingBaselineNames = @($beforeNames | Where-Object {
+        $baselineFullName = $_
+        @($currentPackages | Where-Object {
+            [string]::Equals(
+                $_.PackageFullName,
+                $baselineFullName,
+                [System.StringComparison]::OrdinalIgnoreCase)
+        }).Count -eq 0
+    })
+    if ($missingBaselineNames.Count -ne 0) {
+        $script:runtimeDependencyCleanupDiagnostic =
+            "MissingBaseline(count=$($missingBaselineNames.Count))"
+        throw "A baseline Windows App Runtime registration disappeared during the transaction."
+    }
+
+    $addedPackages = @($currentPackages | Where-Object {
+        $currentFullName = $_.PackageFullName
+        @($beforeNames | Where-Object {
+            [string]::Equals($_, $currentFullName, [System.StringComparison]::OrdinalIgnoreCase)
+        }).Count -eq 0
+    })
+    $validatedAddedPackages = @()
+    foreach ($package in $addedPackages) {
             $versionText = if ($null -eq $package.Version) { "null" } else { $package.Version.ToString() }
             $architectureText = if ($null -eq $package.Architecture) { "null" } else { $package.Architecture.ToString() }
             $frameworkText = if ($null -eq $package.IsFramework) { "null" } else { $package.IsFramework.ToString() }
@@ -1414,7 +1371,7 @@ function Restore-RuntimeDependencyPackageGraph {
                 $package.PackageFamilyName,
                 "$($script:expectedRuntimeDependencyName)_$($script:expectedRuntimeDependencyPublisherId)",
                 [System.StringComparison]::OrdinalIgnoreCase)
-            $architectureAllowed = @($script:expectedRuntimeDependencyCleanupArchitectures | Where-Object {
+            $architectureAllowed = @($script:expectedRuntimeDependencyArchitectures | Where-Object {
                 [string]::Equals($_, $architectureText, [System.StringComparison]::Ordinal)
             }).Count -eq 1
             $x64SiblingMatches = $true
@@ -1457,59 +1414,19 @@ function Restore-RuntimeDependencyPackageGraph {
                 throw "An unexpected Windows App Runtime registration appeared during the transaction."
             }
 
-            $validatedAddedPackages += $package
-        }
-        $lastValidatedAddedPackageCount = $validatedAddedPackages.Count
+        $validatedAddedPackages += $package
+    }
 
-        foreach ($package in $validatedAddedPackages) {
-            $versionText = $package.Version.ToString()
-            $architectureText = $package.Architecture.ToString()
-            $packageFullName = [string]$package.PackageFullName
-            try {
-                $script:runtimeDependencyCleanupDiagnostic =
-                    "RemovingPackage(version=$versionText;architecture=$architectureText)"
-                Remove-AppxPackage -Package $packageFullName -ErrorAction Stop
-            }
-            catch {
-                $removeError = $_
-                $failureCodes = @(Get-ReviewedAppxDeploymentFailureCodes -ErrorRecord $removeError)
-                $failureCodeText = if ($failureCodes.Count -eq 0) {
-                    "Other"
-                }
-                else {
-                    $failureCodes -join ","
-                }
-                $deploymentError =
-                    -not [string]::IsNullOrWhiteSpace($removeError.FullyQualifiedErrorId) -and
-                    $removeError.FullyQualifiedErrorId.StartsWith(
-                        "DeploymentError,",
-                        [System.StringComparison]::Ordinal)
-                $stillRegistered = @(Get-RuntimeDependencyPackages | Where-Object {
-                    [string]::Equals(
-                        $_.PackageFullName,
-                        $packageFullName,
-                        [System.StringComparison]::OrdinalIgnoreCase)
-                }).Count -ne 0
-                $script:runtimeDependencyCleanupDiagnostic =
-                    "RemovalRetry(version=$versionText;architecture=$architectureText;codes=$failureCodeText;deploymentError=$deploymentError;registered=$stillRegistered)"
-                if ($stillRegistered -and (Get-Date) -ge $deadline) {
-                    throw
-                }
-            }
-        }
-
-        $script:runtimeDependencyCleanupDiagnostic = "PostRemovalGraphComparison"
-        if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
-            $script:runtimeDependencyCleanupDiagnostic = "Restored"
-            $script:runtimePackageGraphRestored = $true
-            return
-        }
-        Start-Sleep -Milliseconds 250
-    } while ((Get-Date) -lt $deadline)
-
+    $script:runtimePackageBaselinePreserved = $true
+    $script:runtimePackageSharedAdditionCount = $validatedAddedPackages.Count
+    $script:runtimePackageGraphDisposition = if ($validatedAddedPackages.Count -eq 0) {
+        "ExactRestored"
+    }
+    else {
+        "SharedAdditionsPreserved"
+    }
     $script:runtimeDependencyCleanupDiagnostic =
-        "ConvergenceTimeout(beforeCount=$($beforeNames.Count);afterCount=$(@(Get-RuntimeDependencyPackages).Count);addedCount=$lastAddedPackageCount;validatedCount=$lastValidatedAddedPackageCount)"
-    throw "The Windows App Runtime package graph was not restored."
+        "Validated(disposition=$($script:runtimePackageGraphDisposition);baselineCount=$($beforeNames.Count);currentCount=$($currentPackages.Count);sharedAdditionCount=$($validatedAddedPackages.Count))"
 }
 
 function Close-TrackedProcessNormally {
@@ -1988,7 +1905,7 @@ try {
 
     Set-FailurePoint -Stage "EvidencePreparation" -Code "EvidencePreparationFailed"
     $successCandidate = [ordered]@{
-        SchemaVersion = 8
+        SchemaVersion = 9
         Stage = "M10NativeTierAPlayback"
         Result = "Passed"
         RunId = $runId
@@ -2051,7 +1968,9 @@ try {
         PackageRemoved = $false
         PackageAppDataRemoved = $false
         PackageAppDataEmptyRootCleanupUsed = $false
-        RuntimePackageGraphRestored = $false
+        RuntimePackageBaselinePreserved = $false
+        RuntimePackageGraphDisposition = "NotValidated"
+        RuntimePackageSharedAdditionCount = -1
         EphemeralCertificatesRemoved = $false
         ExportedCertificateFilesRemoved = $false
         PackageOutputRemoved = $false
@@ -2133,8 +2052,8 @@ finally {
         $script:packageAppDataRemoved = $true
     }
 
-    Invoke-CleanupStep -Code "RuntimeDependencyCleanupFailed" -Action {
-        Restore-RuntimeDependencyPackageGraph
+    Invoke-CleanupStep -Code "RuntimeDependencyValidationFailed" -Action {
+        Validate-RuntimeDependencyPackageState
     }
 
     Invoke-CleanupStep -Code "EnvironmentCleanupFailed" -Action {
@@ -2222,7 +2141,27 @@ if ($null -eq $primaryFailure -and $cleanupFailures.Count -eq 0) {
             -not $tlsServerDisposed -or
             -not $packageRemoved -or
             -not $packageAppDataRemoved -or
-            -not $runtimePackageGraphRestored -or
+            -not $runtimePackageBaselinePreserved -or
+            $runtimePackageSharedAdditionCount -lt 0 -or
+            $runtimePackageSharedAdditionCount -gt 64 -or
+            ([string]::Equals(
+                    $runtimePackageGraphDisposition,
+                    "ExactRestored",
+                    [System.StringComparison]::Ordinal) -and
+                $runtimePackageSharedAdditionCount -ne 0) -or
+            ([string]::Equals(
+                    $runtimePackageGraphDisposition,
+                    "SharedAdditionsPreserved",
+                    [System.StringComparison]::Ordinal) -and
+                $runtimePackageSharedAdditionCount -eq 0) -or
+            (-not [string]::Equals(
+                    $runtimePackageGraphDisposition,
+                    "ExactRestored",
+                    [System.StringComparison]::Ordinal) -and
+                -not [string]::Equals(
+                    $runtimePackageGraphDisposition,
+                    "SharedAdditionsPreserved",
+                    [System.StringComparison]::Ordinal)) -or
             -not $tlsCertificateRemoved -or
             -not $signingCertificateRemoved -or
             -not $exportedCertificateFilesRemoved -or
@@ -2239,7 +2178,9 @@ if ($null -eq $primaryFailure -and $cleanupFailures.Count -eq 0) {
         $successCandidate["PackageRemoved"] = $true
         $successCandidate["PackageAppDataRemoved"] = $true
         $successCandidate["PackageAppDataEmptyRootCleanupUsed"] = $packageAppDataEmptyRootCleanupUsed
-        $successCandidate["RuntimePackageGraphRestored"] = $true
+        $successCandidate["RuntimePackageBaselinePreserved"] = $true
+        $successCandidate["RuntimePackageGraphDisposition"] = $runtimePackageGraphDisposition
+        $successCandidate["RuntimePackageSharedAdditionCount"] = $runtimePackageSharedAdditionCount
         $successCandidate["EphemeralCertificatesRemoved"] = $true
         $successCandidate["ExportedCertificateFilesRemoved"] = $true
         $successCandidate["PackageOutputRemoved"] = $true

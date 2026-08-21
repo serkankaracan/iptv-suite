@@ -29,6 +29,29 @@ public sealed class NativePlaybackEvidenceValidatorTests
     }
 
     [TestMethod]
+    public void SharedRuntimeAdditionsAreAcceptedOnlyWithPositiveCount()
+    {
+        using ValidationFiles files = ValidationFiles.Create("native-evidence-shared-runtime");
+        string evidence = CreateValidEvidence(files.ControllerSha256);
+        string sharedEvidence = ReplaceOnce(
+            ReplaceOnce(
+                evidence,
+                "\"RuntimePackageGraphDisposition\":\"ExactRestored\"",
+                "\"RuntimePackageGraphDisposition\":\"SharedAdditionsPreserved\""),
+            "\"RuntimePackageSharedAdditionCount\":0",
+            "\"RuntimePackageSharedAdditionCount\":2");
+
+        files.WriteEvidence(sharedEvidence);
+        files.Validate();
+
+        files.WriteEvidence(ReplaceOnce(
+            sharedEvidence,
+            "\"RuntimePackageSharedAdditionCount\":2",
+            "\"RuntimePackageSharedAdditionCount\":0"));
+        _ = Assert.ThrowsExactly<InvalidDataException>(files.Validate);
+    }
+
+    [TestMethod]
     public void StringCoercionIsRejectedForNumericAndBooleanProperties()
     {
         using ValidationFiles files = ValidationFiles.Create("native-evidence-coercion");
@@ -96,7 +119,13 @@ public sealed class NativePlaybackEvidenceValidatorTests
                 "\"ResolvedWindowsAppRuntimePublisherId\":\"8wekyb3d8bbwe\"",
                 "\"ResolvedWindowsAppRuntimePublisherId\":\"publisher\""),
             ("\"ResolvedWindowsAppRuntimeIsFramework\":true", "\"ResolvedWindowsAppRuntimeIsFramework\":false"),
-            ("\"RuntimePackageGraphRestored\":true", "\"RuntimePackageGraphRestored\":false"),
+            ("\"RuntimePackageBaselinePreserved\":true", "\"RuntimePackageBaselinePreserved\":false"),
+            (
+                "\"RuntimePackageGraphDisposition\":\"ExactRestored\"",
+                "\"RuntimePackageGraphDisposition\":\"Unexpected\""),
+            ("\"RuntimePackageSharedAdditionCount\":0", "\"RuntimePackageSharedAdditionCount\":-1"),
+            ("\"RuntimePackageSharedAdditionCount\":0", "\"RuntimePackageSharedAdditionCount\":1"),
+            ("\"RuntimePackageSharedAdditionCount\":0", "\"RuntimePackageSharedAdditionCount\":65"),
             (
                 "\"PackageSha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"",
                 "\"PackageSha256\":\"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD\""),
@@ -133,7 +162,7 @@ public sealed class NativePlaybackEvidenceValidatorTests
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteNumber("SchemaVersion", 8);
+            writer.WriteNumber("SchemaVersion", 9);
             writer.WriteString("Stage", "M10NativeTierAPlayback");
             writer.WriteString("Result", "Passed");
             writer.WriteString("RunId", RunId);
@@ -199,7 +228,9 @@ public sealed class NativePlaybackEvidenceValidatorTests
             writer.WriteBoolean("PackageRemoved", true);
             writer.WriteBoolean("PackageAppDataRemoved", true);
             writer.WriteBoolean("PackageAppDataEmptyRootCleanupUsed", false);
-            writer.WriteBoolean("RuntimePackageGraphRestored", true);
+            writer.WriteBoolean("RuntimePackageBaselinePreserved", true);
+            writer.WriteString("RuntimePackageGraphDisposition", "ExactRestored");
+            writer.WriteNumber("RuntimePackageSharedAdditionCount", 0);
             writer.WriteBoolean("EphemeralCertificatesRemoved", true);
             writer.WriteBoolean("ExportedCertificateFilesRemoved", true);
             writer.WriteBoolean("PackageOutputRemoved", true);

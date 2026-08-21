@@ -77,7 +77,9 @@ public static class NativePlaybackEvidenceValidator
         "PackageRemoved",
         "PackageAppDataRemoved",
         "PackageAppDataEmptyRootCleanupUsed",
-        "RuntimePackageGraphRestored",
+        "RuntimePackageBaselinePreserved",
+        "RuntimePackageGraphDisposition",
+        "RuntimePackageSharedAdditionCount",
         "EphemeralCertificatesRemoved",
         "ExportedCertificateFilesRemoved",
         "PackageOutputRemoved",
@@ -159,7 +161,7 @@ public static class NativePlaybackEvidenceValidator
             throw Invalid("Native playback evidence property sequence is invalid.");
         }
 
-        RequireEqual(RequireInt32(root, "SchemaVersion"), 8, "SchemaVersion");
+        RequireEqual(RequireInt32(root, "SchemaVersion"), 9, "SchemaVersion");
         RequireEqual(RequireString(root, "Stage"), ExpectedStage, "Stage");
         RequireEqual(RequireString(root, "Result"), "Passed", "Result");
         RequireLowerHex(root, "RunId", 32);
@@ -277,9 +279,41 @@ public static class NativePlaybackEvidenceValidator
         RequireEqual(RequireBoolean(root, "PackageAppDataRemoved"), true, "PackageAppDataRemoved");
         _ = RequireBoolean(root, "PackageAppDataEmptyRootCleanupUsed");
         RequireEqual(
-            RequireBoolean(root, "RuntimePackageGraphRestored"),
+            RequireBoolean(root, "RuntimePackageBaselinePreserved"),
             true,
-            "RuntimePackageGraphRestored");
+            "RuntimePackageBaselinePreserved");
+        string runtimePackageGraphDisposition = RequireString(root, "RuntimePackageGraphDisposition");
+        int runtimePackageSharedAdditionCount =
+            RequireInt32(root, "RuntimePackageSharedAdditionCount");
+        if (runtimePackageSharedAdditionCount is < 0 or > 64)
+        {
+            throw InvalidProperty("RuntimePackageSharedAdditionCount");
+        }
+
+        if (string.Equals(
+                runtimePackageGraphDisposition,
+                "ExactRestored",
+                StringComparison.Ordinal))
+        {
+            if (runtimePackageSharedAdditionCount != 0)
+            {
+                throw InvalidProperty("RuntimePackageSharedAdditionCount");
+            }
+        }
+        else if (string.Equals(
+                     runtimePackageGraphDisposition,
+                     "SharedAdditionsPreserved",
+                     StringComparison.Ordinal))
+        {
+            if (runtimePackageSharedAdditionCount == 0)
+            {
+                throw InvalidProperty("RuntimePackageSharedAdditionCount");
+            }
+        }
+        else
+        {
+            throw InvalidProperty("RuntimePackageGraphDisposition");
+        }
         RequireEqual(
             RequireBoolean(root, "EphemeralCertificatesRemoved"),
             true,

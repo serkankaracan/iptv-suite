@@ -2202,7 +2202,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "SourceDetachMaximumMilliseconds -gt 5000");
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
-        StringAssert.Contains(controller, "SchemaVersion = 8");
+        StringAssert.Contains(controller, "SchemaVersion = 9");
         StringAssert.Contains(controller, "foreach ($staleEvidence in @($evidencePath, $failureEvidencePath))");
         StringAssert.Contains(controller, "if (@(Get-RepositoryStatus).Count -ne 0)");
         StringAssert.Contains(controller, "$repositoryHead = Get-RepositoryHead");
@@ -2221,12 +2221,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "Task.WaitAll(handlers, TimeSpan.FromSeconds(5))");
         StringAssert.Contains(controller, "RemoveExactEmptyDirectory(");
         StringAssert.Contains(controller, "Test-RuntimeDependencyPackageGraph");
-        StringAssert.Contains(controller, "Restore-RuntimeDependencyPackageGraph");
+        StringAssert.Contains(controller, "Validate-RuntimeDependencyPackageState");
         StringAssert.Contains(controller, "$passiveDeadline = (Get-Date).AddSeconds(5)");
         StringAssert.Contains(controller, "$script:runtimeDependencyCleanupDiagnostic = \"PassiveGraphConvergence\"");
-        StringAssert.Contains(controller, "$deadline = (Get-Date).AddSeconds(30)");
-        StringAssert.Contains(controller, "$expectedRuntimeDependencyCleanupArchitectures = @(\"X64\", \"X86\")");
-        StringAssert.Contains(controller, "$architectureAllowed = @($script:expectedRuntimeDependencyCleanupArchitectures | Where-Object");
+        StringAssert.Contains(controller, "$expectedRuntimeDependencyArchitectures = @(\"X64\", \"X86\")");
+        StringAssert.Contains(controller, "$architectureAllowed = @($script:expectedRuntimeDependencyArchitectures | Where-Object");
         StringAssert.Contains(controller, "-not $architectureAllowed");
         StringAssert.Contains(controller, "$validatedAddedPackages = @()");
         StringAssert.Contains(controller, "$missingBaselineNames = @($beforeNames | Where-Object");
@@ -2235,22 +2234,17 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "[string]::Equals($_.Architecture.ToString(), \"X64\", [System.StringComparison]::Ordinal)");
         StringAssert.Contains(controller, "-not $x64SiblingMatches");
         StringAssert.Contains(controller, "$validatedAddedPackages += $package");
-        StringAssert.Contains(controller, "foreach ($package in $validatedAddedPackages)");
         StringAssert.Contains(controller, "$package.IsFramework -ne $true");
         StringAssert.Contains(controller, "$runtimeVersion.Major -ne 2");
         StringAssert.Contains(controller, "$runtimeVersion -lt [version]$script:expectedRuntimeDependencyVersion");
-        StringAssert.Contains(controller, "$stillRegistered = @(Get-RuntimeDependencyPackages | Where-Object");
         StringAssert.Contains(controller, "Native runtime cleanup diagnostic: $($script:runtimeDependencyCleanupDiagnostic).");
         StringAssert.Contains(controller, "AddedPackage(version=$versionText;architecture=$architectureText;framework=$frameworkText;familyMatch=$familyMatches;x64Sibling=$x64SiblingMatches)");
-        StringAssert.Contains(controller, "$removeError = $_");
-        StringAssert.Contains(controller, "Get-ReviewedAppxDeploymentFailureCodes -ErrorRecord $removeError");
-        StringAssert.Contains(controller, "$removeError.FullyQualifiedErrorId.StartsWith(");
-        StringAssert.Contains(controller, "\"DeploymentError,\"");
-        StringAssert.Contains(controller, "RemovalRetry(version=$versionText;architecture=$architectureText;codes=$failureCodeText;deploymentError=$deploymentError;registered=$stillRegistered)");
-        StringAssert.Contains(controller, "ConvergenceTimeout(beforeCount=$($beforeNames.Count);afterCount=$(@(Get-RuntimeDependencyPackages).Count);addedCount=$lastAddedPackageCount;validatedCount=$lastValidatedAddedPackageCount)");
-        StringAssert.Contains(controller, "Invoke-CleanupStep -Code \"RuntimeDependencyCleanupFailed\"");
+        StringAssert.Contains(controller, "\"SharedAdditionsPreserved\"");
+        StringAssert.Contains(controller, "RuntimePackageBaselinePreserved = $false");
+        StringAssert.Contains(controller, "RuntimePackageGraphDisposition = \"NotValidated\"");
+        StringAssert.Contains(controller, "RuntimePackageSharedAdditionCount = -1");
+        StringAssert.Contains(controller, "Invoke-CleanupStep -Code \"RuntimeDependencyValidationFailed\"");
         StringAssert.Contains(controller, "PackageAppDataEmptyRootCleanupUsed = $false");
-        StringAssert.Contains(controller, "RuntimePackageGraphRestored = $false");
         StringAssert.Contains(controller, "Remove-ExactCertificate");
         StringAssert.Contains(controller, "Remove-ExactOwnedTree -Path $script:packageOutput -ExpectedParent $script:packagesRoot");
         StringAssert.Contains(controller, "[System.IO.FileMode]::CreateNew");
@@ -2265,70 +2259,36 @@ public sealed class DependencyRulesTests
             controller.Contains("Move-Item -LiteralPath $temporaryPath", StringComparison.Ordinal),
             "Package app-data cleanup must not recurse and evidence publication must not overwrite.");
 
-        int runtimeRemovalClassifierStart = controller.IndexOf(
-            "function Get-ReviewedAppxDeploymentFailureCodes",
+        int runtimeGraphValidationStart = controller.IndexOf(
+            "function Validate-RuntimeDependencyPackageState",
             StringComparison.Ordinal);
-        int runtimeGraphRestoreStart = controller.IndexOf(
-            "function Restore-RuntimeDependencyPackageGraph",
-            runtimeRemovalClassifierStart,
+        int trackedProcessCloseStart = controller.IndexOf(
+            "function Close-TrackedProcessNormally",
+            runtimeGraphValidationStart,
             StringComparison.Ordinal);
         Assert.IsTrue(
-            runtimeRemovalClassifierStart >= 0 && runtimeGraphRestoreStart > runtimeRemovalClassifierStart);
-        string runtimeRemovalClassifier =
-            controller[runtimeRemovalClassifierStart..runtimeGraphRestoreStart];
-        string[] expectedRuntimeRemovalHResults =
-        [
-            "0x80131620",
-            "0x80004001",
-            "0x80070002",
-            "0x80070005",
-            "0x80070032",
-            "0x80070057",
-            "0x80070490",
-            "0x80073CF1",
-            "0x80073CF3",
-            "0x80073CF7",
-            "0x80073CF9",
-            "0x80073CFA",
-            "0x80073CFE",
-            "0x80073D00",
-            "0x80073D01",
-            "0x80073D02",
-            "0x80073D05",
-            "0x80073D06",
-            "0x80073D1D",
-            "0x80073D23",
-        ];
-        string[] actualRuntimeRemovalHResults = Regex.Matches(
-                runtimeRemovalClassifier,
-                @"0x(?!FFFFFFFF)[0-9A-F]{8}")
-            .Select(match => match.Value)
-            .ToArray();
-        CollectionAssert.AreEqual(
-            expectedRuntimeRemovalHResults,
-            actualRuntimeRemovalHResults,
-            "Runtime removal diagnostics must expose only the reviewed HRESULT allowlist.");
+            runtimeGraphValidationStart >= 0 && trackedProcessCloseStart > runtimeGraphValidationStart);
+        string runtimeGraphValidation =
+            controller[runtimeGraphValidationStart..trackedProcessCloseStart];
+        StringAssert.Contains(runtimeGraphValidation, "$beforeNames.Count -gt 64");
+        StringAssert.Contains(runtimeGraphValidation, "$currentPackages.Count -gt 64");
+        StringAssert.Contains(runtimeGraphValidation, "$baselineNameSet.Add($baselineFullName)");
         StringAssert.Contains(
-            runtimeRemovalClassifier,
-            "([int64]$current.HResult -band 0xFFFFFFFFL)");
+            runtimeGraphValidation,
+            "$currentNameSet.Add([string]$currentPackage.PackageFullName)");
         StringAssert.Contains(
-            runtimeRemovalClassifier,
-            "$depth -lt 8");
-        StringAssert.Contains(
-            runtimeRemovalClassifier,
-            "$ErrorRecord.ErrorDetails.Message");
-        StringAssert.Contains(
-            runtimeRemovalClassifier,
-            "$reviewedCodes.Contains($candidate)");
-        StringAssert.Contains(
-            runtimeRemovalClassifier,
-            "$observedCodes.Count -lt 4");
+            runtimeGraphValidation,
+            "$script:runtimePackageSharedAdditionCount = $validatedAddedPackages.Count");
         Assert.IsFalse(
-            runtimeRemovalClassifier.Contains("Write-", StringComparison.Ordinal) ||
-            runtimeRemovalClassifier.Contains("PackageFullName", StringComparison.Ordinal) ||
-            runtimeRemovalClassifier.Contains("ActivityId", StringComparison.Ordinal) ||
-            runtimeRemovalClassifier.Contains("TargetObject", StringComparison.Ordinal),
-            "Runtime removal classification must not publish raw deployment diagnostics or package identity.");
+            runtimeGraphValidation.Contains("Remove-AppxPackage", StringComparison.Ordinal) ||
+            runtimeGraphValidation.Contains("FindPackagesForUser", StringComparison.Ordinal) ||
+            runtimeGraphValidation.Contains("FindProvisionedPackages", StringComparison.Ordinal) ||
+            runtimeGraphValidation.Contains("-AllUsers", StringComparison.Ordinal),
+            "Shared runtime validation must remain bounded and non-mutating.");
+        Assert.AreEqual(
+            1,
+            Regex.Count(controller, @"\bRemove-AppxPackage\b"),
+            "Only the exact disposable native playback package may be removed.");
 
         int successCandidateIndex = controller.IndexOf("$successCandidate = [ordered]@{", StringComparison.Ordinal);
         int cleanupIndex = controller.LastIndexOf("\nfinally {", StringComparison.Ordinal);
@@ -2407,7 +2367,9 @@ public sealed class DependencyRulesTests
             "PackageRemoved",
             "PackageAppDataRemoved",
             "PackageAppDataEmptyRootCleanupUsed",
-            "RuntimePackageGraphRestored",
+            "RuntimePackageBaselinePreserved",
+            "RuntimePackageGraphDisposition",
+            "RuntimePackageSharedAdditionCount",
             "EphemeralCertificatesRemoved",
             "ExportedCertificateFilesRemoved",
             "PackageOutputRemoved",
