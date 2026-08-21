@@ -1358,7 +1358,13 @@ try {
     if ($statusElement.Current.Name -ne $expectedCatalogStatus) {
         throw "The packaged catalog did not settle after the input-response probe."
     }
-    $channelListElement.SetFocus()
+    $scrollFocusItem = $channelListElement.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $listItemCondition)
+    if ($null -eq $scrollFocusItem) {
+        throw "The packaged catalog has no realized item for the scroll probe."
+    }
+    $scrollFocusItem.SetFocus()
     Start-Sleep -Milliseconds 150
     Assert-FocusedAutomationElement $channelListElement "CatalogChannelList"
     [IptvSuite.PackageSmoke.DwmFrameSampler]::Start()

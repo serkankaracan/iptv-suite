@@ -645,6 +645,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageDown()");
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()");
+        StringAssert.Contains(packageSmoke, "$scrollFocusItem = $channelListElement.FindFirst(");
+        StringAssert.Contains(packageSmoke, "$scrollFocusItem.SetFocus()");
+        Assert.IsFalse(
+            packageSmoke.Contains("$channelListElement.SetFocus()", StringComparison.Ordinal),
+            "The composite ListView root is not the keyboard-focusable scroll target.");
         StringAssert.Contains(packageSmoke, "$catalogFrameP95Milliseconds -gt 33.3");
         StringAssert.Contains(packageSmoke, "$catalogDroppedFramePercent -ge 1.0");
         StringAssert.Contains(packageSmoke, "$catalogFrameMaximumMilliseconds -gt 200.0");
