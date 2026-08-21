@@ -125,6 +125,13 @@ namespace IptvSuite.PackageSmoke
         public static extern uint GetWindowThreadProcessId(
             IntPtr windowHandle,
             out uint processId);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetForegroundWindow(IntPtr windowHandle);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
     }
 
     public static class KeyboardInspector
@@ -999,24 +1006,57 @@ function Get-Percentile95 {
 function Assert-FocusedAutomationElement {
     param(
         [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$ExpectedElement,
+
+        [Parameter(Mandatory)]
         [string]$ExpectedAutomationId
     )
 
     $deadline = (Get-Date).AddSeconds(5)
     do {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        for ($depth = 0; $null -ne $focused -and $depth -lt 16; $depth++) {
-            if ($focused.Current.AutomationId -eq $ExpectedAutomationId) {
+        for ($depth = 0; $null -ne $focused -and $depth -lt 32; $depth++) {
+            if ([System.Windows.Automation.Automation]::Compare($focused, $ExpectedElement) -or
+                $focused.Current.AutomationId -eq $ExpectedAutomationId) {
                 return
             }
 
-            $focused = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($focused)
+            $focused = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($focused)
         }
 
         Start-Sleep -Milliseconds 50
     } while ((Get-Date) -lt $deadline)
 
-    throw "The packaged catalog keyboard focus order is invalid."
+    throw "The packaged catalog keyboard focus order is invalid at the expected control."
+}
+
+function Assert-PackagedWindowForeground {
+    param(
+        [Parameter(Mandatory)]
+        [IntPtr]$WindowHandle,
+
+        [Parameter(Mandatory)]
+        [uint32]$ExpectedProcessId
+    )
+
+    [void][IptvSuite.PackageSmoke.WindowInspector]::SetForegroundWindow($WindowHandle)
+    $deadline = (Get-Date).AddSeconds(5)
+    do {
+        $foreground = [IptvSuite.PackageSmoke.WindowInspector]::GetForegroundWindow()
+        if ($foreground -ne [IntPtr]::Zero) {
+            [uint32]$ownerProcessId = 0
+            [void][IptvSuite.PackageSmoke.WindowInspector]::GetWindowThreadProcessId(
+                $foreground,
+                [ref]$ownerProcessId)
+            if ($ownerProcessId -eq $ExpectedProcessId) {
+                return
+            }
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged catalog window did not own foreground keyboard input."
 }
 
 try {
@@ -1298,15 +1338,16 @@ try {
     if (-not $sourceElement.Current.IsEnabled -or -not $categoryElement.Current.IsEnabled) {
         throw "The packaged catalog controls did not become keyboard-focusable."
     }
+    Assert-PackagedWindowForeground $windowHandle ([uint32]$activationProcessId)
     $sourceElement.SetFocus()
     Start-Sleep -Milliseconds 150
-    Assert-FocusedAutomationElement "CatalogSourceSelector"
+    Assert-FocusedAutomationElement $sourceElement "CatalogSourceSelector"
     [IptvSuite.PackageSmoke.KeyboardInspector]::PressTab()
     Start-Sleep -Milliseconds 150
-    Assert-FocusedAutomationElement "CatalogCategorySelector"
+    Assert-FocusedAutomationElement $categoryElement "CatalogCategorySelector"
     [IptvSuite.PackageSmoke.KeyboardInspector]::PressTab()
     Start-Sleep -Milliseconds 150
-    Assert-FocusedAutomationElement "CatalogSearchBox"
+    Assert-FocusedAutomationElement $searchElement "CatalogSearchBox"
     $catalogKeyboardFocusOrderVerified = $true
 
     $catalogRestoredDeadline = (Get-Date).AddSeconds(10)
@@ -1319,7 +1360,7 @@ try {
     }
     $channelListElement.SetFocus()
     Start-Sleep -Milliseconds 150
-    Assert-FocusedAutomationElement "CatalogChannelList"
+    Assert-FocusedAutomationElement $channelListElement "CatalogChannelList"
     [IptvSuite.PackageSmoke.DwmFrameSampler]::Start()
     $frameResult = $null
     try {

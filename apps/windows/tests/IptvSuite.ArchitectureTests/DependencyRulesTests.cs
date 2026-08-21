@@ -631,8 +631,12 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$catalogRealizedContainerCount -gt 300");
         StringAssert.Contains(packageSmoke, "$catalogInputResponseP95Milliseconds -gt 100.0");
         StringAssert.Contains(packageSmoke, "$deadline = (Get-Date).AddSeconds(5)");
-        StringAssert.Contains(packageSmoke, "$depth -lt 16");
+        StringAssert.Contains(packageSmoke, "$depth -lt 32");
         StringAssert.Contains(packageSmoke, "Start-Sleep -Milliseconds 50");
+        StringAssert.Contains(packageSmoke, "SetForegroundWindow($WindowHandle)");
+        StringAssert.Contains(packageSmoke, "$ownerProcessId -eq $ExpectedProcessId");
+        StringAssert.Contains(packageSmoke, "[System.Windows.Automation.Automation]::Compare($focused, $ExpectedElement)");
+        StringAssert.Contains(packageSmoke, "[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($focused)");
         StringAssert.Contains(packageSmoke, "DwmGetCompositionTimingInfo(IntPtr.Zero, ref timing)");
         StringAssert.Contains(packageSmoke, "timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo))");
         StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");
@@ -1011,7 +1015,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "CatalogSearchBox");
         StringAssert.Contains(packageSmoke, "CatalogChannelList");
         StringAssert.Contains(packageSmoke, "KeyboardInspector]::PressTab()");
-        StringAssert.Contains(packageSmoke, "Assert-FocusedAutomationElement \"CatalogSearchBox\"");
+        StringAssert.Contains(
+            packageSmoke,
+            "Assert-FocusedAutomationElement $searchElement \"CatalogSearchBox\"");
         StringAssert.Contains(packageSmoke, "CatalogUiaContractVerified = $catalogUiaContractVerified");
         StringAssert.Contains(packageSmoke, "CatalogKeyboardFocusOrderVerified = $catalogKeyboardFocusOrderVerified");
         StringAssert.Contains(packageSmoke, "Start-Sleep -Seconds 2");
