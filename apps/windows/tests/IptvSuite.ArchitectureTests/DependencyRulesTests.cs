@@ -637,6 +637,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$ownerProcessId -eq $ExpectedProcessId");
         StringAssert.Contains(packageSmoke, "[System.Windows.Automation.Automation]::Compare($focused, $ExpectedElement)");
         StringAssert.Contains(packageSmoke, "[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($focused)");
+        StringAssert.Contains(
+            packageSmoke,
+            "The packaged catalog keyboard focus order is invalid at $ExpectedAutomationId.");
         StringAssert.Contains(packageSmoke, "DwmGetCompositionTimingInfo(IntPtr.Zero, ref timing)");
         StringAssert.Contains(packageSmoke, "timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo))");
         StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");

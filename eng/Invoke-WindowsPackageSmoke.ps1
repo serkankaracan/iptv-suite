@@ -1027,7 +1027,7 @@ function Assert-FocusedAutomationElement {
         Start-Sleep -Milliseconds 50
     } while ((Get-Date) -lt $deadline)
 
-    throw "The packaged catalog keyboard focus order is invalid at the expected control."
+    throw "The packaged catalog keyboard focus order is invalid at $ExpectedAutomationId."
 }
 
 function Assert-PackagedWindowForeground {
