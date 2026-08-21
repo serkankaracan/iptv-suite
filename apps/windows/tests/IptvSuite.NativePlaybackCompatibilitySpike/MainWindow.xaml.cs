@@ -12,6 +12,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly MediaPlayer _mediaPlayer;
     private TaskCompletionSource? _opened;
     private TaskCompletionSource? _advanced;
+    private TaskCompletionSource? _failureSignal;
     private NativePlaybackFailure _mediaFailure;
     private bool _disposed;
 
@@ -44,6 +45,9 @@ public sealed partial class MainWindow : Window, IDisposable
         int initialHandles = process.HandleCount;
         NativePlaybackFailure timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
         int completedSwitchCount = 0;
+        var resourceSamples = new List<NativePlaybackResourceSample>();
+        var soakStopwatch = Stopwatch.StartNew();
+        CaptureResourceSample(process, soakStopwatch, resourceSamples);
 
         try
         {
@@ -54,6 +58,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 _mediaFailure = NativePlaybackFailure.None;
                 _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _failureSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var stopwatch = Stopwatch.StartNew();
                 _mediaPlayer.Source = MediaSource.CreateFromUri(fixture);
                 _mediaPlayer.Play();
@@ -71,12 +76,34 @@ public sealed partial class MainWindow : Window, IDisposable
                 timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
             }
 
+            NativePlaybackSoakMetrics soakMetrics = NativePlaybackSoakMetrics.None;
+            if (request.SoakDuration > TimeSpan.Zero)
+            {
+                soakMetrics = await RunSoakAsync(
+                    request.Fixtures[0],
+                    request.SoakDuration,
+                    process,
+                    soakStopwatch,
+                    resourceSamples,
+                    cancellationToken);
+                if (!soakMetrics.ResourceBudgetPassed)
+                {
+                    return NativePlaybackProbeResult.Failed(
+                        NativePlaybackFailure.ResourceBudgetExceeded,
+                        completedSwitchCount,
+                        request.SoakDuration,
+                        soakMetrics);
+                }
+            }
+
             process.Refresh();
             return NativePlaybackProbeResult.Passed(
                 request.SwitchCount,
                 startupSamples,
                 hlsStartupSamples,
                 directStartupSamples,
+                request.SoakDuration,
+                soakMetrics,
                 initialPrivateBytes,
                 process.PrivateMemorySize64,
                 initialHandles,
@@ -99,11 +126,62 @@ public sealed partial class MainWindow : Window, IDisposable
         finally
         {
             _mediaPlayer.Pause();
+            _mediaPlayer.IsLoopingEnabled = false;
             _mediaPlayer.Source = null;
             _opened = null;
             _advanced = null;
+            _failureSignal = null;
         }
 
+    }
+
+    private async Task<NativePlaybackSoakMetrics> RunSoakAsync(
+        Uri fixture,
+        TimeSpan soakDuration,
+        Process process,
+        Stopwatch soakStopwatch,
+        List<NativePlaybackResourceSample> resourceSamples,
+        CancellationToken cancellationToken)
+    {
+        _mediaFailure = NativePlaybackFailure.None;
+        _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _failureSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _mediaPlayer.IsLoopingEnabled = true;
+        _mediaPlayer.Source = MediaSource.CreateFromUri(fixture);
+        _mediaPlayer.Play();
+        await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+        await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
+
+        TimeSpan sampleInterval = TimeSpan.FromMinutes(5);
+        while (soakStopwatch.Elapsed < soakDuration)
+        {
+            TimeSpan remaining = soakDuration - soakStopwatch.Elapsed;
+            Task delay = Task.Delay(remaining < sampleInterval ? remaining : sampleInterval, cancellationToken);
+            Task completed = await Task.WhenAny(delay, _failureSignal.Task);
+            if (ReferenceEquals(completed, _failureSignal.Task))
+            {
+                throw new InvalidOperationException(nameof(NativePlaybackFailure.MediaFailed));
+            }
+
+            await delay;
+            CaptureResourceSample(process, soakStopwatch, resourceSamples);
+        }
+
+        _mediaPlayer.IsLoopingEnabled = false;
+        return NativePlaybackSoakMetrics.From(resourceSamples);
+    }
+
+    private static void CaptureResourceSample(
+        Process process,
+        Stopwatch stopwatch,
+        List<NativePlaybackResourceSample> samples)
+    {
+        process.Refresh();
+        samples.Add(new NativePlaybackResourceSample(
+            stopwatch.Elapsed,
+            process.PrivateMemorySize64,
+            process.HandleCount));
     }
 
     internal void ShowResult(NativePlaybackProbeResult result) =>
@@ -120,6 +198,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _mediaFailure = NativePlaybackFailure.MediaFailed;
         _opened?.TrySetException(new InvalidOperationException(nameof(NativePlaybackFailure.MediaFailed)));
         _advanced?.TrySetException(new InvalidOperationException(nameof(NativePlaybackFailure.MediaFailed)));
+        _failureSignal?.TrySetResult();
         DispatcherQueue.TryEnqueue(() => StateText.Text = "Failed: MediaFailed");
     }
 
@@ -145,7 +224,10 @@ public sealed partial class MainWindow : Window, IDisposable
     }
 }
 
-internal sealed record NativePlaybackProbeRequest(IReadOnlyList<Uri> Fixtures, int SwitchCount)
+internal sealed record NativePlaybackProbeRequest(
+    IReadOnlyList<Uri> Fixtures,
+    int SwitchCount,
+    TimeSpan SoakDuration)
 {
     private static readonly HashSet<string> AllowedPaths =
     [
@@ -156,8 +238,10 @@ internal sealed record NativePlaybackProbeRequest(IReadOnlyList<Uri> Fixtures, i
     internal static NativePlaybackProbeRequest Parse(string? arguments)
     {
         string[] parts = arguments?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
-        if (parts is not ["probe", string direct, string hls, string switchText] ||
+        if (parts is not ["probe", string direct, string hls, string switchText, string soakText] ||
             !int.TryParse(switchText, out int switchCount) || switchCount is < 2 or > 100 ||
+            !int.TryParse(soakText, out int soakMinutes) || soakMinutes is < 0 or > 480 ||
+            (soakMinutes > 0 && switchCount != 100) ||
             !Uri.TryCreate(direct, UriKind.Absolute, out Uri? directUri) ||
             !Uri.TryCreate(hls, UriKind.Absolute, out Uri? hlsUri))
         {
@@ -171,7 +255,7 @@ internal sealed record NativePlaybackProbeRequest(IReadOnlyList<Uri> Fixtures, i
             throw new ArgumentException("Native playback fixtures must share one loopback authority and use distinct paths.", nameof(arguments));
         }
 
-        return new NativePlaybackProbeRequest([hlsUri, directUri], switchCount);
+        return new NativePlaybackProbeRequest([hlsUri, directUri], switchCount, TimeSpan.FromMinutes(soakMinutes));
     }
 
     private static void ValidateFixture(Uri fixture)
@@ -192,6 +276,7 @@ internal enum NativePlaybackFailure
     MediaFailed,
     MediaOpenTimeout,
     PlaybackAdvanceTimeout,
+    ResourceBudgetExceeded,
     Cancelled,
     UnexpectedFailure,
 }
@@ -204,6 +289,14 @@ internal sealed record NativePlaybackProbeResult(
     double StartupMaximumMilliseconds,
     double HlsStartupP95Milliseconds,
     double DirectStartupP95Milliseconds,
+    int SoakMinutes,
+    int ResourceSampleCount,
+    long WarmupPrivateBytes,
+    long MemoryNetGrowthBytes,
+    double MemoryNetGrowthPercent,
+    bool MemoryMonotonicIncrease,
+    int WarmupHandleCount,
+    int HandleNetGrowth,
     long InitialPrivateBytes,
     long FinalPrivateBytes,
     int InitialHandleCount,
@@ -220,6 +313,8 @@ internal sealed record NativePlaybackProbeResult(
         IReadOnlyList<double> startupSamples,
         IReadOnlyList<double> hlsStartupSamples,
         IReadOnlyList<double> directStartupSamples,
+        TimeSpan soakDuration,
+        NativePlaybackSoakMetrics soakMetrics,
         long initialPrivateBytes,
         long finalPrivateBytes,
         int initialHandleCount,
@@ -234,6 +329,14 @@ internal sealed record NativePlaybackProbeResult(
             ordered[^1],
             Percentile95(hlsStartupSamples),
             Percentile95(directStartupSamples),
+            (int)soakDuration.TotalMinutes,
+            soakMetrics.ResourceSampleCount,
+            soakMetrics.WarmupPrivateBytes,
+            soakMetrics.MemoryNetGrowthBytes,
+            soakMetrics.MemoryNetGrowthPercent,
+            soakMetrics.MemoryMonotonicIncrease,
+            soakMetrics.WarmupHandleCount,
+            soakMetrics.HandleNetGrowth,
             initialPrivateBytes,
             finalPrivateBytes,
             initialHandleCount,
@@ -242,8 +345,19 @@ internal sealed record NativePlaybackProbeResult(
 
     internal static NativePlaybackProbeResult Failed(
         NativePlaybackFailure failure,
-        int completedSwitchCount = 0) =>
-        new(false, failure, completedSwitchCount, 0, 0, 0, 0, 0, 0, 0, 0);
+        int completedSwitchCount = 0,
+        TimeSpan soakDuration = default,
+        NativePlaybackSoakMetrics soakMetrics = default) =>
+        new(false, failure, completedSwitchCount, 0, 0, 0, 0,
+            (int)soakDuration.TotalMinutes,
+            soakMetrics.ResourceSampleCount,
+            soakMetrics.WarmupPrivateBytes,
+            soakMetrics.MemoryNetGrowthBytes,
+            soakMetrics.MemoryNetGrowthPercent,
+            soakMetrics.MemoryMonotonicIncrease,
+            soakMetrics.WarmupHandleCount,
+            soakMetrics.HandleNetGrowth,
+            0, 0, 0, 0);
 
     private static double Percentile95(IReadOnlyList<double> samples)
     {
@@ -253,4 +367,48 @@ internal sealed record NativePlaybackProbeResult(
     }
 
     internal string ToJson() => JsonSerializer.Serialize(this, SerializerOptions);
+}
+
+internal readonly record struct NativePlaybackResourceSample(
+    TimeSpan Elapsed,
+    long PrivateBytes,
+    int HandleCount);
+
+internal readonly record struct NativePlaybackSoakMetrics(
+    int ResourceSampleCount,
+    long WarmupPrivateBytes,
+    long MemoryNetGrowthBytes,
+    double MemoryNetGrowthPercent,
+    bool MemoryMonotonicIncrease,
+    int WarmupHandleCount,
+    int HandleNetGrowth,
+    bool ResourceBudgetPassed)
+{
+    internal static NativePlaybackSoakMetrics None => new(0, 0, 0, 0, false, 0, 0, true);
+
+    internal static NativePlaybackSoakMetrics From(IReadOnlyList<NativePlaybackResourceSample> samples)
+    {
+        NativePlaybackResourceSample[] postWarmup = samples
+            .Where(sample => sample.Elapsed >= TimeSpan.FromMinutes(30))
+            .ToArray();
+        if (postWarmup.Length < 2) return new(samples.Count, 0, 0, 0, true, 0, 0, false);
+
+        NativePlaybackResourceSample warmup = postWarmup[0];
+        NativePlaybackResourceSample final = postWarmup[^1];
+        long growthBytes = final.PrivateBytes - warmup.PrivateBytes;
+        double growthPercent = warmup.PrivateBytes == 0 ? double.PositiveInfinity :
+            growthBytes * 100d / warmup.PrivateBytes;
+        bool monotonic = postWarmup.Zip(postWarmup.Skip(1),
+            (left, right) => right.PrivateBytes > left.PrivateBytes).All(value => value);
+        bool budgetPassed = growthBytes <= 100L * 1024 * 1024 && growthPercent <= 10d && !monotonic;
+        return new NativePlaybackSoakMetrics(
+            samples.Count,
+            warmup.PrivateBytes,
+            growthBytes,
+            growthPercent,
+            monotonic,
+            warmup.HandleCount,
+            final.HandleCount - warmup.HandleCount,
+            budgetPassed);
+    }
 }

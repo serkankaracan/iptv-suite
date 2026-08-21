@@ -8,11 +8,17 @@ param(
     [string]$DotNetPath = "dotnet",
 
     [ValidateRange(2, 100)]
-    [int]$SwitchCount = 25
+    [int]$SwitchCount = 25,
+
+    [ValidateRange(0, 480)]
+    [int]$SoakMinutes = 0
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+if ($SoakMinutes -gt 0 -and $SwitchCount -ne 100) {
+    throw "A native playback soak requires exactly 100 alternating switches."
+}
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
 
 $activationInterop = @'
@@ -420,7 +426,7 @@ try {
 
     $tlsServer = [IptvSuite.NativePlaybackSmoke.TierATlsServer]::new($fixtureRoot, $tlsCertificate)
     $authority = "https://localhost:$($tlsServer.Port)"
-    $arguments = "probe $authority/direct-h264-aac.ts $authority/hls.m3u8 $SwitchCount"
+    $arguments = "probe $authority/direct-h264-aac.ts $authority/hls.m3u8 $SwitchCount $SoakMinutes"
     $aumid = "$($installedPackage.PackageFamilyName)!$expectedApplicationId"
     $processId = [IptvSuite.NativePlaybackSmoke.PackagedApplicationActivator]::Activate($aumid, $arguments)
     $launchedProcess = Get-Process -Id $processId -ErrorAction Stop
@@ -429,7 +435,7 @@ try {
     Write-Host "Native playback probe activation completed."
 
     $packageEvidencePath = Join-Path $env:LOCALAPPDATA "Packages\$($installedPackage.PackageFamilyName)\LocalCache\M10NativePlayback\last-result.json"
-    $deadline = (Get-Date).AddMinutes(4)
+    $deadline = (Get-Date).AddMinutes([Math]::Max(15, $SoakMinutes + 15))
     while (-not (Test-Path -LiteralPath $packageEvidencePath -PathType Leaf) -and (Get-Date) -lt $deadline) {
         $launchedProcess.Refresh()
         if ($launchedProcess.HasExited) { throw "Native playback probe exited before writing evidence." }
@@ -444,10 +450,18 @@ try {
     if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) {
         throw "Native playback startup budget failed: p95=$($probe.StartupP95Milliseconds), maximum=$($probe.StartupMaximumMilliseconds), hlsP95=$($probe.HlsStartupP95Milliseconds), directP95=$($probe.DirectStartupP95Milliseconds)."
     }
+    if ($SoakMinutes -gt 0 -and (
+        [int]$probe.SoakMinutes -ne $SoakMinutes -or
+        [int]$probe.ResourceSampleCount -lt [Math]::Max(2, [Math]::Floor($SoakMinutes / 5) - 2) -or
+        [bool]$probe.MemoryMonotonicIncrease -or
+        [long]$probe.MemoryNetGrowthBytes -gt 104857600 -or
+        [double]$probe.MemoryNetGrowthPercent -gt 10)) {
+        throw "Native playback soak resource budget failed."
+    }
     if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }
 
     $summary = [ordered]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
         Stage = "M10NativeTierAPlayback"
         Result = "Passed"
         SwitchCount = $SwitchCount
@@ -455,6 +469,14 @@ try {
         StartupMaximumMilliseconds = [Math]::Round([double]$probe.StartupMaximumMilliseconds, 3)
         HlsStartupP95Milliseconds = [Math]::Round([double]$probe.HlsStartupP95Milliseconds, 3)
         DirectStartupP95Milliseconds = [Math]::Round([double]$probe.DirectStartupP95Milliseconds, 3)
+        SoakMinutes = [int]$probe.SoakMinutes
+        ResourceSampleCount = [int]$probe.ResourceSampleCount
+        WarmupPrivateBytes = [long]$probe.WarmupPrivateBytes
+        MemoryNetGrowthBytes = [long]$probe.MemoryNetGrowthBytes
+        MemoryNetGrowthPercent = [Math]::Round([double]$probe.MemoryNetGrowthPercent, 3)
+        MemoryMonotonicIncrease = [bool]$probe.MemoryMonotonicIncrease
+        WarmupHandleCount = [int]$probe.WarmupHandleCount
+        HandleNetGrowth = [int]$probe.HandleNetGrowth
         InitialPrivateBytes = [long]$probe.InitialPrivateBytes
         FinalPrivateBytes = [long]$probe.FinalPrivateBytes
         InitialHandleCount = [int]$probe.InitialHandleCount

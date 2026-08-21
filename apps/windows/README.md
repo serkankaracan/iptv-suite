@@ -144,6 +144,14 @@ Her çağrı yalnız exact `.artifacts/quality-gates` alt ağacını temizleyip 
 
 ADR-007 Tier A playback corpus'u `tests/fixtures/playback/tier-a` altındadır. `eng/New-WindowsTierAPlaybackCorpus.ps1`, ffmpeg.org'un bağladığı exact SHA-256'lı BtbN generator archive'iyle yalnız `lavfi testsrc2` + `sine` kaynaklarından direct H.264/AAC MPEG-TS ve relative HLS-TS üretir. Manifest CC0/provenance, codec tuple, boyut ve file hash'lerini taşır; generator executable/library'leri repository veya MSIX'e girmez. Corpus'un varlığı playback acceptance sonucu değildir.
 
+ADR-007 native fallback acceptance controller'ı elevated, interactive Windows Client üzerinde disposable signed MSIX'i kurar; yalnız TLS loopback sentetik Tier A corpus'unu kullanır ve exact package/certificate cleanup uygular. Kısa hosted diagnostic varsayılan 25 alternating switch'tir. Authoritative long-soak komutu tam 100 switch, ilk switch'ten başlayan 8 saat süre, 5 dakikalık resource örnekleri ve 30 dakika warm-up sonrası `%10` + `100 MiB` memory sınırını fail-closed uygular:
+
+```powershell
+.\eng\Invoke-WindowsNativePlaybackSmoke.ps1 -Configuration Release -SwitchCount 100 -SoakMinutes 480
+```
+
+Bu komutun veya kodunun varlığı acceptance PASS değildir. Sonuç ancak gerçek Windows Client/reference-device run'ında schema-v2 sanitized evidence, sıfır crash/deadlock, startup bütçesi ve cleanup birlikte geçtiğinde doğrulanır; GitHub-hosted Windows Server sonucu reference-device yerine geçmez.
+
 `apps/windows/testdata/m2/fixture-spec.json`; generator `1.0.0`, algorithm version `1`, seed `20260809` ve 16 tamamen sentetik record tanımlar. Gerçek provider response'u, kullanıcı verisi, credential, playlist veya medya içermez. Aynı girdiden `records.json` ve `fixture-manifest.json` üretmek için:
 
 ```powershell

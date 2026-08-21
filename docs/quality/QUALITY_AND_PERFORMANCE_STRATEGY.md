@@ -352,6 +352,8 @@ Bir format “pass” olsa bile exact fixture sonucu; player/build, OS, CPU/GPU,
 - Network interruption/recovery en az her saat.
 - Crash, hang, deadlock, double audio, orphan session ve monotonic memory trend fail.
 
+`Invoke-WindowsNativePlaybackSmoke.ps1 -SwitchCount 100 -SoakMinutes 480`, disposable packaged native fallback için bu uzun koşuyu otomatikleştirir: süre ilk switch ile başlar, 100 HLS/direct switch sonrasında HLS loop sürer, her 5 dakikada private-bytes/handle örneği alınır ve 30 dakika warm-up sonrası net memory büyümesi hem `%10` hem `100 MiB` sınırına bağlanır. Post-warm tüm örneklerin strict artışı ayrıca monoton trend olarak fail olur. Bu controller implementation kanıtıdır; gerçek Windows Client/reference-device schema-v2 artifact'ı gelmeden 8 saat acceptance **UNVERIFIED** kalır.
+
 ### M16 RC
 
 - Packaged private-flight build ile 24 saat.

@@ -2081,8 +2081,14 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "\"/direct-h264-aac.ts\"");
         StringAssert.Contains(window, "\"/hls.m3u8\"");
         StringAssert.Contains(window, "switchCount is < 2 or > 100");
+        StringAssert.Contains(window, "soakMinutes is < 0 or > 480");
+        StringAssert.Contains(window, "soakMinutes > 0 && switchCount != 100");
         StringAssert.Contains(window, "await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
         StringAssert.Contains(window, "await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3)");
+        StringAssert.Contains(window, "TimeSpan sampleInterval = TimeSpan.FromMinutes(5)");
+        StringAssert.Contains(window, "sample.Elapsed >= TimeSpan.FromMinutes(30)");
+        StringAssert.Contains(window, "growthBytes <= 100L * 1024 * 1024 && growthPercent <= 10d && !monotonic");
+        StringAssert.Contains(window, "right.PrivateBytes > left.PrivateBytes");
         StringAssert.Contains(window, "sender.Position >= TimeSpan.FromMilliseconds(500)");
         StringAssert.Contains(window, "JsonStringEnumConverter");
         Assert.IsFalse(
@@ -2113,6 +2119,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "{62CE7E72-4C71-4D20-B15D-452831A87D9D}");
         StringAssert.Contains(controller, "{32D186A7-218F-4C75-8876-DD77273A8999}");
         StringAssert.Contains(controller, "StartupP95Milliseconds -gt 3000");
+        StringAssert.Contains(controller, "[ValidateRange(0, 480)]");
+        StringAssert.Contains(controller, "$SwitchCount -ne 100");
+        StringAssert.Contains(controller, "MemoryNetGrowthBytes -gt 104857600");
+        StringAssert.Contains(controller, "MemoryNetGrowthPercent -gt 10");
+        StringAssert.Contains(controller, "SchemaVersion = 2");
         StringAssert.Contains(controller, "Assert-PackagePayload");
         StringAssert.Contains(controller, "Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop");
         StringAssert.Contains(controller, "Remove-ExactPackage");
