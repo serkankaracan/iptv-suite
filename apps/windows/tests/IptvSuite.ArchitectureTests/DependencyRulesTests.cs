@@ -2088,6 +2088,33 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void NativePlaybackSmokeUsesDisposableSignedPackageAndTlsLoopbackAllowlist()
+    {
+        string controller = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsNativePlaybackSmoke.ps1"));
+
+        StringAssert.Contains(controller, "NativePlaybackCompatibilitySpike.Local.a47d1387");
+        StringAssert.Contains(controller, "PackageCertificateThumbprint");
+        StringAssert.Contains(controller, "Cert:\\LocalMachine\\TrustedPeople");
+        StringAssert.Contains(controller, "New-SelfSignedCertificate -DnsName \"localhost\"");
+        StringAssert.Contains(controller, "Tls12LoopbackAllowlist");
+        StringAssert.Contains(controller, "new TcpListener(IPAddress.Loopback, 0)");
+        StringAssert.Contains(controller, "case \"/direct-h264-aac.ts\"");
+        StringAssert.Contains(controller, "case \"/hls.m3u8\"");
+        StringAssert.Contains(controller, "Range: bytes=");
+        StringAssert.Contains(controller, "StartupP95Milliseconds -gt 3000");
+        StringAssert.Contains(controller, "Assert-PackagePayload");
+        StringAssert.Contains(controller, "Remove-ExactPackage");
+        StringAssert.Contains(controller, "$store.Remove($_)");
+        Assert.IsFalse(
+            controller.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase) ||
+            controller.Contains("http://localhost", StringComparison.OrdinalIgnoreCase),
+            "The native playback smoke must fail closed and keep TLS on loopback.");
+    }
+
+    [TestMethod]
     public void M8CatalogCrashHarnessIsIsolatedAndKillsOnlyItsTrackedProcess()
     {
         string harness = File.ReadAllText(Path.Combine(
@@ -2533,7 +2560,15 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(workflow, ".artifacts/package-lifecycle/last-success.json");
         StringAssert.Contains(
             workflow,
+            "shell: powershell\n        run: .\\eng\\Invoke-WindowsNativePlaybackSmoke.ps1 -Configuration Release");
+        StringAssert.Contains(workflow, "name: windows-native-playback-evidence");
+        StringAssert.Contains(workflow, ".artifacts/native-playback-smoke/last-success.json");
+        StringAssert.Contains(
+            workflow,
             "scan-artifacts .\\.artifacts\\package-lifecycle M4 PACKAGE_LIFECYCLE_EVIDENCE");
+        StringAssert.Contains(
+            workflow,
+            "scan-artifacts .\\.artifacts\\native-playback-smoke M10 NATIVE_PLAYBACK_EVIDENCE");
         StringAssert.Contains(workflow, "name: Required Windows gate");
         StringAssert.Contains(workflow, "if: ${{ always() }}");
         StringAssert.Contains(workflow, "scan-artifacts .\\.artifacts\\msix-smoke CI PACKAGE_EVIDENCE");
@@ -2551,7 +2586,7 @@ public sealed class DependencyRulesTests
         MatchCollection pinnedUses = Regex.Matches(
             workflow,
             @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
-        Assert.HasCount(10, allUses);
+        Assert.HasCount(11, allUses);
         Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
     }
 
