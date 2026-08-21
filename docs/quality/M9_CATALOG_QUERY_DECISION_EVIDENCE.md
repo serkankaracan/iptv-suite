@@ -1,7 +1,7 @@
 # M9 indexed catalog query Decision evidence
 
 **Tarih:** 2026-08-21  
-**Durum:** `VERIFIED` local component evidence; M9 acceptance henüz tamamlanmadı
+**Durum:** `VERIFIED` local component evidence; M9 packaged acceptance ayrıca [tamamlandı](M9_COMPLETION_EVIDENCE.md)
 
 Clean commit `d3ebbdcf24bb842bbab8f39c3abbed47a085db65` üzerinde exact SDK `10.0.302` wrapper'ı ile Release/x64 `SqliteCatalogPerformanceDecisionTests.Measure50kIndexedCatalogQueryDecision` çalıştırıldı. Runner bir kez 50.000 kayıtlı sentetik M3U kataloğunu production parser + protected SQLite sink üzerinden kurdu; ardından source, category, first-page, category-page, exact search ve adapter reopen+first-page sorgularını 20 kez ölçtü. `1.457` byte `decision-summary.json` SHA-256 değeri `79aca1ad7090866a04ae661df9a6e026a955bbc9abc03c138d5843db8a0b66bb`dir.
 

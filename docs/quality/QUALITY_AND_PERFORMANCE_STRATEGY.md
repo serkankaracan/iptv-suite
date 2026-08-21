@@ -372,7 +372,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M6 | Xtream Live contract variants |
 | M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
 | M8 | `COMPLETED`: same-SQLite-transaction persistence, clean 5k–50k ×20 Decision ve gerçek ayrı-process kill/recovery tamamlandı; 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB`, cancellation p95 `12,390 ms`; migration/fault/crash, canary, source lifecycle ve query/cache acceptance PASS. [Kanıt](M8_COMPLETION_EVIDENCE.md) |
-| M9 | IN PROGRESS: bounded query/UI/logo local `292/292 × 2` ve clean query Decision PASS; isolated 50k SQLite v3 seed harness ile packaged name/role/Tab-order, ≤300 automation item ve input-call p95 ≤100 ms smoke IMPLEMENTED fakat hosted UNVERIFIED; DWM/frame/dropped-frame/stall kanıtı açık. [Kanıt](M9_CATALOG_QUERY_DECISION_EVIDENCE.md) |
+| M9 | `COMPLETED, 2026-08-21`: bounded query/UI/logo local `292/292 × 2` ve clean query Decision PASS; run `32443355378` commit-bound packaged 50k UIA/Tab/virtualization/input/DWM acceptance PASS. Realized item `8`, input p95 `16,284 ms`, compositor p95 `31,25 ms`, max `171,875 ms`, late/drop proxy `%0`, interval `404`. [Kanıt](M9_COMPLETION_EVIDENCE.md) |
 | M10 | Compatibility/license/MSIX hard gate |
 | M11 | Fake+real player adapter contract |
 | M12 | Lifecycle/rapid-switch/UI automation |
@@ -398,7 +398,7 @@ Otomasyon şunların yerini tutmaz:
 - Tier B hangi kombinasyonların marketing support matrix'ine gireceği M10 + hukuk sonucudur.
 - Engineering minimum M1'de Windows 11 build 10.0.26100/x64 olarak pinlendi; product support minimumu, ARM64 ve reference hardware M15'te kapanacak.
 - Player A/V sync için sayısal ölçüm düzeneği M10'da seçilecek; yalnız “gözle iyi” kabul değildir.
-- Signed package smoke M9'da Windows UI Automation ile basic catalog name/role, source→category→search Tab focus sırası, 50k status, ≤300 realized automation item ve input-call p95 kontrolünü fail-closed sınar. Ayrıca 240 PageUp/PageDown girdili kontrollü foreground scroll sırasında `DwmGetCompositionTimingInfo(NULL, ...)` ile sistem-compositor proxy frame p95/drop/max interval bütçelerini ölçer [S113]. Bu proxy app-specific ETW/UI-thread attribution, Narrator exploratory acceptance, genel accessibility conformance veya cihaz matrisi değildir; elevated packaged execution hosted kanıtı gelene kadar `UNVERIFIED`dır.
+- Signed package smoke M9'da Windows UI Automation ile basic catalog name/role, source→category→search Tab focus sırası, 50k status, ≤300 realized automation item ve input-call p95 kontrolünü fail-closed sınar. Ayrıca 240 PageUp/PageDown girdili kontrollü foreground scroll sırasında `DwmGetCompositionTimingInfo(NULL, ...)` ile sistem-compositor proxy frame p95/late-frame/max interval bütçelerini ölçer [S113]. Run `32443355378` bu zinciri hosted runner'da commit-bound `VERIFIED` yapmıştır. Bu proxy app-specific ETW/UI-thread attribution, Narrator exploratory acceptance, genel accessibility conformance veya cihaz matrisi değildir.
 
 ## Kaynaklar
 
