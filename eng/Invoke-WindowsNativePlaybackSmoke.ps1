@@ -97,6 +97,10 @@ namespace IptvSuite.NativePlaybackSmoke
         private readonly Task acceptLoop;
         private int requestCount;
         private int failureCount;
+        private int completedResponseCount;
+        private int ioAbortCount;
+        private int headRequestCount;
+        private int rangeRequestCount;
 
         public TierATlsServer(string root, X509Certificate2 certificate)
         {
@@ -110,6 +114,10 @@ namespace IptvSuite.NativePlaybackSmoke
         public int Port { get { return ((IPEndPoint)listener.LocalEndpoint).Port; } }
         public int RequestCount { get { return Volatile.Read(ref requestCount); } }
         public int FailureCount { get { return Volatile.Read(ref failureCount); } }
+        public int CompletedResponseCount { get { return Volatile.Read(ref completedResponseCount); } }
+        public int IoAbortCount { get { return Volatile.Read(ref ioAbortCount); } }
+        public int HeadRequestCount { get { return Volatile.Read(ref headRequestCount); } }
+        public int RangeRequestCount { get { return Volatile.Read(ref rangeRequestCount); } }
 
         private async Task AcceptLoopAsync()
         {
@@ -191,6 +199,8 @@ namespace IptvSuite.NativePlaybackSmoke
 
                     long contentLength = end - start + 1;
                     Interlocked.Increment(ref requestCount);
+                    if (request[0] == "HEAD") Interlocked.Increment(ref headRequestCount);
+                    if (partial) Interlocked.Increment(ref rangeRequestCount);
                     var response = new StringBuilder();
                     response.Append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
                     response.Append("Content-Type: ").Append(contentType).Append("\r\n");
@@ -217,8 +227,9 @@ namespace IptvSuite.NativePlaybackSmoke
                         }
                     }
                     await ssl.FlushAsync().ConfigureAwait(false);
+                    Interlocked.Increment(ref completedResponseCount);
                 }
-                catch (IOException) { }
+                catch (IOException) { Interlocked.Increment(ref ioAbortCount); }
                 catch (AuthenticationException) { Interlocked.Increment(ref failureCount); }
                 catch { Interlocked.Increment(ref failureCount); }
             }
@@ -399,7 +410,7 @@ try {
 
     $probe = Get-Content -Raw $packageEvidencePath | ConvertFrom-Json
     if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or [int]$probe.SwitchCount -ne $SwitchCount) {
-        throw "Native playback probe failed with category '$($probe.Failure)' after $($tlsServer.RequestCount) accepted loopback requests and $($tlsServer.FailureCount) transport failures."
+        throw "Native playback probe failed with category '$($probe.Failure)': accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) { throw "Native playback startup budget failed." }
     if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }

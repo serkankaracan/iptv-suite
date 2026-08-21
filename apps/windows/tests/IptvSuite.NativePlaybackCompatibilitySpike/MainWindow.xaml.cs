@@ -40,6 +40,7 @@ public sealed partial class MainWindow : Window, IDisposable
         using Process process = Process.GetCurrentProcess();
         long initialPrivateBytes = process.PrivateMemorySize64;
         int initialHandles = process.HandleCount;
+        NativePlaybackFailure timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
 
         try
         {
@@ -56,15 +57,26 @@ public sealed partial class MainWindow : Window, IDisposable
 
                 await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
                 startupSamples.Add(stopwatch.Elapsed.TotalMilliseconds);
+                timeoutFailure = NativePlaybackFailure.PlaybackAdvanceTimeout;
                 await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
                 _mediaPlayer.Pause();
                 _mediaPlayer.Source = null;
+                timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
             }
+
+            process.Refresh();
+            return NativePlaybackProbeResult.Passed(
+                request.SwitchCount,
+                startupSamples,
+                initialPrivateBytes,
+                process.PrivateMemorySize64,
+                initialHandles,
+                process.HandleCount);
         }
         catch (TimeoutException)
         {
             return NativePlaybackProbeResult.Failed(
-                _mediaFailure == NativePlaybackFailure.None ? NativePlaybackFailure.PlaybackTimeout : _mediaFailure);
+                _mediaFailure == NativePlaybackFailure.None ? timeoutFailure : _mediaFailure);
         }
         catch (OperationCanceledException)
         {
@@ -82,14 +94,6 @@ public sealed partial class MainWindow : Window, IDisposable
             _advanced = null;
         }
 
-        process.Refresh();
-        return NativePlaybackProbeResult.Passed(
-            request.SwitchCount,
-            startupSamples,
-            initialPrivateBytes,
-            process.PrivateMemorySize64,
-            initialHandles,
-            process.HandleCount);
     }
 
     internal void ShowResult(NativePlaybackProbeResult result) =>
@@ -176,7 +180,8 @@ internal enum NativePlaybackFailure
     None,
     InvalidArguments,
     MediaFailed,
-    PlaybackTimeout,
+    MediaOpenTimeout,
+    PlaybackAdvanceTimeout,
     Cancelled,
     UnexpectedFailure,
 }
