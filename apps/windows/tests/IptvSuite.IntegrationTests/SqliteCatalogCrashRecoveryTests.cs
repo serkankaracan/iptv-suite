@@ -89,9 +89,31 @@ public sealed class SqliteCatalogCrashRecoveryTests
         }
 
         SqliteConnection.ClearAllPools();
+        await WaitForExclusiveFileAccessAsync(databasePath, TimeSpan.FromSeconds(5));
         AssertNoHotRollbackJournal(databasePath + "-journal");
         Assert.IsFalse(File.Exists(databasePath + "-wal"));
         Assert.IsFalse(File.Exists(databasePath + "-shm"));
+    }
+
+    private static async Task WaitForExclusiveFileAccessAsync(string path, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                using FileStream stream = new(
+                    path,
+                    FileMode.Open,
+                    FileAccess.ReadWrite,
+                    FileShare.None);
+                return;
+            }
+            catch (IOException) when (stopwatch.Elapsed < timeout)
+            {
+                await Task.Delay(50);
+            }
+        }
     }
 
     private static void AssertNoHotRollbackJournal(string journalPath)
