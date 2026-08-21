@@ -358,6 +358,13 @@ try {
     if ($LASTEXITCODE -ne 0 -or $actualSdk -ne $expectedSdk) { throw "Expected .NET SDK $expectedSdk, received '$actualSdk'." }
     $h264DecoderRegistered = Test-Path -LiteralPath $h264DecoderClass -PathType Container
     $aacDecoderRegistered = Test-Path -LiteralPath $aacDecoderClass -PathType Container
+    $audioServiceRunning = (Get-Service -Name Audiosrv -ErrorAction SilentlyContinue).Status -eq "Running"
+    $audioEndpointServiceRunning = (Get-Service -Name AudioEndpointBuilder -ErrorAction SilentlyContinue).Status -eq "Running"
+    $userInteractive = [Environment]::UserInteractive
+    $installationType = Get-ItemPropertyValue `
+        -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" `
+        -Name InstallationType `
+        -ErrorAction SilentlyContinue
 
     [xml]$manifest = Get-Content -Raw $manifestPath
     $identity = $manifest.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Identity']")
@@ -432,7 +439,7 @@ try {
 
     $probe = Get-Content -Raw $packageEvidencePath | ConvertFrom-Json
     if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or [int]$probe.SwitchCount -ne $SwitchCount) {
-        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
+        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) { throw "Native playback startup budget failed." }
     if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }
