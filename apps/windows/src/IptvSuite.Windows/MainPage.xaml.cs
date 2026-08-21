@@ -30,9 +30,13 @@ public sealed partial class MainPage : Page, IDisposable
     public MainPage()
     {
         InitializeComponent();
-        AddHandler(
-            UIElement.GettingFocusEvent,
-            new TypedEventHandler<UIElement, GettingFocusEventArgs>(CatalogFilter_GettingFocus),
+        SourceSelector.AddHandler(
+            UIElement.LosingFocusEvent,
+            new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus),
+            handledEventsToo: true);
+        SearchBox.AddHandler(
+            UIElement.LosingFocusEvent,
+            new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus),
             handledEventsToo: true);
         Unloaded += MainPage_Unloaded;
         string assemblyVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
@@ -149,12 +153,11 @@ public sealed partial class MainPage : Page, IDisposable
     private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { _offset = 0; await BrowseAsync(false); }
     private async void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) { if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput) { _offset = 0; await BrowseAsync(debounce: true); } }
 
-    private void CatalogFilter_GettingFocus(UIElement sender, GettingFocusEventArgs args)
+    private void CatalogFilter_LosingFocus(UIElement sender, LosingFocusEventArgs args)
     {
-        DependencyObject? oldFocus = args.OldFocusedElement as DependencyObject;
         DependencyObject? newFocus = args.NewFocusedElement as DependencyObject;
-        bool skippedForward = IsWithin(oldFocus, SourceSelector) && IsWithin(newFocus, SearchBox);
-        bool skippedBackward = IsWithin(oldFocus, SearchBox) && IsWithin(newFocus, SourceSelector);
+        bool skippedForward = ReferenceEquals(sender, SourceSelector) && IsWithin(newFocus, SearchBox);
+        bool skippedBackward = ReferenceEquals(sender, SearchBox) && IsWithin(newFocus, SourceSelector);
         if ((skippedForward || skippedBackward) && !args.TrySetNewFocusedElement(CategorySelector))
         {
             args.Cancel = true;
