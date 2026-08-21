@@ -569,6 +569,7 @@ $harnessAssemblySha256 = $null
 $packageSha256 = $null
 $runtimeDependencyPackageSha256 = $null
 $runtimePackagesBefore = $null
+$runtimeDependencyCleanupDiagnostic = "NotStarted"
 $probeEnvelopeSchemaVersion = 0
 $probeRunIdBound = $false
 $resolvedWindowsAppRuntimeName = $null
@@ -1133,6 +1134,12 @@ function Invoke-CleanupStep {
         & $Action
     }
     catch {
+        if ([string]::Equals(
+                $Code,
+                "RuntimeDependencyCleanupFailed",
+                [System.StringComparison]::Ordinal)) {
+            Write-Host "Native runtime cleanup diagnostic: $($script:runtimeDependencyCleanupDiagnostic)."
+        }
         $script:cleanupFailures.Add($Code)
     }
 }
@@ -1269,6 +1276,7 @@ function Test-RuntimeDependencyPackageGraph {
 }
 
 function Restore-RuntimeDependencyPackageGraph {
+    $script:runtimeDependencyCleanupDiagnostic = "SnapshotValidation"
     if ($null -eq $script:runtimePackagesBefore) {
         if ($script:installAttempted) {
             throw "The Windows App Runtime package graph snapshot is unavailable."
@@ -1281,11 +1289,14 @@ function Restore-RuntimeDependencyPackageGraph {
     $beforeNames = @($script:runtimePackagesBefore)
     $deadline = (Get-Date).AddSeconds(30)
     do {
+        $script:runtimeDependencyCleanupDiagnostic = "GraphComparison"
         if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
+            $script:runtimeDependencyCleanupDiagnostic = "Restored"
             $script:runtimePackageGraphRestored = $true
             return
         }
 
+        $script:runtimeDependencyCleanupDiagnostic = "CurrentGraphRead"
         $currentPackages = @(Get-RuntimeDependencyPackages)
         $addedPackages = @($currentPackages | Where-Object {
             $currentFullName = $_.PackageFullName
@@ -1294,9 +1305,18 @@ function Restore-RuntimeDependencyPackageGraph {
             }).Count -eq 0
         })
         foreach ($package in $addedPackages) {
+            $versionText = if ($null -eq $package.Version) { "null" } else { $package.Version.ToString() }
+            $architectureText = if ($null -eq $package.Architecture) { "null" } else { $package.Architecture.ToString() }
+            $frameworkText = if ($null -eq $package.IsFramework) { "null" } else { $package.IsFramework.ToString() }
+            $familyMatches = [string]::Equals(
+                $package.PackageFamilyName,
+                "$($script:expectedRuntimeDependencyName)_$($script:expectedRuntimeDependencyPublisherId)",
+                [System.StringComparison]::OrdinalIgnoreCase)
+            $script:runtimeDependencyCleanupDiagnostic =
+                "AddedPackage(version=$versionText;architecture=$architectureText;framework=$frameworkText;familyMatch=$familyMatches)"
             $runtimeVersion = [version]::new()
             $runtimeVersionValid = [version]::TryParse(
-                $package.Version.ToString(),
+                $versionText,
                 [ref]$runtimeVersion)
             if ([string]::IsNullOrWhiteSpace([string]$package.PackageFullName) -or
                 -not [string]::Equals(
@@ -1321,6 +1341,8 @@ function Restore-RuntimeDependencyPackageGraph {
 
             $packageFullName = [string]$package.PackageFullName
             try {
+                $script:runtimeDependencyCleanupDiagnostic =
+                    "RemovingPackage(version=$versionText;architecture=$architectureText)"
                 Remove-AppxPackage -Package $packageFullName -ErrorAction Stop
             }
             catch {
@@ -1330,19 +1352,25 @@ function Restore-RuntimeDependencyPackageGraph {
                         $packageFullName,
                         [System.StringComparison]::OrdinalIgnoreCase)
                 }).Count -ne 0
+                $script:runtimeDependencyCleanupDiagnostic =
+                    "RemovalRetry(hresult=$($_.Exception.HResult);registered=$stillRegistered)"
                 if ($stillRegistered -and (Get-Date) -ge $deadline) {
                     throw
                 }
             }
         }
 
+        $script:runtimeDependencyCleanupDiagnostic = "PostRemovalGraphComparison"
         if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
+            $script:runtimeDependencyCleanupDiagnostic = "Restored"
             $script:runtimePackageGraphRestored = $true
             return
         }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
 
+    $script:runtimeDependencyCleanupDiagnostic =
+        "ConvergenceTimeout(beforeCount=$($beforeNames.Count);afterCount=$(@(Get-RuntimeDependencyPackages).Count))"
     throw "The Windows App Runtime package graph was not restored."
 }
 

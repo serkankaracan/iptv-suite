@@ -2227,6 +2227,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "$runtimeVersion.Major -ne 2");
         StringAssert.Contains(controller, "$runtimeVersion -lt [version]$script:expectedRuntimeDependencyVersion");
         StringAssert.Contains(controller, "$stillRegistered = @(Get-RuntimeDependencyPackages | Where-Object");
+        StringAssert.Contains(controller, "Native runtime cleanup diagnostic: $($script:runtimeDependencyCleanupDiagnostic).");
+        StringAssert.Contains(controller, "AddedPackage(version=$versionText;architecture=$architectureText;framework=$frameworkText;familyMatch=$familyMatches)");
+        StringAssert.Contains(controller, "RemovalRetry(hresult=$($_.Exception.HResult);registered=$stillRegistered)");
+        StringAssert.Contains(controller, "ConvergenceTimeout(beforeCount=$($beforeNames.Count);afterCount=$(@(Get-RuntimeDependencyPackages).Count))");
         StringAssert.Contains(controller, "Invoke-CleanupStep -Code \"RuntimeDependencyCleanupFailed\"");
         StringAssert.Contains(controller, "PackageAppDataEmptyRootCleanupUsed = $false");
         StringAssert.Contains(controller, "RuntimePackageGraphRestored = $false");
