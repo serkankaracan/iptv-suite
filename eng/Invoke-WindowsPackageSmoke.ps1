@@ -136,17 +136,41 @@ namespace IptvSuite.PackageSmoke
 
     public static class KeyboardInspector
     {
-        private const byte VirtualKeyTab = 0x09;
-        private const byte VirtualKeyPageUp = 0x21;
-        private const byte VirtualKeyPageDown = 0x22;
+        private const ushort VirtualKeyTab = 0x09;
+        private const ushort VirtualKeyPageUp = 0x21;
+        private const ushort VirtualKeyPageDown = 0x22;
+        private const uint InputKeyboard = 1;
         private const uint KeyEventKeyUp = 0x0002;
 
-        [DllImport("user32.dll")]
-        private static extern void keybd_event(
-            byte virtualKey,
-            byte scanCode,
-            uint flags,
-            UIntPtr extraInfo);
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Input
+        {
+            internal uint Type;
+            internal InputUnion Data;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct InputUnion
+        {
+            [FieldOffset(0)]
+            internal KeyboardInput Keyboard;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KeyboardInput
+        {
+            internal ushort VirtualKey;
+            internal ushort ScanCode;
+            internal uint Flags;
+            internal uint Time;
+            internal UIntPtr ExtraInfo;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(
+            uint inputCount,
+            [In] Input[] inputs,
+            int inputSize);
 
         public static void PressTab()
         {
@@ -163,10 +187,34 @@ namespace IptvSuite.PackageSmoke
             Press(VirtualKeyPageDown);
         }
 
-        private static void Press(byte virtualKey)
+        private static void Press(ushort virtualKey)
         {
-            keybd_event(virtualKey, 0, 0, UIntPtr.Zero);
-            keybd_event(virtualKey, 0, KeyEventKeyUp, UIntPtr.Zero);
+            Input[] inputs =
+            {
+                CreateKeyboardInput(virtualKey, 0),
+                CreateKeyboardInput(virtualKey, KeyEventKeyUp),
+            };
+
+            if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != (uint)inputs.Length)
+            {
+                throw new InvalidOperationException("The packaged keyboard input pair was not delivered atomically.");
+            }
+        }
+
+        private static Input CreateKeyboardInput(ushort virtualKey, uint flags)
+        {
+            return new Input
+            {
+                Type = InputKeyboard,
+                Data = new InputUnion
+                {
+                    Keyboard = new KeyboardInput
+                    {
+                        VirtualKey = virtualKey,
+                        Flags = flags,
+                    },
+                },
+            };
         }
     }
 

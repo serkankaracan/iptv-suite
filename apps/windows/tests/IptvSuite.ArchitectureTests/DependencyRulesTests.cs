@@ -647,6 +647,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageDown()");
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()");
+        StringAssert.Contains(packageSmoke, "private static extern uint SendInput(");
+        StringAssert.Contains(packageSmoke, "CreateKeyboardInput(virtualKey, KeyEventKeyUp)");
+        StringAssert.Contains(packageSmoke, "SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != (uint)inputs.Length");
+        Assert.IsFalse(packageSmoke.Contains("keybd_event", StringComparison.Ordinal));
         StringAssert.Contains(packageSmoke, "$scrollFocusItem = $channelListElement.FindFirst(");
         StringAssert.Contains(packageSmoke, "Assert-FocusedAutomationElement $scrollFocusItem \"CatalogChannelList\" -RequestFocus");
         StringAssert.Contains(packageSmoke, "Assert-FocusedAutomationElement $sourceElement \"CatalogSourceSelector\" -RequestFocus");
