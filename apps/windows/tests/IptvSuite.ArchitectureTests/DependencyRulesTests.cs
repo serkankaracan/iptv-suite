@@ -633,8 +633,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "args.TrySetNewFocusedElement(CategorySelector)");
         StringAssert.Contains(codeBehind, "new KeyEventHandler(SourceSelector_KeyDown)");
         StringAssert.Contains(codeBehind, "new KeyEventHandler(CategorySelector_KeyDown)");
-        StringAssert.Contains(codeBehind, "MoveForwardOnTab(args, CategorySelector)");
-        StringAssert.Contains(codeBehind, "MoveForwardOnTab(args, SearchBox)");
+        StringAssert.Contains(codeBehind, "MoveForwardOnTab(args, SourceSelector, CategorySelector)");
+        StringAssert.Contains(codeBehind, "MoveForwardOnTab(args, CategorySelector, SearchBox)");
+        StringAssert.Contains(codeBehind, "args.OriginalSource is not DependencyObject origin || !IsWithin(origin, owner)");
         StringAssert.Contains(codeBehind, "InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)");
         StringAssert.Contains(codeBehind, "args.Handled = true;");
         StringAssert.Contains(codeBehind, "target.Focus(FocusState.Keyboard);");

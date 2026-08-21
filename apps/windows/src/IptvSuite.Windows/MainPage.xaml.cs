@@ -173,14 +173,15 @@ public sealed partial class MainPage : Page, IDisposable
     }
 
     private void SourceSelector_KeyDown(object sender, KeyRoutedEventArgs args) =>
-        MoveForwardOnTab(args, CategorySelector);
+        MoveForwardOnTab(args, SourceSelector, CategorySelector);
 
     private void CategorySelector_KeyDown(object sender, KeyRoutedEventArgs args) =>
-        MoveForwardOnTab(args, SearchBox);
+        MoveForwardOnTab(args, CategorySelector, SearchBox);
 
-    private static void MoveForwardOnTab(KeyRoutedEventArgs args, Control target)
+    private static void MoveForwardOnTab(KeyRoutedEventArgs args, Control owner, Control target)
     {
-        if (args.Key != VirtualKey.Tab ||
+        if (args.OriginalSource is not DependencyObject origin || !IsWithin(origin, owner) ||
+            args.Key != VirtualKey.Tab ||
             InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down))
         {
             return;
