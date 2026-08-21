@@ -99,6 +99,12 @@ public sealed class DependencyRulesTests
             [],
             ["LibVLCSharp", "LibVLCSharp.WinUI", "Microsoft.Windows.SDK.BuildTools", "Microsoft.WindowsAppSDK", "VideoLAN.LibVLC.Windows"]),
         new(
+            "IptvSuite.NativePlaybackCompatibilitySpike",
+            "apps/windows/tests/IptvSuite.NativePlaybackCompatibilitySpike/IptvSuite.NativePlaybackCompatibilitySpike.csproj",
+            [],
+            [],
+            ["Microsoft.Windows.SDK.BuildTools", "Microsoft.WindowsAppSDK"]),
+        new(
             "IptvSuite.PackageLifecycleHarness",
             "apps/windows/tests/IptvSuite.PackageLifecycleHarness/IptvSuite.PackageLifecycleHarness.csproj",
             ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure"],
@@ -147,6 +153,7 @@ public sealed class DependencyRulesTests
         AssertNoPath(graph, "IptvSuite.Infrastructure", "IptvSuite.Windows");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.ProtectedCatalogSpike");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PlaybackCompatibilitySpike");
+        AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.NativePlaybackCompatibilitySpike");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PackageLifecycleHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.DpapiUserBoundaryHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.CatalogCrashHarness");
@@ -251,7 +258,7 @@ public sealed class DependencyRulesTests
             string? useWinUi = GetProperty(project, "UseWinUI");
             string? enableMsixTooling = GetProperty(project, "EnableMsixTooling");
 
-            if (rule.Name is "IptvSuite.Windows" or "IptvSuite.PackageLifecycleHarness" or "IptvSuite.PlaybackCompatibilitySpike")
+            if (rule.Name is "IptvSuite.Windows" or "IptvSuite.PackageLifecycleHarness" or "IptvSuite.PlaybackCompatibilitySpike" or "IptvSuite.NativePlaybackCompatibilitySpike")
             {
                 Assert.AreEqual("true", useWinUi, ignoreCase: true);
                 Assert.AreEqual("true", enableMsixTooling, ignoreCase: true);
@@ -976,7 +983,16 @@ public sealed class DependencyRulesTests
             const string solutionRoot = "apps/windows/";
             Assert.IsTrue(rule.RelativePath.StartsWith(solutionRoot, StringComparison.Ordinal));
             string solutionRelativePath = rule.RelativePath[solutionRoot.Length..].Replace('/', '\\');
-            StringAssert.Contains(solution, solutionRelativePath);
+            if (rule.Name == "IptvSuite.PlaybackCompatibilitySpike")
+            {
+                Assert.IsFalse(
+                    solution.Contains(solutionRelativePath, StringComparison.Ordinal),
+                    "The rejected M10 native payload must remain outside the normal solution graph.");
+            }
+            else
+            {
+                StringAssert.Contains(solution, solutionRelativePath);
+            }
         }
 
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
@@ -994,6 +1010,7 @@ public sealed class DependencyRulesTests
                 content.Contains("IptvSuite.SecretStoreSpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.ProtectedCatalogSpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.PlaybackCompatibilitySpike", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.NativePlaybackCompatibilitySpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.PackageLifecycleHarness", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.DpapiUserBoundaryHarness", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.CatalogCrashHarness", StringComparison.Ordinal) ||
@@ -1086,6 +1103,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             packageSmoke,
             "$entry.Name -match '^(?i:IptvSuite\\.PlaybackCompatibilitySpike(?:\\..*)?)$'");
+        StringAssert.Contains(
+            packageSmoke,
+            "$entry.Name -match '^(?i:IptvSuite\\.NativePlaybackCompatibilitySpike(?:\\..*)?)$'");
         StringAssert.Contains(packageSmoke, "PackagedApplicationActivator]::Activate($aumid)");
         StringAssert.Contains(packageSmoke, "CoCreateInstance");
         StringAssert.Contains(packageSmoke, "LocalServer = 0x00000004");

@@ -1,0 +1,29 @@
+<Window
+    x:Class="IptvSuite.NativePlaybackCompatibilitySpike.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Native Tier A playback compatibility spike">
+    <Grid Background="#101318">
+        <MediaPlayerElement
+            x:Name="PlaybackSurface"
+            AutomationProperties.AutomationId="NativePlaybackSurface"
+            AreTransportControlsEnabled="False"
+            AutoPlay="False"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch" />
+        <Border
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Margin="16"
+            Padding="12,8"
+            Background="#CC101318"
+            CornerRadius="4">
+            <TextBlock
+                x:Name="StateText"
+                AutomationProperties.AutomationId="NativePlaybackState"
+                Foreground="White"
+                Text="Ready"
+                TextWrapping="Wrap" />
+        </Border>
+    </Grid>
+</Window>

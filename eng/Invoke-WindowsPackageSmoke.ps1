@@ -859,6 +859,10 @@ function Assert-ProductionPackagePayload {
             if ($entry.Name -match '^(?i:IptvSuite\.PlaybackCompatibilitySpike(?:\..*)?)$') {
                 throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
             }
+
+            if ($entry.Name -match '^(?i:IptvSuite\.NativePlaybackCompatibilitySpike(?:\..*)?)$') {
+                throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
+            }
         }
 
         $payloadFiles = @($payloadEntries | Where-Object { -not $_.PSIsContainer })
