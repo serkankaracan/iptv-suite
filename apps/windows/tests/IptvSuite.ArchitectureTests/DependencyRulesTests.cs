@@ -650,7 +650,11 @@ public sealed class DependencyRulesTests
             packageSmoke,
             "The packaged catalog keyboard focus order is invalid at $ExpectedAutomationId (Observed$observedFocusTarget).");
         StringAssert.Contains(packageSmoke, "DwmGetCompositionTimingInfo(IntPtr.Zero, ref timing)");
+        StringAssert.Contains(packageSmoke, "[StructLayout(LayoutKind.Sequential, Pack = 1)]");
+        StringAssert.Contains(packageSmoke, "Marshal.SizeOf(typeof(DwmTimingInfo)) != 292");
         StringAssert.Contains(packageSmoke, "timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo))");
+        StringAssert.Contains(packageSmoke, "Timestamps.Add(timing.QpcVBlank)");
+        StringAssert.Contains(packageSmoke, "timing.FramesLate - previousLate");
         StringAssert.Contains(packageSmoke, "failure.GetType().Name");
         StringAssert.Contains(packageSmoke, "unchecked((uint)failure.HResult)");
         StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");

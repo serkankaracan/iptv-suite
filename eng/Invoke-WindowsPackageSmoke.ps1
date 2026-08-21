@@ -225,7 +225,7 @@ namespace IptvSuite.PackageSmoke
         internal uint Denominator;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct DwmTimingInfo
     {
         internal uint Size;
@@ -298,6 +298,10 @@ namespace IptvSuite.PackageSmoke
         {
             lock (Sync)
             {
+                if (Marshal.SizeOf(typeof(DwmTimingInfo)) != 292)
+                {
+                    throw new InvalidOperationException("The DWM timing ABI size is invalid.");
+                }
                 if (running || worker != null)
                 {
                     throw new InvalidOperationException("The DWM frame sampler is already active.");
@@ -382,7 +386,9 @@ namespace IptvSuite.PackageSmoke
         {
             try
             {
-                ulong previous = 0;
+                ulong previousTimestamp = 0;
+                ulong previousRefresh = 0;
+                ulong previousLate = 0;
                 while (true)
                 {
                     lock (Sync)
@@ -396,15 +402,26 @@ namespace IptvSuite.PackageSmoke
                     {
                         throw new COMException("DWM composition timing is unavailable.", result);
                     }
-                    if (timing.QpcFrameDisplayed != 0 && timing.QpcFrameDisplayed != previous)
+                    if (timing.QpcVBlank != 0 && timing.QpcVBlank != previousTimestamp)
                     {
                         lock (Sync)
                         {
-                            Timestamps.Add(timing.QpcFrameDisplayed);
-                            displayed += timing.FramesDisplayed;
-                            dropped += timing.FramesDropped;
+                            Timestamps.Add(timing.QpcVBlank);
+                            if (previousTimestamp != 0 &&
+                                timing.Refresh >= previousRefresh &&
+                                timing.FramesLate >= previousLate)
+                            {
+                                ulong refreshDelta = timing.Refresh - previousRefresh;
+                                ulong lateDelta = Math.Min(
+                                    timing.FramesLate - previousLate,
+                                    refreshDelta);
+                                displayed += refreshDelta - lateDelta;
+                                dropped += lateDelta;
+                            }
                         }
-                        previous = timing.QpcFrameDisplayed;
+                        previousTimestamp = timing.QpcVBlank;
+                        previousRefresh = timing.Refresh;
+                        previousLate = timing.FramesLate;
                     }
                     System.Threading.Thread.Sleep(1);
                 }
