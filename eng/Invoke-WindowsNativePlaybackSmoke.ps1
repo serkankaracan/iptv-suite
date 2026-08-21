@@ -441,7 +441,9 @@ try {
     if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or [int]$probe.SwitchCount -ne $SwitchCount) {
         throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
-    if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) { throw "Native playback startup budget failed." }
+    if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) {
+        throw "Native playback startup budget failed: p95=$($probe.StartupP95Milliseconds), maximum=$($probe.StartupMaximumMilliseconds), hlsP95=$($probe.HlsStartupP95Milliseconds), directP95=$($probe.DirectStartupP95Milliseconds)."
+    }
     if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }
 
     $summary = [ordered]@{
@@ -451,6 +453,8 @@ try {
         SwitchCount = $SwitchCount
         StartupP95Milliseconds = [Math]::Round([double]$probe.StartupP95Milliseconds, 3)
         StartupMaximumMilliseconds = [Math]::Round([double]$probe.StartupMaximumMilliseconds, 3)
+        HlsStartupP95Milliseconds = [Math]::Round([double]$probe.HlsStartupP95Milliseconds, 3)
+        DirectStartupP95Milliseconds = [Math]::Round([double]$probe.DirectStartupP95Milliseconds, 3)
         InitialPrivateBytes = [long]$probe.InitialPrivateBytes
         FinalPrivateBytes = [long]$probe.FinalPrivateBytes
         InitialHandleCount = [int]$probe.InitialHandleCount

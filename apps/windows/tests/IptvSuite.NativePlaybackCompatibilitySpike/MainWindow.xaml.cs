@@ -37,6 +37,8 @@ public sealed partial class MainWindow : Window, IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(request);
         var startupSamples = new List<double>(request.SwitchCount);
+        var hlsStartupSamples = new List<double>((request.SwitchCount + 1) / 2);
+        var directStartupSamples = new List<double>(request.SwitchCount / 2);
         using Process process = Process.GetCurrentProcess();
         long initialPrivateBytes = process.PrivateMemorySize64;
         int initialHandles = process.HandleCount;
@@ -57,7 +59,10 @@ public sealed partial class MainWindow : Window, IDisposable
                 _mediaPlayer.Play();
 
                 await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-                startupSamples.Add(stopwatch.Elapsed.TotalMilliseconds);
+                double startupMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                startupSamples.Add(startupMilliseconds);
+                (index % request.Fixtures.Count == 0 ? hlsStartupSamples : directStartupSamples)
+                    .Add(startupMilliseconds);
                 timeoutFailure = NativePlaybackFailure.PlaybackAdvanceTimeout;
                 await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
                 _mediaPlayer.Pause();
@@ -70,6 +75,8 @@ public sealed partial class MainWindow : Window, IDisposable
             return NativePlaybackProbeResult.Passed(
                 request.SwitchCount,
                 startupSamples,
+                hlsStartupSamples,
+                directStartupSamples,
                 initialPrivateBytes,
                 process.PrivateMemorySize64,
                 initialHandles,
@@ -195,6 +202,8 @@ internal sealed record NativePlaybackProbeResult(
     int SwitchCount,
     double StartupP95Milliseconds,
     double StartupMaximumMilliseconds,
+    double HlsStartupP95Milliseconds,
+    double DirectStartupP95Milliseconds,
     long InitialPrivateBytes,
     long FinalPrivateBytes,
     int InitialHandleCount,
@@ -209,19 +218,22 @@ internal sealed record NativePlaybackProbeResult(
     internal static NativePlaybackProbeResult Passed(
         int switchCount,
         IReadOnlyList<double> startupSamples,
+        IReadOnlyList<double> hlsStartupSamples,
+        IReadOnlyList<double> directStartupSamples,
         long initialPrivateBytes,
         long finalPrivateBytes,
         int initialHandleCount,
         int finalHandleCount)
     {
         double[] ordered = startupSamples.Order().ToArray();
-        int percentileIndex = Math.Max(0, (int)Math.Ceiling(ordered.Length * 0.95) - 1);
         return new NativePlaybackProbeResult(
             true,
             NativePlaybackFailure.None,
             switchCount,
-            ordered[percentileIndex],
+            Percentile95(startupSamples),
             ordered[^1],
+            Percentile95(hlsStartupSamples),
+            Percentile95(directStartupSamples),
             initialPrivateBytes,
             finalPrivateBytes,
             initialHandleCount,
@@ -231,7 +243,14 @@ internal sealed record NativePlaybackProbeResult(
     internal static NativePlaybackProbeResult Failed(
         NativePlaybackFailure failure,
         int completedSwitchCount = 0) =>
-        new(false, failure, completedSwitchCount, 0, 0, 0, 0, 0, 0);
+        new(false, failure, completedSwitchCount, 0, 0, 0, 0, 0, 0, 0, 0);
+
+    private static double Percentile95(IReadOnlyList<double> samples)
+    {
+        double[] ordered = samples.Order().ToArray();
+        int percentileIndex = Math.Max(0, (int)Math.Ceiling(ordered.Length * 0.95) - 1);
+        return ordered[percentileIndex];
+    }
 
     internal string ToJson() => JsonSerializer.Serialize(this, SerializerOptions);
 }
