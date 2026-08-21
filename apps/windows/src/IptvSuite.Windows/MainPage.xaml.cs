@@ -4,12 +4,16 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using IptvSuite.Application;
 using IptvSuite.Domain;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.ApplicationModel;
 using Windows.Storage.Streams;
+using Windows.System;
+using Windows.UI.Core;
 
 namespace IptvSuite.Windows;
 
@@ -142,6 +146,29 @@ public sealed partial class MainPage : Page, IDisposable
     private async void CategorySelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_updatingSelectors) { _offset = 0; await BrowseAsync(false); } }
     private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { _offset = 0; await BrowseAsync(false); }
     private async void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) { if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput) { _offset = 0; await BrowseAsync(debounce: true); } }
+
+    private void CatalogFilter_KeyDown(object sender, KeyRoutedEventArgs args)
+    {
+        if (args.Key != VirtualKey.Tab) return;
+
+        bool shiftPressed = InputKeyboardSource
+            .GetKeyStateForCurrentThread(VirtualKey.Shift)
+            .HasFlag(CoreVirtualKeyStates.Down);
+        Control? target = sender switch
+        {
+            _ when ReferenceEquals(sender, SourceSelector) && !shiftPressed => CategorySelector,
+            _ when ReferenceEquals(sender, CategorySelector) && shiftPressed => SourceSelector,
+            _ when ReferenceEquals(sender, CategorySelector) => SearchBox,
+            _ when ReferenceEquals(sender, SearchBox) && shiftPressed => CategorySelector,
+            _ => null,
+        };
+
+        if (target is not null && target.Focus(FocusState.Keyboard))
+        {
+            args.Handled = true;
+        }
+    }
+
     private async void PreviousButton_Click(object sender, RoutedEventArgs e) { _offset = Math.Max(0, _offset - PageSize); await BrowseAsync(false); }
     private async void NextButton_Click(object sender, RoutedEventArgs e) { _offset += PageSize; await BrowseAsync(false); }
 
