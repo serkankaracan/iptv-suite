@@ -444,8 +444,11 @@ try {
     if (-not (Test-Path -LiteralPath $packageEvidencePath -PathType Leaf)) { throw "Native playback probe evidence deadline expired." }
 
     $probe = Get-Content -Raw $packageEvidencePath | ConvertFrom-Json
-    if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or [int]$probe.SwitchCount -ne $SwitchCount) {
-        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
+    $expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }
+    if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or
+        [int]$probe.SwitchCount -ne $SwitchCount -or
+        [int]$probe.SurfaceTransitionCount -ne $expectedSurfaceTransitions) {
+        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), surfaceTransitions=$($probe.SurfaceTransitionCount), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) {
         throw "Native playback startup budget failed: p95=$($probe.StartupP95Milliseconds), maximum=$($probe.StartupMaximumMilliseconds), hlsP95=$($probe.HlsStartupP95Milliseconds), directP95=$($probe.DirectStartupP95Milliseconds)."
@@ -461,7 +464,7 @@ try {
     if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }
 
     $summary = [ordered]@{
-        SchemaVersion = 2
+        SchemaVersion = 3
         Stage = "M10NativeTierAPlayback"
         Result = "Passed"
         SwitchCount = $SwitchCount
@@ -477,6 +480,7 @@ try {
         MemoryMonotonicIncrease = [bool]$probe.MemoryMonotonicIncrease
         WarmupHandleCount = [int]$probe.WarmupHandleCount
         HandleNetGrowth = [int]$probe.HandleNetGrowth
+        SurfaceTransitionCount = [int]$probe.SurfaceTransitionCount
         InitialPrivateBytes = [long]$probe.InitialPrivateBytes
         FinalPrivateBytes = [long]$probe.FinalPrivateBytes
         InitialHandleCount = [int]$probe.InitialHandleCount

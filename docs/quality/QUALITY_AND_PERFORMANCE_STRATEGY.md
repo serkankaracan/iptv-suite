@@ -354,6 +354,8 @@ Bir format “pass” olsa bile exact fixture sonucu; player/build, OS, CPU/GPU,
 
 `Invoke-WindowsNativePlaybackSmoke.ps1 -SwitchCount 100 -SoakMinutes 480`, disposable packaged native fallback için bu uzun koşuyu otomatikleştirir: süre ilk switch ile başlar, 100 HLS/direct switch sonrasında HLS loop sürer, her 5 dakikada private-bytes/handle örneği alınır ve 30 dakika warm-up sonrası net memory büyümesi hem `%10` hem `100 MiB` sınırına bağlanır. Post-warm tüm örneklerin strict artışı ayrıca monoton trend olarak fail olur. Commit `077b3e9d5404055687f4b3e74db41e111a77cc8d` üzerindeki gerçek Windows Client schema-v2 koşusu 100 switch + 120 dakika developer soak için 25 sample, `%2,894`/`6.885.376` byte post-warm büyüme ve monoton trend `false` ile **VERIFIED**dır; [kalıcı kayıt](M10_NATIVE_TIER_A_DEVELOPER_SOAK_EVIDENCE.md) ortamı, hash'leri ve sınırları içerir. Sekiz saat acceptance ayrıca çalıştırılmadığından **UNVERIFIED** kalır.
 
+Schema-3 kısa packaged surface koşusu iki resize, minimize/restore ve fullscreen/overlapped olmak üzere exact altı geçişi switch döngüsüne bağlar. Her geçişten sonraki open/advance mevcut timeout'larla geçmeden kanıt yazılmaz. 2026-08-21 Windows Client koşusu 100/100 switch ve altı geçişi startup p95 `265,492 ms` ile geçirdi; [surface kaydı](M10_NATIVE_TIER_A_SURFACE_EVIDENCE.md) yalnız bu otomatik alt kümeyi **PARTIAL VERIFIED** yapar.
+
 ### M16 RC
 
 - Packaged private-flight build ile 24 saat.
@@ -377,7 +379,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
 | M8 | `COMPLETED`: same-SQLite-transaction persistence, clean 5k–50k ×20 Decision ve gerçek ayrı-process kill/recovery tamamlandı; 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB`, cancellation p95 `12,390 ms`; migration/fault/crash, canary, source lifecycle ve query/cache acceptance PASS. [Kanıt](M8_COMPLETION_EVIDENCE.md) |
 | M9 | `COMPLETED, 2026-08-21`: bounded query/UI/logo local `292/292 × 2` ve clean query Decision PASS; run `32443355378` commit-bound packaged 50k UIA/Tab/virtualization/input/DWM acceptance PASS. Realized item `8`, input p95 `16,284 ms`, compositor p95 `31,25 ms`, max `171,875 ms`, late/drop proxy `%0`, interval `404`. [Kanıt](M9_COMPLETION_EVIDENCE.md) |
-| M10 | `CANDIDATE NO-GO; NATIVE FALLBACK IN PROGRESS, 2026-08-21`: exact LibVLC seti GPL-zero hard gate FAIL; ADR-002 rejected. ADR-007 native Tier A fallback gerçek Windows Client'ta 100 switch + 120 dakika developer soak PASS; 8 saat, surface/network ve device/HW-decode matrisi açık. [Candidate](M10_PLAYBACK_CANDIDATE_DECISION.md), [developer soak](M10_NATIVE_TIER_A_DEVELOPER_SOAK_EVIDENCE.md) |
+| M10 | `CANDIDATE NO-GO; NATIVE FALLBACK IN PROGRESS, 2026-08-21`: exact LibVLC seti GPL-zero hard gate FAIL; ADR-002 rejected. ADR-007 native Tier A fallback gerçek Windows Client'ta 100 switch + 120 dakika developer soak PASS; resize/minimize/restore/fullscreen alt kümesi PARTIAL PASS. 8 saat, kalan surface/network ve device/HW-decode matrisi açık. [Candidate](M10_PLAYBACK_CANDIDATE_DECISION.md), [developer soak](M10_NATIVE_TIER_A_DEVELOPER_SOAK_EVIDENCE.md), [surface](M10_NATIVE_TIER_A_SURFACE_EVIDENCE.md) |
 | M11 | Fake+real player adapter contract |
 | M12 | Lifecycle/rapid-switch/UI automation |
 | M13 | Retry/reconnect deterministic fault suite |

@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Windows.Graphics;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 
@@ -45,6 +47,7 @@ public sealed partial class MainWindow : Window, IDisposable
         int initialHandles = process.HandleCount;
         NativePlaybackFailure timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
         int completedSwitchCount = 0;
+        int surfaceTransitionCount = 0;
         var resourceSamples = new List<NativePlaybackResourceSample>();
         var soakStopwatch = Stopwatch.StartNew();
         CaptureResourceSample(process, soakStopwatch, resourceSamples);
@@ -54,6 +57,10 @@ public sealed partial class MainWindow : Window, IDisposable
             for (int index = 0; index < request.SwitchCount; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                surfaceTransitionCount += await ApplySurfaceTransitionAsync(
+                    index,
+                    request.SwitchCount,
+                    cancellationToken);
                 Uri fixture = request.Fixtures[index % request.Fixtures.Count];
                 _mediaFailure = NativePlaybackFailure.None;
                 _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -104,6 +111,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 directStartupSamples,
                 request.SoakDuration,
                 soakMetrics,
+                surfaceTransitionCount,
                 initialPrivateBytes,
                 process.PrivateMemorySize64,
                 initialHandles,
@@ -123,6 +131,13 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             return NativePlaybackProbeResult.Failed(NativePlaybackFailure.MediaFailed, completedSwitchCount);
         }
+        catch (NativePlaybackSurfaceException)
+        {
+            return NativePlaybackProbeResult.Failed(
+                NativePlaybackFailure.SurfaceLifecycleFailed,
+                completedSwitchCount,
+                surfaceTransitionCount: surfaceTransitionCount);
+        }
         finally
         {
             _mediaPlayer.Pause();
@@ -133,6 +148,71 @@ public sealed partial class MainWindow : Window, IDisposable
             _failureSignal = null;
         }
 
+    }
+
+    private async Task<int> ApplySurfaceTransitionAsync(
+        int switchIndex,
+        int switchCount,
+        CancellationToken cancellationToken)
+    {
+        if (switchCount < 25) return 0;
+
+        try
+        {
+            if (switchIndex == switchCount / 5)
+            {
+                AppWindow.Resize(new SizeInt32(960, 540));
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                return 1;
+            }
+
+            if (switchIndex == switchCount * 2 / 5)
+            {
+                if (AppWindow.Presenter is not OverlappedPresenter presenter)
+                {
+                    throw new NativePlaybackSurfaceException();
+                }
+
+                presenter.Minimize();
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                presenter.Restore();
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                return 2;
+            }
+
+            if (switchIndex == switchCount * 3 / 5)
+            {
+                AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                return 1;
+            }
+
+            if (switchIndex == switchCount * 4 / 5)
+            {
+                AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                AppWindow.Resize(new SizeInt32(1280, 720));
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                return 2;
+            }
+
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (NativePlaybackSurfaceException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is not OutOfMemoryException and
+            not StackOverflowException and
+            not AccessViolationException)
+        {
+            throw new NativePlaybackSurfaceException();
+        }
     }
 
     private async Task<NativePlaybackSoakMetrics> RunSoakAsync(
@@ -277,6 +357,7 @@ internal enum NativePlaybackFailure
     MediaOpenTimeout,
     PlaybackAdvanceTimeout,
     ResourceBudgetExceeded,
+    SurfaceLifecycleFailed,
     Cancelled,
     UnexpectedFailure,
 }
@@ -297,6 +378,7 @@ internal sealed record NativePlaybackProbeResult(
     bool MemoryMonotonicIncrease,
     int WarmupHandleCount,
     int HandleNetGrowth,
+    int SurfaceTransitionCount,
     long InitialPrivateBytes,
     long FinalPrivateBytes,
     int InitialHandleCount,
@@ -315,6 +397,7 @@ internal sealed record NativePlaybackProbeResult(
         IReadOnlyList<double> directStartupSamples,
         TimeSpan soakDuration,
         NativePlaybackSoakMetrics soakMetrics,
+        int surfaceTransitionCount,
         long initialPrivateBytes,
         long finalPrivateBytes,
         int initialHandleCount,
@@ -337,6 +420,7 @@ internal sealed record NativePlaybackProbeResult(
             soakMetrics.MemoryMonotonicIncrease,
             soakMetrics.WarmupHandleCount,
             soakMetrics.HandleNetGrowth,
+            surfaceTransitionCount,
             initialPrivateBytes,
             finalPrivateBytes,
             initialHandleCount,
@@ -347,7 +431,8 @@ internal sealed record NativePlaybackProbeResult(
         NativePlaybackFailure failure,
         int completedSwitchCount = 0,
         TimeSpan soakDuration = default,
-        NativePlaybackSoakMetrics soakMetrics = default) =>
+        NativePlaybackSoakMetrics soakMetrics = default,
+        int surfaceTransitionCount = 0) =>
         new(false, failure, completedSwitchCount, 0, 0, 0, 0,
             (int)soakDuration.TotalMinutes,
             soakMetrics.ResourceSampleCount,
@@ -357,6 +442,7 @@ internal sealed record NativePlaybackProbeResult(
             soakMetrics.MemoryMonotonicIncrease,
             soakMetrics.WarmupHandleCount,
             soakMetrics.HandleNetGrowth,
+            surfaceTransitionCount,
             0, 0, 0, 0);
 
     private static double Percentile95(IReadOnlyList<double> samples)
@@ -368,6 +454,8 @@ internal sealed record NativePlaybackProbeResult(
 
     internal string ToJson() => JsonSerializer.Serialize(this, SerializerOptions);
 }
+
+internal sealed class NativePlaybackSurfaceException : Exception;
 
 internal readonly record struct NativePlaybackResourceSample(
     TimeSpan Elapsed,

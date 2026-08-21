@@ -2083,6 +2083,12 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "switchCount is < 2 or > 100");
         StringAssert.Contains(window, "soakMinutes is < 0 or > 480");
         StringAssert.Contains(window, "soakMinutes > 0 && switchCount != 100");
+        StringAssert.Contains(window, "AppWindow.Resize(new SizeInt32(960, 540))");
+        StringAssert.Contains(window, "presenter.Minimize()");
+        StringAssert.Contains(window, "presenter.Restore()");
+        StringAssert.Contains(window, "AppWindowPresenterKind.FullScreen");
+        StringAssert.Contains(window, "AppWindowPresenterKind.Overlapped");
+        StringAssert.Contains(window, "NativePlaybackFailure.SurfaceLifecycleFailed");
         StringAssert.Contains(window, "await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
         StringAssert.Contains(window, "await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3)");
         StringAssert.Contains(window, "TimeSpan sampleInterval = TimeSpan.FromMinutes(5)");
@@ -2123,7 +2129,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "$SwitchCount -ne 100");
         StringAssert.Contains(controller, "MemoryNetGrowthBytes -gt 104857600");
         StringAssert.Contains(controller, "MemoryNetGrowthPercent -gt 10");
-        StringAssert.Contains(controller, "SchemaVersion = 2");
+        StringAssert.Contains(controller, "$expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }");
+        StringAssert.Contains(controller, "SurfaceTransitionCount = [int]$probe.SurfaceTransitionCount");
+        StringAssert.Contains(controller, "SchemaVersion = 3");
         StringAssert.Contains(controller, "Assert-PackagePayload");
         StringAssert.Contains(controller, "Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop");
         StringAssert.Contains(controller, "Remove-ExactPackage");
