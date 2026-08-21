@@ -602,6 +602,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSourceSelector\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogCategorySelector\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSearchBox\"");
+        StringAssert.Contains(page, "x:Name=\"SourceSelector\" TabIndex=\"0\"");
+        StringAssert.Contains(page, "x:Name=\"CategorySelector\" Grid.Column=\"1\" TabIndex=\"1\"");
+        StringAssert.Contains(page, "x:Name=\"SearchBox\" Grid.Column=\"2\" TabIndex=\"2\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogPreviousPage\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogNextPage\"");
         StringAssert.Contains(page, "AutomationProperties.LiveSetting=\"Polite\"");
@@ -627,6 +630,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000");
         StringAssert.Contains(packageSmoke, "$catalogRealizedContainerCount -gt 300");
         StringAssert.Contains(packageSmoke, "$catalogInputResponseP95Milliseconds -gt 100.0");
+        StringAssert.Contains(packageSmoke, "$deadline = (Get-Date).AddSeconds(5)");
+        StringAssert.Contains(packageSmoke, "$depth -lt 16");
+        StringAssert.Contains(packageSmoke, "Start-Sleep -Milliseconds 50");
         StringAssert.Contains(packageSmoke, "DwmGetCompositionTimingInfo(IntPtr.Zero, ref timing)");
         StringAssert.Contains(packageSmoke, "timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo))");
         StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");

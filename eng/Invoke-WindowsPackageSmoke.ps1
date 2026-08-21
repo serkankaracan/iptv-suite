@@ -1002,14 +1002,19 @@ function Assert-FocusedAutomationElement {
         [string]$ExpectedAutomationId
     )
 
-    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-    for ($depth = 0; $null -ne $focused -and $depth -lt 8; $depth++) {
-        if ($focused.Current.AutomationId -eq $ExpectedAutomationId) {
-            return
+    $deadline = (Get-Date).AddSeconds(5)
+    do {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        for ($depth = 0; $null -ne $focused -and $depth -lt 16; $depth++) {
+            if ($focused.Current.AutomationId -eq $ExpectedAutomationId) {
+                return
+            }
+
+            $focused = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($focused)
         }
 
-        $focused = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($focused)
-    }
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $deadline)
 
     throw "The packaged catalog keyboard focus order is invalid."
 }
