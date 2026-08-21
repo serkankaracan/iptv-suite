@@ -2051,6 +2051,43 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void NativePlaybackSpikeIsLoopbackBoundAndWritesSanitizedEvidence()
+    {
+        string spikeRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.NativePlaybackCompatibilitySpike");
+        string app = File.ReadAllText(Path.Combine(spikeRoot, "App.xaml.cs"));
+        string window = File.ReadAllText(Path.Combine(spikeRoot, "MainWindow.xaml.cs"));
+        string xaml = File.ReadAllText(Path.Combine(spikeRoot, "MainWindow.xaml"));
+
+        StringAssert.Contains(xaml, "<MediaPlayerElement");
+        StringAssert.Contains(xaml, "AutomationProperties.AutomationId=\"NativePlaybackSurface\"");
+        StringAssert.Contains(app, "AppInstance.GetCurrent().GetActivatedEventArgs()");
+        StringAssert.Contains(app, "ApplicationData.Current.LocalCacheFolder.Path");
+        StringAssert.Contains(app, "M10NativePlayback");
+        StringAssert.Contains(window, "fixture.Scheme != Uri.UriSchemeHttps");
+        StringAssert.Contains(window, "!fixture.IsLoopback");
+        StringAssert.Contains(window, "!string.IsNullOrEmpty(fixture.UserInfo)");
+        StringAssert.Contains(window, "!string.IsNullOrEmpty(fixture.Query)");
+        StringAssert.Contains(window, "!string.IsNullOrEmpty(fixture.Fragment)");
+        StringAssert.Contains(window, "\"/direct-h264-aac.ts\"");
+        StringAssert.Contains(window, "\"/hls.m3u8\"");
+        StringAssert.Contains(window, "switchCount is < 2 or > 100");
+        StringAssert.Contains(window, "await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
+        StringAssert.Contains(window, "await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3)");
+        StringAssert.Contains(window, "sender.Position >= TimeSpan.FromMilliseconds(500)");
+        StringAssert.Contains(window, "JsonStringEnumConverter");
+        Assert.IsFalse(
+            window.Contains("fixture.ToString()", StringComparison.Ordinal) ||
+            window.Contains("AbsoluteUri", StringComparison.Ordinal) ||
+            window.Contains("args.ErrorMessage", StringComparison.Ordinal),
+            "The native playback evidence path must not serialize a locator or native diagnostic text.");
+    }
+
+    [TestMethod]
     public void M8CatalogCrashHarnessIsIsolatedAndKillsOnlyItsTrackedProcess()
     {
         string harness = File.ReadAllText(Path.Combine(
