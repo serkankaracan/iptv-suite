@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-21
 
-**Implementation note:** Hakları temiz `iptvsuite-tier-a-synthetic-v1` corpus'u reproducible biçimde üretildi. Direct MPEG-TS ile dört segmentli HLS-TS; H.264 High/yuv420p/640×360/25 fps ve AAC-LC/48 kHz/stereo tuple'ını taşır. Generator iki koşuda byte-identical hash üretti ve architecture guard'ı 6 media/playlist dosyasını manifest hash'lerine bağladı. Bu yalnız input/provenance kanıtıdır; packaged playback, startup budget, lifecycle ve soak henüz geçmediğinden ADR `Proposed` kalır.
+**Implementation note:** Hakları temiz `iptvsuite-tier-a-synthetic-v1` corpus'u reproducible biçimde üretildi. Direct MPEG-TS ile dört segmentli HLS-TS; H.264 High/yuv420p/640×360/25 fps ve AAC-LC/48 kHz/stereo tuple'ını taşır. Generator iki koşuda byte-identical hash üretti ve architecture guard'ı 6 media/playlist dosyasını manifest hash'lerine bağladı. Commit `077b3e9d5404055687f4b3e74db41e111a77cc8d` üzerindeki gerçek Windows Client disposable MSIX koşusu 100 switch'i ve 120 dakikalık developer soak'ı; startup p95 `263,972 ms`, 25 resource sample, 30 dakika sonrası `%2,894`/`6.885.376` byte net memory growth ve monoton artış olmamasıyla geçirdi. [Developer soak kanıtı](../quality/M10_NATIVE_TIER_A_DEVELOPER_SOAK_EVIDENCE.md) yalnız bu cihaz ve 2 saat kapısı içindir; 8 saat, surface/lifecycle, network-fault ve device/HW-decode matrisi açık olduğundan ADR `Proposed` kalır.
 
 ## Context / Problem
 

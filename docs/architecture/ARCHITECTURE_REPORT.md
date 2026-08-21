@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi, Windows-native Tier A fallback ve Samsung kararları açık
+**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi, Windows-native Tier A fallback 100 switch/120 dakika developer soak'ı geçti fakat tam acceptance ve Samsung kararları açık
 
 M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8'e bırakıldı”, `Proposed` veya “açık” ifadelerini supersede eder; exact kabul bağı [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
@@ -12,7 +12,7 @@ M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8
 
 Windows MVP için önerilen stack **C# / .NET 10 LTS + WinUI 3 + güncel stable Windows App SDK + framework-dependent MSIX**'tir. Uygulama tek process'li modular monolith olacak; presentation, application, domain ve infrastructure sınırları korunacaktır. Windows UI kararı playback motorundan ayrıdır.
 
-M10'da incelenen **libVLC + LibVLCSharp.WinUI** exact candidate'i restored native payload'daki GPL-risk plugin ve kapanmayan binary-to-source/notices zinciri nedeniyle reddedilmiştir. Windows native media API'leri ADR-007 kapsamında dar Tier A fallback olarak yeniden spike edilir; temiz OS'te HEVC/AC-3/E-AC-3 ve HEVC-in-TS kapsamı geniş ürün sözü değildir.
+M10'da incelenen **libVLC + LibVLCSharp.WinUI** exact candidate'i restored native payload'daki GPL-risk plugin ve kapanmayan binary-to-source/notices zinciri nedeniyle reddedilmiştir. Windows native media API'leri ADR-007 kapsamında dar Tier A fallback olarak yeniden spike edilir. Gerçek Windows Client disposable MSIX koşusu 100 switch ve 120 dakika developer soak'ı geçti; 8 saat, surface/network ve device/HW-decode matrisi henüz kapanmadı. Temiz OS'te HEVC/AC-3/E-AC-3 ve HEVC-in-TS kapsamı geniş ürün sözü değildir.
 
 Platformlar aynı UI/player implementation'ını paylaşmayacaktır. Samsung ayrı Tizen Web + AVPlay, Android Kotlin + Media3, Apple Swift + AVFoundation/AVKit yönündedir. Paylaşım; versioned terminology, contracts, error codes ve sentetik test vectors ile sınırlıdır. İlk organizasyon modeli, platform sınırları kesin bir monorepo'dur.
 
@@ -432,7 +432,7 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 
 | ID | Durum | Soru/varsayım | Kapatma yöntemi | Owner/milestone |
 |---|---|---|---|---|
-| O1 | UNVERIFIED | Non-GPL libVLC hedef corpus, WinUI surface ve MSIX'i geçer mi? | M10 full matrix, SBOM, WACK | Playback / M10 |
+| O1 | PARTIAL | ADR-007 Windows-native Tier A fallback tam reference matrix, WinUI surface ve MSIX acceptance'ını geçer mi? 100 switch/120 dakika developer soak VERIFIED; 8 saat, surface/network ve HW-decode matrisi açık. | M10 full matrix, 8 saat soak, WACK | Playback / M10 |
 | O2 | VERIFIED / CLOSED, 2026-08-21 | Aynı-SQLite-transaction production yönü component bütçelerini ve process-crash old-or-new recovery invariant'ını karşılar mı? | [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) + [Decision evidence](../quality/M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) | Security/Data / M4–M8 |
 | O3 | UNVERIFIED | M1 engineering sınırı 10.0.26100/x64; nihai product minimumu ve ARM64 release talebi nedir? | Market/support data + clean devices | Product / M15 |
 | O4 | UNVERIFIED | Microsoft Store BYO IPTV modelini kabul eder mi? | Partner Center private/pre-certification | Product/Legal / M15 |
