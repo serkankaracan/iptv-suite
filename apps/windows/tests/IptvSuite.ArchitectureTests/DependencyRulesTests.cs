@@ -2108,6 +2108,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "case \"/direct-h264-aac.ts\"");
         StringAssert.Contains(controller, "case \"/hls.m3u8\"");
         StringAssert.Contains(controller, "Range: bytes=");
+        StringAssert.Contains(controller, "{62CE7E72-4C71-4D20-B15D-452831A87D9D}");
+        StringAssert.Contains(controller, "{32D186A7-218F-4C75-8876-DD77273A8999}");
         StringAssert.Contains(controller, "StartupP95Milliseconds -gt 3000");
         StringAssert.Contains(controller, "Assert-PackagePayload");
         StringAssert.Contains(controller, "Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop");
