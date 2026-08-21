@@ -605,6 +605,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(page, "x:Name=\"SourceSelector\" TabIndex=\"0\"");
         StringAssert.Contains(page, "x:Name=\"CategorySelector\" Grid.Column=\"1\" TabIndex=\"1\"");
         StringAssert.Contains(page, "x:Name=\"SearchBox\" Grid.Column=\"2\" TabIndex=\"2\"");
+        Assert.HasCount(3, Regex.Matches(page, "IsTabStop=\"True\""));
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogPreviousPage\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogNextPage\"");
         StringAssert.Contains(page, "AutomationProperties.LiveSetting=\"Polite\"");
@@ -630,6 +631,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000");
         StringAssert.Contains(packageSmoke, "$catalogRealizedContainerCount -gt 300");
         StringAssert.Contains(packageSmoke, "$catalogInputResponseP95Milliseconds -gt 100.0");
+        StringAssert.Contains(packageSmoke, "$categoryElement.Current.IsKeyboardFocusable");
         StringAssert.Contains(packageSmoke, "$deadline = (Get-Date).AddSeconds(5)");
         StringAssert.Contains(packageSmoke, "$depth -lt 32");
         StringAssert.Contains(packageSmoke, "Start-Sleep -Milliseconds 50");

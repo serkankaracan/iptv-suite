@@ -22,9 +22,9 @@
                 <ColumnDefinition Width="2*" />
                 <ColumnDefinition Width="3*" />
             </Grid.ColumnDefinitions>
-            <ComboBox x:Name="SourceSelector" TabIndex="0" AutomationProperties.AutomationId="CatalogSourceSelector" AutomationProperties.Name="Playlist source" DisplayMemberPath="Name" SelectionChanged="SourceSelector_SelectionChanged" />
-            <ComboBox x:Name="CategorySelector" Grid.Column="1" TabIndex="1" AutomationProperties.AutomationId="CatalogCategorySelector" AutomationProperties.Name="Channel category" DisplayMemberPath="Name" SelectionChanged="CategorySelector_SelectionChanged" />
-            <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" TabIndex="2" AutomationProperties.AutomationId="CatalogSearchBox" AutomationProperties.Name="Search channels" PlaceholderText="Search channels" QuerySubmitted="SearchBox_QuerySubmitted" TextChanged="SearchBox_TextChanged" />
+            <ComboBox x:Name="SourceSelector" TabIndex="0" IsTabStop="True" AutomationProperties.AutomationId="CatalogSourceSelector" AutomationProperties.Name="Playlist source" DisplayMemberPath="Name" SelectionChanged="SourceSelector_SelectionChanged" />
+            <ComboBox x:Name="CategorySelector" Grid.Column="1" TabIndex="1" IsTabStop="True" AutomationProperties.AutomationId="CatalogCategorySelector" AutomationProperties.Name="Channel category" DisplayMemberPath="Name" SelectionChanged="CategorySelector_SelectionChanged" />
+            <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" TabIndex="2" IsTabStop="True" AutomationProperties.AutomationId="CatalogSearchBox" AutomationProperties.Name="Search channels" PlaceholderText="Search channels" QuerySubmitted="SearchBox_QuerySubmitted" TextChanged="SearchBox_TextChanged" />
         </Grid>
         <ListView x:Name="ChannelList" Grid.Row="2" AutomationProperties.AutomationId="CatalogChannelList" AutomationProperties.Name="Channels" ContainerContentChanging="ChannelList_ContainerContentChanging" ItemsSource="{x:Bind Channels}">
             <ListView.ItemsPanel>

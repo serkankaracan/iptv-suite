@@ -1362,11 +1362,17 @@ try {
     }
 
     $focusReadyDeadline = (Get-Date).AddSeconds(15)
-    while ((-not $sourceElement.Current.IsEnabled -or -not $categoryElement.Current.IsEnabled) -and
+    while ((-not $sourceElement.Current.IsEnabled -or
+            -not $sourceElement.Current.IsKeyboardFocusable -or
+            -not $categoryElement.Current.IsEnabled -or
+            -not $categoryElement.Current.IsKeyboardFocusable) -and
         (Get-Date) -lt $focusReadyDeadline) {
         Start-Sleep -Milliseconds 100
     }
-    if (-not $sourceElement.Current.IsEnabled -or -not $categoryElement.Current.IsEnabled) {
+    if (-not $sourceElement.Current.IsEnabled -or
+        -not $sourceElement.Current.IsKeyboardFocusable -or
+        -not $categoryElement.Current.IsEnabled -or
+        -not $categoryElement.Current.IsKeyboardFocusable) {
         throw "The packaged catalog controls did not become keyboard-focusable."
     }
     Assert-PackagedWindowForeground $windowHandle ([uint32]$activationProcessId)
