@@ -388,13 +388,17 @@ public sealed class BoundedHttpTransportTests
         HttpTransportRetryability expectedRetryability)
     {
         using StubHandler handler = new((_, _) => Task.FromResult(Response((HttpStatusCode)statusCode, [])));
-        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using BoundedHttpTransport transport = CreateTransport(
+            handler,
+            TimeSpan.FromSeconds(1),
+            static (_, _) => Task.CompletedTask);
 
         HttpTransportResult result = await transport.GetAsync(CreateRequest("https://example.test/list", 64));
 
         Assert.AreEqual(expectedFailure, result.Failure);
         Assert.AreEqual(expectedRetryability, result.Retryability);
         Assert.AreEqual(statusCode, result.StatusCode);
+        Assert.HasCount(expectedRetryability == HttpTransportRetryability.BoundedTransient ? 3 : 1, handler.RequestUris);
     }
 
     private static HttpTransportRequest CreateRequest(string locator, int maximumBytes)
