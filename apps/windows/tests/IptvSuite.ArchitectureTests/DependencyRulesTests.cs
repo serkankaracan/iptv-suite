@@ -2535,7 +2535,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(workflow, ".artifacts/dpapi-user-boundary/last-success.json");
         StringAssert.Contains(
             workflow,
-            "      - quality\n      - package-smoke\n      - dpapi-user-boundary\n");
+            "      - quality\n      - package-smoke\n      - native-playback\n      - dpapi-user-boundary\n");
+        StringAssert.Contains(
+            workflow,
+            "NATIVE_PLAYBACK_RESULT: ${{ needs.native-playback.result }}");
+        StringAssert.Contains(workflow, "test \"$NATIVE_PLAYBACK_RESULT\" = \"success\"");
         StringAssert.Contains(
             workflow,
             "DPAPI_USER_BOUNDARY_RESULT: ${{ needs.dpapi-user-boundary.result }}");
@@ -2565,6 +2569,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             workflow,
             "shell: powershell\n        run: .\\eng\\Invoke-WindowsNativePlaybackSmoke.ps1 -Configuration Release");
+        StringAssert.Contains(
+            workflow,
+            "  native-playback:\n    name: Native Tier A packaged playback smoke\n    needs: quality\n");
         StringAssert.Contains(workflow, "name: windows-native-playback-evidence");
         StringAssert.Contains(workflow, ".artifacts/native-playback-smoke/last-success.json");
         StringAssert.Contains(
@@ -2590,7 +2597,7 @@ public sealed class DependencyRulesTests
         MatchCollection pinnedUses = Regex.Matches(
             workflow,
             @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
-        Assert.HasCount(11, allUses);
+        Assert.HasCount(13, allUses);
         Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
     }
 

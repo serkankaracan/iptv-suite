@@ -107,10 +107,6 @@ jobs:
         shell: powershell
         run: .\eng\Invoke-WindowsPackageLifecycleSmoke.ps1 -Configuration Release
 
-      - name: Verify packaged native Tier A playback
-        shell: powershell
-        run: .\eng\Invoke-WindowsNativePlaybackSmoke.ps1 -Configuration Release
-
       - name: Scan packaged-smoke evidence
         shell: pwsh
         run: |
@@ -130,11 +126,6 @@ jobs:
             scan-artifacts .\.artifacts\package-lifecycle M4 PACKAGE_LIFECYCLE_EVIDENCE
           if ($LASTEXITCODE -ne 0) {
             throw "The packaged lifecycle evidence scan failed."
-          }
-          dotnet .\apps\windows\tests\IptvSuite.Testing\bin\Release\net10.0\IptvSuite.Testing.dll `
-            scan-artifacts .\.artifacts\native-playback-smoke M10 NATIVE_PLAYBACK_EVIDENCE
-          if ($LASTEXITCODE -ne 0) {
-            throw "The native playback evidence scan failed."
           }
 
       - name: Upload sanitized packaged smoke evidence
@@ -156,6 +147,63 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+
+
+  native-playback:
+    name: Native Tier A packaged playback smoke
+    needs: quality
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install exact .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.302"
+          cache: true
+          cache-dependency-path: apps/windows/**/packages.lock.json
+
+      - name: Verify exact .NET SDK
+        shell: pwsh
+        run: |
+          $actualSdk = (dotnet --version).Trim()
+          if ($actualSdk -ne "10.0.302") {
+            throw "Expected .NET SDK 10.0.302, received '$actualSdk'."
+          }
+
+      - name: Restore locked dependencies
+        shell: pwsh
+        run: >-
+          dotnet restore .\apps\windows\IptvSuite.Windows.sln
+          --locked-mode
+          --configfile .\NuGet.config
+          -p:Platform=x64
+          --nologo
+
+      - name: Verify packaged native Tier A playback
+        shell: powershell
+        run: .\eng\Invoke-WindowsNativePlaybackSmoke.ps1 -Configuration Release
+
+      - name: Scan native playback evidence
+        shell: pwsh
+        run: |
+          dotnet build .\apps\windows\tests\IptvSuite.Testing\IptvSuite.Testing.csproj `
+            -c Release `
+            --no-restore `
+            --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "The native playback evidence scanner build failed."
+          }
+          dotnet .\apps\windows\tests\IptvSuite.Testing\bin\Release\net10.0\IptvSuite.Testing.dll `
+            scan-artifacts .\.artifacts\native-playback-smoke M10 NATIVE_PLAYBACK_EVIDENCE
+          if ($LASTEXITCODE -ne 0) {
+            throw "The native playback evidence scan failed."
+          }
 
       - name: Upload sanitized native playback evidence
         if: ${{ success() }}
@@ -223,6 +271,7 @@ jobs:
     needs:
       - quality
       - package-smoke
+      - native-playback
       - dpapi-user-boundary
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -233,8 +282,10 @@ jobs:
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
           PACKAGE_SMOKE_RESULT: ${{ needs.package-smoke.result }}
+          NATIVE_PLAYBACK_RESULT: ${{ needs.native-playback.result }}
           DPAPI_USER_BOUNDARY_RESULT: ${{ needs.dpapi-user-boundary.result }}
         run: |
           test "$QUALITY_RESULT" = "success"
           test "$PACKAGE_SMOKE_RESULT" = "success"
+          test "$NATIVE_PLAYBACK_RESULT" = "success"
           test "$DPAPI_USER_BOUNDARY_RESULT" = "success"
