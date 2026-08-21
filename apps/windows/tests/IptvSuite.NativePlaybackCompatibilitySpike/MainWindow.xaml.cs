@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.UI.Windowing;
@@ -42,12 +43,15 @@ public sealed partial class MainWindow : Window, IDisposable
         var startupSamples = new List<double>(request.SwitchCount);
         var hlsStartupSamples = new List<double>((request.SwitchCount + 1) / 2);
         var directStartupSamples = new List<double>(request.SwitchCount / 2);
+        var sourceDetachSamples = new List<double>(request.SwitchCount + 1);
         using Process process = Process.GetCurrentProcess();
         long initialPrivateBytes = process.PrivateMemorySize64;
         int initialHandles = process.HandleCount;
         NativePlaybackFailure timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
         int completedSwitchCount = 0;
         int surfaceTransitionCount = 0;
+        int detachedSourceCount = 0;
+        int playbackRetryCount = 0;
         var resourceSamples = new List<NativePlaybackResourceSample>();
         var soakStopwatch = Stopwatch.StartNew();
         CaptureResourceSample(process, soakStopwatch, resourceSamples);
@@ -62,23 +66,65 @@ public sealed partial class MainWindow : Window, IDisposable
                     request.SwitchCount,
                     cancellationToken);
                 Uri fixture = request.Fixtures[index % request.Fixtures.Count];
-                _mediaFailure = NativePlaybackFailure.None;
-                _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                _failureSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var stopwatch = Stopwatch.StartNew();
-                _mediaPlayer.Source = MediaSource.CreateFromUri(fixture);
-                _mediaPlayer.Play();
+                double startupMilliseconds = 0;
+                for (int attempt = 0; attempt < 2; attempt++)
+                {
+                    bool retryRequested = false;
+                    bool sourceDetached = false;
+                    _mediaFailure = NativePlaybackFailure.None;
+                    _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _failureSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    MediaSource source = MediaSource.CreateFromUri(fixture);
+                    try
+                    {
+                        _mediaPlayer.Source = source;
+                        _mediaPlayer.Play();
+                        await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+                        startupMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                        timeoutFailure = NativePlaybackFailure.PlaybackAdvanceTimeout;
+                        await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
+                        sourceDetachSamples.Add(await DetachSourceAsync(
+                            pauseIfSupported: true,
+                            cancellationToken));
+                        sourceDetached = true;
+                        detachedSourceCount++;
+                        break;
+                    }
+                    catch (InvalidOperationException) when (
+                        _mediaFailure == NativePlaybackFailure.MediaFailed && attempt == 0)
+                    {
+                        playbackRetryCount++;
+                        sourceDetachSamples.Add(await DetachSourceAsync(
+                            pauseIfSupported: false,
+                            cancellationToken));
+                        sourceDetached = true;
+                        detachedSourceCount++;
+                        retryRequested = true;
+                    }
+                    finally
+                    {
+                        BestEffortResetAfterProbe();
+                        if (sourceDetached)
+                        {
+                            DisposeMediaSource(source);
+                        }
+                        else
+                        {
+                            BestEffortDisposeMediaSource(source);
+                        }
+                    }
 
-                await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-                double startupMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                    if (retryRequested)
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                    }
+                }
+
                 startupSamples.Add(startupMilliseconds);
                 (index % request.Fixtures.Count == 0 ? hlsStartupSamples : directStartupSamples)
                     .Add(startupMilliseconds);
-                timeoutFailure = NativePlaybackFailure.PlaybackAdvanceTimeout;
-                await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
-                _mediaPlayer.Pause();
-                _mediaPlayer.Source = null;
                 completedSwitchCount++;
                 timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
             }
@@ -92,7 +138,9 @@ public sealed partial class MainWindow : Window, IDisposable
                     process,
                     soakStopwatch,
                     resourceSamples,
+                    sourceDetachSamples,
                     cancellationToken);
+                detachedSourceCount++;
                 if (!soakMetrics.ResourceBudgetPassed)
                 {
                     return NativePlaybackProbeResult.Failed(
@@ -112,6 +160,9 @@ public sealed partial class MainWindow : Window, IDisposable
                 request.SoakDuration,
                 soakMetrics,
                 surfaceTransitionCount,
+                detachedSourceCount,
+                playbackRetryCount,
+                sourceDetachSamples,
                 initialPrivateBytes,
                 process.PrivateMemorySize64,
                 initialHandles,
@@ -121,33 +172,193 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             return NativePlaybackProbeResult.Failed(
                 _mediaFailure == NativePlaybackFailure.None ? timeoutFailure : _mediaFailure,
-                completedSwitchCount);
+                completedSwitchCount,
+                playbackRetryCount: playbackRetryCount);
         }
         catch (OperationCanceledException)
         {
-            return NativePlaybackProbeResult.Failed(NativePlaybackFailure.Cancelled, completedSwitchCount);
+            return NativePlaybackProbeResult.Failed(
+                NativePlaybackFailure.Cancelled,
+                completedSwitchCount,
+                playbackRetryCount: playbackRetryCount);
         }
         catch (InvalidOperationException) when (_mediaFailure == NativePlaybackFailure.MediaFailed)
         {
-            return NativePlaybackProbeResult.Failed(NativePlaybackFailure.MediaFailed, completedSwitchCount);
+            return NativePlaybackProbeResult.Failed(
+                NativePlaybackFailure.MediaFailed,
+                completedSwitchCount,
+                playbackRetryCount: playbackRetryCount);
         }
         catch (NativePlaybackSurfaceException)
         {
             return NativePlaybackProbeResult.Failed(
                 NativePlaybackFailure.SurfaceLifecycleFailed,
                 completedSwitchCount,
-                surfaceTransitionCount: surfaceTransitionCount);
+                surfaceTransitionCount: surfaceTransitionCount,
+                playbackRetryCount: playbackRetryCount);
+        }
+        catch (NativePlaybackSourceDetachmentException exception)
+        {
+            return NativePlaybackProbeResult.Failed(
+                NativePlaybackFailure.SourceDetachmentTimeout,
+                completedSwitchCount,
+                surfaceTransitionCount: surfaceTransitionCount,
+                detachedSourceCount: detachedSourceCount,
+                playbackStateBeforeDetach: exception.PlaybackStateBeforeDetach,
+                sourceDetached: exception.SourceDetached,
+                canPauseBeforeDetach: exception.CanPauseBeforeDetach,
+                canSeekBeforeDetach: exception.CanSeekBeforeDetach,
+                playbackRetryCount: playbackRetryCount);
+        }
+        catch (NativePlaybackTeardownException exception)
+        {
+            return NativePlaybackProbeResult.Failed(
+                NativePlaybackFailure.SourceDetachmentFailed,
+                completedSwitchCount,
+                surfaceTransitionCount: surfaceTransitionCount,
+                detachedSourceCount: detachedSourceCount,
+                teardownStage: exception.Stage,
+                exceptionCategory: exception.Category,
+                exceptionHResult: exception.ExceptionHResult,
+                playbackRetryCount: playbackRetryCount);
         }
         finally
         {
-            _mediaPlayer.Pause();
-            _mediaPlayer.IsLoopingEnabled = false;
-            _mediaPlayer.Source = null;
+            BestEffortResetAfterProbe();
             _opened = null;
             _advanced = null;
             _failureSignal = null;
         }
 
+    }
+
+    private void BestEffortResetAfterProbe()
+    {
+        try
+        {
+            if (_mediaPlayer.Source is not null && _mediaPlayer.PlaybackSession.CanPause)
+            {
+                _mediaPlayer.Pause();
+            }
+        }
+        catch (Exception exception) when (
+            exception is not OutOfMemoryException and
+            not StackOverflowException and
+            not AccessViolationException)
+        {
+            // The controller owns exact process/package cleanup. Do not mask the probe's typed result.
+        }
+
+        try
+        {
+            _mediaPlayer.IsLoopingEnabled = false;
+            _mediaPlayer.Source = null;
+        }
+        catch (Exception exception) when (
+            exception is not OutOfMemoryException and
+            not StackOverflowException and
+            not AccessViolationException)
+        {
+            // The controller owns exact process/package cleanup. Do not mask the probe's typed result.
+        }
+    }
+
+    private static void DisposeMediaSource(MediaSource source)
+    {
+        try
+        {
+            source.Dispose();
+        }
+        catch (Exception exception) when (
+            exception is not OutOfMemoryException and
+            not StackOverflowException and
+            not AccessViolationException)
+        {
+            throw new NativePlaybackTeardownException(
+                NativePlaybackTeardownStage.MediaSourceDispose,
+                exception);
+        }
+    }
+
+    private static void BestEffortDisposeMediaSource(MediaSource source)
+    {
+        try
+        {
+            source.Dispose();
+        }
+        catch (Exception exception) when (
+            exception is not OutOfMemoryException and
+            not StackOverflowException and
+            not AccessViolationException)
+        {
+            // Preserve the primary typed probe failure; the controller terminates the disposable process.
+        }
+    }
+
+    private async Task<double> DetachSourceAsync(
+        bool pauseIfSupported,
+        CancellationToken cancellationToken)
+    {
+        NativePlaybackTeardownStage stage = NativePlaybackTeardownStage.SourceInspection;
+        try
+        {
+            if (_mediaPlayer.Source is null)
+            {
+                return 0;
+            }
+
+            MediaPlaybackState playbackStateBeforeDetach = MediaPlaybackState.None;
+            bool canPauseBeforeDetach = false;
+            bool canSeekBeforeDetach = false;
+            if (pauseIfSupported)
+            {
+                stage = NativePlaybackTeardownStage.PlaybackSessionInspection;
+                playbackStateBeforeDetach = _mediaPlayer.PlaybackSession.PlaybackState;
+                canPauseBeforeDetach = _mediaPlayer.PlaybackSession.CanPause;
+                canSeekBeforeDetach = _mediaPlayer.PlaybackSession.CanSeek;
+                stage = NativePlaybackTeardownStage.Pause;
+                if (canPauseBeforeDetach)
+                {
+                    _mediaPlayer.Pause();
+                }
+            }
+
+            stage = NativePlaybackTeardownStage.SourceClear;
+            var timeout = Stopwatch.StartNew();
+            _mediaPlayer.Source = null;
+            stage = NativePlaybackTeardownStage.SourceInspection;
+
+            while (_mediaPlayer.Source is not null)
+            {
+                if (timeout.Elapsed >= TimeSpan.FromSeconds(5))
+                {
+                    throw new NativePlaybackSourceDetachmentException(
+                        playbackStateBeforeDetach,
+                        false,
+                        canPauseBeforeDetach,
+                        canSeekBeforeDetach);
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(20), cancellationToken);
+            }
+
+            return timeout.Elapsed.TotalMilliseconds;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (NativePlaybackSourceDetachmentException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is not OutOfMemoryException and
+            not StackOverflowException and
+            not AccessViolationException)
+        {
+            throw new NativePlaybackTeardownException(stage, exception);
+        }
     }
 
     private async Task<int> ApplySurfaceTransitionAsync(
@@ -221,6 +432,7 @@ public sealed partial class MainWindow : Window, IDisposable
         Process process,
         Stopwatch soakStopwatch,
         List<NativePlaybackResourceSample> resourceSamples,
+        List<double> sourceDetachSamples,
         CancellationToken cancellationToken)
     {
         _mediaFailure = NativePlaybackFailure.None;
@@ -228,28 +440,50 @@ public sealed partial class MainWindow : Window, IDisposable
         _advanced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _failureSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _mediaPlayer.IsLoopingEnabled = true;
-        _mediaPlayer.Source = MediaSource.CreateFromUri(fixture);
-        _mediaPlayer.Play();
-        await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-        await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
-
-        TimeSpan sampleInterval = TimeSpan.FromMinutes(5);
-        while (soakStopwatch.Elapsed < soakDuration)
+        MediaSource source = MediaSource.CreateFromUri(fixture);
+        bool sourceDetached = false;
+        try
         {
-            TimeSpan remaining = soakDuration - soakStopwatch.Elapsed;
-            Task delay = Task.Delay(remaining < sampleInterval ? remaining : sampleInterval, cancellationToken);
-            Task completed = await Task.WhenAny(delay, _failureSignal.Task);
-            if (ReferenceEquals(completed, _failureSignal.Task))
+            _mediaPlayer.Source = source;
+            _mediaPlayer.Play();
+            await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+            await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
+
+            TimeSpan sampleInterval = TimeSpan.FromMinutes(5);
+            while (soakStopwatch.Elapsed < soakDuration)
             {
-                throw new InvalidOperationException(nameof(NativePlaybackFailure.MediaFailed));
+                TimeSpan remaining = soakDuration - soakStopwatch.Elapsed;
+                Task delay = Task.Delay(remaining < sampleInterval ? remaining : sampleInterval, cancellationToken);
+                Task completed = await Task.WhenAny(delay, _failureSignal.Task);
+                if (ReferenceEquals(completed, _failureSignal.Task))
+                {
+                    throw new InvalidOperationException(nameof(NativePlaybackFailure.MediaFailed));
+                }
+
+                await delay;
+                CaptureResourceSample(process, soakStopwatch, resourceSamples);
             }
 
-            await delay;
-            CaptureResourceSample(process, soakStopwatch, resourceSamples);
+            _mediaPlayer.IsLoopingEnabled = false;
+            NativePlaybackSoakMetrics metrics = NativePlaybackSoakMetrics.From(resourceSamples);
+            sourceDetachSamples.Add(await DetachSourceAsync(
+                pauseIfSupported: true,
+                cancellationToken));
+            sourceDetached = true;
+            return metrics;
         }
-
-        _mediaPlayer.IsLoopingEnabled = false;
-        return NativePlaybackSoakMetrics.From(resourceSamples);
+        finally
+        {
+            BestEffortResetAfterProbe();
+            if (sourceDetached)
+            {
+                DisposeMediaSource(source);
+            }
+            else
+            {
+                BestEffortDisposeMediaSource(source);
+            }
+        }
     }
 
     private static void CaptureResourceSample(
@@ -358,6 +592,8 @@ internal enum NativePlaybackFailure
     PlaybackAdvanceTimeout,
     ResourceBudgetExceeded,
     SurfaceLifecycleFailed,
+    SourceDetachmentTimeout,
+    SourceDetachmentFailed,
     Cancelled,
     UnexpectedFailure,
 }
@@ -379,6 +615,17 @@ internal sealed record NativePlaybackProbeResult(
     int WarmupHandleCount,
     int HandleNetGrowth,
     int SurfaceTransitionCount,
+    int DetachedSourceCount,
+    int PlaybackRetryCount,
+    double SourceDetachP95Milliseconds,
+    double SourceDetachMaximumMilliseconds,
+    MediaPlaybackState PlaybackStateBeforeDetach,
+    bool SourceDetached,
+    bool CanPauseBeforeDetach,
+    bool CanSeekBeforeDetach,
+    NativePlaybackTeardownStage TeardownStage,
+    NativePlaybackExceptionCategory ExceptionCategory,
+    int ExceptionHResult,
     long InitialPrivateBytes,
     long FinalPrivateBytes,
     int InitialHandleCount,
@@ -398,6 +645,9 @@ internal sealed record NativePlaybackProbeResult(
         TimeSpan soakDuration,
         NativePlaybackSoakMetrics soakMetrics,
         int surfaceTransitionCount,
+        int detachedSourceCount,
+        int playbackRetryCount,
+        IReadOnlyList<double> sourceDetachSamples,
         long initialPrivateBytes,
         long finalPrivateBytes,
         int initialHandleCount,
@@ -421,6 +671,17 @@ internal sealed record NativePlaybackProbeResult(
             soakMetrics.WarmupHandleCount,
             soakMetrics.HandleNetGrowth,
             surfaceTransitionCount,
+            detachedSourceCount,
+            playbackRetryCount,
+            Percentile95(sourceDetachSamples),
+            sourceDetachSamples.Max(),
+            MediaPlaybackState.None,
+            true,
+            false,
+            false,
+            NativePlaybackTeardownStage.None,
+            NativePlaybackExceptionCategory.None,
+            0,
             initialPrivateBytes,
             finalPrivateBytes,
             initialHandleCount,
@@ -432,7 +693,16 @@ internal sealed record NativePlaybackProbeResult(
         int completedSwitchCount = 0,
         TimeSpan soakDuration = default,
         NativePlaybackSoakMetrics soakMetrics = default,
-        int surfaceTransitionCount = 0) =>
+        int surfaceTransitionCount = 0,
+        int detachedSourceCount = 0,
+        MediaPlaybackState playbackStateBeforeDetach = MediaPlaybackState.None,
+        bool sourceDetached = false,
+        bool canPauseBeforeDetach = false,
+        bool canSeekBeforeDetach = false,
+        NativePlaybackTeardownStage teardownStage = NativePlaybackTeardownStage.None,
+        NativePlaybackExceptionCategory exceptionCategory = NativePlaybackExceptionCategory.None,
+        int exceptionHResult = 0,
+        int playbackRetryCount = 0) =>
         new(false, failure, completedSwitchCount, 0, 0, 0, 0,
             (int)soakDuration.TotalMinutes,
             soakMetrics.ResourceSampleCount,
@@ -443,6 +713,17 @@ internal sealed record NativePlaybackProbeResult(
             soakMetrics.WarmupHandleCount,
             soakMetrics.HandleNetGrowth,
             surfaceTransitionCount,
+            detachedSourceCount,
+            playbackRetryCount,
+            0,
+            0,
+            playbackStateBeforeDetach,
+            sourceDetached,
+            canPauseBeforeDetach,
+            canSeekBeforeDetach,
+            teardownStage,
+            exceptionCategory,
+            exceptionHResult,
             0, 0, 0, 0);
 
     private static double Percentile95(IReadOnlyList<double> samples)
@@ -456,6 +737,57 @@ internal sealed record NativePlaybackProbeResult(
 }
 
 internal sealed class NativePlaybackSurfaceException : Exception;
+
+internal sealed class NativePlaybackSourceDetachmentException(
+    MediaPlaybackState playbackStateBeforeDetach,
+    bool sourceDetached,
+    bool canPauseBeforeDetach,
+    bool canSeekBeforeDetach) : Exception
+{
+    internal MediaPlaybackState PlaybackStateBeforeDetach { get; } = playbackStateBeforeDetach;
+
+    internal bool SourceDetached { get; } = sourceDetached;
+
+    internal bool CanPauseBeforeDetach { get; } = canPauseBeforeDetach;
+
+    internal bool CanSeekBeforeDetach { get; } = canSeekBeforeDetach;
+}
+
+internal enum NativePlaybackTeardownStage
+{
+    None,
+    PlaybackSessionInspection,
+    Pause,
+    SourceClear,
+    SourceInspection,
+    MediaSourceDispose,
+}
+
+internal enum NativePlaybackExceptionCategory
+{
+    None,
+    Com,
+    InvalidOperation,
+    ObjectDisposed,
+    Other,
+}
+
+internal sealed class NativePlaybackTeardownException(
+    NativePlaybackTeardownStage stage,
+    Exception exception) : Exception
+{
+    internal NativePlaybackTeardownStage Stage { get; } = stage;
+
+    internal NativePlaybackExceptionCategory Category { get; } = exception switch
+    {
+        COMException => NativePlaybackExceptionCategory.Com,
+        ObjectDisposedException => NativePlaybackExceptionCategory.ObjectDisposed,
+        InvalidOperationException => NativePlaybackExceptionCategory.InvalidOperation,
+        _ => NativePlaybackExceptionCategory.Other,
+    };
+
+    internal int ExceptionHResult { get; } = exception.HResult;
+}
 
 internal readonly record struct NativePlaybackResourceSample(
     TimeSpan Elapsed,

@@ -2089,6 +2089,26 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "AppWindowPresenterKind.FullScreen");
         StringAssert.Contains(window, "AppWindowPresenterKind.Overlapped");
         StringAssert.Contains(window, "NativePlaybackFailure.SurfaceLifecycleFailed");
+        StringAssert.Contains(window, "while (_mediaPlayer.Source is not null)");
+        StringAssert.Contains(window, "timeout.Elapsed >= TimeSpan.FromSeconds(5)");
+        StringAssert.Contains(window, "sourceDetachSamples.Add(await DetachSourceAsync(");
+        StringAssert.Contains(window, "NativePlaybackFailure.SourceDetachmentTimeout");
+        StringAssert.Contains(window, "NativePlaybackFailure.SourceDetachmentFailed");
+        StringAssert.Contains(window, "if (canPauseBeforeDetach)");
+        StringAssert.Contains(window, "_mediaPlayer.Source is not null && _mediaPlayer.PlaybackSession.CanPause");
+        StringAssert.Contains(window, "BestEffortResetAfterProbe()");
+        StringAssert.Contains(window, "Do not mask the probe's typed result.");
+        StringAssert.Contains(window, "NativePlaybackTeardownStage.PlaybackSessionInspection");
+        StringAssert.Contains(window, "NativePlaybackTeardownStage.SourceClear");
+        StringAssert.Contains(window, "NativePlaybackTeardownStage.SourceInspection");
+        StringAssert.Contains(window, "COMException => NativePlaybackExceptionCategory.Com");
+        StringAssert.Contains(window, "for (int attempt = 0; attempt < 2; attempt++)");
+        StringAssert.Contains(window, "_mediaFailure == NativePlaybackFailure.MediaFailed && attempt == 0");
+        StringAssert.Contains(window, "MediaSource source = MediaSource.CreateFromUri(fixture)");
+        StringAssert.Contains(window, "NativePlaybackTeardownStage.MediaSourceDispose");
+        StringAssert.Contains(window, "DisposeMediaSource(source)");
+        StringAssert.Contains(window, "BestEffortDisposeMediaSource(source)");
+        StringAssert.Contains(window, "Preserve the primary typed probe failure");
         StringAssert.Contains(window, "await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
         StringAssert.Contains(window, "await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3)");
         StringAssert.Contains(window, "TimeSpan sampleInterval = TimeSpan.FromMinutes(5)");
@@ -2135,9 +2155,20 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "$NetworkInterruptionCount -gt 0 -and $SwitchCount -ne 100");
         StringAssert.Contains(controller, "ArmNextMediaRequestFailure");
         StringAssert.Contains(controller, "Interlocked.Exchange(ref armedMediaFailure, 0) == 1");
+        StringAssert.Contains(controller, "int requestOrdinal = Interlocked.Increment(ref requestCount)");
+        StringAssert.Contains(controller, "requestOrdinal > injectedRequestOrdinal");
+        StringAssert.Contains(controller, "Interlocked.CompareExchange(ref pendingRecovery, 0, 1) == 1");
+        StringAssert.Contains(controller, "LastRecoveryRequestOrdinal -le $tlsServer.LastInjectedRequestOrdinal");
         StringAssert.Contains(controller, "NetworkInterruptionCount = $tlsServer.InjectedFailureCount");
         StringAssert.Contains(controller, "NetworkRecoveryCount = $tlsServer.RecoveryCount");
-        StringAssert.Contains(controller, "SchemaVersion = 4");
+        StringAssert.Contains(controller, "$expectedDetachedSourceCount = $SwitchCount + [int]$probe.PlaybackRetryCount");
+        StringAssert.Contains(controller, "[int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount");
+        StringAssert.Contains(controller, "DetachedSourceCount = [int]$probe.DetachedSourceCount");
+        StringAssert.Contains(controller, "SourceDetachP95Milliseconds -gt 3000");
+        StringAssert.Contains(controller, "SourceDetachMaximumMilliseconds -gt 5000");
+        StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
+        StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
+        StringAssert.Contains(controller, "SchemaVersion = 7");
         string readme = File.ReadAllText(Path.Combine(RepositoryRoot, "apps", "windows", "README.md"));
         StringAssert.Contains(
             readme,

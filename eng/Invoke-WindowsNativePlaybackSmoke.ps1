@@ -120,6 +120,8 @@ namespace IptvSuite.NativePlaybackSmoke
         private int pendingRecovery;
         private int injectedFailureCount;
         private int recoveryCount;
+        private int lastInjectedRequestOrdinal;
+        private int lastRecoveryRequestOrdinal;
         private long completedBodyBytes;
 
         public TierATlsServer(string root, X509Certificate2 certificate)
@@ -143,6 +145,8 @@ namespace IptvSuite.NativePlaybackSmoke
         public int BoundedRangeCount { get { return Volatile.Read(ref boundedRangeCount); } }
         public int InjectedFailureCount { get { return Volatile.Read(ref injectedFailureCount); } }
         public int RecoveryCount { get { return Volatile.Read(ref recoveryCount); } }
+        public int LastInjectedRequestOrdinal { get { return Volatile.Read(ref lastInjectedRequestOrdinal); } }
+        public int LastRecoveryRequestOrdinal { get { return Volatile.Read(ref lastRecoveryRequestOrdinal); } }
         public long CompletedBodyBytes { get { return Interlocked.Read(ref completedBodyBytes); } }
 
         public void ArmNextMediaRequestFailure()
@@ -236,9 +240,10 @@ namespace IptvSuite.NativePlaybackSmoke
                     }
 
                     long contentLength = end - start + 1;
-                    Interlocked.Increment(ref requestCount);
+                    int requestOrdinal = Interlocked.Increment(ref requestCount);
                     if (Interlocked.Exchange(ref armedMediaFailure, 0) == 1)
                     {
+                        Volatile.Write(ref lastInjectedRequestOrdinal, requestOrdinal);
                         Interlocked.Exchange(ref pendingRecovery, 1);
                         Interlocked.Increment(ref injectedFailureCount);
                         await WriteStatusAsync(ssl, 503).ConfigureAwait(false);
@@ -280,8 +285,11 @@ namespace IptvSuite.NativePlaybackSmoke
                     await ssl.FlushAsync().ConfigureAwait(false);
                     if (request[0] == "GET") Interlocked.Add(ref completedBodyBytes, contentLength);
                     Interlocked.Increment(ref completedResponseCount);
-                    if (Interlocked.Exchange(ref pendingRecovery, 0) == 1)
+                    int injectedRequestOrdinal = Volatile.Read(ref lastInjectedRequestOrdinal);
+                    if (requestOrdinal > injectedRequestOrdinal &&
+                        Interlocked.CompareExchange(ref pendingRecovery, 0, 1) == 1)
                     {
+                        Volatile.Write(ref lastRecoveryRequestOrdinal, requestOrdinal);
                         Interlocked.Increment(ref recoveryCount);
                     }
                 }
@@ -496,13 +504,20 @@ try {
 
     $probe = Get-Content -Raw $packageEvidencePath | ConvertFrom-Json
     $expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }
+    $expectedDetachedSourceCount = $SwitchCount + [int]$probe.PlaybackRetryCount
+    if ($SoakMinutes -gt 0) { $expectedDetachedSourceCount++ }
     if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or
         [int]$probe.SwitchCount -ne $SwitchCount -or
-        [int]$probe.SurfaceTransitionCount -ne $expectedSurfaceTransitions) {
-        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
+        [int]$probe.SurfaceTransitionCount -ne $expectedSurfaceTransitions -or
+        [int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount -or
+        [int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount) {
+        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), playbackRetries=$($probe.PlaybackRetryCount), playbackStateBeforeDetach=$($probe.PlaybackStateBeforeDetach), sourceDetached=$($probe.SourceDetached), canPauseBeforeDetach=$($probe.CanPauseBeforeDetach), canSeekBeforeDetach=$($probe.CanSeekBeforeDetach), teardownStage=$($probe.TeardownStage), exceptionCategory=$($probe.ExceptionCategory), exceptionHResult=$($probe.ExceptionHResult), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), injectedRequestOrdinal=$($tlsServer.LastInjectedRequestOrdinal), recoveryRequestOrdinal=$($tlsServer.LastRecoveryRequestOrdinal), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) {
         throw "Native playback startup budget failed: p95=$($probe.StartupP95Milliseconds), maximum=$($probe.StartupMaximumMilliseconds), hlsP95=$($probe.HlsStartupP95Milliseconds), directP95=$($probe.DirectStartupP95Milliseconds)."
+    }
+    if ([double]$probe.SourceDetachP95Milliseconds -gt 3000 -or [double]$probe.SourceDetachMaximumMilliseconds -gt 5000) {
+        throw "Native playback source-detachment budget failed: p95=$($probe.SourceDetachP95Milliseconds), maximum=$($probe.SourceDetachMaximumMilliseconds)."
     }
     if ($SoakMinutes -gt 0 -and (
         [int]$probe.SoakMinutes -ne $SoakMinutes -or
@@ -515,12 +530,14 @@ try {
     if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }
     if ($scheduledInterruptionCount -ne $NetworkInterruptionCount -or
         $tlsServer.InjectedFailureCount -ne $NetworkInterruptionCount -or
-        $tlsServer.RecoveryCount -ne $NetworkInterruptionCount) {
+        $tlsServer.RecoveryCount -ne $NetworkInterruptionCount -or
+        ($NetworkInterruptionCount -gt 0 -and
+            $tlsServer.LastRecoveryRequestOrdinal -le $tlsServer.LastInjectedRequestOrdinal)) {
         throw "Native playback network interruption/recovery invariant failed."
     }
 
     $summary = [ordered]@{
-        SchemaVersion = 4
+        SchemaVersion = 7
         Stage = "M10NativeTierAPlayback"
         Result = "Passed"
         SwitchCount = $SwitchCount
@@ -537,8 +554,14 @@ try {
         WarmupHandleCount = [int]$probe.WarmupHandleCount
         HandleNetGrowth = [int]$probe.HandleNetGrowth
         SurfaceTransitionCount = [int]$probe.SurfaceTransitionCount
+        DetachedSourceCount = [int]$probe.DetachedSourceCount
+        PlaybackRetryCount = [int]$probe.PlaybackRetryCount
+        SourceDetachP95Milliseconds = [Math]::Round([double]$probe.SourceDetachP95Milliseconds, 3)
+        SourceDetachMaximumMilliseconds = [Math]::Round([double]$probe.SourceDetachMaximumMilliseconds, 3)
         NetworkInterruptionCount = $tlsServer.InjectedFailureCount
         NetworkRecoveryCount = $tlsServer.RecoveryCount
+        LastInjectedRequestOrdinal = $tlsServer.LastInjectedRequestOrdinal
+        LastRecoveryRequestOrdinal = $tlsServer.LastRecoveryRequestOrdinal
         InitialPrivateBytes = [long]$probe.InitialPrivateBytes
         FinalPrivateBytes = [long]$probe.FinalPrivateBytes
         InitialHandleCount = [int]$probe.InitialHandleCount
