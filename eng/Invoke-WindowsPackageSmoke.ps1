@@ -1009,11 +1009,23 @@ function Assert-FocusedAutomationElement {
         [System.Windows.Automation.AutomationElement]$ExpectedElement,
 
         [Parameter(Mandatory)]
-        [string]$ExpectedAutomationId
+        [string]$ExpectedAutomationId,
+
+        [switch]$RequestFocus
     )
 
     $deadline = (Get-Date).AddSeconds(5)
     do {
+        if ($RequestFocus) {
+            try {
+                $ExpectedElement.SetFocus()
+            }
+            catch {
+                # UI Automation focus transfer can race foreground activation;
+                # the bounded identity assertion below remains fail-closed.
+            }
+        }
+
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         for ($depth = 0; $null -ne $focused -and $depth -lt 32; $depth++) {
             if ([System.Windows.Automation.Automation]::Compare($focused, $ExpectedElement) -or
@@ -1348,9 +1360,7 @@ try {
         throw "The packaged catalog controls did not become keyboard-focusable."
     }
     Assert-PackagedWindowForeground $windowHandle ([uint32]$activationProcessId)
-    $sourceElement.SetFocus()
-    Start-Sleep -Milliseconds 150
-    Assert-FocusedAutomationElement $sourceElement "CatalogSourceSelector"
+    Assert-FocusedAutomationElement $sourceElement "CatalogSourceSelector" -RequestFocus
     [IptvSuite.PackageSmoke.KeyboardInspector]::PressTab()
     Start-Sleep -Milliseconds 150
     Assert-FocusedAutomationElement $categoryElement "CatalogCategorySelector"
@@ -1364,9 +1374,7 @@ try {
     if ($null -eq $scrollFocusItem) {
         throw "The packaged catalog has no realized item for the scroll probe."
     }
-    $scrollFocusItem.SetFocus()
-    Start-Sleep -Milliseconds 150
-    Assert-FocusedAutomationElement $channelListElement "CatalogChannelList"
+    Assert-FocusedAutomationElement $scrollFocusItem "CatalogChannelList" -RequestFocus
     [IptvSuite.PackageSmoke.DwmFrameSampler]::Start()
     $frameResult = $null
     try {
