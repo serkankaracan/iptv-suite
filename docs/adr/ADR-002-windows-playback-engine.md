@@ -1,6 +1,6 @@
 # ADR-002 — Windows playback motoru
 
-**Status:** Proposed
+**Status:** Rejected — M10 exact binary/license hard gate
 
 **Date:** 2026-08-09
 
@@ -95,3 +95,7 @@ Tier A HLS-TS/direct TS + H.264/AAC yüzde 100 geçmelidir. Diğer kombinasyonla
 ## References
 
 [S21–S32, S60–S62](../research/SOURCES.md)
+
+## M10 decision record — 2026-08-21
+
+Exact `VideoLAN.LibVLC.Windows 3.0.23.1` x64 payload'ında `libx26410b_plugin.dll` bulundu. Upstream GPL-compliance kaydı x264 plugin ailesinin GPL paketine ayrılmasını ister; package-level LGPL metadata'sı exact binary-to-source/notices yükümlülüğünü çözmez. IPTV Suite'in “GPL plugin/binary sıfır” hard gate'i bu nedenle **NO-GO** oldu. DLL'i körlemesine çıkarmak runtime ve transitive lisans bütünlüğünü kanıtlamayacağından uygulanmadı. Kalıcı kanıt [M10 candidate decision](../quality/M10_PLAYBACK_CANDIDATE_DECISION.md), fallback ise [ADR-007](ADR-007-windows-native-tier-a-playback-fallback.md) içindedir.

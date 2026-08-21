@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; playback ve Samsung kararları kendi milestone'larında açık
+**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi, Windows-native Tier A fallback ve Samsung kararları açık
 
 M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8'e bırakıldı”, `Proposed` veya “açık” ifadelerini supersede eder; exact kabul bağı [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
@@ -12,7 +12,7 @@ M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8
 
 Windows MVP için önerilen stack **C# / .NET 10 LTS + WinUI 3 + güncel stable Windows App SDK + framework-dependent MSIX**'tir. Uygulama tek process'li modular monolith olacak; presentation, application, domain ve infrastructure sınırları korunacaktır. Windows UI kararı playback motorundan ayrıdır.
 
-Geniş IPTV compatibility için birincil playback adayı **non-GPL libVLC + LibVLCSharp.WinUI**'dır; ancak WinUI surface, codec corpus, uzun süreli stabilite, x64/ARM64, MSIX/Store ve exact lisans envanteri M10 spike'ında geçmeden production kararı değildir. Windows native media API'leri temiz baseline/fallback'tir, fakat temiz OS'te HEVC/AC-3/E-AC-3 ve HEVC-in-TS kapsamı geniş ürün sözünü karşılamaz.
+M10'da incelenen **libVLC + LibVLCSharp.WinUI** exact candidate'i restored native payload'daki GPL-risk plugin ve kapanmayan binary-to-source/notices zinciri nedeniyle reddedilmiştir. Windows native media API'leri ADR-007 kapsamında dar Tier A fallback olarak yeniden spike edilir; temiz OS'te HEVC/AC-3/E-AC-3 ve HEVC-in-TS kapsamı geniş ürün sözü değildir.
 
 Platformlar aynı UI/player implementation'ını paylaşmayacaktır. Samsung ayrı Tizen Web + AVPlay, Android Kotlin + Media3, Apple Swift + AVFoundation/AVKit yönündedir. Paylaşım; versioned terminology, contracts, error codes ve sentetik test vectors ile sınırlıdır. İlk organizasyon modeli, platform sınırları kesin bir monorepo'dur.
 

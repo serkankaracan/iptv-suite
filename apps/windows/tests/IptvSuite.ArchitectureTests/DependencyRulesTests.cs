@@ -1942,6 +1942,38 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M10PlaybackCandidateDecisionPreservesTheExactLicenseBoundary()
+    {
+        string decision = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPlaybackCandidateDecision.ps1"));
+        string rejectedAdr = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "docs",
+            "adr",
+            "ADR-002-windows-playback-engine.md"));
+        string fallbackAdr = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "docs",
+            "adr",
+            "ADR-007-windows-native-tier-a-playback-fallback.md"));
+
+        StringAssert.Contains(decision, "$expectedPackageVersion = '3.0.23.1'");
+        StringAssert.Contains(decision, "$expectedBlocker = 'build/x64/plugins/codec/libx26410b_plugin.dll'");
+        StringAssert.Contains(decision, "ExactBinaryLicenseBoundaryUnresolved");
+        StringAssert.Contains(decision, "PackageLicenseExpression");
+        StringAssert.Contains(decision, "EmbeddedLicenseOrNoticeEntries");
+        StringAssert.Contains(decision, "Do not ship this candidate");
+        StringAssert.Contains(rejectedAdr, "**Status:** Rejected — M10 exact binary/license hard gate");
+        StringAssert.Contains(fallbackAdr, "**Status:** Proposed");
+        StringAssert.Contains(fallbackAdr, "Windows `MediaPlayer` / Media Foundation");
+        Assert.IsFalse(
+            fallbackAdr.Contains("**Status:** Accepted", StringComparison.Ordinal),
+            "The native fallback must not be accepted before its independent playback gate passes.");
+    }
+
+    [TestMethod]
     public void M8CatalogCrashHarnessIsIsolatedAndKillsOnlyItsTrackedProcess()
     {
         string harness = File.ReadAllText(Path.Combine(

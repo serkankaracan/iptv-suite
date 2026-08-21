@@ -373,7 +373,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M7 | COMPLETED, 2026-08-20: streaming loader + mandatory sink handoff, M3U/HLS golden/adversarial/50k/cancel suite; local 260/260 ×2 ve commit `fc4e2e360e1b0283369058e6bef349e667f3a764` hosted run `32409222785` 4/4 PASS |
 | M8 | `COMPLETED`: same-SQLite-transaction persistence, clean 5k–50k ×20 Decision ve gerçek ayrı-process kill/recovery tamamlandı; 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB`, cancellation p95 `12,390 ms`; migration/fault/crash, canary, source lifecycle ve query/cache acceptance PASS. [Kanıt](M8_COMPLETION_EVIDENCE.md) |
 | M9 | `COMPLETED, 2026-08-21`: bounded query/UI/logo local `292/292 × 2` ve clean query Decision PASS; run `32443355378` commit-bound packaged 50k UIA/Tab/virtualization/input/DWM acceptance PASS. Realized item `8`, input p95 `16,284 ms`, compositor p95 `31,25 ms`, max `171,875 ms`, late/drop proxy `%0`, interval `404`. [Kanıt](M9_COMPLETION_EVIDENCE.md) |
-| M10 | Compatibility/license/MSIX hard gate |
+| M10 | `COMPLETED — CANDIDATE NO-GO, 2026-08-21`: exact LibVLC seti restore/build/isolation PASS; x64 payload `libx26410b_plugin.dll` ve kapanmayan binary-to-source/notices zinciri nedeniyle GPL-zero hard gate FAIL. ADR-002 rejected, ADR-007 native Tier A fallback proposed. [Kanıt](M10_PLAYBACK_CANDIDATE_DECISION.md) |
 | M11 | Fake+real player adapter contract |
 | M12 | Lifecycle/rapid-switch/UI automation |
 | M13 | Retry/reconnect deterministic fault suite |
