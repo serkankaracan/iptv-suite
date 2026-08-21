@@ -167,11 +167,24 @@ namespace IptvSuite.NativePlaybackSmoke
                         {
                             string range = line.Substring(13);
                             string[] bounds = range.Split('-');
-                            if (bounds.Length != 2 || !Int64.TryParse(bounds[0], NumberStyles.None, CultureInfo.InvariantCulture, out start) || start < 0 || start >= total)
+                            if (range.IndexOf(',') >= 0 || bounds.Length != 2)
                             { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
-                            if (bounds[1].Length > 0 && (!Int64.TryParse(bounds[1], NumberStyles.None, CultureInfo.InvariantCulture, out end) || end < start))
-                            { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
-                            end = Math.Min(end, total - 1);
+                            if (bounds[0].Length == 0)
+                            {
+                                long suffixLength;
+                                if (!Int64.TryParse(bounds[1], NumberStyles.None, CultureInfo.InvariantCulture, out suffixLength) || suffixLength <= 0)
+                                { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
+                                start = Math.Max(0, total - suffixLength);
+                                end = total - 1;
+                            }
+                            else
+                            {
+                                if (!Int64.TryParse(bounds[0], NumberStyles.None, CultureInfo.InvariantCulture, out start) || start < 0 || start >= total)
+                                { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
+                                if (bounds[1].Length > 0 && (!Int64.TryParse(bounds[1], NumberStyles.None, CultureInfo.InvariantCulture, out end) || end < start))
+                                { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
+                                end = Math.Min(end, total - 1);
+                            }
                             partial = true;
                         }
                     }
