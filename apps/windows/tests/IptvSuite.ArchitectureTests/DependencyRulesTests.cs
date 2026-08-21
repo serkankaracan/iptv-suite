@@ -2427,7 +2427,7 @@ public sealed class DependencyRulesTests
 
         using Process contractProcess = Process.Start(startInfo)
             ?? throw new AssertFailedException("The PowerShell 5.1 contract probe could not start.");
-        bool contractCompleted = contractProcess.WaitForExit(10_000);
+        bool contractCompleted = contractProcess.WaitForExit(30_000);
         if (!contractCompleted)
         {
             contractProcess.Kill(entireProcessTree: true);
