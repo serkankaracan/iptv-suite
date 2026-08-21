@@ -538,6 +538,7 @@ $expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
 $expectedRuntimeDependencyPublisher = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
 $expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
 $expectedRuntimeDependencyVersion = "2.3.1.0"
+$expectedRuntimeDependencyCleanupArchitectures = @("X64", "X86")
 $expectedRuntimeNuGetVersion = "2.3.1"
 $projectAssetsPath = Join-Path (Split-Path -Parent $projectPath) "obj\project.assets.json"
 $h264DecoderClass = "Registry::HKEY_CLASSES_ROOT\CLSID\{62CE7E72-4C71-4D20-B15D-452831A87D9D}\InprocServer32"
@@ -1287,7 +1288,20 @@ function Restore-RuntimeDependencyPackageGraph {
     }
 
     $beforeNames = @($script:runtimePackagesBefore)
+    $passiveDeadline = (Get-Date).AddSeconds(5)
+    do {
+        $script:runtimeDependencyCleanupDiagnostic = "PassiveGraphConvergence"
+        if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
+            $script:runtimeDependencyCleanupDiagnostic = "Restored"
+            $script:runtimePackageGraphRestored = $true
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $passiveDeadline)
+
     $deadline = (Get-Date).AddSeconds(30)
+    $lastAddedPackageCount = -1
+    $lastValidatedAddedPackageCount = -1
     do {
         $script:runtimeDependencyCleanupDiagnostic = "GraphComparison"
         if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
@@ -1298,12 +1312,29 @@ function Restore-RuntimeDependencyPackageGraph {
 
         $script:runtimeDependencyCleanupDiagnostic = "CurrentGraphRead"
         $currentPackages = @(Get-RuntimeDependencyPackages)
+        $missingBaselineNames = @($beforeNames | Where-Object {
+            $baselineFullName = $_
+            @($currentPackages | Where-Object {
+                [string]::Equals(
+                    $_.PackageFullName,
+                    $baselineFullName,
+                    [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -eq 0
+        })
+        if ($missingBaselineNames.Count -ne 0) {
+            $script:runtimeDependencyCleanupDiagnostic =
+                "MissingBaseline(count=$($missingBaselineNames.Count))"
+            throw "A baseline Windows App Runtime registration disappeared during the transaction."
+        }
+
         $addedPackages = @($currentPackages | Where-Object {
             $currentFullName = $_.PackageFullName
             @($beforeNames | Where-Object {
                 [string]::Equals($_, $currentFullName, [System.StringComparison]::OrdinalIgnoreCase)
             }).Count -eq 0
         })
+        $lastAddedPackageCount = $addedPackages.Count
+        $validatedAddedPackages = @()
         foreach ($package in $addedPackages) {
             $versionText = if ($null -eq $package.Version) { "null" } else { $package.Version.ToString() }
             $architectureText = if ($null -eq $package.Architecture) { "null" } else { $package.Architecture.ToString() }
@@ -1312,8 +1343,23 @@ function Restore-RuntimeDependencyPackageGraph {
                 $package.PackageFamilyName,
                 "$($script:expectedRuntimeDependencyName)_$($script:expectedRuntimeDependencyPublisherId)",
                 [System.StringComparison]::OrdinalIgnoreCase)
+            $architectureAllowed = @($script:expectedRuntimeDependencyCleanupArchitectures | Where-Object {
+                [string]::Equals($_, $architectureText, [System.StringComparison]::Ordinal)
+            }).Count -eq 1
+            $x64SiblingMatches = $true
+            if ([string]::Equals($architectureText, "X86", [System.StringComparison]::Ordinal)) {
+                $x64SiblingMatches = @($currentPackages | Where-Object {
+                    -not [string]::IsNullOrWhiteSpace([string]$_.PackageFullName) -and
+                    [string]::Equals($_.Name, $package.Name, [System.StringComparison]::OrdinalIgnoreCase) -and
+                    [string]::Equals($_.Publisher, $package.Publisher, [System.StringComparison]::Ordinal) -and
+                    [string]::Equals($_.PackageFamilyName, $package.PackageFamilyName, [System.StringComparison]::OrdinalIgnoreCase) -and
+                    [string]::Equals($_.Version.ToString(), $versionText, [System.StringComparison]::Ordinal) -and
+                    [string]::Equals($_.Architecture.ToString(), "X64", [System.StringComparison]::Ordinal) -and
+                    $_.IsFramework -eq $true
+                }).Count -eq 1
+            }
             $script:runtimeDependencyCleanupDiagnostic =
-                "AddedPackage(version=$versionText;architecture=$architectureText;framework=$frameworkText;familyMatch=$familyMatches)"
+                "AddedPackage(version=$versionText;architecture=$architectureText;framework=$frameworkText;familyMatch=$familyMatches;x64Sibling=$x64SiblingMatches)"
             $runtimeVersion = [version]::new()
             $runtimeVersionValid = [version]::TryParse(
                 $versionText,
@@ -1327,11 +1373,12 @@ function Restore-RuntimeDependencyPackageGraph {
                     $package.Publisher,
                     $script:expectedRuntimeDependencyPublisher,
                     [System.StringComparison]::Ordinal) -or
-                $package.Architecture.ToString() -ne "X64" -or
+                -not $architectureAllowed -or
                 $package.IsFramework -ne $true -or
                 -not $runtimeVersionValid -or
                 $runtimeVersion.Major -ne 2 -or
                 $runtimeVersion -lt [version]$script:expectedRuntimeDependencyVersion -or
+                -not $x64SiblingMatches -or
                 -not [string]::Equals(
                     $package.PackageFamilyName,
                     "$($script:expectedRuntimeDependencyName)_$($script:expectedRuntimeDependencyPublisherId)",
@@ -1339,6 +1386,13 @@ function Restore-RuntimeDependencyPackageGraph {
                 throw "An unexpected Windows App Runtime registration appeared during the transaction."
             }
 
+            $validatedAddedPackages += $package
+        }
+        $lastValidatedAddedPackageCount = $validatedAddedPackages.Count
+
+        foreach ($package in $validatedAddedPackages) {
+            $versionText = $package.Version.ToString()
+            $architectureText = $package.Architecture.ToString()
             $packageFullName = [string]$package.PackageFullName
             try {
                 $script:runtimeDependencyCleanupDiagnostic =
@@ -1370,7 +1424,7 @@ function Restore-RuntimeDependencyPackageGraph {
     } while ((Get-Date) -lt $deadline)
 
     $script:runtimeDependencyCleanupDiagnostic =
-        "ConvergenceTimeout(beforeCount=$($beforeNames.Count);afterCount=$(@(Get-RuntimeDependencyPackages).Count))"
+        "ConvergenceTimeout(beforeCount=$($beforeNames.Count);afterCount=$(@(Get-RuntimeDependencyPackages).Count);addedCount=$lastAddedPackageCount;validatedCount=$lastValidatedAddedPackageCount)"
     throw "The Windows App Runtime package graph was not restored."
 }
 

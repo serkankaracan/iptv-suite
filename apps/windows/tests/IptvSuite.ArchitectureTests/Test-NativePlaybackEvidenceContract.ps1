@@ -171,9 +171,11 @@ function Get-HashtableKeys {
 function Assert-ExactSequence {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [object[]]$Actual,
 
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [object[]]$Expected,
 
         [Parameter(Mandatory)]
@@ -553,5 +555,247 @@ Assert-ExactSequence `
     -Actual (Get-HashtableKeys -Hashtable $failureHashtable) `
     -Expected @("Stage", "Code") `
     -Message "Failure evidence must remain a stable two-field allowlist."
+
+function Get-ControllerFunctionDefinition {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    $definitions = @($ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        [string]::Equals($node.Name, $Name, [System.StringComparison]::Ordinal)
+    }, $true))
+    Assert-Contract ($definitions.Count -eq 1) "A required runtime cleanup function is missing or ambiguous."
+    return $definitions[0]
+}
+
+function New-RuntimePackageRecord {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Version,
+
+        [Parameter(Mandatory)]
+        [string]$Architecture,
+
+        [Parameter(Mandatory)]
+        [string]$PackageFullName,
+
+        [string]$Name = "Microsoft.WindowsAppRuntime.2",
+
+        [string]$Publisher = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+
+        [string]$PackageFamilyName = "Microsoft.WindowsAppRuntime.2_8wekyb3d8bbwe",
+
+        [bool]$IsFramework = $true
+    )
+
+    return [pscustomobject]@{
+        Name = $Name
+        Publisher = $Publisher
+        PackageFamilyName = $PackageFamilyName
+        Version = [version]$Version
+        Architecture = $Architecture
+        IsFramework = $IsFramework
+        PackageFullName = $PackageFullName
+    }
+}
+
+$script:expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
+$script:expectedRuntimeDependencyPublisher =
+    "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+$script:expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
+$script:expectedRuntimeDependencyVersion = "2.3.1.0"
+$script:expectedRuntimeDependencyCleanupArchitectures = @("X64", "X86")
+$global:runtimeCleanupClock = [datetime]::Parse("2026-08-22T00:00:00Z").ToUniversalTime()
+$global:runtimeCleanupCurrentPackages = @()
+$global:runtimeCleanupRemovedPackages = @()
+$global:runtimeCleanupRemoveAttempts = 0
+
+function global:Invoke-MockGetDate {
+    $global:runtimeCleanupClock = $global:runtimeCleanupClock.AddSeconds(10)
+    return $global:runtimeCleanupClock
+}
+
+function global:Invoke-MockStartSleep {
+    param([int]$Milliseconds)
+}
+
+function global:Invoke-MockGetRuntimeDependencyPackages {
+    return @($global:runtimeCleanupCurrentPackages)
+}
+
+function global:Invoke-MockRemoveAppxPackage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Package
+    )
+
+    $global:runtimeCleanupRemoveAttempts++
+    $matchingPackages = @($global:runtimeCleanupCurrentPackages | Where-Object {
+        [string]::Equals($_.PackageFullName, $Package, [System.StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($matchingPackages.Count -ne 1) {
+        throw "The mock cleanup target is missing or ambiguous."
+    }
+
+    $global:runtimeCleanupRemovedPackages += $Package
+    $global:runtimeCleanupCurrentPackages = @($global:runtimeCleanupCurrentPackages | Where-Object {
+        -not [string]::Equals($_.PackageFullName, $Package, [System.StringComparison]::OrdinalIgnoreCase)
+    })
+}
+
+$runtimeGraphTestText =
+    (Get-ControllerFunctionDefinition -Name "Test-RuntimeDependencyPackageGraph").Extent.Text.Replace(
+        "Get-RuntimeDependencyPackages",
+        "Invoke-MockGetRuntimeDependencyPackages")
+$runtimeGraphRestoreText =
+    (Get-ControllerFunctionDefinition -Name "Restore-RuntimeDependencyPackageGraph").Extent.Text.Replace(
+        "Get-RuntimeDependencyPackages",
+        "Invoke-MockGetRuntimeDependencyPackages").Replace(
+        "Remove-AppxPackage",
+        "Invoke-MockRemoveAppxPackage").Replace(
+        "Get-Date",
+        "Invoke-MockGetDate").Replace(
+        "Start-Sleep",
+        "Invoke-MockStartSleep")
+. ([scriptblock]::Create($runtimeGraphTestText))
+. ([scriptblock]::Create($runtimeGraphRestoreText))
+
+function Invoke-RuntimeCleanupScenario {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Before,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Current,
+
+        [Parameter(Mandatory)]
+        [bool]$ExpectFailure,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$ExpectedRemoved,
+
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    $global:runtimeCleanupClock = [datetime]::Parse("2026-08-22T00:00:00Z").ToUniversalTime()
+    $script:runtimePackagesBefore = @($Before | ForEach-Object { $_.PackageFullName } | Sort-Object)
+    $global:runtimeCleanupCurrentPackages = @($Current)
+    $global:runtimeCleanupRemovedPackages = @()
+    $global:runtimeCleanupRemoveAttempts = 0
+    $script:runtimePackageGraphRestored = $false
+    $script:runtimeDependencyCleanupDiagnostic = "NotStarted"
+    $script:installAttempted = $true
+    $scenarioAddedPackages = @($global:runtimeCleanupCurrentPackages | Where-Object {
+        $currentFullName = $_.PackageFullName
+        @($script:runtimePackagesBefore | Where-Object {
+            [string]::Equals($_, $currentFullName, [System.StringComparison]::OrdinalIgnoreCase)
+        }).Count -eq 0
+    })
+
+    $failed = $false
+    $failureMessage = $null
+    try {
+        Restore-RuntimeDependencyPackageGraph
+    }
+    catch {
+        $failed = $true
+        $failureMessage = $_.Exception.Message
+    }
+
+    Assert-Contract `
+        ($failed -eq $ExpectFailure) `
+        "Runtime cleanup scenario '$Name' returned an unexpected result: $failureMessage; diagnostic=$script:runtimeDependencyCleanupDiagnostic; added=$($scenarioAddedPackages.Count); attempts=$global:runtimeCleanupRemoveAttempts; removed=$($global:runtimeCleanupRemovedPackages.Count); current=$($global:runtimeCleanupCurrentPackages.Count)"
+    Assert-ExactSequence `
+        -Actual @($global:runtimeCleanupRemovedPackages | Sort-Object) `
+        -Expected @($ExpectedRemoved | Sort-Object) `
+        -Message "Runtime cleanup scenario '$Name' mutated an unexpected package."
+    if (-not $ExpectFailure) {
+        Assert-Contract `
+            $script:runtimePackageGraphRestored `
+            "Runtime cleanup scenario '$Name' did not publish graph restoration."
+        Assert-Contract `
+            (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $script:runtimePackagesBefore) `
+            "Runtime cleanup scenario '$Name' did not restore the exact baseline graph."
+    }
+}
+
+$runtimeX64V24 = New-RuntimePackageRecord `
+    -Version "2.4.0.0" `
+    -Architecture "X64" `
+    -PackageFullName "Microsoft.WindowsAppRuntime.2_2.4.0.0_x64__8wekyb3d8bbwe"
+$runtimeX86V24 = New-RuntimePackageRecord `
+    -Version "2.4.0.0" `
+    -Architecture "X86" `
+    -PackageFullName "Microsoft.WindowsAppRuntime.2_2.4.0.0_x86__8wekyb3d8bbwe"
+$runtimeX64V231 = New-RuntimePackageRecord `
+    -Version "2.3.1.0" `
+    -Architecture "X64" `
+    -PackageFullName "Microsoft.WindowsAppRuntime.2_2.3.1.0_x64__8wekyb3d8bbwe"
+$runtimeArm64V24 = New-RuntimePackageRecord `
+    -Version "2.4.0.0" `
+    -Architecture "Arm64" `
+    -PackageFullName "Microsoft.WindowsAppRuntime.2_2.4.0.0_arm64__8wekyb3d8bbwe"
+$runtimeWrongFamily = New-RuntimePackageRecord `
+    -Version "2.4.0.0" `
+    -Architecture "X64" `
+    -PackageFullName "Microsoft.WindowsAppRuntime.2_2.4.0.0_x64__unknown" `
+    -PackageFamilyName "Microsoft.WindowsAppRuntime.2_unknown"
+
+Invoke-RuntimeCleanupScenario `
+    -Before @() `
+    -Current @($runtimeX64V24, $runtimeX86V24) `
+    -ExpectFailure $false `
+    -ExpectedRemoved @($runtimeX64V24.PackageFullName, $runtimeX86V24.PackageFullName) `
+    -Name "empty baseline with serviced x64 and x86 pair"
+Invoke-RuntimeCleanupScenario `
+    -Before @() `
+    -Current @($runtimeX86V24) `
+    -ExpectFailure $true `
+    -ExpectedRemoved @() `
+    -Name "x86 without x64 sibling"
+Invoke-RuntimeCleanupScenario `
+    -Before @() `
+    -Current @($runtimeX64V231, $runtimeX86V24) `
+    -ExpectFailure $true `
+    -ExpectedRemoved @() `
+    -Name "x86 with mismatched x64 version"
+Invoke-RuntimeCleanupScenario `
+    -Before @() `
+    -Current @($runtimeX64V24, $runtimeArm64V24) `
+    -ExpectFailure $true `
+    -ExpectedRemoved @() `
+    -Name "unsupported architecture"
+Invoke-RuntimeCleanupScenario `
+    -Before @() `
+    -Current @($runtimeX64V24, $runtimeWrongFamily) `
+    -ExpectFailure $true `
+    -ExpectedRemoved @() `
+    -Name "unexpected family"
+Invoke-RuntimeCleanupScenario `
+    -Before @($runtimeX64V24) `
+    -Current @($runtimeX64V24, $runtimeX86V24) `
+    -ExpectFailure $false `
+    -ExpectedRemoved @($runtimeX86V24.PackageFullName) `
+    -Name "baseline x64 with added serviced x86 sibling"
+Invoke-RuntimeCleanupScenario `
+    -Before @($runtimeX64V24, $runtimeX86V24) `
+    -Current @($runtimeX64V24, $runtimeX86V24) `
+    -ExpectFailure $false `
+    -ExpectedRemoved @() `
+    -Name "unchanged baseline"
+Invoke-RuntimeCleanupScenario `
+    -Before @($runtimeX64V231) `
+    -Current @($runtimeX64V24) `
+    -ExpectFailure $true `
+    -ExpectedRemoved @() `
+    -Name "same count with a replaced baseline package"
 
 Write-Output "Native playback evidence AST contract passed."
