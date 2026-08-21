@@ -33,11 +33,7 @@ public sealed partial class MainPage : Page, IDisposable
     public MainPage()
     {
         InitializeComponent();
-        SourceSelector.AddHandler(
-            UIElement.LosingFocusEvent,
-            new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus),
-            handledEventsToo: true);
-        SearchBox.AddHandler(
+        AddHandler(
             UIElement.LosingFocusEvent,
             new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus),
             handledEventsToo: true);
@@ -166,9 +162,10 @@ public sealed partial class MainPage : Page, IDisposable
 
     private void CatalogFilter_LosingFocus(UIElement sender, LosingFocusEventArgs args)
     {
+        DependencyObject? oldFocus = args.OldFocusedElement as DependencyObject;
         DependencyObject? newFocus = args.NewFocusedElement as DependencyObject;
-        bool skippedForward = ReferenceEquals(sender, SourceSelector) && IsWithin(newFocus, SearchBox);
-        bool skippedBackward = ReferenceEquals(sender, SearchBox) && IsWithin(newFocus, SourceSelector);
+        bool skippedForward = IsWithin(oldFocus, SourceSelector) && IsWithin(newFocus, SearchBox);
+        bool skippedBackward = IsWithin(oldFocus, SearchBox) && IsWithin(newFocus, SourceSelector);
         if ((skippedForward || skippedBackward) && !args.TrySetNewFocusedElement(CategorySelector))
         {
             args.Cancel = true;

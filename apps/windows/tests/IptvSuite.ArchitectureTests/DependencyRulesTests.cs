@@ -623,12 +623,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(page, "x:Name=\"CategorySelector\" Grid.Column=\"1\" TabIndex=\"1\"");
         StringAssert.Contains(page, "x:Name=\"SearchBox\" Grid.Column=\"2\" TabIndex=\"2\"");
         Assert.HasCount(3, Regex.Matches(page, "IsTabStop=\"True\""));
+        StringAssert.Contains(codeBehind, "InitializeComponent();\n        AddHandler(");
         StringAssert.Contains(codeBehind, "SourceSelector.AddHandler(");
-        StringAssert.Contains(codeBehind, "SearchBox.AddHandler(");
         StringAssert.Contains(codeBehind, "UIElement.LosingFocusEvent");
         StringAssert.Contains(codeBehind, "new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus)");
-        StringAssert.Contains(codeBehind, "ReferenceEquals(sender, SourceSelector) && IsWithin(newFocus, SearchBox)");
-        StringAssert.Contains(codeBehind, "ReferenceEquals(sender, SearchBox) && IsWithin(newFocus, SourceSelector)");
+        StringAssert.Contains(codeBehind, "args.OldFocusedElement as DependencyObject");
+        StringAssert.Contains(codeBehind, "IsWithin(oldFocus, SourceSelector) && IsWithin(newFocus, SearchBox)");
+        StringAssert.Contains(codeBehind, "IsWithin(oldFocus, SearchBox) && IsWithin(newFocus, SourceSelector)");
         StringAssert.Contains(codeBehind, "args.TrySetNewFocusedElement(CategorySelector)");
         StringAssert.Contains(codeBehind, "new KeyEventHandler(SourceSelector_KeyDown)");
         StringAssert.Contains(codeBehind, "new KeyEventHandler(CategorySelector_KeyDown)");
