@@ -335,7 +335,13 @@ namespace IptvSuite.PackageSmoke
                 worker = null;
                 if (failure != null)
                 {
-                    throw new InvalidOperationException("The DWM frame sampler failed.", failure);
+                    throw new InvalidOperationException(
+                        string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "The DWM frame sampler failed ({0}, HRESULT 0x{1:X8}).",
+                            failure.GetType().Name,
+                            unchecked((uint)failure.HResult)),
+                        failure);
                 }
                 if (Timestamps.Count < 31)
                 {
