@@ -9,9 +9,12 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Input;
 using Windows.ApplicationModel;
 using Windows.Foundation;
 using Windows.Storage.Streams;
+using Windows.System;
+using Windows.UI.Core;
 
 namespace IptvSuite.Windows;
 
@@ -37,6 +40,14 @@ public sealed partial class MainPage : Page, IDisposable
         SearchBox.AddHandler(
             UIElement.LosingFocusEvent,
             new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus),
+            handledEventsToo: true);
+        SourceSelector.AddHandler(
+            UIElement.KeyDownEvent,
+            new KeyEventHandler(SourceSelector_KeyDown),
+            handledEventsToo: true);
+        CategorySelector.AddHandler(
+            UIElement.KeyDownEvent,
+            new KeyEventHandler(CategorySelector_KeyDown),
             handledEventsToo: true);
         Unloaded += MainPage_Unloaded;
         string assemblyVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
@@ -162,6 +173,23 @@ public sealed partial class MainPage : Page, IDisposable
         {
             args.Cancel = true;
         }
+    }
+
+    private void SourceSelector_KeyDown(object sender, KeyRoutedEventArgs args) =>
+        MoveForwardOnTab(args, CategorySelector);
+
+    private void CategorySelector_KeyDown(object sender, KeyRoutedEventArgs args) =>
+        MoveForwardOnTab(args, SearchBox);
+
+    private static void MoveForwardOnTab(KeyRoutedEventArgs args, Control target)
+    {
+        if (args.Key != VirtualKey.Tab ||
+            InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down))
+        {
+            return;
+        }
+
+        args.Handled = target.Focus(FocusState.Keyboard);
     }
 
     private static bool IsWithin(DependencyObject? candidate, DependencyObject ancestor)
