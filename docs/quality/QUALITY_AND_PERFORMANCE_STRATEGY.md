@@ -398,7 +398,7 @@ Otomasyon şunların yerini tutmaz:
 - Tier B hangi kombinasyonların marketing support matrix'ine gireceği M10 + hukuk sonucudur.
 - Engineering minimum M1'de Windows 11 build 10.0.26100/x64 olarak pinlendi; product support minimumu, ARM64 ve reference hardware M15'te kapanacak.
 - Player A/V sync için sayısal ölçüm düzeneği M10'da seçilecek; yalnız “gözle iyi” kabul değildir.
-- Signed package smoke M9'da Windows UI Automation ile basic catalog name/role ve source→category→search Tab focus sırasını da fail-closed sınar. Bu dar smoke data-bearing browse davranışı, realized-container/frame bütçesi, Narrator exploratory acceptance veya genel accessibility conformance kanıtı değildir.
+- Signed package smoke M9'da Windows UI Automation ile basic catalog name/role, source→category→search Tab focus sırası, 50k status, ≤300 realized automation item ve input-call p95 kontrolünü fail-closed sınar. Ayrıca 240 PageUp/PageDown girdili kontrollü foreground scroll sırasında `DwmGetCompositionTimingInfo(NULL, ...)` ile sistem-compositor proxy frame p95/drop/max interval bütçelerini ölçer [S113]. Bu proxy app-specific ETW/UI-thread attribution, Narrator exploratory acceptance, genel accessibility conformance veya cihaz matrisi değildir; elevated packaged execution hosted kanıtı gelene kadar `UNVERIFIED`dır.
 
 ## Kaynaklar
 

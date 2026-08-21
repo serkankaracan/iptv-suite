@@ -130,6 +130,8 @@ namespace IptvSuite.PackageSmoke
     public static class KeyboardInspector
     {
         private const byte VirtualKeyTab = 0x09;
+        private const byte VirtualKeyPageUp = 0x21;
+        private const byte VirtualKeyPageDown = 0x22;
         private const uint KeyEventKeyUp = 0x0002;
 
         [DllImport("user32.dll")]
@@ -141,8 +143,219 @@ namespace IptvSuite.PackageSmoke
 
         public static void PressTab()
         {
-            keybd_event(VirtualKeyTab, 0, 0, UIntPtr.Zero);
-            keybd_event(VirtualKeyTab, 0, KeyEventKeyUp, UIntPtr.Zero);
+            Press(VirtualKeyTab);
+        }
+
+        public static void PressPageUp()
+        {
+            Press(VirtualKeyPageUp);
+        }
+
+        public static void PressPageDown()
+        {
+            Press(VirtualKeyPageDown);
+        }
+
+        private static void Press(byte virtualKey)
+        {
+            keybd_event(virtualKey, 0, 0, UIntPtr.Zero);
+            keybd_event(virtualKey, 0, KeyEventKeyUp, UIntPtr.Zero);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct UnsignedRatio
+    {
+        internal uint Numerator;
+        internal uint Denominator;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct DwmTimingInfo
+    {
+        internal uint Size;
+        internal UnsignedRatio RateRefresh;
+        internal ulong QpcRefreshPeriod;
+        internal UnsignedRatio RateCompose;
+        internal ulong QpcVBlank;
+        internal ulong Refresh;
+        internal uint DxRefresh;
+        internal ulong QpcCompose;
+        internal ulong Frame;
+        internal uint DxPresent;
+        internal ulong RefreshFrame;
+        internal ulong FrameSubmitted;
+        internal uint DxPresentSubmitted;
+        internal ulong FrameConfirmed;
+        internal uint DxPresentConfirmed;
+        internal ulong RefreshConfirmed;
+        internal uint DxRefreshConfirmed;
+        internal ulong FramesLate;
+        internal uint FramesOutstanding;
+        internal ulong FrameDisplayed;
+        internal ulong QpcFrameDisplayed;
+        internal ulong RefreshFrameDisplayed;
+        internal ulong FrameComplete;
+        internal ulong QpcFrameComplete;
+        internal ulong FramePending;
+        internal ulong QpcFramePending;
+        internal ulong FramesDisplayed;
+        internal ulong FramesComplete;
+        internal ulong FramesPending;
+        internal ulong FramesAvailable;
+        internal ulong FramesDropped;
+        internal ulong FramesMissed;
+        internal ulong RefreshNextDisplayed;
+        internal ulong RefreshNextPresented;
+        internal ulong RefreshesDisplayed;
+        internal ulong RefreshesPresented;
+        internal ulong RefreshStarted;
+        internal ulong PixelsReceived;
+        internal ulong PixelsDrawn;
+        internal ulong BuffersEmpty;
+    }
+
+    public sealed class DwmFrameSampleResult
+    {
+        public double P95Milliseconds { get; internal set; }
+        public double MaximumMilliseconds { get; internal set; }
+        public double DroppedPercent { get; internal set; }
+        public int IntervalCount { get; internal set; }
+    }
+
+    public static class DwmFrameSampler
+    {
+        private static readonly object Sync = new object();
+        private static System.Threading.Thread worker;
+        private static bool running;
+        private static Exception failure;
+        private static readonly System.Collections.Generic.List<ulong> Timestamps =
+            new System.Collections.Generic.List<ulong>();
+        private static ulong displayed;
+        private static ulong dropped;
+
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int DwmGetCompositionTimingInfo(
+            IntPtr windowHandle,
+            ref DwmTimingInfo timingInfo);
+
+        public static void Start()
+        {
+            lock (Sync)
+            {
+                if (running || worker != null)
+                {
+                    throw new InvalidOperationException("The DWM frame sampler is already active.");
+                }
+                Timestamps.Clear();
+                displayed = 0;
+                dropped = 0;
+                failure = null;
+                running = true;
+                worker = new System.Threading.Thread(SampleLoop);
+                worker.IsBackground = true;
+                worker.Name = "IptvSuite M9 DWM sampler";
+                worker.Start();
+            }
+        }
+
+        public static DwmFrameSampleResult Stop()
+        {
+            System.Threading.Thread thread;
+            lock (Sync)
+            {
+                if (worker == null)
+                {
+                    throw new InvalidOperationException("The DWM frame sampler is not active.");
+                }
+                running = false;
+                thread = worker;
+            }
+            if (!thread.Join(5000))
+            {
+                throw new TimeoutException("The DWM frame sampler did not stop.");
+            }
+            lock (Sync)
+            {
+                worker = null;
+                if (failure != null)
+                {
+                    throw new InvalidOperationException("The DWM frame sampler failed.", failure);
+                }
+                if (Timestamps.Count < 31)
+                {
+                    throw new InvalidOperationException("The DWM frame sample is too small.");
+                }
+                var intervals = new System.Collections.Generic.List<double>(Timestamps.Count - 1);
+                for (int index = 1; index < Timestamps.Count; index++)
+                {
+                    if (Timestamps[index] > Timestamps[index - 1])
+                    {
+                        intervals.Add(
+                            (Timestamps[index] - Timestamps[index - 1]) * 1000.0 /
+                            System.Diagnostics.Stopwatch.Frequency);
+                    }
+                }
+                if (intervals.Count < 30)
+                {
+                    throw new InvalidOperationException("The DWM frame interval sample is too small.");
+                }
+                intervals.Sort();
+                int percentileIndex = Math.Max(0, (int)Math.Ceiling(intervals.Count * 0.95) - 1);
+                ulong denominator = displayed + dropped;
+                if (denominator == 0)
+                {
+                    throw new InvalidOperationException("The DWM frame counters are unavailable.");
+                }
+                return new DwmFrameSampleResult
+                {
+                    P95Milliseconds = intervals[percentileIndex],
+                    MaximumMilliseconds = intervals[intervals.Count - 1],
+                    DroppedPercent = dropped * 100.0 / denominator,
+                    IntervalCount = intervals.Count,
+                };
+            }
+        }
+
+        private static void SampleLoop()
+        {
+            try
+            {
+                ulong previous = 0;
+                while (true)
+                {
+                    lock (Sync)
+                    {
+                        if (!running) return;
+                    }
+                    DwmTimingInfo timing = new DwmTimingInfo();
+                    timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo));
+                    int result = DwmGetCompositionTimingInfo(IntPtr.Zero, ref timing);
+                    if (result < 0)
+                    {
+                        throw new COMException("DWM composition timing is unavailable.", result);
+                    }
+                    if (timing.QpcFrameDisplayed != 0 && timing.QpcFrameDisplayed != previous)
+                    {
+                        lock (Sync)
+                        {
+                            Timestamps.Add(timing.QpcFrameDisplayed);
+                            displayed += timing.FramesDisplayed;
+                            dropped += timing.FramesDropped;
+                        }
+                        previous = timing.QpcFrameDisplayed;
+                    }
+                    System.Threading.Thread.Sleep(1);
+                }
+            }
+            catch (Exception exception)
+            {
+                lock (Sync)
+                {
+                    failure = exception;
+                    running = false;
+                }
+            }
         }
     }
 }
@@ -180,6 +393,10 @@ $catalog50kSeedVerified = $false
 $catalogRealizedContainerBoundVerified = $false
 $catalogRealizedContainerCount = 0
 $catalogInputResponseP95Milliseconds = 0.0
+$catalogFrameP95Milliseconds = 0.0
+$catalogFrameMaximumMilliseconds = 0.0
+$catalogDroppedFramePercent = 0.0
+$catalogFrameIntervalCount = 0
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
     AppxBundle                    = "Never"
@@ -1087,6 +1304,43 @@ try {
     Assert-FocusedAutomationElement "CatalogSearchBox"
     $catalogKeyboardFocusOrderVerified = $true
 
+    $catalogRestoredDeadline = (Get-Date).AddSeconds(10)
+    while ($statusElement.Current.Name -ne $expectedCatalogStatus -and
+        (Get-Date) -lt $catalogRestoredDeadline) {
+        Start-Sleep -Milliseconds 100
+    }
+    if ($statusElement.Current.Name -ne $expectedCatalogStatus) {
+        throw "The packaged catalog did not settle after the input-response probe."
+    }
+    $channelListElement.SetFocus()
+    Start-Sleep -Milliseconds 150
+    Assert-FocusedAutomationElement "CatalogChannelList"
+    [IptvSuite.PackageSmoke.DwmFrameSampler]::Start()
+    $frameResult = $null
+    try {
+        for ($frameInput = 0; $frameInput -lt 240; $frameInput++) {
+            if (($frameInput % 2) -eq 0) {
+                [IptvSuite.PackageSmoke.KeyboardInspector]::PressPageDown()
+            }
+            else {
+                [IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()
+            }
+            Start-Sleep -Milliseconds 16
+        }
+    }
+    finally {
+        $frameResult = [IptvSuite.PackageSmoke.DwmFrameSampler]::Stop()
+    }
+    $catalogFrameP95Milliseconds = $frameResult.P95Milliseconds
+    $catalogFrameMaximumMilliseconds = $frameResult.MaximumMilliseconds
+    $catalogDroppedFramePercent = $frameResult.DroppedPercent
+    $catalogFrameIntervalCount = $frameResult.IntervalCount
+    if ($catalogFrameP95Milliseconds -gt 33.3 -or
+        $catalogDroppedFramePercent -ge 1.0 -or
+        $catalogFrameMaximumMilliseconds -gt 200.0) {
+        throw "The packaged catalog DWM frame budget failed."
+    }
+
     Start-Sleep -Seconds 2
     $launchedProcess.Refresh()
     if ($launchedProcess.HasExited) {
@@ -1172,6 +1426,10 @@ try {
         CatalogRealizedContainerBoundVerified = $catalogRealizedContainerBoundVerified
         CatalogRealizedContainerCount = $catalogRealizedContainerCount
         CatalogInputResponseP95Milliseconds = [Math]::Round($catalogInputResponseP95Milliseconds, 3)
+        CatalogDwmFrameP95Milliseconds = [Math]::Round($catalogFrameP95Milliseconds, 3)
+        CatalogDwmFrameMaximumMilliseconds = [Math]::Round($catalogFrameMaximumMilliseconds, 3)
+        CatalogDwmDroppedFramePercent = [Math]::Round($catalogDroppedFramePercent, 3)
+        CatalogDwmFrameIntervalCount = $catalogFrameIntervalCount
         NormalClose       = $true
         PackageRemoved    = $true
     }

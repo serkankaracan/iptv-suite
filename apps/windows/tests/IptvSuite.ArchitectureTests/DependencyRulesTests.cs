@@ -627,6 +627,18 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000");
         StringAssert.Contains(packageSmoke, "$catalogRealizedContainerCount -gt 300");
         StringAssert.Contains(packageSmoke, "$catalogInputResponseP95Milliseconds -gt 100.0");
+        StringAssert.Contains(packageSmoke, "DwmGetCompositionTimingInfo(IntPtr.Zero, ref timing)");
+        StringAssert.Contains(packageSmoke, "timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo))");
+        StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");
+        StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageDown()");
+        StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()");
+        StringAssert.Contains(packageSmoke, "$catalogFrameP95Milliseconds -gt 33.3");
+        StringAssert.Contains(packageSmoke, "$catalogDroppedFramePercent -ge 1.0");
+        StringAssert.Contains(packageSmoke, "$catalogFrameMaximumMilliseconds -gt 200.0");
+        StringAssert.Contains(packageSmoke, "CatalogDwmFrameP95Milliseconds =");
+        StringAssert.Contains(packageSmoke, "CatalogDwmFrameMaximumMilliseconds =");
+        StringAssert.Contains(packageSmoke, "CatalogDwmDroppedFramePercent =");
+        StringAssert.Contains(packageSmoke, "CatalogDwmFrameIntervalCount =");
         StringAssert.Contains(packageSmoke, "Catalog50kSeedVerified = $catalog50kSeedVerified");
         StringAssert.Contains(packageSmoke, "CatalogRealizedContainerBoundVerified = $catalogRealizedContainerBoundVerified");
         Assert.IsFalse(
