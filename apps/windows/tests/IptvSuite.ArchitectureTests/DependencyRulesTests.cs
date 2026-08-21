@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -2083,6 +2084,21 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(app, "AppInstance.GetCurrent().GetActivatedEventArgs()");
         StringAssert.Contains(app, "ApplicationData.Current.LocalCacheFolder.Path");
         StringAssert.Contains(app, "M10NativePlayback");
+        StringAssert.Contains(window, "Guid RunId,");
+        StringAssert.Contains(window, "Guid.TryParseExact(runIdText, \"N\", out Guid runId)");
+        StringAssert.Contains(window, "runId.ToString(\"N\") != runIdText");
+        StringAssert.Contains(app, "new NativePlaybackProbeEnvelope(");
+        StringAssert.Contains(app, "request.RunId.ToString(\"N\")");
+        StringAssert.Contains(app, "$\"result-{request.RunId:N}.json\"");
+        StringAssert.Contains(app, "$\"result-{request.RunId:N}.pending\"");
+        StringAssert.Contains(app, "FileMode.CreateNew");
+        StringAssert.Contains(app, "stream.Flush(flushToDisk: true)");
+        StringAssert.Contains(app, "File.Move(pendingEvidencePath, evidencePath, overwrite: false)");
+        StringAssert.Contains(app, "Package.Current.Dependencies");
+        StringAssert.Contains(app, "package.Id.Name == \"Microsoft.WindowsAppRuntime.2\"");
+        StringAssert.Contains(app, "dependency.Id.Architecture.ToString() != \"X64\"");
+        StringAssert.Contains(app, "dependency.Id.PublisherId != \"8wekyb3d8bbwe\"");
+        StringAssert.Contains(app, "!dependency.IsFramework");
         StringAssert.Contains(window, "fixture.Scheme != Uri.UriSchemeHttps");
         StringAssert.Contains(window, "!fixture.IsLoopback");
         StringAssert.Contains(window, "!string.IsNullOrEmpty(fixture.UserInfo)");
@@ -2131,7 +2147,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "growthBytes <= 100L * 1024 * 1024 && growthPercent <= 10d && !monotonic");
         StringAssert.Contains(window, "right.PrivateBytes > left.PrivateBytes");
         StringAssert.Contains(window, "sender.Position >= TimeSpan.FromMilliseconds(500)");
-        StringAssert.Contains(window, "JsonStringEnumConverter");
+        StringAssert.Contains(app, "JsonStringEnumConverter");
         Assert.IsFalse(
             window.Contains("fixture.ToString()", StringComparison.Ordinal) ||
             window.Contains("AbsoluteUri", StringComparison.Ordinal) ||
@@ -2173,9 +2189,12 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "int requestOrdinal = Interlocked.Increment(ref requestCount)");
         StringAssert.Contains(controller, "requestOrdinal > injectedRequestOrdinal");
         StringAssert.Contains(controller, "Interlocked.CompareExchange(ref pendingRecovery, 0, 1) == 1");
-        StringAssert.Contains(controller, "LastRecoveryRequestOrdinal -le $tlsServer.LastInjectedRequestOrdinal");
-        StringAssert.Contains(controller, "NetworkInterruptionCount = $tlsServer.InjectedFailureCount");
-        StringAssert.Contains(controller, "NetworkRecoveryCount = $tlsServer.RecoveryCount");
+        StringAssert.Contains(controller, "$tlsServer.Dispose()");
+        StringAssert.Contains(controller, "$tlsRequestCount = $tlsServer.RequestCount");
+        StringAssert.Contains(controller, "$tlsServer = $null");
+        StringAssert.Contains(controller, "$tlsLastRecoveryRequestOrdinal -le $tlsLastInjectedRequestOrdinal");
+        StringAssert.Contains(controller, "NetworkInterruptionCount = $tlsInjectedFailureCount");
+        StringAssert.Contains(controller, "NetworkRecoveryCount = $tlsRecoveryCount");
         StringAssert.Contains(controller, "$expectedDetachedSourceCount = $SwitchCount + [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "[int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount");
         StringAssert.Contains(controller, "DetachedSourceCount = [int]$probe.DetachedSourceCount");
@@ -2183,7 +2202,162 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "SourceDetachMaximumMilliseconds -gt 5000");
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
-        StringAssert.Contains(controller, "SchemaVersion = 7");
+        StringAssert.Contains(controller, "SchemaVersion = 8");
+        StringAssert.Contains(controller, "foreach ($staleEvidence in @($evidencePath, $failureEvidencePath))");
+        StringAssert.Contains(controller, "if (@(Get-RepositoryStatus).Count -ne 0)");
+        StringAssert.Contains(controller, "$repositoryHead = Get-RepositoryHead");
+        StringAssert.Contains(controller, "$controllerScriptSha256 = Get-RegularFileSha256 -Path $PSCommandPath");
+        StringAssert.Contains(controller, "Assert-FixtureCorpus");
+        StringAssert.Contains(controller, "$fixtureManifestSha256 = Get-RegularFileSha256 -Path $fixtureManifestPath");
+        StringAssert.Contains(controller, "ProbeEnvelopeSchemaVersion = $probeEnvelopeSchemaVersion");
+        StringAssert.Contains(controller, "ProbeRunIdBound = $probeRunIdBound");
+        StringAssert.Contains(controller, "Get-PackageEntrySha256");
+        StringAssert.Contains(controller, "-EntryName \"IptvSuite.NativePlaybackCompatibilitySpike.dll\"");
+        StringAssert.Contains(controller, "The native playback probe exited before the required normal close.");
+        StringAssert.Contains(controller, "Close-TrackedProcessNormally -Process $launchedProcess");
+        StringAssert.Contains(controller, "$script:forcedProcessTerminationUsed = $true");
+        StringAssert.Contains(controller, "Get-AppxPackage -Name $script:expectedName -ErrorAction Stop");
+        StringAssert.Contains(controller, "$dependencySignature.Status.ToString() -ne \"Valid\"");
+        StringAssert.Contains(controller, "Task.WaitAll(handlers, TimeSpan.FromSeconds(5))");
+        StringAssert.Contains(controller, "RemoveExactEmptyDirectory(");
+        StringAssert.Contains(controller, "Restore-RuntimeDependencyPackageGraph");
+        StringAssert.Contains(controller, "Invoke-CleanupStep -Code \"RuntimeDependencyCleanupFailed\"");
+        StringAssert.Contains(controller, "PackageAppDataEmptyRootCleanupUsed = $false");
+        StringAssert.Contains(controller, "RuntimePackageGraphRestored = $false");
+        StringAssert.Contains(controller, "Remove-ExactCertificate");
+        StringAssert.Contains(controller, "Remove-ExactOwnedTree -Path $script:packageOutput -ExpectedParent $script:packagesRoot");
+        StringAssert.Contains(controller, "[System.IO.FileMode]::CreateNew");
+        StringAssert.Contains(controller, "$stream.Flush($true)");
+        StringAssert.Contains(controller, "[System.IO.File]::Move($temporaryPath, $DestinationPath)");
+        StringAssert.Contains(controller, "Write-JsonAtomically -Value $successCandidate -DestinationPath $evidencePath");
+        StringAssert.Contains(controller, "@(Get-RepositoryStatus).Count -ne 0 -or (Get-RepositoryHead) -ne $repositoryHead");
+        Assert.IsFalse(
+            controller.Contains(
+                "Remove-ExactOwnedTree -Path $script:packageAppDataPath",
+                StringComparison.Ordinal) ||
+            controller.Contains("Move-Item -LiteralPath $temporaryPath", StringComparison.Ordinal),
+            "Package app-data cleanup must not recurse and evidence publication must not overwrite.");
+
+        int successCandidateIndex = controller.IndexOf("$successCandidate = [ordered]@{", StringComparison.Ordinal);
+        int cleanupIndex = controller.LastIndexOf("\nfinally {", StringComparison.Ordinal);
+        int forcedTerminationIndex = controller.IndexOf("$script:launchedProcess.Kill()", StringComparison.Ordinal);
+        int successPublicationIndex = controller.IndexOf(
+            "Write-JsonAtomically -Value $successCandidate -DestinationPath $evidencePath",
+            StringComparison.Ordinal);
+        Assert.IsTrue(successCandidateIndex >= 0 && cleanupIndex > successCandidateIndex);
+        Assert.IsTrue(forcedTerminationIndex > cleanupIndex && successPublicationIndex > forcedTerminationIndex);
+
+        int successCandidateEnd = controller.IndexOf("\n    }\n}", successCandidateIndex, StringComparison.Ordinal);
+        Assert.IsTrue(successCandidateEnd > successCandidateIndex);
+        string successEvidence = controller[successCandidateIndex..successCandidateEnd];
+        string[] expectedEvidenceKeys =
+        [
+            "SchemaVersion",
+            "Stage",
+            "Result",
+            "RunId",
+            "CompletedAtUtc",
+            "Configuration",
+            "Platform",
+            "DotNetSdk",
+            "CleanHeadBound",
+            "CommitSha",
+            "ControllerScriptSha256",
+            "HarnessAssemblySha256",
+            "FixtureManifestSha256",
+            "FixtureCorpusVerified",
+            "ProbeEnvelopeSchemaVersion",
+            "ProbeRunIdBound",
+            "SwitchCount",
+            "StartupP95Milliseconds",
+            "StartupMaximumMilliseconds",
+            "HlsStartupP95Milliseconds",
+            "DirectStartupP95Milliseconds",
+            "SoakMinutes",
+            "ResourceSampleCount",
+            "WarmupPrivateBytes",
+            "MemoryNetGrowthBytes",
+            "MemoryNetGrowthPercent",
+            "MemoryMonotonicIncrease",
+            "WarmupHandleCount",
+            "HandleNetGrowth",
+            "SurfaceTransitionCount",
+            "DetachedSourceCount",
+            "PlaybackRetryCount",
+            "SourceDetachP95Milliseconds",
+            "SourceDetachMaximumMilliseconds",
+            "NetworkInterruptionCount",
+            "NetworkRecoveryCount",
+            "LastInjectedRequestOrdinal",
+            "LastRecoveryRequestOrdinal",
+            "InitialPrivateBytes",
+            "FinalPrivateBytes",
+            "InitialHandleCount",
+            "FinalHandleCount",
+            "LoopbackRequestCount",
+            "H264DecoderRegistered",
+            "AacDecoderRegistered",
+            "Transport",
+            "Fixtures",
+            "PackageSha256",
+            "PackageSignatureStatus",
+            "RuntimeDependencyPackageSha256",
+            "RuntimeDependencyPackageSignatureStatus",
+            "ResolvedWindowsAppRuntimeName",
+            "ResolvedWindowsAppRuntimeVersion",
+            "ResolvedWindowsAppRuntimeArchitecture",
+            "ResolvedWindowsAppRuntimePublisherId",
+            "ResolvedWindowsAppRuntimeIsFramework",
+            "NormalCloseVerified",
+            "ForcedProcessTerminationUsed",
+            "ProcessCleanupPassed",
+            "TlsServerDisposed",
+            "PackageRemoved",
+            "PackageAppDataRemoved",
+            "PackageAppDataEmptyRootCleanupUsed",
+            "RuntimePackageGraphRestored",
+            "EphemeralCertificatesRemoved",
+            "ExportedCertificateFilesRemoved",
+            "PackageOutputRemoved",
+            "EnvironmentRestored",
+            "RepositoryCleanAfterRun",
+        ];
+        string[] actualEvidenceKeys = Regex.Matches(
+                successEvidence,
+                @"(?m)^\s{8}([A-Za-z][A-Za-z0-9]*)\s*=")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            expectedEvidenceKeys,
+            actualEvidenceKeys,
+            "Native playback success evidence must remain an exact allowlist.");
+
+        foreach (string sensitiveToken in new[]
+                 {
+                     "$authority",
+                     "$aumid",
+                     "$installedPackage",
+                     "$packageAppDataPath",
+                     "$signingCertificate",
+                     "$tlsCertificate",
+                     "$packageEvidencePath",
+                 })
+        {
+            Assert.IsFalse(
+                successEvidence.Contains(sensitiveToken, StringComparison.Ordinal),
+                $"Native playback success evidence must not contain sensitive token {sensitiveToken}.");
+        }
+
+        int failureEvidenceIndex = controller.IndexOf("$failureEvidence = [ordered]@{", StringComparison.Ordinal);
+        int failureEvidenceEnd = controller.IndexOf("\n    }", failureEvidenceIndex, StringComparison.Ordinal);
+        Assert.IsTrue(failureEvidenceIndex >= 0 && failureEvidenceEnd > failureEvidenceIndex);
+        string[] failureEvidenceKeys = Regex.Matches(
+                controller[failureEvidenceIndex..failureEvidenceEnd],
+                @"(?m)^\s{8}([A-Za-z][A-Za-z0-9]*)\s*=")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        string[] expectedFailureEvidenceKeys = ["Stage", "Code"];
+        CollectionAssert.AreEqual(expectedFailureEvidenceKeys, failureEvidenceKeys);
         string readme = File.ReadAllText(Path.Combine(RepositoryRoot, "apps", "windows", "README.md"));
         StringAssert.Contains(
             readme,
@@ -2191,11 +2365,57 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "Assert-PackagePayload");
         StringAssert.Contains(controller, "Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop");
         StringAssert.Contains(controller, "Remove-ExactPackage");
-        StringAssert.Contains(controller, "Cert:\\LocalMachine\\Root\\$($tlsCertificate.Thumbprint)");
+        StringAssert.Contains(controller, "Cert:\\LocalMachine\\Root\\$($script:tlsCertificate.Thumbprint)");
         Assert.IsFalse(
             controller.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase) ||
             controller.Contains("http://localhost", StringComparison.OrdinalIgnoreCase),
             "The native playback smoke must fail closed and keep TLS on loopback.");
+
+        string contractProbe = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ArchitectureTests",
+            "Test-NativePlaybackEvidenceContract.ps1");
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(File.Exists(windowsPowerShell), "Windows PowerShell 5.1 is required for the controller contract.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(contractProbe);
+        startInfo.ArgumentList.Add("-ControllerPath");
+        startInfo.ArgumentList.Add(Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsNativePlaybackSmoke.ps1"));
+
+        using Process contractProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The PowerShell 5.1 contract probe could not start.");
+        bool contractCompleted = contractProcess.WaitForExit(10_000);
+        if (!contractCompleted)
+        {
+            contractProcess.Kill(entireProcessTree: true);
+            contractProcess.WaitForExit();
+        }
+
+        string contractOutput = contractProcess.StandardOutput.ReadToEnd();
+        string contractError = contractProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            contractCompleted && contractProcess.ExitCode == 0,
+            $"Native playback evidence AST contract failed.{Environment.NewLine}{contractOutput}{contractError}");
     }
 
     [TestMethod]
@@ -2648,12 +2868,20 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(workflow, ".artifacts/package-lifecycle/last-success.json");
         StringAssert.Contains(
             workflow,
-            "shell: powershell\n        run: .\\eng\\Invoke-WindowsNativePlaybackSmoke.ps1 -Configuration Release");
+            "shell: powershell\n        run: >-\n          .\\eng\\Invoke-WindowsNativePlaybackSmoke.ps1\n          -Configuration Release");
         StringAssert.Contains(
             workflow,
             "  native-playback:\n    name: Native Tier A packaged playback smoke\n    needs: quality\n");
         StringAssert.Contains(workflow, "name: windows-native-playback-evidence");
         StringAssert.Contains(workflow, ".artifacts/native-playback-smoke/last-success.json");
+        StringAssert.Contains(workflow, "timeout-minutes: 30");
+        StringAssert.Contains(workflow, "-SwitchCount 100");
+        StringAssert.Contains(workflow, "-SoakMinutes 0");
+        StringAssert.Contains(workflow, "-NetworkInterruptionCount 1");
+        StringAssert.Contains(workflow, "validate-native-playback-evidence `");
+        StringAssert.Contains(workflow, ".\\eng\\Invoke-WindowsNativePlaybackSmoke.ps1 `");
+        StringAssert.Contains(workflow, "$env:GITHUB_SHA.ToLowerInvariant() `");
+        StringAssert.Contains(workflow, "The native playback evidence contract validation failed.");
         StringAssert.Contains(
             workflow,
             "scan-artifacts .\\.artifacts\\package-lifecycle M4 PACKAGE_LIFECYCLE_EVIDENCE");

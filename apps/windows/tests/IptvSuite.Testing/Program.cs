@@ -32,8 +32,28 @@ internal static class TestTool
                 return findings.Count == 0 ? 0 : 2;
             }
 
+            if (arguments is
+                [
+                    "validate-native-playback-evidence",
+                    string evidencePath,
+                    string controllerPath,
+                    string expectedCommitSha,
+                    string expectedSdk,
+                ])
+            {
+                NativePlaybackEvidenceValidator.Validate(
+                    evidencePath,
+                    controllerPath,
+                    expectedCommitSha,
+                    expectedSdk);
+                Console.WriteLine("Native playback evidence validated.");
+                return 0;
+            }
+
             Console.Error.WriteLine(
-                "Usage: generate-fixtures <specification> <output-directory> | scan-artifacts <root> <run-scope> <case-id>");
+                "Usage: generate-fixtures <specification> <output-directory> | " +
+                "scan-artifacts <root> <run-scope> <case-id> | " +
+                "validate-native-playback-evidence <evidence> <controller> <commit> <sdk>");
             return 64;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)

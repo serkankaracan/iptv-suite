@@ -19,17 +19,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-if ($SoakMinutes -gt 0 -and $SwitchCount -ne 100) {
-    throw "A native playback soak requires exactly 100 alternating switches."
-}
-if ($NetworkInterruptionCount -gt 0 -and $SwitchCount -ne 100) {
-    throw "A native playback network interruption probe requires exactly 100 alternating switches."
-}
-Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
 
 $activationInterop = @'
 using System;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace IptvSuite.NativePlaybackSmoke
 {
@@ -51,6 +46,28 @@ namespace IptvSuite.NativePlaybackSmoke
 
     public static class PackagedApplicationActivator
     {
+        [StructLayout(LayoutKind.Explicit, Size = 8)]
+        private struct PackageVersionNative
+        {
+            [FieldOffset(0)] internal ulong Value;
+            [FieldOffset(0)] internal ushort Revision;
+            [FieldOffset(2)] internal ushort Build;
+            [FieldOffset(4)] internal ushort Minor;
+            [FieldOffset(6)] internal ushort Major;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PackageIdNative
+        {
+            internal uint Reserved;
+            internal uint ProcessorArchitecture;
+            internal PackageVersionNative Version;
+            [MarshalAs(UnmanagedType.LPWStr)] internal string Name;
+            [MarshalAs(UnmanagedType.LPWStr)] internal string Publisher;
+            [MarshalAs(UnmanagedType.LPWStr)] internal string ResourceId;
+            [MarshalAs(UnmanagedType.LPWStr)] internal string PublisherId;
+        }
+
         public static int Activate(string appUserModelId, string arguments)
         {
             Guid classId = new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C");
@@ -73,6 +90,49 @@ namespace IptvSuite.NativePlaybackSmoke
             }
         }
 
+        public static string GetPackageFamilyName(
+            string name,
+            string publisher,
+            ushort major,
+            ushort minor,
+            ushort build,
+            ushort revision)
+        {
+            var id = new PackageIdNative
+            {
+                Reserved = 0,
+                ProcessorArchitecture = 9,
+                Version = new PackageVersionNative
+                {
+                    Major = major,
+                    Minor = minor,
+                    Build = build,
+                    Revision = revision
+                },
+                Name = name,
+                Publisher = publisher,
+                ResourceId = null,
+                PublisherId = null
+            };
+            uint length = 0;
+            int result = PackageFamilyNameFromId(ref id, ref length, null);
+            if (result != 122 || length < 18 || length > 65)
+                throw new Win32Exception(result, "Package family name sizing failed.");
+            var value = new StringBuilder(checked((int)length));
+            result = PackageFamilyNameFromId(ref id, ref length, value);
+            if (result != 0 || value.Length + 1 != length)
+                throw new Win32Exception(result, "Package family name calculation failed.");
+            return value.ToString();
+        }
+
+        public static bool RemoveExactEmptyDirectory(string path)
+        {
+            if (RemoveDirectory2(path, 1)) return true;
+            int error = Marshal.GetLastWin32Error();
+            if (error == 2 || error == 3) return false;
+            throw new Win32Exception(error, "Exact empty package-data directory removal failed.");
+        }
+
         [DllImport("ole32.dll", ExactSpelling = true, PreserveSig = true)]
         private static extern int CoCreateInstance(
             [In] ref Guid classId,
@@ -80,12 +140,28 @@ namespace IptvSuite.NativePlaybackSmoke
             uint classContext,
             [In] ref Guid interfaceId,
             [MarshalAs(UnmanagedType.Interface)] out object value);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern int PackageFamilyNameFromId(
+            ref PackageIdNative packageId,
+            ref uint packageFamilyNameLength,
+            [Out] StringBuilder packageFamilyName);
+
+        [DllImport(
+            "kernel32.dll",
+            EntryPoint = "RemoveDirectory2W",
+            CharSet = CharSet.Unicode,
+            ExactSpelling = true,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool RemoveDirectory2(string path, uint flags);
     }
 }
 '@
 
 $tlsServerSource = @'
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -106,7 +182,11 @@ namespace IptvSuite.NativePlaybackSmoke
         private readonly X509Certificate2 certificate;
         private readonly TcpListener listener;
         private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
+        private readonly ConcurrentDictionary<int, TcpClient> activeClients = new ConcurrentDictionary<int, TcpClient>();
+        private readonly ConcurrentDictionary<int, Task> activeHandlers = new ConcurrentDictionary<int, Task>();
         private readonly Task acceptLoop;
+        private int nextHandlerId;
+        private int disposed;
         private int requestCount;
         private int failureCount;
         private int completedResponseCount;
@@ -165,11 +245,52 @@ namespace IptvSuite.NativePlaybackSmoke
                 try
                 {
                     TcpClient client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
-                    Task ignored = Task.Run(() => HandleAsync(client));
+                    int handlerId = Interlocked.Increment(ref nextHandlerId);
+                    if (!activeClients.TryAdd(handlerId, client))
+                    {
+                        client.Dispose();
+                        throw new InvalidOperationException("A loopback handler identity collided.");
+                    }
+                    Task handler = Task.Run(() => HandleTrackedAsync(handlerId, client));
+                    if (!activeHandlers.TryAdd(handlerId, handler))
+                    {
+                        TcpClient trackedClient;
+                        activeClients.TryRemove(handlerId, out trackedClient);
+                        client.Dispose();
+                        throw new InvalidOperationException("A loopback handler task could not be tracked.");
+                    }
+                    Task continuation = handler.ContinueWith(
+                        completed =>
+                        {
+                            Task ignored;
+                            activeHandlers.TryRemove(handlerId, out ignored);
+                            if (completed.IsFaulted) Interlocked.Increment(ref failureCount);
+                        },
+                        CancellationToken.None,
+                        TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                    GC.KeepAlive(continuation);
                 }
                 catch (ObjectDisposedException) { if (cancellation.IsCancellationRequested) return; throw; }
                 catch (SocketException) { if (cancellation.IsCancellationRequested) return; throw; }
-                catch { Interlocked.Increment(ref failureCount); }
+                catch
+                {
+                    if (cancellation.IsCancellationRequested) return;
+                    Interlocked.Increment(ref failureCount);
+                }
+            }
+        }
+
+        private async Task HandleTrackedAsync(int handlerId, TcpClient client)
+        {
+            try
+            {
+                await HandleAsync(client).ConfigureAwait(false);
+            }
+            finally
+            {
+                TcpClient trackedClient;
+                if (activeClients.TryRemove(handlerId, out trackedClient)) trackedClient.Dispose();
             }
         }
 
@@ -180,7 +301,11 @@ namespace IptvSuite.NativePlaybackSmoke
             {
                 try
                 {
-                    ssl.AuthenticateAsServer(certificate, false, SslProtocols.Tls12, false);
+                    await ssl.AuthenticateAsServerAsync(
+                        certificate,
+                        false,
+                        SslProtocols.Tls12,
+                        false).ConfigureAwait(false);
                     byte[] headerBuffer = new byte[16384];
                     int length = 0;
                     while (length < headerBuffer.Length)
@@ -293,9 +418,22 @@ namespace IptvSuite.NativePlaybackSmoke
                         Interlocked.Increment(ref recoveryCount);
                     }
                 }
-                catch (IOException) { Interlocked.Increment(ref ioAbortCount); }
-                catch (AuthenticationException) { Interlocked.Increment(ref failureCount); }
-                catch { Interlocked.Increment(ref failureCount); }
+                catch (IOException)
+                {
+                    if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref ioAbortCount);
+                }
+                catch (AuthenticationException)
+                {
+                    if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref failureCount);
+                }
+                catch (ObjectDisposedException)
+                {
+                    if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref failureCount);
+                }
+                catch
+                {
+                    if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref failureCount);
+                }
             }
         }
 
@@ -328,41 +466,145 @@ namespace IptvSuite.NativePlaybackSmoke
 
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref disposed, 1) != 0) return;
             cancellation.Cancel();
             listener.Stop();
-            try { acceptLoop.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { }
-            cancellation.Dispose();
+            Exception shutdownFailure = null;
+            try
+            {
+                if (!acceptLoop.Wait(TimeSpan.FromSeconds(5)))
+                    shutdownFailure = new InvalidOperationException("The loopback accept task did not stop.");
+            }
+            catch (AggregateException exception)
+            {
+                shutdownFailure = exception.Flatten();
+            }
+
+            try
+            {
+                foreach (TcpClient client in activeClients.Values) client.Dispose();
+                Task[] handlers = new List<Task>(activeHandlers.Values).ToArray();
+                if (handlers.Length > 0 && !Task.WaitAll(handlers, TimeSpan.FromSeconds(5)))
+                    shutdownFailure = shutdownFailure ??
+                        new InvalidOperationException("The loopback handler tasks did not drain.");
+
+                foreach (KeyValuePair<int, Task> pair in activeHandlers)
+                {
+                    if (!pair.Value.IsCompleted) continue;
+                    Task ignored;
+                    activeHandlers.TryRemove(pair.Key, out ignored);
+                }
+
+                if (!activeClients.IsEmpty || !activeHandlers.IsEmpty)
+                    shutdownFailure = shutdownFailure ??
+                        new InvalidOperationException("The loopback handler registry did not drain.");
+            }
+            catch (AggregateException exception)
+            {
+                shutdownFailure = shutdownFailure ?? exception.Flatten();
+            }
+            finally
+            {
+                cancellation.Dispose();
+            }
+
+            if (shutdownFailure != null) throw shutdownFailure;
         }
     }
 }
 '@
 
-Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
-Add-Type -TypeDefinition $tlsServerSource -Language CSharp -ErrorAction Stop
-
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.NativePlaybackCompatibilitySpike\IptvSuite.NativePlaybackCompatibilitySpike.csproj"
 $manifestPath = Join-Path (Split-Path -Parent $projectPath) "Package.appxmanifest"
 $fixtureRoot = Join-Path $repositoryRoot "apps\windows\tests\fixtures\playback\tier-a"
+$fixtureManifestPath = Join-Path $fixtureRoot "fixture-manifest.json"
 $artifactRoot = Join-Path $repositoryRoot ".artifacts\native-playback-smoke"
+$packagesRoot = Join-Path $artifactRoot "packages"
+$localPackagesRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) "Packages"
 $runId = [Guid]::NewGuid().ToString("N")
-$packageOutput = Join-Path $artifactRoot "packages\$runId"
+$packageOutput = Join-Path $packagesRoot $runId
 $signingCertificatePath = Join-Path $artifactRoot "$runId-signing.cer"
 $tlsCertificatePath = Join-Path $artifactRoot "$runId-tls.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
+$failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
+$expectedControllerPath = Join-Path $repositoryRoot "eng\Invoke-WindowsNativePlaybackSmoke.ps1"
 $expectedName = "NativePlaybackCompatibilitySpike.Local.a47d1387"
 $expectedPublisher = "CN=Native Playback Compatibility Spike Local Test"
 $expectedApplicationId = "App"
+$expectedVersion = "0.0.1.0"
+$expectedPackageFamilyName = "NativePlaybackCompatibilitySpike.Local.a47d1387_6cjqrm2wkajhe"
+$expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
+$expectedRuntimeDependencyPublisher = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+$expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
+$expectedRuntimeDependencyVersion = "2.3.1.0"
+$expectedRuntimeNuGetVersion = "2.3.1"
+$projectAssetsPath = Join-Path (Split-Path -Parent $projectPath) "obj\project.assets.json"
 $h264DecoderClass = "Registry::HKEY_CLASSES_ROOT\CLSID\{62CE7E72-4C71-4D20-B15D-452831A87D9D}\InprocServer32"
 $aacDecoderClass = "Registry::HKEY_CLASSES_ROOT\CLSID\{32D186A7-218F-4C75-8876-DD77273A8999}\InprocServer32"
 $signingCertificate = $null
 $tlsCertificate = $null
 $tlsServer = $null
 $installedPackage = $null
+$installedPackageFullName = $null
+$packageFamilyName = $null
+$packageAppDataPath = $null
+$packageEvidenceRoot = $null
+$packageEvidencePath = $null
 $installAttempted = $false
+$activationAttempted = $false
 $launchedProcess = $null
 $environmentBackup = @{}
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
+$successCandidate = $null
+$primaryFailure = $null
+$primaryFailureStage = $null
+$primaryFailureCode = $null
+$failureStage = "Initialization"
+$failureCode = "UnexpectedFailure"
+$repositoryHead = $null
+$controllerScriptSha256 = $null
+$fixtureManifestSha256 = $null
+$harnessAssemblySha256 = $null
+$packageSha256 = $null
+$runtimeDependencyPackageSha256 = $null
+$runtimePackagesBefore = $null
+$probeEnvelopeSchemaVersion = 0
+$probeRunIdBound = $false
+$resolvedWindowsAppRuntimeName = $null
+$resolvedWindowsAppRuntimeVersion = $null
+$resolvedWindowsAppRuntimeArchitecture = $null
+$resolvedWindowsAppRuntimePublisherId = $null
+$resolvedWindowsAppRuntimeIsFramework = $false
+$actualSdk = $null
+$fixtureCorpusVerified = $false
+$processExitedWithoutForce = $false
+$forcedProcessTerminationUsed = $false
+$processCleanupPassed = $false
+$tlsServerDisposed = $false
+$packageRemoved = $false
+$packageAppDataRemoved = $false
+$packageAppDataEmptyRootCleanupUsed = $false
+$runtimePackageGraphRestored = $false
+$environmentRestored = $false
+$signingCertificateRemoved = $false
+$tlsCertificateRemoved = $false
+$exportedCertificateFilesRemoved = $false
+$runOutputRemoved = $false
+$tlsRequestCount = 0
+$tlsFailureCount = 0
+$tlsCompletedResponseCount = 0
+$tlsIoAbortCount = 0
+$tlsHeadRequestCount = 0
+$tlsRangeRequestCount = 0
+$tlsOpenEndedRangeCount = 0
+$tlsSuffixRangeCount = 0
+$tlsBoundedRangeCount = 0
+$tlsInjectedFailureCount = 0
+$tlsRecoveryCount = 0
+$tlsLastInjectedRequestOrdinal = 0
+$tlsLastRecoveryRequestOrdinal = 0
+$tlsCompletedBodyBytes = 0L
 $msBuildEnvironment = @{
     AppxBundle = "Never"
     AppxPackageDir = "$packageOutput\"
@@ -374,10 +616,714 @@ $msBuildEnvironment = @{
     UapAppxPackageBuildMode = "SideloadOnly"
 }
 
+function Set-FailurePoint {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Stage,
+
+        [Parameter(Mandatory)]
+        [string]$Code
+    )
+
+    $script:failureStage = $Stage
+    $script:failureCode = $Code
+}
+
+function Assert-NoReparsePath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $current = [System.IO.DirectoryInfo]::new([System.IO.Path]::GetFullPath($Path))
+    while ($null -ne $current) {
+        if ($current.Exists -and
+            ($current.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "A native playback path contains a reparse point."
+        }
+
+        $current = $current.Parent
+    }
+}
+
+function Assert-RegularDirectory {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "A required native playback directory is unavailable."
+    }
+
+    Assert-NoReparsePath -Path $Path
+    $attributes = [System.IO.File]::GetAttributes([System.IO.Path]::GetFullPath($Path))
+    if (($attributes -band [System.IO.FileAttributes]::Directory) -eq 0 -or
+        ($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "A required native playback directory is unsafe."
+    }
+}
+
+function Assert-RegularFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "A required native playback file is unavailable."
+    }
+
+    $attributes = [System.IO.File]::GetAttributes([System.IO.Path]::GetFullPath($Path))
+    if (($attributes -band ([System.IO.FileAttributes]::Directory -bor [System.IO.FileAttributes]::ReparsePoint)) -ne 0) {
+        throw "A required native playback file is unsafe."
+    }
+}
+
+function New-RegularDirectory {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    Assert-NoReparsePath -Path $Path
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        throw "A native playback directory path is occupied by a file."
+    }
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        New-Item -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
+    }
+
+    Assert-RegularDirectory -Path $Path
+}
+
+function Assert-ExactChildPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Parent,
+
+        [Parameter(Mandatory)]
+        [string]$Child
+    )
+
+    $fullParent = [System.IO.Path]::GetFullPath($Parent).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $fullChild = [System.IO.Path]::GetFullPath($Child).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $actualParent = [System.IO.Directory]::GetParent($fullChild)
+    if ($null -eq $actualParent -or
+        -not $actualParent.FullName.Equals($fullParent, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "A native playback cleanup path escaped its exact parent."
+    }
+}
+
+function Remove-ExactOwnedFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedParent
+    )
+
+    Assert-ExactChildPath -Parent $ExpectedParent -Child $Path
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    Assert-RegularFile -Path $Path
+    Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $Path) {
+        throw "An exact native playback file remains after cleanup."
+    }
+}
+
+function Remove-ExactOwnedTree {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedParent
+    )
+
+    Assert-ExactChildPath -Parent $ExpectedParent -Child $Path
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    Assert-RegularDirectory -Path $Path
+    $pending = [System.Collections.Generic.Queue[System.IO.DirectoryInfo]]::new()
+    $pending.Enqueue([System.IO.DirectoryInfo]::new([System.IO.Path]::GetFullPath($Path)))
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Dequeue()
+        foreach ($entry in $directory.GetFileSystemInfos()) {
+            if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "A native playback cleanup tree contains a reparse point."
+            }
+
+            if ($entry -is [System.IO.DirectoryInfo]) {
+                $pending.Enqueue($entry)
+            }
+        }
+    }
+
+    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $Path) {
+        throw "An exact native playback cleanup tree remains."
+    }
+}
+
+function Get-RepositoryStatus {
+    $status = @(& git -C $script:repositoryRoot status --porcelain=v1 --untracked-files=all 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        throw "The repository state is unavailable."
+    }
+
+    return @($status)
+}
+
+function Get-RepositoryHead {
+    $head = @(& git -C $script:repositoryRoot rev-parse --verify HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $head.Count -ne 1 -or $head[0] -notmatch '\A[0-9a-fA-F]{40}\z') {
+        throw "The repository HEAD is unavailable."
+    }
+
+    return $head[0].ToLowerInvariant()
+}
+
+function Get-RegularFileSha256 {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    Assert-RegularFile -Path $Path
+    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    if ($hash -notmatch '\A[0-9a-f]{64}\z') {
+        throw "A native playback file hash is invalid."
+    }
+
+    return $hash
+}
+
+function Get-PackageEntrySha256 {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackagePath,
+
+        [Parameter(Mandatory)]
+        [string]$EntryName
+    )
+
+    Assert-RegularFile -Path $PackagePath
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($PackagePath)
+    try {
+        $entries = @($archive.Entries | Where-Object {
+            $_.FullName.Equals($EntryName, [System.StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($entries.Count -ne 1) {
+            throw "The native playback package harness assembly is ambiguous."
+        }
+
+        $stream = $entries[0].Open()
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = $sha256.ComputeHash($stream)
+            return [System.BitConverter]::ToString($bytes).Replace("-", "").ToLowerInvariant()
+        }
+        finally {
+            $sha256.Dispose()
+            $stream.Dispose()
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Get-PackageManifest {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackagePath
+    )
+
+    Assert-RegularFile -Path $PackagePath
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($PackagePath)
+    try {
+        $entries = @($archive.Entries | Where-Object {
+            $_.FullName.Equals("AppxManifest.xml", [System.StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($entries.Count -ne 1 -or $entries[0].Length -le 0 -or $entries[0].Length -gt 4194304) {
+            throw "The native playback package manifest is ambiguous or outside its size bound."
+        }
+
+        $stream = $entries[0].Open()
+        $reader = [System.IO.StreamReader]::new(
+            $stream,
+            [System.Text.UTF8Encoding]::new($false, $true),
+            $true,
+            4096,
+            $false)
+        try {
+            [xml]$manifest = $reader.ReadToEnd()
+            return ,$manifest
+        }
+        finally {
+            $reader.Dispose()
+            $stream.Dispose()
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Assert-BuiltNativePackageManifest {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackagePath
+    )
+
+    $manifest = Get-PackageManifest -PackagePath $PackagePath
+    $identities = @($manifest.SelectNodes("/*[local-name()='Package']/*[local-name()='Identity']"))
+    $applications = @($manifest.SelectNodes("/*[local-name()='Package']/*[local-name()='Applications']/*[local-name()='Application']"))
+    $dependencies = @($manifest.SelectNodes("/*[local-name()='Package']/*[local-name()='Dependencies']/*[local-name()='PackageDependency']"))
+    if ($identities.Count -ne 1 -or
+        $identities[0].GetAttribute("Name") -ne $script:expectedName -or
+        $identities[0].GetAttribute("Publisher") -cne $script:expectedPublisher -or
+        $identities[0].GetAttribute("Version") -ne $script:expectedVersion -or
+        $identities[0].GetAttribute("ProcessorArchitecture") -ne "x64" -or
+        $applications.Count -ne 1 -or
+        $applications[0].GetAttribute("Id") -ne $script:expectedApplicationId -or
+        $dependencies.Count -ne 1 -or
+        $dependencies[0].GetAttribute("Name") -ne $script:expectedRuntimeDependencyName -or
+        $dependencies[0].GetAttribute("MinVersion") -ne $script:expectedRuntimeDependencyVersion -or
+        $dependencies[0].GetAttribute("Publisher") -cne $script:expectedRuntimeDependencyPublisher) {
+        throw "The built native playback package manifest is outside policy."
+    }
+}
+
+function Assert-RuntimeDependencyPackageManifest {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackagePath
+    )
+
+    $manifest = Get-PackageManifest -PackagePath $PackagePath
+    $identities = @($manifest.SelectNodes("/*[local-name()='Package']/*[local-name()='Identity']"))
+    $frameworks = @($manifest.SelectNodes("/*[local-name()='Package']/*[local-name()='Properties']/*[local-name()='Framework']"))
+    if ($identities.Count -ne 1 -or
+        $identities[0].GetAttribute("Name") -ne $script:expectedRuntimeDependencyName -or
+        $identities[0].GetAttribute("Publisher") -cne $script:expectedRuntimeDependencyPublisher -or
+        $identities[0].GetAttribute("Version") -ne $script:expectedRuntimeDependencyVersion -or
+        $identities[0].GetAttribute("ProcessorArchitecture") -ne "x64" -or
+        $frameworks.Count -ne 1 -or
+        $frameworks[0].InnerText -cne "true") {
+        throw "The supplied Windows App Runtime package manifest is outside policy."
+    }
+}
+
+function Get-LockedRuntimeDependencyPackagePath {
+    Assert-RegularFile -Path $script:projectAssetsPath
+    $assets = Get-Content -LiteralPath $script:projectAssetsPath -Raw | ConvertFrom-Json
+    $libraryName = "Microsoft.WindowsAppSDK.Runtime/$($script:expectedRuntimeNuGetVersion)"
+    $libraries = @($assets.libraries.PSObject.Properties | Where-Object { $_.Name -ceq $libraryName })
+    if ($libraries.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$libraries[0].Value.path)) {
+        throw "The locked Windows App Runtime library is unavailable in project assets."
+    }
+
+    $relativePackagePath = Join-Path `
+        ([string]$libraries[0].Value.path) `
+        "tools\MSIX\win10-x64\Microsoft.WindowsAppRuntime.2.msix"
+    $candidates = @($assets.packageFolders.PSObject.Properties | ForEach-Object {
+        $candidate = Join-Path $_.Name $relativePackagePath
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            [System.IO.Path]::GetFullPath($candidate)
+        }
+    })
+    if ($candidates.Count -ne 1) {
+        throw "The exact locked Windows App Runtime package input is ambiguous."
+    }
+    Assert-RegularFile -Path $candidates[0]
+    return $candidates[0]
+}
+
+function Assert-FixtureCorpus {
+    Assert-RegularDirectory -Path $script:fixtureRoot
+    Assert-RegularFile -Path $script:fixtureManifestPath
+    $expectedNames = @(
+        "fixture-manifest.json",
+        "direct-h264-aac.ts",
+        "hls.m3u8",
+        "hls-000.ts",
+        "hls-001.ts",
+        "hls-002.ts",
+        "hls-003.ts"
+    )
+    $entries = @([System.IO.DirectoryInfo]::new([System.IO.Path]::GetFullPath($script:fixtureRoot)).GetFileSystemInfos())
+    if ($entries.Count -ne $expectedNames.Count) {
+        throw "The native playback fixture corpus contains an unexpected entry."
+    }
+    foreach ($entry in $entries) {
+        if ($entry -isnot [System.IO.FileInfo] -or
+            ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $expectedNames -notcontains $entry.Name) {
+            throw "The native playback fixture corpus contains an unsafe entry."
+        }
+    }
+
+    $manifest = Get-Content -LiteralPath $script:fixtureManifestPath -Raw | ConvertFrom-Json
+    if ([int]$manifest.SchemaVersion -ne 1 -or
+        [string]$manifest.FixtureId -ne "iptvsuite-tier-a-synthetic-v1" -or
+        [string]$manifest.Rights.License -ne "CC0-1.0") {
+        throw "The native playback fixture manifest contract changed."
+    }
+
+    $expectedPayloadNames = @($expectedNames | Where-Object { $_ -ne "fixture-manifest.json" })
+    $manifestFiles = @($manifest.Files)
+    if ($manifestFiles.Count -ne $expectedPayloadNames.Count) {
+        throw "The native playback fixture manifest file set changed."
+    }
+    foreach ($file in $manifestFiles) {
+        $relativePath = [string]$file.Path
+        if ($expectedPayloadNames -notcontains $relativePath -or
+            [System.IO.Path]::GetFileName($relativePath) -ne $relativePath) {
+            throw "The native playback fixture manifest contains an unsafe path."
+        }
+
+        $payloadPath = Join-Path $script:fixtureRoot $relativePath
+        Assert-RegularFile -Path $payloadPath
+        $payload = Get-Item -LiteralPath $payloadPath -ErrorAction Stop
+        if ([long]$file.SizeBytes -ne $payload.Length -or
+            [string]$file.Sha256 -cne (Get-RegularFileSha256 -Path $payloadPath)) {
+            throw "The native playback fixture corpus does not match its manifest."
+        }
+    }
+
+    $actualPayloadNames = @($manifestFiles | ForEach-Object { [string]$_.Path } | Sort-Object)
+    $sortedExpectedPayloadNames = @($expectedPayloadNames | Sort-Object)
+    if ([string]::Join("`n", $actualPayloadNames) -cne [string]::Join("`n", $sortedExpectedPayloadNames)) {
+        throw "The native playback fixture manifest file set is ambiguous."
+    }
+}
+
+function Remove-ExactCertificate {
+    param(
+        [Parameter(Mandatory)]
+        [string]$StorePath,
+
+        [Parameter(Mandatory)]
+        [string]$Thumbprint,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedSubject
+    )
+
+    if (-not (Test-Path -LiteralPath $StorePath)) {
+        return
+    }
+
+    $certificate = Get-Item -LiteralPath $StorePath -ErrorAction Stop
+    if (-not [string]::Equals($certificate.Thumbprint, $Thumbprint, [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals($certificate.Subject, $ExpectedSubject, [System.StringComparison]::Ordinal)) {
+        throw "An exact native playback certificate identity is unexpected."
+    }
+    Remove-Item -LiteralPath $StorePath -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $StorePath) {
+        throw "An exact native playback certificate remains after cleanup."
+    }
+}
+
+function Write-JsonAtomically {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Value,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationPath
+    )
+
+    $directory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($DestinationPath))
+    Assert-RegularDirectory -Path $directory
+    Assert-ExactChildPath -Parent $directory -Child $DestinationPath
+    if (Test-Path -LiteralPath $DestinationPath) {
+        throw "Refusing to overwrite an existing native playback evidence file."
+    }
+
+    $temporaryPath = Join-Path $directory ("staging-" + [Guid]::NewGuid().ToString("N") + ".json")
+    try {
+        $json = $Value | ConvertTo-Json -Depth 6
+        $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($json)
+        $stream = [System.IO.File]::Open(
+            $temporaryPath,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None)
+        try {
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush($true)
+        }
+        finally {
+            $stream.Dispose()
+        }
+
+        Assert-RegularFile -Path $temporaryPath
+        [System.IO.File]::Move($temporaryPath, $DestinationPath)
+        Assert-RegularFile -Path $DestinationPath
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-ExactOwnedFile -Path $temporaryPath -ExpectedParent $directory
+        }
+    }
+}
+
+function Assert-ExactJsonProperties {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Value,
+
+        [Parameter(Mandatory)]
+        [string[]]$ExpectedNames
+    )
+
+    $properties = @($Value.PSObject.Properties)
+    if ($properties.Count -ne $ExpectedNames.Count) {
+        throw "A native playback JSON object has an unexpected property count."
+    }
+    for ($index = 0; $index -lt $ExpectedNames.Count; $index++) {
+        if (-not [string]::Equals(
+                $properties[$index].Name,
+                $ExpectedNames[$index],
+                [System.StringComparison]::Ordinal)) {
+            throw "A native playback JSON object has an unexpected property contract."
+        }
+    }
+}
+
+function Test-JsonInteger {
+    param([AllowNull()][object]$Value)
+
+    return $Value -is [int] -or $Value -is [long]
+}
+
+function Test-JsonNumber {
+    param([AllowNull()][object]$Value)
+
+    if (Test-JsonInteger -Value $Value) { return $true }
+    if ($Value -is [decimal]) { return $true }
+    if ($Value -is [double]) {
+        return -not [double]::IsNaN($Value) -and -not [double]::IsInfinity($Value)
+    }
+
+    return $false
+}
+
+function Invoke-CleanupStep {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Code,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$Action
+    )
+
+    try {
+        & $Action
+    }
+    catch {
+        $script:cleanupFailures.Add($Code)
+    }
+}
+
+function Get-ExactPackages {
+    return @(Get-AppxPackage -Name $script:expectedName -ErrorAction Stop |
+        Where-Object {
+            [string]::Equals(
+                $_.Name,
+                $script:expectedName,
+                [System.StringComparison]::OrdinalIgnoreCase) -and
+            [string]::Equals(
+                $_.Publisher,
+                $script:expectedPublisher,
+                [System.StringComparison]::Ordinal)
+        })
+}
+
+function Get-RuntimeDependencyPackages {
+    return @(Get-AppxPackage -Name $script:expectedRuntimeDependencyName -ErrorAction Stop |
+        Where-Object {
+            [string]::Equals(
+                $_.Name,
+                $script:expectedRuntimeDependencyName,
+                [System.StringComparison]::OrdinalIgnoreCase) -and
+            [string]::Equals(
+                $_.Publisher,
+                $script:expectedRuntimeDependencyPublisher,
+                [System.StringComparison]::Ordinal)
+        })
+}
+
+function Assert-ExactPackageIdentity {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Package
+    )
+
+    if (-not [string]::Equals(
+            $Package.Name,
+            $script:expectedName,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals(
+            $Package.Publisher,
+            $script:expectedPublisher,
+            [System.StringComparison]::Ordinal) -or
+        $Package.Architecture.ToString() -ne "X64" -or
+        $Package.Version.ToString() -ne $script:expectedVersion -or
+        [string]::IsNullOrWhiteSpace($Package.PackageFullName) -or
+        [string]::IsNullOrWhiteSpace($Package.PackageFamilyName) -or
+        -not [string]::Equals(
+            $Package.PackageFamilyName,
+            $script:packageFamilyName,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The exact native playback package identity is outside policy."
+    }
+}
+
 function Remove-ExactPackage {
-    Get-AppxPackage -Name $expectedName -ErrorAction SilentlyContinue |
-        Where-Object { $_.Publisher -eq $expectedPublisher } |
-        ForEach-Object { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction Stop }
+    $packages = @(Get-ExactPackages)
+    if ($packages.Count -gt 1) {
+        throw "The exact native playback package registration is ambiguous."
+    }
+    if ($packages.Count -eq 1) {
+        Assert-ExactPackageIdentity -Package $packages[0]
+        if (-not [string]::IsNullOrWhiteSpace($script:installedPackageFullName) -and
+            -not [string]::Equals(
+                $packages[0].PackageFullName,
+                $script:installedPackageFullName,
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "The installed native playback package identity changed during cleanup."
+        }
+
+        Remove-AppxPackage -Package $packages[0].PackageFullName -ErrorAction Stop
+    }
+
+    $deadline = (Get-Date).AddSeconds(15)
+    while (@(Get-ExactPackages).Count -ne 0 -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 250
+    }
+    if (@(Get-ExactPackages).Count -ne 0) {
+        throw "The exact native playback package registration remains after cleanup."
+    }
+}
+
+function Wait-PackageAppDataRemoval {
+    if ([string]::IsNullOrWhiteSpace($script:packageAppDataPath)) {
+        throw "The exact native playback package data path is unavailable."
+    }
+    Assert-ExactChildPath -Parent $script:localPackagesRoot -Child $script:packageAppDataPath
+    if (@(Get-ExactPackages).Count -ne 0) {
+        throw "Refusing package app-data cleanup while the package remains registered."
+    }
+
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Test-Path -LiteralPath $script:packageAppDataPath) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 250
+    }
+    if (Test-Path -LiteralPath $script:packageAppDataPath) {
+        if ([IptvSuite.NativePlaybackSmoke.PackagedApplicationActivator]::RemoveExactEmptyDirectory(
+                [System.IO.Path]::GetFullPath($script:packageAppDataPath))) {
+            $script:packageAppDataEmptyRootCleanupUsed = $true
+        }
+    }
+    if (Test-Path -LiteralPath $script:packageAppDataPath) {
+        throw "The exact native playback package data remains after deployment cleanup."
+    }
+}
+
+function Restore-RuntimeDependencyPackageGraph {
+    if ($null -eq $script:runtimePackagesBefore) {
+        if ($script:installAttempted) {
+            throw "The Windows App Runtime package graph snapshot is unavailable."
+        }
+
+        $script:runtimePackageGraphRestored = $true
+        return
+    }
+
+    $beforeNames = @($script:runtimePackagesBefore)
+    $currentPackages = @(Get-RuntimeDependencyPackages)
+    $addedPackages = @($currentPackages | Where-Object {
+        $currentFullName = $_.PackageFullName
+        @($beforeNames | Where-Object {
+            [string]::Equals($_, $currentFullName, [System.StringComparison]::OrdinalIgnoreCase)
+        }).Count -eq 0
+    })
+    foreach ($package in $addedPackages) {
+        if ($package.Architecture.ToString() -ne "X64" -or
+            $package.Version.ToString() -ne $script:expectedRuntimeDependencyVersion -or
+            -not [string]::Equals(
+                $package.PackageFamilyName,
+                "$($script:expectedRuntimeDependencyName)_$($script:expectedRuntimeDependencyPublisherId)",
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "An unexpected Windows App Runtime registration appeared during the transaction."
+        }
+
+        Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop
+    }
+
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        $afterNames = @(Get-RuntimeDependencyPackages |
+            ForEach-Object { $_.PackageFullName } |
+            Sort-Object)
+        $matches = $afterNames.Count -eq $beforeNames.Count
+        if ($matches) {
+            for ($index = 0; $index -lt $beforeNames.Count; $index++) {
+                if (-not [string]::Equals(
+                        $beforeNames[$index],
+                        $afterNames[$index],
+                        [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $matches = $false
+                    break
+                }
+            }
+        }
+
+        if ($matches) { break }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+
+    if (-not $matches) {
+        throw "The Windows App Runtime package graph was not restored."
+    }
+    $script:runtimePackageGraphRestored = $true
+}
+
+function Close-TrackedProcessNormally {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process
+    )
+
+    $Process.Refresh()
+    if ($Process.HasExited) {
+        if ($Process.ExitCode -ne 0) {
+            throw "The native playback probe exited with a nonzero code."
+        }
+        return
+    }
+
+    if (-not $Process.CloseMainWindow()) {
+        throw "The native playback probe did not accept a normal window close."
+    }
+    if (-not $Process.WaitForExit(10000)) {
+        throw "The native playback probe did not exit after a normal window close."
+    }
+    if ($Process.ExitCode -ne 0) {
+        throw "The native playback probe exited with a nonzero code."
+    }
 }
 
 function Assert-PackagePayload([string]$PackagePath) {
@@ -392,6 +1338,53 @@ function Assert-PackagePayload([string]$PackagePath) {
 }
 
 try {
+    Set-FailurePoint -Stage "WorkspaceValidation" -Code "ArtifactWorkspaceRejected"
+    Assert-RegularDirectory -Path $repositoryRoot
+    Assert-RegularFile -Path $PSCommandPath
+    if (-not [System.IO.Path]::GetFullPath($PSCommandPath).Equals(
+            [System.IO.Path]::GetFullPath($expectedControllerPath),
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The native playback controller path is unexpected."
+    }
+    New-RegularDirectory -Path (Join-Path $repositoryRoot ".artifacts")
+    New-RegularDirectory -Path $artifactRoot
+    New-RegularDirectory -Path $packagesRoot
+    foreach ($staleEvidence in @($evidencePath, $failureEvidencePath)) {
+        if (Test-Path -LiteralPath $staleEvidence) {
+            Remove-ExactOwnedFile -Path $staleEvidence -ExpectedParent $artifactRoot
+        }
+    }
+
+    Set-FailurePoint -Stage "InputValidation" -Code "InvalidProbeParameters"
+    if ($SoakMinutes -gt 0 -and $SwitchCount -ne 100) {
+        throw "A native playback soak requires exactly 100 alternating switches."
+    }
+    if ($NetworkInterruptionCount -gt 0 -and $SwitchCount -ne 100) {
+        throw "A native playback network interruption probe requires exactly 100 alternating switches."
+    }
+
+    Set-FailurePoint -Stage "ControllerCompilation" -Code "EmbeddedControllerCompilationFailed"
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
+    Add-Type -TypeDefinition $tlsServerSource -Language CSharp -ErrorAction Stop
+
+    Set-FailurePoint -Stage "RepositoryBinding" -Code "RepositoryDirty"
+    if (@(Get-RepositoryStatus).Count -ne 0) {
+        throw "The repository worktree is not clean."
+    }
+    $repositoryHead = Get-RepositoryHead
+    $githubSha = [Environment]::GetEnvironmentVariable("GITHUB_SHA", "Process")
+    if (-not [string]::IsNullOrWhiteSpace($githubSha) -and
+        ($githubSha -notmatch '\A[0-9a-fA-F]{40}\z' -or
+            -not $repositoryHead.Equals($githubSha, [System.StringComparison]::OrdinalIgnoreCase))) {
+        throw "The GitHub workflow commit does not match repository HEAD."
+    }
+    $controllerScriptSha256 = Get-RegularFileSha256 -Path $PSCommandPath
+    Assert-FixtureCorpus
+    $fixtureManifestSha256 = Get-RegularFileSha256 -Path $fixtureManifestPath
+    $fixtureCorpusVerified = $true
+
+    Set-FailurePoint -Stage "HostValidation" -Code "ElevationRequired"
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw "Native packaged playback smoke requires an elevated Windows PowerShell session."
@@ -399,9 +1392,12 @@ try {
     $enableLua = Get-ItemPropertyValue "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name EnableLUA
     if ($enableLua -ne 1) { throw "Package activation requires the Windows app-model UAC service." }
 
+    Set-FailurePoint -Stage "SdkValidation" -Code "ExactSdkMismatch"
     $expectedSdk = (Get-Content -Raw (Join-Path $repositoryRoot "global.json") | ConvertFrom-Json).sdk.version
     $actualSdk = (& $DotNetPath --version).Trim()
     if ($LASTEXITCODE -ne 0 -or $actualSdk -ne $expectedSdk) { throw "Expected .NET SDK $expectedSdk, received '$actualSdk'." }
+
+    Set-FailurePoint -Stage "HostInspection" -Code "HostInspectionFailed"
     $h264DecoderRegistered = Test-Path -LiteralPath $h264DecoderClass -PathType Container
     $aacDecoderRegistered = Test-Path -LiteralPath $aacDecoderClass -PathType Container
     $audioServiceRunning = (Get-Service -Name Audiosrv -ErrorAction SilentlyContinue).Status -eq "Running"
@@ -412,14 +1408,41 @@ try {
         -Name InstallationType `
         -ErrorAction SilentlyContinue
 
+    Set-FailurePoint -Stage "ManifestValidation" -Code "ManifestIdentityChanged"
     [xml]$manifest = Get-Content -Raw $manifestPath
     $identity = $manifest.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Identity']")
     $application = $manifest.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Applications']/*[local-name()='Application']")
-    if ($identity.Name -ne $expectedName -or $identity.Publisher -ne $expectedPublisher -or $application.Id -ne $expectedApplicationId) {
+    if ($null -eq $identity -or
+        $null -eq $application -or
+        $identity.GetAttribute("Name") -ne $expectedName -or
+        $identity.GetAttribute("Publisher") -cne $expectedPublisher -or
+        $identity.GetAttribute("Version") -ne $expectedVersion -or
+        $identity.GetAttribute("ProcessorArchitecture") -ne "x64" -or
+        $application.GetAttribute("Id") -ne $expectedApplicationId) {
         throw "The disposable native playback manifest identity changed."
     }
+    $manifestVersion = [version]$identity.GetAttribute("Version")
+    $packageFamilyName = [IptvSuite.NativePlaybackSmoke.PackagedApplicationActivator]::GetPackageFamilyName(
+        $expectedName,
+        $expectedPublisher,
+        [uint16]$manifestVersion.Major,
+        [uint16]$manifestVersion.Minor,
+        [uint16]$manifestVersion.Build,
+        [uint16]$manifestVersion.Revision)
+    if (-not [string]::Equals(
+            $packageFamilyName,
+            $expectedPackageFamilyName,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The disposable native playback package family identity changed."
+    }
+    $packageAppDataPath = Join-Path $localPackagesRoot $packageFamilyName
+    Assert-ExactChildPath -Parent $localPackagesRoot -Child $packageAppDataPath
+    $packageEvidenceRoot = Join-Path $packageAppDataPath "LocalCache\M10NativePlayback"
+    $packageEvidencePath = Join-Path $packageEvidenceRoot "result-$runId.json"
+    Assert-NoReparsePath -Path $packageEvidencePath
 
-    New-Item -ItemType Directory -Path $packageOutput -Force | Out-Null
+    Set-FailurePoint -Stage "CertificatePreparation" -Code "CertificatePreparationFailed"
+    New-RegularDirectory -Path $packageOutput
     $signingCertificate = New-SelfSignedCertificate -Type Custom -Subject $expectedPublisher `
         -CertStoreLocation "Cert:\CurrentUser\My" -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
         -KeyExportPolicy NonExportable -KeyUsage DigitalSignature -NotAfter (Get-Date).AddDays(2) `
@@ -434,6 +1457,7 @@ try {
     Import-Certificate -FilePath $tlsCertificatePath -CertStoreLocation "Cert:\LocalMachine\Root" | Out-Null
     Write-Host "Ephemeral package-signing and loopback TLS certificates are prepared."
 
+    Set-FailurePoint -Stage "PackageBuild" -Code "PackageBuildFailed"
     $msBuildEnvironment.PackageCertificateThumbprint = $signingCertificate.Thumbprint
     foreach ($entry in $msBuildEnvironment.GetEnumerator()) {
         $environmentBackup[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
@@ -445,36 +1469,78 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Signed native playback package build failed." }
     Write-Host "Disposable native playback package build completed."
 
+    Set-FailurePoint -Stage "PackageInspection" -Code "PackageOutputInvalid"
     $packages = @(Get-ChildItem $packageOutput -Filter "IptvSuite.NativePlaybackCompatibilitySpike_*.msix" -Recurse -File |
         Where-Object { $_.FullName -notmatch '[\\/]Dependencies[\\/]' })
     $dependencies = @(Get-ChildItem $packageOutput -Filter "Microsoft.WindowsAppRuntime.2.msix" -Recurse -File |
         Where-Object { $_.Directory.Name -eq "x64" })
     if ($packages.Count -ne 1 -or $dependencies.Count -ne 1) { throw "Expected one native playback MSIX and one x64 runtime dependency." }
+    Assert-RegularFile -Path $packages[0].FullName
+    Assert-RegularFile -Path $dependencies[0].FullName
     $signature = Get-AuthenticodeSignature $packages[0].FullName
-    if ($null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Thumbprint -ne $signingCertificate.Thumbprint -or $signature.Status -in @("HashMismatch", "NotSigned")) {
+    if ($null -eq $signature.SignerCertificate -or
+        $signature.SignerCertificate.Thumbprint -ne $signingCertificate.Thumbprint -or
+        $signature.Status.ToString() -ne "Valid") {
         throw "Native playback MSIX signature validation failed."
     }
+    $dependencySignature = Get-AuthenticodeSignature $dependencies[0].FullName
+    if ($null -eq $dependencySignature.SignerCertificate -or
+        $dependencySignature.SignerCertificate.Subject -cne $expectedRuntimeDependencyPublisher -or
+        $dependencySignature.Status.ToString() -ne "Valid") {
+        throw "Native playback runtime dependency signature validation failed."
+    }
     Assert-PackagePayload $packages[0].FullName
+    Assert-BuiltNativePackageManifest -PackagePath $packages[0].FullName
+    Assert-RuntimeDependencyPackageManifest -PackagePath $dependencies[0].FullName
+    $packageSha256 = Get-RegularFileSha256 -Path $packages[0].FullName
+    $runtimeDependencyPackageSha256 = Get-RegularFileSha256 -Path $dependencies[0].FullName
+    $lockedRuntimeDependencyPath = Get-LockedRuntimeDependencyPackagePath
+    if ((Get-RegularFileSha256 -Path $lockedRuntimeDependencyPath) -cne $runtimeDependencyPackageSha256) {
+        throw "The supplied Windows App Runtime package differs from the locked restore input."
+    }
+    $harnessAssemblySha256 = Get-PackageEntrySha256 `
+        -PackagePath $packages[0].FullName `
+        -EntryName "IptvSuite.NativePlaybackCompatibilitySpike.dll"
 
-    Remove-ExactPackage
+    Set-FailurePoint -Stage "PackageInstall" -Code "PackageInstallFailed"
+    $runtimePackagesBefore = @(Get-RuntimeDependencyPackages |
+        ForEach-Object { $_.PackageFullName } |
+        Sort-Object)
     $installAttempted = $true
+    Remove-ExactPackage
+    Wait-PackageAppDataRemoval
+    if ((Get-RegularFileSha256 -Path $packages[0].FullName) -cne $packageSha256 -or
+        (Get-RegularFileSha256 -Path $dependencies[0].FullName) -cne $runtimeDependencyPackageSha256) {
+        throw "A native playback package input changed after inspection."
+    }
     Add-AppxPackage -Path $packages[0].FullName -DependencyPath $dependencies[0].FullName
-    $installed = @(Get-AppxPackage -Name $expectedName | Where-Object { $_.Publisher -eq $expectedPublisher })
-    if ($installed.Count -ne 1 -or $installed[0].Architecture -ne "X64") { throw "Disposable native playback package installation is ambiguous." }
+    $installed = @(Get-ExactPackages)
+    if ($installed.Count -ne 1) { throw "Disposable native playback package installation is ambiguous." }
     $installedPackage = $installed[0]
+    Assert-ExactPackageIdentity -Package $installedPackage
+    $installedPackageFullName = $installedPackage.PackageFullName
+    if (Test-Path -LiteralPath $packageEvidenceRoot) {
+        Assert-RegularDirectory -Path $packageEvidenceRoot
+        if (@([System.IO.DirectoryInfo]::new(
+                    [System.IO.Path]::GetFullPath($packageEvidenceRoot)).GetFileSystemInfos()).Count -ne 0) {
+            throw "Unexpected native playback package evidence exists before activation."
+        }
+    }
     Write-Host "Disposable native playback package installation completed."
 
+    Set-FailurePoint -Stage "ProbeActivation" -Code "ProbeActivationFailed"
     $tlsServer = [IptvSuite.NativePlaybackSmoke.TierATlsServer]::new($fixtureRoot, $tlsCertificate)
     $authority = "https://localhost:$($tlsServer.Port)"
-    $arguments = "probe $authority/direct-h264-aac.ts $authority/hls.m3u8 $SwitchCount $SoakMinutes"
-    $aumid = "$($installedPackage.PackageFamilyName)!$expectedApplicationId"
+    $arguments = "probe $runId $authority/direct-h264-aac.ts $authority/hls.m3u8 $SwitchCount $SoakMinutes"
+    $aumid = "$packageFamilyName!$expectedApplicationId"
+    $activationAttempted = $true
     $processId = [IptvSuite.NativePlaybackSmoke.PackagedApplicationActivator]::Activate($aumid, $arguments)
     $launchedProcess = Get-Process -Id $processId -ErrorAction Stop
     $null = $launchedProcess.Handle
     if ($launchedProcess.ProcessName -ne "IptvSuite.NativePlaybackCompatibilitySpike") { throw "Package activation returned an unexpected process." }
     Write-Host "Native playback probe activation completed."
 
-    $packageEvidencePath = Join-Path $env:LOCALAPPDATA "Packages\$($installedPackage.PackageFamilyName)\LocalCache\M10NativePlayback\last-result.json"
+    Set-FailurePoint -Stage "ProbeExecution" -Code "ProbeEvidenceUnavailable"
     $deadline = (Get-Date).AddMinutes([Math]::Max(15, $SoakMinutes + 15))
     $probeStarted = Get-Date
     $scheduledInterruptionCount = 0
@@ -501,8 +1567,151 @@ try {
         Start-Sleep -Milliseconds 250
     }
     if (-not (Test-Path -LiteralPath $packageEvidencePath -PathType Leaf)) { throw "Native playback probe evidence deadline expired." }
+    Assert-RegularFile -Path $packageEvidencePath
 
-    $probe = Get-Content -Raw $packageEvidencePath | ConvertFrom-Json
+    $packageEvidenceEntries = @([System.IO.DirectoryInfo]::new(
+            [System.IO.Path]::GetFullPath($packageEvidenceRoot)).GetFileSystemInfos())
+    if ($packageEvidenceEntries.Count -ne 1 -or
+        $packageEvidenceEntries[0] -isnot [System.IO.FileInfo] -or
+        -not $packageEvidenceEntries[0].Name.Equals(
+            [System.IO.Path]::GetFileName($packageEvidencePath),
+            [System.StringComparison]::Ordinal) -or
+        ($packageEvidenceEntries[0].Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $packageEvidenceEntries[0].Length -le 0 -or
+        $packageEvidenceEntries[0].Length -gt 65536) {
+        throw "The native playback probe evidence file set is outside policy."
+    }
+
+    Set-FailurePoint -Stage "ProbeEnvelopeValidation" -Code "ProbeRunBindingMismatch"
+    $probeEnvelope = Get-Content -LiteralPath $packageEvidencePath -Raw | ConvertFrom-Json
+    Assert-ExactJsonProperties -Value $probeEnvelope -ExpectedNames @(
+        "SchemaVersion",
+        "RunId",
+        "RuntimeDependency",
+        "Probe"
+    )
+    if (-not (Test-JsonInteger -Value $probeEnvelope.SchemaVersion) -or
+        [int]$probeEnvelope.SchemaVersion -ne 1 -or
+        $probeEnvelope.RunId -isnot [string] -or
+        -not [string]::Equals(
+            $probeEnvelope.RunId,
+            $runId,
+            [System.StringComparison]::Ordinal) -or
+        $null -eq $probeEnvelope.RuntimeDependency -or
+        $null -eq $probeEnvelope.Probe) {
+        throw "The native playback probe evidence is not bound to this controller run."
+    }
+    $probeEnvelopeSchemaVersion = 1
+    $probeRunIdBound = $true
+
+    Assert-ExactJsonProperties -Value $probeEnvelope.RuntimeDependency -ExpectedNames @(
+        "Name",
+        "Version",
+        "Architecture",
+        "PublisherId",
+        "IsFramework"
+    )
+    $resolvedRuntimeVersionValue = [version]::new()
+    $resolvedRuntimeVersionValid =
+        $probeEnvelope.RuntimeDependency.Version -is [string] -and
+        [version]::TryParse(
+            [string]$probeEnvelope.RuntimeDependency.Version,
+            [ref]$resolvedRuntimeVersionValue)
+    if ($probeEnvelope.RuntimeDependency.Name -isnot [string] -or
+        $probeEnvelope.RuntimeDependency.Architecture -isnot [string] -or
+        $probeEnvelope.RuntimeDependency.PublisherId -isnot [string] -or
+        $probeEnvelope.RuntimeDependency.IsFramework -isnot [bool] -or
+        -not [string]::Equals(
+            $probeEnvelope.RuntimeDependency.Name,
+            $expectedRuntimeDependencyName,
+            [System.StringComparison]::Ordinal) -or
+        -not [string]::Equals(
+            $probeEnvelope.RuntimeDependency.Architecture,
+            "X64",
+            [System.StringComparison]::Ordinal) -or
+        -not [string]::Equals(
+            $probeEnvelope.RuntimeDependency.PublisherId,
+            $expectedRuntimeDependencyPublisherId,
+            [System.StringComparison]::Ordinal) -or
+        $probeEnvelope.RuntimeDependency.IsFramework -ne $true -or
+        -not $resolvedRuntimeVersionValid -or
+        $resolvedRuntimeVersionValue.Major -ne 2 -or
+        $resolvedRuntimeVersionValue -lt [version]$expectedRuntimeDependencyVersion) {
+        throw "The resolved Windows App Runtime dependency is outside policy."
+    }
+    $resolvedWindowsAppRuntimeName = [string]$probeEnvelope.RuntimeDependency.Name
+    $resolvedWindowsAppRuntimeVersion = $resolvedRuntimeVersionValue.ToString(4)
+    $resolvedWindowsAppRuntimeArchitecture = "x64"
+    $resolvedWindowsAppRuntimePublisherId = [string]$probeEnvelope.RuntimeDependency.PublisherId
+    $resolvedWindowsAppRuntimeIsFramework = [bool]$probeEnvelope.RuntimeDependency.IsFramework
+
+    Set-FailurePoint -Stage "ProbeValidation" -Code "ProbeInvariantFailed"
+    $probe = $probeEnvelope.Probe
+    Assert-ExactJsonProperties -Value $probe -ExpectedNames @(
+        "Success",
+        "Failure",
+        "SwitchCount",
+        "StartupP95Milliseconds",
+        "StartupMaximumMilliseconds",
+        "HlsStartupP95Milliseconds",
+        "DirectStartupP95Milliseconds",
+        "SoakMinutes",
+        "ResourceSampleCount",
+        "WarmupPrivateBytes",
+        "MemoryNetGrowthBytes",
+        "MemoryNetGrowthPercent",
+        "MemoryMonotonicIncrease",
+        "WarmupHandleCount",
+        "HandleNetGrowth",
+        "SurfaceTransitionCount",
+        "DetachedSourceCount",
+        "PlaybackRetryCount",
+        "SourceDetachP95Milliseconds",
+        "SourceDetachMaximumMilliseconds",
+        "PlaybackStateBeforeDetach",
+        "SourceDetached",
+        "CanPauseBeforeDetach",
+        "CanSeekBeforeDetach",
+        "TeardownStage",
+        "ExceptionCategory",
+        "ExceptionHResult",
+        "InitialPrivateBytes",
+        "FinalPrivateBytes",
+        "InitialHandleCount",
+        "FinalHandleCount"
+    )
+    foreach ($propertyName in @(
+            "SwitchCount", "SoakMinutes", "ResourceSampleCount", "WarmupPrivateBytes",
+            "MemoryNetGrowthBytes", "WarmupHandleCount", "HandleNetGrowth",
+            "SurfaceTransitionCount", "DetachedSourceCount", "PlaybackRetryCount",
+            "ExceptionHResult", "InitialPrivateBytes", "FinalPrivateBytes",
+            "InitialHandleCount", "FinalHandleCount")) {
+        if (-not (Test-JsonInteger -Value $probe.PSObject.Properties[$propertyName].Value)) {
+            throw "A native playback probe integer field has an invalid JSON type."
+        }
+    }
+    foreach ($propertyName in @(
+            "StartupP95Milliseconds", "StartupMaximumMilliseconds",
+            "HlsStartupP95Milliseconds", "DirectStartupP95Milliseconds",
+            "MemoryNetGrowthPercent", "SourceDetachP95Milliseconds",
+            "SourceDetachMaximumMilliseconds")) {
+        if (-not (Test-JsonNumber -Value $probe.PSObject.Properties[$propertyName].Value)) {
+            throw "A native playback probe metric has an invalid JSON type."
+        }
+    }
+    foreach ($propertyName in @(
+            "Success", "MemoryMonotonicIncrease", "SourceDetached",
+            "CanPauseBeforeDetach", "CanSeekBeforeDetach")) {
+        if ($probe.PSObject.Properties[$propertyName].Value -isnot [bool]) {
+            throw "A native playback probe Boolean field has an invalid JSON type."
+        }
+    }
+    foreach ($propertyName in @(
+            "Failure", "PlaybackStateBeforeDetach", "TeardownStage", "ExceptionCategory")) {
+        if ($probe.PSObject.Properties[$propertyName].Value -isnot [string]) {
+            throw "A native playback probe enum field has an invalid JSON type."
+        }
+    }
     $expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }
     $expectedDetachedSourceCount = $SwitchCount + [int]$probe.PlaybackRetryCount
     if ($SoakMinutes -gt 0) { $expectedDetachedSourceCount++ }
@@ -527,19 +1736,63 @@ try {
         [double]$probe.MemoryNetGrowthPercent -gt 10)) {
         throw "Native playback soak resource budget failed."
     }
-    if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }
+    Set-FailurePoint -Stage "ProcessExit" -Code "NormalCloseFailed"
+    $launchedProcess.Refresh()
+    if ($launchedProcess.HasExited) {
+        throw "The native playback probe exited before the required normal close."
+    }
+    Close-TrackedProcessNormally -Process $launchedProcess
+    $processExitedWithoutForce = $true
+
+    Set-FailurePoint -Stage "TlsShutdown" -Code "TlsServerDrainFailed"
+    $tlsServer.Dispose()
+    $tlsRequestCount = $tlsServer.RequestCount
+    $tlsFailureCount = $tlsServer.FailureCount
+    $tlsCompletedResponseCount = $tlsServer.CompletedResponseCount
+    $tlsIoAbortCount = $tlsServer.IoAbortCount
+    $tlsHeadRequestCount = $tlsServer.HeadRequestCount
+    $tlsRangeRequestCount = $tlsServer.RangeRequestCount
+    $tlsOpenEndedRangeCount = $tlsServer.OpenEndedRangeCount
+    $tlsSuffixRangeCount = $tlsServer.SuffixRangeCount
+    $tlsBoundedRangeCount = $tlsServer.BoundedRangeCount
+    $tlsInjectedFailureCount = $tlsServer.InjectedFailureCount
+    $tlsRecoveryCount = $tlsServer.RecoveryCount
+    $tlsLastInjectedRequestOrdinal = $tlsServer.LastInjectedRequestOrdinal
+    $tlsLastRecoveryRequestOrdinal = $tlsServer.LastRecoveryRequestOrdinal
+    $tlsCompletedBodyBytes = $tlsServer.CompletedBodyBytes
+    $tlsServer = $null
+    $tlsServerDisposed = $true
+
+    Set-FailurePoint -Stage "NetworkValidation" -Code "NetworkInvariantFailed"
+    if ($tlsFailureCount -ne 0 -or $tlsRequestCount -lt $SwitchCount) {
+        throw "Loopback media request invariant failed."
+    }
     if ($scheduledInterruptionCount -ne $NetworkInterruptionCount -or
-        $tlsServer.InjectedFailureCount -ne $NetworkInterruptionCount -or
-        $tlsServer.RecoveryCount -ne $NetworkInterruptionCount -or
+        $tlsInjectedFailureCount -ne $NetworkInterruptionCount -or
+        $tlsRecoveryCount -ne $NetworkInterruptionCount -or
         ($NetworkInterruptionCount -gt 0 -and
-            $tlsServer.LastRecoveryRequestOrdinal -le $tlsServer.LastInjectedRequestOrdinal)) {
+            $tlsLastRecoveryRequestOrdinal -le $tlsLastInjectedRequestOrdinal)) {
         throw "Native playback network interruption/recovery invariant failed."
     }
 
-    $summary = [ordered]@{
-        SchemaVersion = 7
+    Set-FailurePoint -Stage "EvidencePreparation" -Code "EvidencePreparationFailed"
+    $successCandidate = [ordered]@{
+        SchemaVersion = 8
         Stage = "M10NativeTierAPlayback"
         Result = "Passed"
+        RunId = $runId
+        CompletedAtUtc = $null
+        Configuration = $Configuration
+        Platform = "x64"
+        DotNetSdk = $actualSdk
+        CleanHeadBound = $true
+        CommitSha = $repositoryHead
+        ControllerScriptSha256 = $controllerScriptSha256
+        HarnessAssemblySha256 = $harnessAssemblySha256
+        FixtureManifestSha256 = $fixtureManifestSha256
+        FixtureCorpusVerified = $fixtureCorpusVerified
+        ProbeEnvelopeSchemaVersion = $probeEnvelopeSchemaVersion
+        ProbeRunIdBound = $probeRunIdBound
         SwitchCount = $SwitchCount
         StartupP95Milliseconds = [Math]::Round([double]$probe.StartupP95Milliseconds, 3)
         StartupMaximumMilliseconds = [Math]::Round([double]$probe.StartupMaximumMilliseconds, 3)
@@ -558,45 +1811,275 @@ try {
         PlaybackRetryCount = [int]$probe.PlaybackRetryCount
         SourceDetachP95Milliseconds = [Math]::Round([double]$probe.SourceDetachP95Milliseconds, 3)
         SourceDetachMaximumMilliseconds = [Math]::Round([double]$probe.SourceDetachMaximumMilliseconds, 3)
-        NetworkInterruptionCount = $tlsServer.InjectedFailureCount
-        NetworkRecoveryCount = $tlsServer.RecoveryCount
-        LastInjectedRequestOrdinal = $tlsServer.LastInjectedRequestOrdinal
-        LastRecoveryRequestOrdinal = $tlsServer.LastRecoveryRequestOrdinal
+        NetworkInterruptionCount = $tlsInjectedFailureCount
+        NetworkRecoveryCount = $tlsRecoveryCount
+        LastInjectedRequestOrdinal = $tlsLastInjectedRequestOrdinal
+        LastRecoveryRequestOrdinal = $tlsLastRecoveryRequestOrdinal
         InitialPrivateBytes = [long]$probe.InitialPrivateBytes
         FinalPrivateBytes = [long]$probe.FinalPrivateBytes
         InitialHandleCount = [int]$probe.InitialHandleCount
         FinalHandleCount = [int]$probe.FinalHandleCount
-        LoopbackRequestCount = $tlsServer.RequestCount
+        LoopbackRequestCount = $tlsRequestCount
         H264DecoderRegistered = $h264DecoderRegistered
         AacDecoderRegistered = $aacDecoderRegistered
         Transport = "Tls12LoopbackAllowlist"
         Fixtures = @("DirectH264AacMpegTs", "HlsH264AacMpegTs")
-        PackageSha256 = (Get-FileHash $packages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        PackageSha256 = $packageSha256
+        PackageSignatureStatus = "Valid"
+        RuntimeDependencyPackageSha256 = $runtimeDependencyPackageSha256
+        RuntimeDependencyPackageSignatureStatus = "Valid"
+        ResolvedWindowsAppRuntimeName = $resolvedWindowsAppRuntimeName
+        ResolvedWindowsAppRuntimeVersion = $resolvedWindowsAppRuntimeVersion
+        ResolvedWindowsAppRuntimeArchitecture = $resolvedWindowsAppRuntimeArchitecture
+        ResolvedWindowsAppRuntimePublisherId = $resolvedWindowsAppRuntimePublisherId
+        ResolvedWindowsAppRuntimeIsFramework = $resolvedWindowsAppRuntimeIsFramework
+        NormalCloseVerified = $false
+        ForcedProcessTerminationUsed = $false
+        ProcessCleanupPassed = $false
+        TlsServerDisposed = $false
+        PackageRemoved = $false
+        PackageAppDataRemoved = $false
+        PackageAppDataEmptyRootCleanupUsed = $false
+        RuntimePackageGraphRestored = $false
+        EphemeralCertificatesRemoved = $false
+        ExportedCertificateFilesRemoved = $false
+        PackageOutputRemoved = $false
+        EnvironmentRestored = $false
+        RepositoryCleanAfterRun = $false
     }
-    New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
-    $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
-    Write-Host "Native packaged Tier A playback smoke passed: $SwitchCount alternating switches."
+}
+catch {
+    $primaryFailure = $_
+    $primaryFailureStage = $failureStage
+    $primaryFailureCode = $failureCode
 }
 finally {
-    if ($null -ne $launchedProcess) {
-        try { if (-not $launchedProcess.HasExited) { $null = $launchedProcess.CloseMainWindow(); if (-not $launchedProcess.WaitForExit(5000)) { $launchedProcess.Kill(); $launchedProcess.WaitForExit() } } } catch { $cleanupFailures.Add("ProcessCleanup") }
-        $launchedProcess.Dispose()
-    }
-    if ($null -ne $tlsServer) { try { $tlsServer.Dispose() } catch { $cleanupFailures.Add("TlsServerCleanup") } }
-    if ($installAttempted) { try { Remove-ExactPackage } catch { $cleanupFailures.Add("PackageCleanup") } }
-    foreach ($entry in $environmentBackup.GetEnumerator()) { [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process") }
-    if ($null -ne $tlsCertificate) {
-        foreach ($path in @("Cert:\LocalMachine\Root\$($tlsCertificate.Thumbprint)", "Cert:\CurrentUser\My\$($tlsCertificate.Thumbprint)")) {
-            try { if (Test-Path $path) { Remove-Item -LiteralPath $path -Force } } catch { $cleanupFailures.Add("TlsCertificateCleanup") }
+    Invoke-CleanupStep -Code "ProcessCleanupFailed" -Action {
+        if ($null -eq $script:launchedProcess) {
+            $script:processCleanupPassed = $true
+            return
+        }
+
+        try {
+            $script:launchedProcess.Refresh()
+            if (-not $script:launchedProcess.HasExited) {
+                try {
+                    Close-TrackedProcessNormally -Process $script:launchedProcess
+                    $script:processExitedWithoutForce = $true
+                }
+                catch {
+                    $normalCloseFailure = $_
+                    $script:launchedProcess.Refresh()
+                    if (-not $script:launchedProcess.HasExited) {
+                        $script:forcedProcessTerminationUsed = $true
+                        $script:launchedProcess.Kill()
+                        if (-not $script:launchedProcess.WaitForExit(10000)) {
+                            throw "The exact native playback probe did not exit after bounded failure cleanup."
+                        }
+                    }
+                    throw $normalCloseFailure
+                }
+            }
+            if ($script:forcedProcessTerminationUsed) {
+                throw "The native playback probe required forced termination."
+            }
+            $script:processCleanupPassed = $true
+        }
+        finally {
+            $script:launchedProcess.Dispose()
+            $script:launchedProcess = $null
         }
     }
-    if ($null -ne $signingCertificate) {
-        foreach ($path in @("Cert:\LocalMachine\TrustedPeople\$($signingCertificate.Thumbprint)", "Cert:\CurrentUser\My\$($signingCertificate.Thumbprint)")) {
-            try { if (Test-Path $path) { Remove-Item -LiteralPath $path -Force } } catch { $cleanupFailures.Add("SigningCertificateCleanup") }
+
+    Invoke-CleanupStep -Code "TlsServerCleanupFailed" -Action {
+        if ($null -ne $script:tlsServer) {
+            $script:tlsServer.Dispose()
+            $script:tlsServer = $null
+        }
+        $script:tlsServerDisposed = $true
+    }
+
+    Invoke-CleanupStep -Code "PackageCleanupFailed" -Action {
+        if ($script:installAttempted) {
+            Remove-ExactPackage
+        }
+        $script:packageRemoved = @(Get-ExactPackages).Count -eq 0
+        if (-not $script:packageRemoved) {
+            throw "The exact native playback package registration remains."
         }
     }
-    Remove-Item -LiteralPath $signingCertificatePath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $tlsCertificatePath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $packageOutput -Recurse -Force -ErrorAction SilentlyContinue
-    if ($cleanupFailures.Count -ne 0) { throw "Native playback smoke cleanup failed: $($cleanupFailures -join ', ')." }
+
+    Invoke-CleanupStep -Code "PackageAppDataCleanupFailed" -Action {
+        if ($script:installAttempted -and $null -eq $script:packageAppDataPath) {
+            throw "The exact native playback package data path is unavailable."
+        }
+        if ($script:installAttempted) {
+            if (-not $script:packageRemoved) {
+                throw "Refusing package app-data cleanup while the package remains registered."
+            }
+            Wait-PackageAppDataRemoval
+        }
+        $script:packageAppDataRemoved = $true
+    }
+
+    Invoke-CleanupStep -Code "RuntimeDependencyCleanupFailed" -Action {
+        Restore-RuntimeDependencyPackageGraph
+    }
+
+    Invoke-CleanupStep -Code "EnvironmentCleanupFailed" -Action {
+        foreach ($entry in $script:environmentBackup.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+            if (-not [object]::Equals(
+                    [Environment]::GetEnvironmentVariable($entry.Key, "Process"),
+                    $entry.Value)) {
+                throw "A native playback build environment value was not restored."
+            }
+        }
+        $script:environmentRestored = $true
+    }
+
+    Invoke-CleanupStep -Code "TlsCertificateCleanupFailed" -Action {
+        if ($null -ne $script:tlsCertificate) {
+            foreach ($path in @(
+                    "Cert:\LocalMachine\Root\$($script:tlsCertificate.Thumbprint)",
+                    "Cert:\CurrentUser\My\$($script:tlsCertificate.Thumbprint)")) {
+                Remove-ExactCertificate `
+                    -StorePath $path `
+                    -Thumbprint $script:tlsCertificate.Thumbprint `
+                    -ExpectedSubject $script:tlsCertificate.Subject
+            }
+        }
+        $script:tlsCertificateRemoved = $true
+    }
+
+    Invoke-CleanupStep -Code "SigningCertificateCleanupFailed" -Action {
+        if ($null -ne $script:signingCertificate) {
+            foreach ($path in @(
+                    "Cert:\LocalMachine\TrustedPeople\$($script:signingCertificate.Thumbprint)",
+                    "Cert:\CurrentUser\My\$($script:signingCertificate.Thumbprint)")) {
+                Remove-ExactCertificate `
+                    -StorePath $path `
+                    -Thumbprint $script:signingCertificate.Thumbprint `
+                    -ExpectedSubject $script:signingCertificate.Subject
+            }
+        }
+        $script:signingCertificateRemoved = $true
+    }
+
+    Invoke-CleanupStep -Code "ExportedCertificateCleanupFailed" -Action {
+        Remove-ExactOwnedFile -Path $script:signingCertificatePath -ExpectedParent $script:artifactRoot
+        Remove-ExactOwnedFile -Path $script:tlsCertificatePath -ExpectedParent $script:artifactRoot
+        if ((Test-Path -LiteralPath $script:signingCertificatePath) -or
+            (Test-Path -LiteralPath $script:tlsCertificatePath)) {
+            throw "An exported native playback certificate remains."
+        }
+        $script:exportedCertificateFilesRemoved = $true
+    }
+
+    Invoke-CleanupStep -Code "PackageOutputCleanupFailed" -Action {
+        Remove-ExactOwnedTree -Path $script:packageOutput -ExpectedParent $script:packagesRoot
+        if (Test-Path -LiteralPath $script:packageOutput) {
+            throw "The exact native playback package output remains."
+        }
+        $script:runOutputRemoved = $true
+    }
 }
+
+if ($cleanupFailures.Count -eq 0) {
+    try {
+        Set-FailurePoint -Stage "RepositoryBinding" -Code "RepositoryChanged"
+        if (@(Get-RepositoryStatus).Count -ne 0 -or (Get-RepositoryHead) -ne $repositoryHead) {
+            throw "The repository changed during the native playback smoke."
+        }
+    }
+    catch {
+        if ($null -eq $primaryFailure) {
+            $primaryFailure = $_
+            $primaryFailureStage = $failureStage
+            $primaryFailureCode = $failureCode
+        }
+    }
+}
+
+if ($null -eq $primaryFailure -and $cleanupFailures.Count -eq 0) {
+    try {
+        Set-FailurePoint -Stage "CleanupVerification" -Code "CleanupEvidenceIncomplete"
+        if ($null -eq $successCandidate -or
+            -not $processExitedWithoutForce -or
+            $forcedProcessTerminationUsed -or
+            -not $processCleanupPassed -or
+            -not $tlsServerDisposed -or
+            -not $packageRemoved -or
+            -not $packageAppDataRemoved -or
+            -not $runtimePackageGraphRestored -or
+            -not $tlsCertificateRemoved -or
+            -not $signingCertificateRemoved -or
+            -not $exportedCertificateFilesRemoved -or
+            -not $runOutputRemoved -or
+            -not $environmentRestored) {
+            throw "The native playback cleanup evidence is incomplete."
+        }
+
+        $successCandidate["CompletedAtUtc"] = [DateTime]::UtcNow.ToString("O")
+        $successCandidate["NormalCloseVerified"] = $true
+        $successCandidate["ForcedProcessTerminationUsed"] = $false
+        $successCandidate["ProcessCleanupPassed"] = $true
+        $successCandidate["TlsServerDisposed"] = $true
+        $successCandidate["PackageRemoved"] = $true
+        $successCandidate["PackageAppDataRemoved"] = $true
+        $successCandidate["PackageAppDataEmptyRootCleanupUsed"] = $packageAppDataEmptyRootCleanupUsed
+        $successCandidate["RuntimePackageGraphRestored"] = $true
+        $successCandidate["EphemeralCertificatesRemoved"] = $true
+        $successCandidate["ExportedCertificateFilesRemoved"] = $true
+        $successCandidate["PackageOutputRemoved"] = $true
+        $successCandidate["EnvironmentRestored"] = $true
+        $successCandidate["RepositoryCleanAfterRun"] = $true
+
+        Set-FailurePoint -Stage "EvidencePublication" -Code "EvidencePublicationFailed"
+        Write-JsonAtomically -Value $successCandidate -DestinationPath $evidencePath
+    }
+    catch {
+        $primaryFailure = $_
+        $primaryFailureStage = $failureStage
+        $primaryFailureCode = $failureCode
+    }
+}
+
+if ($null -ne $primaryFailure -or $cleanupFailures.Count -ne 0) {
+    $effectiveStage = $primaryFailureStage
+    $effectiveCode = $primaryFailureCode
+    if ($cleanupFailures.Count -ne 0) {
+        $effectiveStage = "Cleanup"
+        $effectiveCode = if ($cleanupFailures.Count -eq 1) {
+            $cleanupFailures[0]
+        }
+        else {
+            "MultipleCleanupFailures"
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($effectiveStage)) { $effectiveStage = "Unknown" }
+    if ([string]::IsNullOrWhiteSpace($effectiveCode)) { $effectiveCode = "UnexpectedFailure" }
+
+    $failureEvidence = [ordered]@{
+        Stage = $effectiveStage
+        Code = $effectiveCode
+    }
+    try {
+        New-RegularDirectory -Path (Join-Path $repositoryRoot ".artifacts")
+        New-RegularDirectory -Path $artifactRoot
+        if (Test-Path -LiteralPath $evidencePath) {
+            Remove-ExactOwnedFile -Path $evidencePath -ExpectedParent $artifactRoot
+        }
+        Write-JsonAtomically -Value $failureEvidence -DestinationPath $failureEvidencePath
+    }
+    catch {
+        throw "Native playback smoke failed and stable failure evidence could not be written."
+    }
+
+    if ($cleanupFailures.Count -ne 0) {
+        throw "Native playback smoke failed at $effectiveStage ($effectiveCode)."
+    }
+    throw $primaryFailure
+}
+
+Write-Host "Native packaged Tier A playback smoke passed: $SwitchCount alternating switches."

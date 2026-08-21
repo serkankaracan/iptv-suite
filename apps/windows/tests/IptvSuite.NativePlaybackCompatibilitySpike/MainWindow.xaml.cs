@@ -1,7 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Windows.Graphics;
@@ -539,6 +537,7 @@ public sealed partial class MainWindow : Window, IDisposable
 }
 
 internal sealed record NativePlaybackProbeRequest(
+    Guid RunId,
     IReadOnlyList<Uri> Fixtures,
     int SwitchCount,
     TimeSpan SoakDuration)
@@ -552,7 +551,9 @@ internal sealed record NativePlaybackProbeRequest(
     internal static NativePlaybackProbeRequest Parse(string? arguments)
     {
         string[] parts = arguments?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
-        if (parts is not ["probe", string direct, string hls, string switchText, string soakText] ||
+        if (parts is not ["probe", string runIdText, string direct, string hls, string switchText, string soakText] ||
+            !Guid.TryParseExact(runIdText, "N", out Guid runId) ||
+            runId.ToString("N") != runIdText ||
             !int.TryParse(switchText, out int switchCount) || switchCount is < 2 or > 100 ||
             !int.TryParse(soakText, out int soakMinutes) || soakMinutes is < 0 or > 480 ||
             (soakMinutes > 0 && switchCount != 100) ||
@@ -569,7 +570,7 @@ internal sealed record NativePlaybackProbeRequest(
             throw new ArgumentException("Native playback fixtures must share one loopback authority and use distinct paths.", nameof(arguments));
         }
 
-        return new NativePlaybackProbeRequest([hlsUri, directUri], switchCount, TimeSpan.FromMinutes(soakMinutes));
+        return new NativePlaybackProbeRequest(runId, [hlsUri, directUri], switchCount, TimeSpan.FromMinutes(soakMinutes));
     }
 
     private static void ValidateFixture(Uri fixture)
@@ -587,6 +588,7 @@ internal enum NativePlaybackFailure
 {
     None,
     InvalidArguments,
+    RuntimeDependencyResolutionFailed,
     MediaFailed,
     MediaOpenTimeout,
     PlaybackAdvanceTimeout,
@@ -631,12 +633,6 @@ internal sealed record NativePlaybackProbeResult(
     int InitialHandleCount,
     int FinalHandleCount)
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
-    };
-
     internal static NativePlaybackProbeResult Passed(
         int switchCount,
         IReadOnlyList<double> startupSamples,
@@ -733,7 +729,6 @@ internal sealed record NativePlaybackProbeResult(
         return ordered[percentileIndex];
     }
 
-    internal string ToJson() => JsonSerializer.Serialize(this, SerializerOptions);
 }
 
 internal sealed class NativePlaybackSurfaceException : Exception;
