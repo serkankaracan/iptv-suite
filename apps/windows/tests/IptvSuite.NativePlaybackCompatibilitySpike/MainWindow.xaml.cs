@@ -41,6 +41,7 @@ public sealed partial class MainWindow : Window, IDisposable
         long initialPrivateBytes = process.PrivateMemorySize64;
         int initialHandles = process.HandleCount;
         NativePlaybackFailure timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
+        int completedSwitchCount = 0;
 
         try
         {
@@ -61,6 +62,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
                 _mediaPlayer.Pause();
                 _mediaPlayer.Source = null;
+                completedSwitchCount++;
                 timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
             }
 
@@ -76,15 +78,16 @@ public sealed partial class MainWindow : Window, IDisposable
         catch (TimeoutException)
         {
             return NativePlaybackProbeResult.Failed(
-                _mediaFailure == NativePlaybackFailure.None ? timeoutFailure : _mediaFailure);
+                _mediaFailure == NativePlaybackFailure.None ? timeoutFailure : _mediaFailure,
+                completedSwitchCount);
         }
         catch (OperationCanceledException)
         {
-            return NativePlaybackProbeResult.Failed(NativePlaybackFailure.Cancelled);
+            return NativePlaybackProbeResult.Failed(NativePlaybackFailure.Cancelled, completedSwitchCount);
         }
         catch (InvalidOperationException) when (_mediaFailure == NativePlaybackFailure.MediaFailed)
         {
-            return NativePlaybackProbeResult.Failed(NativePlaybackFailure.MediaFailed);
+            return NativePlaybackProbeResult.Failed(NativePlaybackFailure.MediaFailed, completedSwitchCount);
         }
         finally
         {
@@ -161,7 +164,7 @@ internal sealed record NativePlaybackProbeRequest(IReadOnlyList<Uri> Fixtures, i
             throw new ArgumentException("Native playback fixtures must share one loopback authority and use distinct paths.", nameof(arguments));
         }
 
-        return new NativePlaybackProbeRequest([directUri, hlsUri], switchCount);
+        return new NativePlaybackProbeRequest([hlsUri, directUri], switchCount);
     }
 
     private static void ValidateFixture(Uri fixture)
@@ -225,8 +228,10 @@ internal sealed record NativePlaybackProbeResult(
             finalHandleCount);
     }
 
-    internal static NativePlaybackProbeResult Failed(NativePlaybackFailure failure) =>
-        new(false, failure, 0, 0, 0, 0, 0, 0, 0);
+    internal static NativePlaybackProbeResult Failed(
+        NativePlaybackFailure failure,
+        int completedSwitchCount = 0) =>
+        new(false, failure, completedSwitchCount, 0, 0, 0, 0, 0, 0);
 
     internal string ToJson() => JsonSerializer.Serialize(this, SerializerOptions);
 }
