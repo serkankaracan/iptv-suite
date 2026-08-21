@@ -606,7 +606,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(page, "x:Name=\"CategorySelector\" Grid.Column=\"1\" TabIndex=\"1\"");
         StringAssert.Contains(page, "x:Name=\"SearchBox\" Grid.Column=\"2\" TabIndex=\"2\"");
         Assert.HasCount(3, Regex.Matches(page, "IsTabStop=\"True\""));
-        Assert.HasCount(3, Regex.Matches(page, "KeyDown=\"CatalogFilter_KeyDown\""));
+        Assert.HasCount(3, Regex.Matches(codeBehind, @"\.AddHandler\(UIElement\.KeyDownEvent, filterKeyHandler, handledEventsToo: true\)"));
+        StringAssert.Contains(codeBehind, "new KeyEventHandler(CatalogFilter_KeyDown)");
         StringAssert.Contains(codeBehind, "GetKeyStateForCurrentThread(VirtualKey.Shift)");
         StringAssert.Contains(codeBehind, "ReferenceEquals(sender, SourceSelector) && !shiftPressed => CategorySelector");
         StringAssert.Contains(codeBehind, "ReferenceEquals(sender, CategorySelector) => SearchBox");

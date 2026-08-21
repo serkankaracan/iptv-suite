@@ -32,6 +32,10 @@ public sealed partial class MainPage : Page, IDisposable
     public MainPage()
     {
         InitializeComponent();
+        var filterKeyHandler = new KeyEventHandler(CatalogFilter_KeyDown);
+        SourceSelector.AddHandler(UIElement.KeyDownEvent, filterKeyHandler, handledEventsToo: true);
+        CategorySelector.AddHandler(UIElement.KeyDownEvent, filterKeyHandler, handledEventsToo: true);
+        SearchBox.AddHandler(UIElement.KeyDownEvent, filterKeyHandler, handledEventsToo: true);
         Unloaded += MainPage_Unloaded;
         string assemblyVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 #if DEBUG
