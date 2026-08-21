@@ -28,6 +28,7 @@ public sealed partial class MainPage : Page, IDisposable
     private int _offset;
     private bool _updatingSelectors;
     private bool _disposed;
+    private bool _movingTabFocus;
     private long _loadingGeneration;
 
     public MainPage()
@@ -178,9 +179,10 @@ public sealed partial class MainPage : Page, IDisposable
     private void CategorySelector_KeyDown(object sender, KeyRoutedEventArgs args) =>
         MoveForwardOnTab(args, CategorySelector, SearchBox);
 
-    private static void MoveForwardOnTab(KeyRoutedEventArgs args, Control owner, Control target)
+    private void MoveForwardOnTab(KeyRoutedEventArgs args, Control owner, Control target)
     {
-        if (args.OriginalSource is not DependencyObject origin || !IsWithin(origin, owner) ||
+        if (_movingTabFocus ||
+            args.OriginalSource is not DependencyObject origin || !IsWithin(origin, owner) ||
             args.Key != VirtualKey.Tab ||
             InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down))
         {
@@ -188,7 +190,9 @@ public sealed partial class MainPage : Page, IDisposable
         }
 
         args.Handled = true;
-        _ = owner.DispatcherQueue.TryEnqueue(() => target.Focus(FocusState.Keyboard));
+        _movingTabFocus = true;
+        try { target.Focus(FocusState.Keyboard); }
+        finally { _movingTabFocus = false; }
     }
 
     private static bool IsWithin(DependencyObject? candidate, DependencyObject ancestor)
