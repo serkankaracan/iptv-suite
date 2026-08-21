@@ -149,7 +149,7 @@ namespace IptvSuite.PackageSmoke
             internal InputUnion Data;
         }
 
-        [StructLayout(LayoutKind.Explicit)]
+        [StructLayout(LayoutKind.Explicit, Size = 32)]
         private struct InputUnion
         {
             [FieldOffset(0)]

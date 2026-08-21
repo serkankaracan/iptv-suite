@@ -648,6 +648,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageDown()");
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()");
         StringAssert.Contains(packageSmoke, "private static extern uint SendInput(");
+        StringAssert.Contains(packageSmoke, "[StructLayout(LayoutKind.Explicit, Size = 32)]");
         StringAssert.Contains(packageSmoke, "CreateKeyboardInput(virtualKey, KeyEventKeyUp)");
         StringAssert.Contains(packageSmoke, "SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != (uint)inputs.Length");
         Assert.IsFalse(packageSmoke.Contains("keybd_event", StringComparison.Ordinal));
