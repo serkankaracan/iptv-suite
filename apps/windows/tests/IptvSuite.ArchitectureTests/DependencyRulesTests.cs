@@ -647,6 +647,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()");
         StringAssert.Contains(packageSmoke, "$scrollFocusItem = $channelListElement.FindFirst(");
         StringAssert.Contains(packageSmoke, "$scrollFocusItem.SetFocus()");
+        Assert.IsTrue(
+            packageSmoke.IndexOf("The packaged catalog did not settle after the input-response probe.", StringComparison.Ordinal) <
+            packageSmoke.IndexOf("$sourceElement.SetFocus()", StringComparison.Ordinal),
+            "The asynchronous input probe must settle before keyboard focus order is measured.");
         Assert.IsFalse(
             packageSmoke.Contains("$channelListElement.SetFocus()", StringComparison.Ordinal),
             "The composite ListView root is not the keyboard-focusable scroll target.");

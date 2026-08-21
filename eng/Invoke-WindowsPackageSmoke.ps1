@@ -1330,6 +1330,15 @@ try {
         throw "The packaged catalog input response budget failed."
     }
 
+    $catalogRestoredDeadline = (Get-Date).AddSeconds(10)
+    while ($statusElement.Current.Name -ne $expectedCatalogStatus -and
+        (Get-Date) -lt $catalogRestoredDeadline) {
+        Start-Sleep -Milliseconds 100
+    }
+    if ($statusElement.Current.Name -ne $expectedCatalogStatus) {
+        throw "The packaged catalog did not settle after the input-response probe."
+    }
+
     $focusReadyDeadline = (Get-Date).AddSeconds(15)
     while ((-not $sourceElement.Current.IsEnabled -or -not $categoryElement.Current.IsEnabled) -and
         (Get-Date) -lt $focusReadyDeadline) {
@@ -1349,15 +1358,6 @@ try {
     Start-Sleep -Milliseconds 150
     Assert-FocusedAutomationElement $searchElement "CatalogSearchBox"
     $catalogKeyboardFocusOrderVerified = $true
-
-    $catalogRestoredDeadline = (Get-Date).AddSeconds(10)
-    while ($statusElement.Current.Name -ne $expectedCatalogStatus -and
-        (Get-Date) -lt $catalogRestoredDeadline) {
-        Start-Sleep -Milliseconds 100
-    }
-    if ($statusElement.Current.Name -ne $expectedCatalogStatus) {
-        throw "The packaged catalog did not settle after the input-response probe."
-    }
     $scrollFocusItem = $channelListElement.FindFirst(
         [System.Windows.Automation.TreeScope]::Descendants,
         $listItemCondition)
