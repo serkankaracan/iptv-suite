@@ -11,13 +11,19 @@ param(
     [int]$SwitchCount = 25,
 
     [ValidateRange(0, 480)]
-    [int]$SoakMinutes = 0
+    [int]$SoakMinutes = 0,
+
+    [ValidateRange(0, 7)]
+    [int]$NetworkInterruptionCount = 0
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 if ($SoakMinutes -gt 0 -and $SwitchCount -ne 100) {
     throw "A native playback soak requires exactly 100 alternating switches."
+}
+if ($NetworkInterruptionCount -gt 0 -and $SwitchCount -ne 100) {
+    throw "A native playback network interruption probe requires exactly 100 alternating switches."
 }
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
 
@@ -110,6 +116,10 @@ namespace IptvSuite.NativePlaybackSmoke
         private int openEndedRangeCount;
         private int suffixRangeCount;
         private int boundedRangeCount;
+        private int armedMediaFailure;
+        private int pendingRecovery;
+        private int injectedFailureCount;
+        private int recoveryCount;
         private long completedBodyBytes;
 
         public TierATlsServer(string root, X509Certificate2 certificate)
@@ -131,7 +141,18 @@ namespace IptvSuite.NativePlaybackSmoke
         public int OpenEndedRangeCount { get { return Volatile.Read(ref openEndedRangeCount); } }
         public int SuffixRangeCount { get { return Volatile.Read(ref suffixRangeCount); } }
         public int BoundedRangeCount { get { return Volatile.Read(ref boundedRangeCount); } }
+        public int InjectedFailureCount { get { return Volatile.Read(ref injectedFailureCount); } }
+        public int RecoveryCount { get { return Volatile.Read(ref recoveryCount); } }
         public long CompletedBodyBytes { get { return Interlocked.Read(ref completedBodyBytes); } }
+
+        public void ArmNextMediaRequestFailure()
+        {
+            if (Volatile.Read(ref pendingRecovery) != 0 ||
+                Interlocked.CompareExchange(ref armedMediaFailure, 1, 0) != 0)
+            {
+                throw new InvalidOperationException("A media fault is already pending.");
+            }
+        }
 
         private async Task AcceptLoopAsync()
         {
@@ -216,6 +237,13 @@ namespace IptvSuite.NativePlaybackSmoke
 
                     long contentLength = end - start + 1;
                     Interlocked.Increment(ref requestCount);
+                    if (Interlocked.Exchange(ref armedMediaFailure, 0) == 1)
+                    {
+                        Interlocked.Exchange(ref pendingRecovery, 1);
+                        Interlocked.Increment(ref injectedFailureCount);
+                        await WriteStatusAsync(ssl, 503).ConfigureAwait(false);
+                        return;
+                    }
                     if (request[0] == "HEAD") Interlocked.Increment(ref headRequestCount);
                     if (partial)
                     {
@@ -252,6 +280,10 @@ namespace IptvSuite.NativePlaybackSmoke
                     await ssl.FlushAsync().ConfigureAwait(false);
                     if (request[0] == "GET") Interlocked.Add(ref completedBodyBytes, contentLength);
                     Interlocked.Increment(ref completedResponseCount);
+                    if (Interlocked.Exchange(ref pendingRecovery, 0) == 1)
+                    {
+                        Interlocked.Increment(ref recoveryCount);
+                    }
                 }
                 catch (IOException) { Interlocked.Increment(ref ioAbortCount); }
                 catch (AuthenticationException) { Interlocked.Increment(ref failureCount); }
@@ -436,9 +468,28 @@ try {
 
     $packageEvidencePath = Join-Path $env:LOCALAPPDATA "Packages\$($installedPackage.PackageFamilyName)\LocalCache\M10NativePlayback\last-result.json"
     $deadline = (Get-Date).AddMinutes([Math]::Max(15, $SoakMinutes + 15))
+    $probeStarted = Get-Date
+    $scheduledInterruptionCount = 0
     while (-not (Test-Path -LiteralPath $packageEvidencePath -PathType Leaf) -and (Get-Date) -lt $deadline) {
         $launchedProcess.Refresh()
         if ($launchedProcess.HasExited) { throw "Native playback probe exited before writing evidence." }
+        if ($scheduledInterruptionCount -lt $NetworkInterruptionCount -and
+            $scheduledInterruptionCount -eq $tlsServer.InjectedFailureCount -and
+            $tlsServer.InjectedFailureCount -eq $tlsServer.RecoveryCount) {
+            $nextInterruption = $scheduledInterruptionCount + 1
+            $interruptionDue = if ($SoakMinutes -gt 0) {
+                ((Get-Date) - $probeStarted).TotalSeconds -ge
+                    (($SoakMinutes * 60.0 / ($NetworkInterruptionCount + 1)) * $nextInterruption)
+            }
+            else {
+                $tlsServer.RequestCount -ge
+                    [Math]::Ceiling(($SwitchCount * 1.0 / ($NetworkInterruptionCount + 1)) * $nextInterruption)
+            }
+            if ($interruptionDue) {
+                $tlsServer.ArmNextMediaRequestFailure()
+                $scheduledInterruptionCount++
+            }
+        }
         Start-Sleep -Milliseconds 250
     }
     if (-not (Test-Path -LiteralPath $packageEvidencePath -PathType Leaf)) { throw "Native playback probe evidence deadline expired." }
@@ -448,7 +499,7 @@ try {
     if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or
         [int]$probe.SwitchCount -ne $SwitchCount -or
         [int]$probe.SurfaceTransitionCount -ne $expectedSurfaceTransitions) {
-        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), surfaceTransitions=$($probe.SurfaceTransitionCount), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
+        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) {
         throw "Native playback startup budget failed: p95=$($probe.StartupP95Milliseconds), maximum=$($probe.StartupMaximumMilliseconds), hlsP95=$($probe.HlsStartupP95Milliseconds), directP95=$($probe.DirectStartupP95Milliseconds)."
@@ -462,9 +513,14 @@ try {
         throw "Native playback soak resource budget failed."
     }
     if ($tlsServer.FailureCount -ne 0 -or $tlsServer.RequestCount -lt $SwitchCount) { throw "Loopback media request invariant failed." }
+    if ($scheduledInterruptionCount -ne $NetworkInterruptionCount -or
+        $tlsServer.InjectedFailureCount -ne $NetworkInterruptionCount -or
+        $tlsServer.RecoveryCount -ne $NetworkInterruptionCount) {
+        throw "Native playback network interruption/recovery invariant failed."
+    }
 
     $summary = [ordered]@{
-        SchemaVersion = 3
+        SchemaVersion = 4
         Stage = "M10NativeTierAPlayback"
         Result = "Passed"
         SwitchCount = $SwitchCount
@@ -481,6 +537,8 @@ try {
         WarmupHandleCount = [int]$probe.WarmupHandleCount
         HandleNetGrowth = [int]$probe.HandleNetGrowth
         SurfaceTransitionCount = [int]$probe.SurfaceTransitionCount
+        NetworkInterruptionCount = $tlsServer.InjectedFailureCount
+        NetworkRecoveryCount = $tlsServer.RecoveryCount
         InitialPrivateBytes = [long]$probe.InitialPrivateBytes
         FinalPrivateBytes = [long]$probe.FinalPrivateBytes
         InitialHandleCount = [int]$probe.InitialHandleCount

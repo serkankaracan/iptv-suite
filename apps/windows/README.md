@@ -147,7 +147,7 @@ ADR-007 Tier A playback corpus'u `tests/fixtures/playback/tier-a` altındadır. 
 ADR-007 native fallback acceptance controller'ı elevated, interactive Windows Client üzerinde disposable signed MSIX'i kurar; yalnız TLS loopback sentetik Tier A corpus'unu kullanır ve exact package/certificate cleanup uygular. Kısa hosted diagnostic varsayılan 25 alternating switch'tir. Authoritative long-soak komutu tam 100 switch, ilk switch'ten başlayan 8 saat süre, 5 dakikalık resource örnekleri ve 30 dakika warm-up sonrası `%10` + `100 MiB` memory sınırını fail-closed uygular:
 
 ```powershell
-.\eng\Invoke-WindowsNativePlaybackSmoke.ps1 -Configuration Release -SwitchCount 100 -SoakMinutes 480
+.\eng\Invoke-WindowsNativePlaybackSmoke.ps1 -Configuration Release -SwitchCount 100 -SoakMinutes 480 -NetworkInterruptionCount 7
 ```
 
 Bu komutun veya kodunun varlığı acceptance PASS değildir. Sonuç ancak gerçek Windows Client/reference-device run'ında schema-v2 sanitized evidence, sıfır crash/deadlock, startup bütçesi ve cleanup birlikte geçtiğinde doğrulanır; GitHub-hosted Windows Server sonucu reference-device yerine geçmez.

@@ -432,7 +432,7 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 
 | ID | Durum | Soru/varsayım | Kapatma yöntemi | Owner/milestone |
 |---|---|---|---|---|
-| O1 | PARTIAL | ADR-007 Windows-native Tier A fallback tam reference matrix, WinUI surface ve MSIX acceptance'ını geçer mi? 100 switch/120 dakika developer soak VERIFIED; resize/minimize/restore/fullscreen packaged alt kümesi PARTIAL VERIFIED. 8 saat, kalan surface/network ve HW-decode matrisi açık. | M10 full matrix, 8 saat soak, WACK | Playback / M10 |
+| O1 | PARTIAL | ADR-007 Windows-native Tier A fallback tam reference matrix, WinUI surface ve MSIX acceptance'ını geçer mi? 100 switch/120 dakika developer soak VERIFIED; resize/minimize/restore/fullscreen ile tek HTTP interruption/recovery packaged alt kümeleri PARTIAL VERIFIED. 8 saat, kalan surface/network ve HW-decode matrisi açık. | M10 full matrix, 8 saat soak, WACK | Playback / M10 |
 | O2 | VERIFIED / CLOSED, 2026-08-21 | Aynı-SQLite-transaction production yönü component bütçelerini ve process-crash old-or-new recovery invariant'ını karşılar mı? | [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) + [Decision evidence](../quality/M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) | Security/Data / M4–M8 |
 | O3 | UNVERIFIED | M1 engineering sınırı 10.0.26100/x64; nihai product minimumu ve ARM64 release talebi nedir? | Market/support data + clean devices | Product / M15 |
 | O4 | UNVERIFIED | Microsoft Store BYO IPTV modelini kabul eder mi? | Partner Center private/pre-certification | Product/Legal / M15 |

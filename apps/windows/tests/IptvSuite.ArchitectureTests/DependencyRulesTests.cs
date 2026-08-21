@@ -2131,7 +2131,17 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "MemoryNetGrowthPercent -gt 10");
         StringAssert.Contains(controller, "$expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }");
         StringAssert.Contains(controller, "SurfaceTransitionCount = [int]$probe.SurfaceTransitionCount");
-        StringAssert.Contains(controller, "SchemaVersion = 3");
+        StringAssert.Contains(controller, "[ValidateRange(0, 7)]");
+        StringAssert.Contains(controller, "$NetworkInterruptionCount -gt 0 -and $SwitchCount -ne 100");
+        StringAssert.Contains(controller, "ArmNextMediaRequestFailure");
+        StringAssert.Contains(controller, "Interlocked.Exchange(ref armedMediaFailure, 0) == 1");
+        StringAssert.Contains(controller, "NetworkInterruptionCount = $tlsServer.InjectedFailureCount");
+        StringAssert.Contains(controller, "NetworkRecoveryCount = $tlsServer.RecoveryCount");
+        StringAssert.Contains(controller, "SchemaVersion = 4");
+        string readme = File.ReadAllText(Path.Combine(RepositoryRoot, "apps", "windows", "README.md"));
+        StringAssert.Contains(
+            readme,
+            "-SwitchCount 100 -SoakMinutes 480 -NetworkInterruptionCount 7");
         StringAssert.Contains(controller, "Assert-PackagePayload");
         StringAssert.Contains(controller, "Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop");
         StringAssert.Contains(controller, "Remove-ExactPackage");
