@@ -1242,6 +1242,32 @@ function Wait-PackageAppDataRemoval {
     }
 }
 
+function Test-RuntimeDependencyPackageGraph {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$ExpectedPackageFullNames
+    )
+
+    $actualNames = @(Get-RuntimeDependencyPackages |
+        ForEach-Object { $_.PackageFullName } |
+        Sort-Object)
+    if ($actualNames.Count -ne $ExpectedPackageFullNames.Count) {
+        return $false
+    }
+
+    for ($index = 0; $index -lt $ExpectedPackageFullNames.Count; $index++) {
+        if (-not [string]::Equals(
+                $ExpectedPackageFullNames[$index],
+                $actualNames[$index],
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Restore-RuntimeDependencyPackageGraph {
     if ($null -eq $script:runtimePackagesBefore) {
         if ($script:installAttempted) {
@@ -1253,52 +1279,71 @@ function Restore-RuntimeDependencyPackageGraph {
     }
 
     $beforeNames = @($script:runtimePackagesBefore)
-    $currentPackages = @(Get-RuntimeDependencyPackages)
-    $addedPackages = @($currentPackages | Where-Object {
-        $currentFullName = $_.PackageFullName
-        @($beforeNames | Where-Object {
-            [string]::Equals($_, $currentFullName, [System.StringComparison]::OrdinalIgnoreCase)
-        }).Count -eq 0
-    })
-    foreach ($package in $addedPackages) {
-        if ($package.Architecture.ToString() -ne "X64" -or
-            $package.Version.ToString() -ne $script:expectedRuntimeDependencyVersion -or
-            -not [string]::Equals(
-                $package.PackageFamilyName,
-                "$($script:expectedRuntimeDependencyName)_$($script:expectedRuntimeDependencyPublisherId)",
-                [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "An unexpected Windows App Runtime registration appeared during the transaction."
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
+            $script:runtimePackageGraphRestored = $true
+            return
         }
 
-        Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop
-    }
+        $currentPackages = @(Get-RuntimeDependencyPackages)
+        $addedPackages = @($currentPackages | Where-Object {
+            $currentFullName = $_.PackageFullName
+            @($beforeNames | Where-Object {
+                [string]::Equals($_, $currentFullName, [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -eq 0
+        })
+        foreach ($package in $addedPackages) {
+            $runtimeVersion = [version]::new()
+            $runtimeVersionValid = [version]::TryParse(
+                $package.Version.ToString(),
+                [ref]$runtimeVersion)
+            if ([string]::IsNullOrWhiteSpace([string]$package.PackageFullName) -or
+                -not [string]::Equals(
+                    $package.Name,
+                    $script:expectedRuntimeDependencyName,
+                    [System.StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals(
+                    $package.Publisher,
+                    $script:expectedRuntimeDependencyPublisher,
+                    [System.StringComparison]::Ordinal) -or
+                $package.Architecture.ToString() -ne "X64" -or
+                $package.IsFramework -ne $true -or
+                -not $runtimeVersionValid -or
+                $runtimeVersion.Major -ne 2 -or
+                $runtimeVersion -lt [version]$script:expectedRuntimeDependencyVersion -or
+                -not [string]::Equals(
+                    $package.PackageFamilyName,
+                    "$($script:expectedRuntimeDependencyName)_$($script:expectedRuntimeDependencyPublisherId)",
+                    [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "An unexpected Windows App Runtime registration appeared during the transaction."
+            }
 
-    $deadline = (Get-Date).AddSeconds(15)
-    do {
-        $afterNames = @(Get-RuntimeDependencyPackages |
-            ForEach-Object { $_.PackageFullName } |
-            Sort-Object)
-        $matches = $afterNames.Count -eq $beforeNames.Count
-        if ($matches) {
-            for ($index = 0; $index -lt $beforeNames.Count; $index++) {
-                if (-not [string]::Equals(
-                        $beforeNames[$index],
-                        $afterNames[$index],
-                        [System.StringComparison]::OrdinalIgnoreCase)) {
-                    $matches = $false
-                    break
+            $packageFullName = [string]$package.PackageFullName
+            try {
+                Remove-AppxPackage -Package $packageFullName -ErrorAction Stop
+            }
+            catch {
+                $stillRegistered = @(Get-RuntimeDependencyPackages | Where-Object {
+                    [string]::Equals(
+                        $_.PackageFullName,
+                        $packageFullName,
+                        [System.StringComparison]::OrdinalIgnoreCase)
+                }).Count -ne 0
+                if ($stillRegistered -and (Get-Date) -ge $deadline) {
+                    throw
                 }
             }
         }
 
-        if ($matches) { break }
+        if (Test-RuntimeDependencyPackageGraph -ExpectedPackageFullNames $beforeNames) {
+            $script:runtimePackageGraphRestored = $true
+            return
+        }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
 
-    if (-not $matches) {
-        throw "The Windows App Runtime package graph was not restored."
-    }
-    $script:runtimePackageGraphRestored = $true
+    throw "The Windows App Runtime package graph was not restored."
 }
 
 function Close-TrackedProcessNormally {

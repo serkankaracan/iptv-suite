@@ -2220,7 +2220,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "$dependencySignature.Status.ToString() -ne \"Valid\"");
         StringAssert.Contains(controller, "Task.WaitAll(handlers, TimeSpan.FromSeconds(5))");
         StringAssert.Contains(controller, "RemoveExactEmptyDirectory(");
+        StringAssert.Contains(controller, "Test-RuntimeDependencyPackageGraph");
         StringAssert.Contains(controller, "Restore-RuntimeDependencyPackageGraph");
+        StringAssert.Contains(controller, "$deadline = (Get-Date).AddSeconds(30)");
+        StringAssert.Contains(controller, "$package.IsFramework -ne $true");
+        StringAssert.Contains(controller, "$runtimeVersion.Major -ne 2");
+        StringAssert.Contains(controller, "$runtimeVersion -lt [version]$script:expectedRuntimeDependencyVersion");
+        StringAssert.Contains(controller, "$stillRegistered = @(Get-RuntimeDependencyPackages | Where-Object");
         StringAssert.Contains(controller, "Invoke-CleanupStep -Code \"RuntimeDependencyCleanupFailed\"");
         StringAssert.Contains(controller, "PackageAppDataEmptyRootCleanupUsed = $false");
         StringAssert.Contains(controller, "RuntimePackageGraphRestored = $false");
