@@ -4,16 +4,14 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using IptvSuite.Application;
 using IptvSuite.Domain;
-using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.ApplicationModel;
+using Windows.Foundation;
 using Windows.Storage.Streams;
-using Windows.System;
-using Windows.UI.Core;
 
 namespace IptvSuite.Windows;
 
@@ -32,10 +30,10 @@ public sealed partial class MainPage : Page, IDisposable
     public MainPage()
     {
         InitializeComponent();
-        var filterKeyHandler = new KeyEventHandler(CatalogFilter_KeyDown);
-        SourceSelector.AddHandler(UIElement.KeyDownEvent, filterKeyHandler, handledEventsToo: true);
-        CategorySelector.AddHandler(UIElement.KeyDownEvent, filterKeyHandler, handledEventsToo: true);
-        SearchBox.AddHandler(UIElement.KeyDownEvent, filterKeyHandler, handledEventsToo: true);
+        AddHandler(
+            UIElement.GettingFocusEvent,
+            new TypedEventHandler<UIElement, GettingFocusEventArgs>(CatalogFilter_GettingFocus),
+            handledEventsToo: true);
         Unloaded += MainPage_Unloaded;
         string assemblyVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 #if DEBUG
@@ -151,26 +149,27 @@ public sealed partial class MainPage : Page, IDisposable
     private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { _offset = 0; await BrowseAsync(false); }
     private async void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) { if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput) { _offset = 0; await BrowseAsync(debounce: true); } }
 
-    private void CatalogFilter_KeyDown(object sender, KeyRoutedEventArgs args)
+    private void CatalogFilter_GettingFocus(UIElement sender, GettingFocusEventArgs args)
     {
-        if (args.Key != VirtualKey.Tab) return;
-
-        bool shiftPressed = InputKeyboardSource
-            .GetKeyStateForCurrentThread(VirtualKey.Shift)
-            .HasFlag(CoreVirtualKeyStates.Down);
-        Control? target = sender switch
+        DependencyObject? oldFocus = args.OldFocusedElement as DependencyObject;
+        DependencyObject? newFocus = args.NewFocusedElement as DependencyObject;
+        bool skippedForward = IsWithin(oldFocus, SourceSelector) && IsWithin(newFocus, SearchBox);
+        bool skippedBackward = IsWithin(oldFocus, SearchBox) && IsWithin(newFocus, SourceSelector);
+        if ((skippedForward || skippedBackward) && !args.TrySetNewFocusedElement(CategorySelector))
         {
-            _ when ReferenceEquals(sender, SourceSelector) && !shiftPressed => CategorySelector,
-            _ when ReferenceEquals(sender, CategorySelector) && shiftPressed => SourceSelector,
-            _ when ReferenceEquals(sender, CategorySelector) => SearchBox,
-            _ when ReferenceEquals(sender, SearchBox) && shiftPressed => CategorySelector,
-            _ => null,
-        };
-
-        if (target is not null && target.Focus(FocusState.Keyboard))
-        {
-            args.Handled = true;
+            args.Cancel = true;
         }
+    }
+
+    private static bool IsWithin(DependencyObject? candidate, DependencyObject ancestor)
+    {
+        for (int depth = 0; candidate is not null && depth < 32; depth++)
+        {
+            if (ReferenceEquals(candidate, ancestor)) return true;
+            candidate = VisualTreeHelper.GetParent(candidate);
+        }
+
+        return false;
     }
 
     private async void PreviousButton_Click(object sender, RoutedEventArgs e) { _offset = Math.Max(0, _offset - PageSize); await BrowseAsync(false); }
