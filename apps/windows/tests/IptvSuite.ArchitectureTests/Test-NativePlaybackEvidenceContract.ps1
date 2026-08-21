@@ -651,6 +651,8 @@ $runtimeGraphTestText =
     (Get-ControllerFunctionDefinition -Name "Test-RuntimeDependencyPackageGraph").Extent.Text.Replace(
         "Get-RuntimeDependencyPackages",
         "Invoke-MockGetRuntimeDependencyPackages")
+$runtimeRemovalFailureCodeText =
+    (Get-ControllerFunctionDefinition -Name "Get-ReviewedAppxDeploymentFailureCodes").Extent.Text
 $runtimeGraphRestoreText =
     (Get-ControllerFunctionDefinition -Name "Restore-RuntimeDependencyPackageGraph").Extent.Text.Replace(
         "Get-RuntimeDependencyPackages",
@@ -662,7 +664,40 @@ $runtimeGraphRestoreText =
         "Start-Sleep",
         "Invoke-MockStartSleep")
 . ([scriptblock]::Create($runtimeGraphTestText))
+. ([scriptblock]::Create($runtimeRemovalFailureCodeText))
 . ([scriptblock]::Create($runtimeGraphRestoreText))
+
+$innerDeploymentException = [System.Runtime.InteropServices.COMException]::new(
+    "inner-sensitive 0x80070005",
+    [int]0x80073D02)
+$outerDeploymentException = [System.IO.IOException]::new(
+    "outer-sensitive 0x80073CFA",
+    $innerDeploymentException)
+$deploymentErrorRecord = [System.Management.Automation.ErrorRecord]::new(
+    $outerDeploymentException,
+    "DeploymentError",
+    [System.Management.Automation.ErrorCategory]::WriteError,
+    $null)
+$deploymentErrorRecord.ErrorDetails = [System.Management.Automation.ErrorDetails]::new(
+    "details-sensitive 0x80070490")
+$reviewedDeploymentCodes = @(
+    Get-ReviewedAppxDeploymentFailureCodes -ErrorRecord $deploymentErrorRecord)
+Assert-ExactSequence `
+    -Actual $reviewedDeploymentCodes `
+    -Expected @("0x80131620", "0x80073D02", "0x80070490", "0x80073CFA") `
+    -Message "Runtime removal diagnostics did not preserve the reviewed HRESULT sequence."
+Assert-Contract `
+    (-not (($reviewedDeploymentCodes -join ",") -match "sensitive|DeploymentError")) `
+    "Runtime removal diagnostics disclosed raw exception content."
+
+$unreviewedErrorRecord = [System.Management.Automation.ErrorRecord]::new(
+    [System.Exception]::new("opaque 0xDEADBEEF"),
+    "Unreviewed",
+    [System.Management.Automation.ErrorCategory]::NotSpecified,
+    $null)
+Assert-Contract `
+    (@(Get-ReviewedAppxDeploymentFailureCodes -ErrorRecord $unreviewedErrorRecord).Count -eq 0) `
+    "Runtime removal diagnostics accepted an unreviewed HRESULT."
 
 function Invoke-RuntimeCleanupScenario {
     param(

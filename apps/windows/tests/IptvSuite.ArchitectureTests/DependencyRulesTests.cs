@@ -2242,7 +2242,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "$stillRegistered = @(Get-RuntimeDependencyPackages | Where-Object");
         StringAssert.Contains(controller, "Native runtime cleanup diagnostic: $($script:runtimeDependencyCleanupDiagnostic).");
         StringAssert.Contains(controller, "AddedPackage(version=$versionText;architecture=$architectureText;framework=$frameworkText;familyMatch=$familyMatches;x64Sibling=$x64SiblingMatches)");
-        StringAssert.Contains(controller, "RemovalRetry(hresult=$($_.Exception.HResult);registered=$stillRegistered)");
+        StringAssert.Contains(controller, "$removeError = $_");
+        StringAssert.Contains(controller, "Get-ReviewedAppxDeploymentFailureCodes -ErrorRecord $removeError");
+        StringAssert.Contains(controller, "$removeError.FullyQualifiedErrorId.StartsWith(");
+        StringAssert.Contains(controller, "\"DeploymentError,\"");
+        StringAssert.Contains(controller, "RemovalRetry(version=$versionText;architecture=$architectureText;codes=$failureCodeText;deploymentError=$deploymentError;registered=$stillRegistered)");
         StringAssert.Contains(controller, "ConvergenceTimeout(beforeCount=$($beforeNames.Count);afterCount=$(@(Get-RuntimeDependencyPackages).Count);addedCount=$lastAddedPackageCount;validatedCount=$lastValidatedAddedPackageCount)");
         StringAssert.Contains(controller, "Invoke-CleanupStep -Code \"RuntimeDependencyCleanupFailed\"");
         StringAssert.Contains(controller, "PackageAppDataEmptyRootCleanupUsed = $false");
@@ -2260,6 +2264,71 @@ public sealed class DependencyRulesTests
                 StringComparison.Ordinal) ||
             controller.Contains("Move-Item -LiteralPath $temporaryPath", StringComparison.Ordinal),
             "Package app-data cleanup must not recurse and evidence publication must not overwrite.");
+
+        int runtimeRemovalClassifierStart = controller.IndexOf(
+            "function Get-ReviewedAppxDeploymentFailureCodes",
+            StringComparison.Ordinal);
+        int runtimeGraphRestoreStart = controller.IndexOf(
+            "function Restore-RuntimeDependencyPackageGraph",
+            runtimeRemovalClassifierStart,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            runtimeRemovalClassifierStart >= 0 && runtimeGraphRestoreStart > runtimeRemovalClassifierStart);
+        string runtimeRemovalClassifier =
+            controller[runtimeRemovalClassifierStart..runtimeGraphRestoreStart];
+        string[] expectedRuntimeRemovalHResults =
+        [
+            "0x80131620",
+            "0x80004001",
+            "0x80070002",
+            "0x80070005",
+            "0x80070032",
+            "0x80070057",
+            "0x80070490",
+            "0x80073CF1",
+            "0x80073CF3",
+            "0x80073CF7",
+            "0x80073CF9",
+            "0x80073CFA",
+            "0x80073CFE",
+            "0x80073D00",
+            "0x80073D01",
+            "0x80073D02",
+            "0x80073D05",
+            "0x80073D06",
+            "0x80073D1D",
+            "0x80073D23",
+        ];
+        string[] actualRuntimeRemovalHResults = Regex.Matches(
+                runtimeRemovalClassifier,
+                @"0x(?!FFFFFFFF)[0-9A-F]{8}")
+            .Select(match => match.Value)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            expectedRuntimeRemovalHResults,
+            actualRuntimeRemovalHResults,
+            "Runtime removal diagnostics must expose only the reviewed HRESULT allowlist.");
+        StringAssert.Contains(
+            runtimeRemovalClassifier,
+            "([int64]$current.HResult -band 0xFFFFFFFFL)");
+        StringAssert.Contains(
+            runtimeRemovalClassifier,
+            "$depth -lt 8");
+        StringAssert.Contains(
+            runtimeRemovalClassifier,
+            "$ErrorRecord.ErrorDetails.Message");
+        StringAssert.Contains(
+            runtimeRemovalClassifier,
+            "$reviewedCodes.Contains($candidate)");
+        StringAssert.Contains(
+            runtimeRemovalClassifier,
+            "$observedCodes.Count -lt 4");
+        Assert.IsFalse(
+            runtimeRemovalClassifier.Contains("Write-", StringComparison.Ordinal) ||
+            runtimeRemovalClassifier.Contains("PackageFullName", StringComparison.Ordinal) ||
+            runtimeRemovalClassifier.Contains("ActivityId", StringComparison.Ordinal) ||
+            runtimeRemovalClassifier.Contains("TargetObject", StringComparison.Ordinal),
+            "Runtime removal classification must not publish raw deployment diagnostics or package identity.");
 
         int successCandidateIndex = controller.IndexOf("$successCandidate = [ordered]@{", StringComparison.Ordinal);
         int cleanupIndex = controller.LastIndexOf("\nfinally {", StringComparison.Ordinal);

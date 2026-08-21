@@ -1276,6 +1276,77 @@ function Test-RuntimeDependencyPackageGraph {
     return $true
 }
 
+function Get-ReviewedAppxDeploymentFailureCodes {
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $reviewedCodes = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($code in @(
+            "0x80131620",
+            "0x80004001",
+            "0x80070002",
+            "0x80070005",
+            "0x80070032",
+            "0x80070057",
+            "0x80070490",
+            "0x80073CF1",
+            "0x80073CF3",
+            "0x80073CF7",
+            "0x80073CF9",
+            "0x80073CFA",
+            "0x80073CFE",
+            "0x80073D00",
+            "0x80073D01",
+            "0x80073D02",
+            "0x80073D05",
+            "0x80073D06",
+            "0x80073D1D",
+            "0x80073D23")) {
+        [void]$reviewedCodes.Add($code)
+    }
+
+    $observedCodes = [System.Collections.Generic.List[string]]::new()
+    $observedCodeSet = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    $diagnosticTexts = [System.Collections.Generic.List[string]]::new()
+    if ($null -ne $ErrorRecord.ErrorDetails -and
+        -not [string]::IsNullOrWhiteSpace($ErrorRecord.ErrorDetails.Message)) {
+        $diagnosticTexts.Add($ErrorRecord.ErrorDetails.Message)
+    }
+    $current = $ErrorRecord.Exception
+    for ($depth = 0; $null -ne $current -and $depth -lt 8; $depth++) {
+        $hresult = "0x{0:X8}" -f ([int64]$current.HResult -band 0xFFFFFFFFL)
+        if ($observedCodes.Count -lt 4 -and
+            $reviewedCodes.Contains($hresult) -and
+            $observedCodeSet.Add($hresult)) {
+            $observedCodes.Add($hresult)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($current.Message)) {
+            $diagnosticTexts.Add($current.Message)
+        }
+
+        $current = $current.InnerException
+    }
+
+    foreach ($diagnosticText in $diagnosticTexts) {
+        foreach ($match in [regex]::Matches(
+                $diagnosticText,
+                "(?i)(?<![0-9A-F])0x[0-9A-F]{8}(?![0-9A-F])")) {
+            $candidate = "0x$($match.Value.Substring(2).ToUpperInvariant())"
+            if ($observedCodes.Count -lt 4 -and
+                $reviewedCodes.Contains($candidate) -and
+                $observedCodeSet.Add($candidate)) {
+                $observedCodes.Add($candidate)
+            }
+        }
+    }
+
+    return @($observedCodes.ToArray())
+}
+
 function Restore-RuntimeDependencyPackageGraph {
     $script:runtimeDependencyCleanupDiagnostic = "SnapshotValidation"
     if ($null -eq $script:runtimePackagesBefore) {
@@ -1400,6 +1471,19 @@ function Restore-RuntimeDependencyPackageGraph {
                 Remove-AppxPackage -Package $packageFullName -ErrorAction Stop
             }
             catch {
+                $removeError = $_
+                $failureCodes = @(Get-ReviewedAppxDeploymentFailureCodes -ErrorRecord $removeError)
+                $failureCodeText = if ($failureCodes.Count -eq 0) {
+                    "Other"
+                }
+                else {
+                    $failureCodes -join ","
+                }
+                $deploymentError =
+                    -not [string]::IsNullOrWhiteSpace($removeError.FullyQualifiedErrorId) -and
+                    $removeError.FullyQualifiedErrorId.StartsWith(
+                        "DeploymentError,",
+                        [System.StringComparison]::Ordinal)
                 $stillRegistered = @(Get-RuntimeDependencyPackages | Where-Object {
                     [string]::Equals(
                         $_.PackageFullName,
@@ -1407,7 +1491,7 @@ function Restore-RuntimeDependencyPackageGraph {
                         [System.StringComparison]::OrdinalIgnoreCase)
                 }).Count -ne 0
                 $script:runtimeDependencyCleanupDiagnostic =
-                    "RemovalRetry(hresult=$($_.Exception.HResult);registered=$stillRegistered)"
+                    "RemovalRetry(version=$versionText;architecture=$architectureText;codes=$failureCodeText;deploymentError=$deploymentError;registered=$stillRegistered)"
                 if ($stillRegistered -and (Get-Date) -ge $deadline) {
                     throw
                 }
