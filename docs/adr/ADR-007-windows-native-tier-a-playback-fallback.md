@@ -4,6 +4,8 @@
 
 **Date:** 2026-08-21
 
+**Implementation note:** Hakları temiz `iptvsuite-tier-a-synthetic-v1` corpus'u reproducible biçimde üretildi. Direct MPEG-TS ile dört segmentli HLS-TS; H.264 High/yuv420p/640×360/25 fps ve AAC-LC/48 kHz/stereo tuple'ını taşır. Generator iki koşuda byte-identical hash üretti ve architecture guard'ı 6 media/playlist dosyasını manifest hash'lerine bağladı. Bu yalnız input/provenance kanıtıdır; packaged playback, startup budget, lifecycle ve soak henüz geçmediğinden ADR `Proposed` kalır.
+
 ## Context / Problem
 
 ADR-002'nin exact `VideoLAN.LibVLC.Windows 3.0.23.1` adayı M10 binary/license hard gate'ini geçemedi. Paket metadata'sı `LGPL-2.1-or-later` dese de x64 payload `libx26410b_plugin.dll` içeriyor; upstream GPL ayırma kaydı bu plugin ailesini GPL riski olarak sınıflandırıyor. Paket ayrıca exact binary-to-source/notices kabulünü tek başına kapatacak embedded envanteri sağlamıyor.
@@ -32,4 +34,4 @@ Bu ADR henüz `Accepted` değildir. Native Tier A corpus %100 başlangıç, cont
 
 ## References
 
-[S21–S23, S27, S110–S111](../research/SOURCES.md)
+[S21–S23, S27, S110–S112](../research/SOURCES.md)

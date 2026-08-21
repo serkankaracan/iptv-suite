@@ -2000,6 +2000,57 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void NativeTierAPlaybackCorpusIsSyntheticLicensedAndByteBound()
+    {
+        string fixtureRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "fixtures",
+            "playback",
+            "tier-a");
+        using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(fixtureRoot, "fixture-manifest.json")));
+        JsonElement root = manifest.RootElement;
+
+        Assert.AreEqual(1, root.GetProperty("SchemaVersion").GetInt32());
+        Assert.AreEqual("iptvsuite-tier-a-synthetic-v1", root.GetProperty("FixtureId").GetString());
+        Assert.AreEqual("CC0-1.0", root.GetProperty("Rights").GetProperty("License").GetString());
+        StringAssert.Contains(
+            root.GetProperty("Rights").GetProperty("Provenance").GetString()!,
+            "no captured or third-party media");
+        Assert.AreEqual("A", root.GetProperty("Capability").GetProperty("Tier").GetString());
+        Assert.AreEqual("H.264 High, yuv420p, 640x360, 25fps", root.GetProperty("Capability").GetProperty("Video").GetString());
+        Assert.AreEqual("AAC-LC, 48kHz, stereo", root.GetProperty("Capability").GetProperty("Audio").GetString());
+
+        JsonElement[] files = root.GetProperty("Files").EnumerateArray().ToArray();
+        Assert.HasCount(6, files);
+        foreach (JsonElement file in files)
+        {
+            string relativePath = file.GetProperty("Path").GetString()!;
+            string fullPath = Path.Combine(fixtureRoot, relativePath);
+            Assert.IsTrue(File.Exists(fullPath), $"Missing Tier A fixture file: {relativePath}");
+            Assert.AreEqual(new FileInfo(fullPath).Length, file.GetProperty("SizeBytes").GetInt64());
+            string actualHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(fullPath))).ToLowerInvariant();
+            Assert.AreEqual(file.GetProperty("Sha256").GetString(), actualHash, $"Tier A fixture hash drifted: {relativePath}");
+        }
+
+        string playlist = File.ReadAllText(Path.Combine(fixtureRoot, "hls.m3u8"));
+        StringAssert.Contains(playlist, "#EXT-X-ENDLIST");
+        Assert.HasCount(4, Regex.Matches(playlist, @"(?m)^hls-\d{3}\.ts$"));
+        Assert.IsFalse(Regex.IsMatch(playlist, @"(?i)(https?://|file:|\\|\.\.)"));
+
+        string generator = File.ReadAllText(Path.Combine(RepositoryRoot, "eng", "New-WindowsTierAPlaybackCorpus.ps1"));
+        StringAssert.Contains(generator, "$expectedToolVersion = 'n9.0.1-6-g9d4ca21220-20260820'");
+        StringAssert.Contains(generator, "$expectedArchiveSha256 = '73d64c702162aaa5eaa8f36c21921f95cb351d737bf89c0557d773cd8cf091a9'");
+        StringAssert.Contains(generator, "Get-FileHash -LiteralPath $archivePath -Algorithm SHA256");
+        StringAssert.Contains(generator, "testsrc2=size=640x360:rate=25");
+        StringAssert.Contains(generator, "sine=frequency=1000:sample_rate=48000");
+        StringAssert.Contains(generator, "-profile:v high");
+        StringAssert.Contains(generator, "-profile:a aac_low");
+    }
+
+    [TestMethod]
     public void M8CatalogCrashHarnessIsIsolatedAndKillsOnlyItsTrackedProcess()
     {
         string harness = File.ReadAllText(Path.Combine(

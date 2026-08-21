@@ -142,6 +142,8 @@ Her çağrı yalnız exact `.artifacts/quality-gates` alt ağacını temizleyip 
 
 ## Sentetik fixture ve canary
 
+ADR-007 Tier A playback corpus'u `tests/fixtures/playback/tier-a` altındadır. `eng/New-WindowsTierAPlaybackCorpus.ps1`, ffmpeg.org'un bağladığı exact SHA-256'lı BtbN generator archive'iyle yalnız `lavfi testsrc2` + `sine` kaynaklarından direct H.264/AAC MPEG-TS ve relative HLS-TS üretir. Manifest CC0/provenance, codec tuple, boyut ve file hash'lerini taşır; generator executable/library'leri repository veya MSIX'e girmez. Corpus'un varlığı playback acceptance sonucu değildir.
+
 `apps/windows/testdata/m2/fixture-spec.json`; generator `1.0.0`, algorithm version `1`, seed `20260809` ve 16 tamamen sentetik record tanımlar. Gerçek provider response'u, kullanıcı verisi, credential, playlist veya medya içermez. Aynı girdiden `records.json` ve `fixture-manifest.json` üretmek için:
 
 ```powershell
