@@ -259,6 +259,7 @@ $artifactRoot = Join-Path $repositoryRoot ".artifacts\native-playback-smoke"
 $runId = [Guid]::NewGuid().ToString("N")
 $packageOutput = Join-Path $artifactRoot "packages\$runId"
 $signingCertificatePath = Join-Path $artifactRoot "$runId-signing.cer"
+$tlsCertificatePath = Join-Path $artifactRoot "$runId-tls.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
 $expectedName = "NativePlaybackCompatibilitySpike.Local.a47d1387"
 $expectedPublisher = "CN=Native Playback Compatibility Spike Local Test"
@@ -330,8 +331,9 @@ try {
     $tlsCertificate = New-SelfSignedCertificate -DnsName "localhost" -CertStoreLocation "Cert:\CurrentUser\My" `
         -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable `
         -NotAfter (Get-Date).AddDays(2) -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.1")
-    $rootStore = [Security.Cryptography.X509Certificates.X509Store]::new("Root", "CurrentUser")
-    try { $rootStore.Open("ReadWrite"); $rootStore.Add($tlsCertificate) } finally { $rootStore.Close() }
+    Export-Certificate -Cert $tlsCertificate -FilePath $tlsCertificatePath | Out-Null
+    Import-Certificate -FilePath $tlsCertificatePath -CertStoreLocation "Cert:\LocalMachine\Root" | Out-Null
+    Write-Host "Ephemeral package-signing and loopback TLS certificates are prepared."
 
     $msBuildEnvironment.PackageCertificateThumbprint = $signingCertificate.Thumbprint
     foreach ($entry in $msBuildEnvironment.GetEnumerator()) {
@@ -342,6 +344,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Locked native playback restore failed." }
     & $DotNetPath build $projectPath -c $Configuration -p:Platform=x64 --no-restore --nologo
     if ($LASTEXITCODE -ne 0) { throw "Signed native playback package build failed." }
+    Write-Host "Disposable native playback package build completed."
 
     $packages = @(Get-ChildItem $packageOutput -Filter "IptvSuite.NativePlaybackCompatibilitySpike_*.msix" -Recurse -File |
         Where-Object { $_.FullName -notmatch '[\\/]Dependencies[\\/]' })
@@ -360,6 +363,7 @@ try {
     $installed = @(Get-AppxPackage -Name $expectedName | Where-Object { $_.Publisher -eq $expectedPublisher })
     if ($installed.Count -ne 1 -or $installed[0].Architecture -ne "X64") { throw "Disposable native playback package installation is ambiguous." }
     $installedPackage = $installed[0]
+    Write-Host "Disposable native playback package installation completed."
 
     $tlsServer = [IptvSuite.NativePlaybackSmoke.TierATlsServer]::new($fixtureRoot, $tlsCertificate)
     $authority = "https://localhost:$($tlsServer.Port)"
@@ -369,6 +373,7 @@ try {
     $launchedProcess = Get-Process -Id $processId -ErrorAction Stop
     $null = $launchedProcess.Handle
     if ($launchedProcess.ProcessName -ne "IptvSuite.NativePlaybackCompatibilitySpike") { throw "Package activation returned an unexpected process." }
+    Write-Host "Native playback probe activation completed."
 
     $packageEvidencePath = Join-Path $env:LOCALAPPDATA "Packages\$($installedPackage.PackageFamilyName)\LocalCache\M10NativePlayback\last-result.json"
     $deadline = (Get-Date).AddMinutes(4)
@@ -413,11 +418,8 @@ finally {
     if ($installAttempted) { try { Remove-ExactPackage } catch { $cleanupFailures.Add("PackageCleanup") } }
     foreach ($entry in $environmentBackup.GetEnumerator()) { [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process") }
     if ($null -ne $tlsCertificate) {
-        foreach ($storeName in @("Root", "My")) {
-            try {
-                $store = [Security.Cryptography.X509Certificates.X509Store]::new($storeName, "CurrentUser")
-                try { $store.Open("ReadWrite"); @($store.Certificates.Find("FindByThumbprint", $tlsCertificate.Thumbprint, $false)) | ForEach-Object { $store.Remove($_) } } finally { $store.Close() }
-            } catch { $cleanupFailures.Add("TlsCertificateCleanup") }
+        foreach ($path in @("Cert:\LocalMachine\Root\$($tlsCertificate.Thumbprint)", "Cert:\CurrentUser\My\$($tlsCertificate.Thumbprint)")) {
+            try { if (Test-Path $path) { Remove-Item -LiteralPath $path -Force } } catch { $cleanupFailures.Add("TlsCertificateCleanup") }
         }
     }
     if ($null -ne $signingCertificate) {
@@ -426,6 +428,7 @@ finally {
         }
     }
     Remove-Item -LiteralPath $signingCertificatePath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tlsCertificatePath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $packageOutput -Recurse -Force -ErrorAction SilentlyContinue
     if ($cleanupFailures.Count -ne 0) { throw "Native playback smoke cleanup failed: $($cleanupFailures -join ', ')." }
 }

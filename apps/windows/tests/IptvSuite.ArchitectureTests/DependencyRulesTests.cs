@@ -2100,6 +2100,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "PackageCertificateThumbprint");
         StringAssert.Contains(controller, "Cert:\\LocalMachine\\TrustedPeople");
         StringAssert.Contains(controller, "New-SelfSignedCertificate -DnsName \"localhost\"");
+        StringAssert.Contains(controller, "Import-Certificate -FilePath $tlsCertificatePath -CertStoreLocation \"Cert:\\LocalMachine\\Root\"");
         StringAssert.Contains(controller, "Tls12LoopbackAllowlist");
         StringAssert.Contains(controller, "new TcpListener(IPAddress.Loopback, 0)");
         StringAssert.Contains(controller, "case \"/direct-h264-aac.ts\"");
@@ -2108,7 +2109,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "StartupP95Milliseconds -gt 3000");
         StringAssert.Contains(controller, "Assert-PackagePayload");
         StringAssert.Contains(controller, "Remove-ExactPackage");
-        StringAssert.Contains(controller, "$store.Remove($_)");
+        StringAssert.Contains(controller, "Cert:\\LocalMachine\\Root\\$($tlsCertificate.Thumbprint)");
         Assert.IsFalse(
             controller.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase) ||
             controller.Contains("http://localhost", StringComparison.OrdinalIgnoreCase),
