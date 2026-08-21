@@ -500,6 +500,8 @@ Collection reset, synchronous DB/image decode veya bad template'in virtualizatio
 
 Proposed libVLC setinin codec/container, WinUI surface, stabilite, lisans ve packaged deployment hard gate'lerini production adapter yazmadan kanıtlamak.
 
+**Implementation status:** `IN PROGRESS` — disposable `IptvSuite.PlaybackCompatibilitySpike` x64 WinUI/MSIX harness'ı production graph'ından ayrı kurulmuştur. Centrally pinned baseline `LibVLCSharp`/`LibVLCSharp.WinUI 3.10.0` ve non-GPL `VideoLAN.LibVLC.Windows 3.0.23.1` exact lock graph'ıyla restore edilmiştir; gerçek `VideoView`, `Core.Initialize`, owned `LibVLC`/`MediaPlayer` ve deterministic dispose Release x64'ta 0 warning/error ile derlenmiştir. Production source ve package payload guard'ları spike leakage'ını ve `.GPL` native package çözümünü reddeder. Bu yalnız scaffold/package compatibility kanıtıdır; corpus playback, native baseline, plugin/SBOM/license inventory, packaged install, WACK, device matrix ve 2/8 saat soak henüz açık olduğundan M10 kararı verilmemiştir.
+
 ### Kapsam
 
 - Küçük throwaway harness; LibVLCSharp.WinUI 3.10.0 + compatible core + non-GPL VideoLAN.LibVLC.Windows 3.0.23.1 başlangıç seti.

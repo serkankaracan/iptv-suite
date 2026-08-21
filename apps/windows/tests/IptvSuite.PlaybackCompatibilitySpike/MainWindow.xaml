@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="IptvSuite.PlaybackCompatibilitySpike.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vlc="using:LibVLCSharp.Platforms.Windows"
+    Title="Playback Compatibility Spike">
+    <Grid Padding="24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="M10 playback compatibility spike" Style="{ThemeResource TitleTextBlockStyle}" />
+        <vlc:VideoView
+            x:Name="PlaybackView"
+            Grid.Row="1"
+            AutomationProperties.AutomationId="PlaybackSurfaceHost" />
+    </Grid>
+</Window>

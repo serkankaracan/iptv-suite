@@ -35,6 +35,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.CatalogCrashHarne
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.CatalogUiAcceptanceHarness", "tests\IptvSuite.CatalogUiAcceptanceHarness\IptvSuite.CatalogUiAcceptanceHarness.csproj", "{B70AA8A6-304A-4922-8365-EAA421A02726}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.PlaybackCompatibilitySpike", "tests\IptvSuite.PlaybackCompatibilitySpike\IptvSuite.PlaybackCompatibilitySpike.csproj", "{7D138799-B690-4FF8-9A79-7495EE113942}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -99,6 +101,10 @@ Global
 		{B70AA8A6-304A-4922-8365-EAA421A02726}.Debug|x64.Build.0 = Debug|x64
 		{B70AA8A6-304A-4922-8365-EAA421A02726}.Release|x64.ActiveCfg = Release|x64
 		{B70AA8A6-304A-4922-8365-EAA421A02726}.Release|x64.Build.0 = Release|x64
+		{7D138799-B690-4FF8-9A79-7495EE113942}.Debug|x64.ActiveCfg = Debug|x64
+		{7D138799-B690-4FF8-9A79-7495EE113942}.Debug|x64.Build.0 = Debug|x64
+		{7D138799-B690-4FF8-9A79-7495EE113942}.Release|x64.ActiveCfg = Release|x64
+		{7D138799-B690-4FF8-9A79-7495EE113942}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -118,5 +124,6 @@ Global
 		{9E610CDF-2461-4D7B-A289-84B41BB4F55A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{A1C743E8-9472-45B9-9A34-8B73FCA4D120} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{B70AA8A6-304A-4922-8365-EAA421A02726} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{7D138799-B690-4FF8-9A79-7495EE113942} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

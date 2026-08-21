@@ -93,6 +93,12 @@ public sealed class DependencyRulesTests
             [],
             ["System.Security.Cryptography.ProtectedData"]),
         new(
+            "IptvSuite.PlaybackCompatibilitySpike",
+            "apps/windows/tests/IptvSuite.PlaybackCompatibilitySpike/IptvSuite.PlaybackCompatibilitySpike.csproj",
+            [],
+            [],
+            ["LibVLCSharp", "LibVLCSharp.WinUI", "Microsoft.Windows.SDK.BuildTools", "Microsoft.WindowsAppSDK", "VideoLAN.LibVLC.Windows"]),
+        new(
             "IptvSuite.PackageLifecycleHarness",
             "apps/windows/tests/IptvSuite.PackageLifecycleHarness/IptvSuite.PackageLifecycleHarness.csproj",
             ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure"],
@@ -140,6 +146,7 @@ public sealed class DependencyRulesTests
         AssertNoPath(graph, "IptvSuite.Application", "IptvSuite.Windows");
         AssertNoPath(graph, "IptvSuite.Infrastructure", "IptvSuite.Windows");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.ProtectedCatalogSpike");
+        AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PlaybackCompatibilitySpike");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PackageLifecycleHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.DpapiUserBoundaryHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.CatalogCrashHarness");
@@ -186,8 +193,11 @@ public sealed class DependencyRulesTests
             ["Microsoft.Windows.SDK.BuildTools"] = "10.0.26100.8249",
             ["Microsoft.Extensions.TimeProvider.Testing"] = "10.8.0",
             ["Microsoft.Data.Sqlite"] = "10.0.11",
+            ["LibVLCSharp"] = "3.10.0",
+            ["LibVLCSharp.WinUI"] = "3.10.0",
             ["MSTest"] = "4.3.3",
             ["System.Security.Cryptography.ProtectedData"] = "10.0.10",
+            ["VideoLAN.LibVLC.Windows"] = "3.0.23.1",
         };
 
         CollectionAssert.AreEquivalent(expected.Keys.ToArray(), actual.Keys.ToArray());
@@ -241,7 +251,7 @@ public sealed class DependencyRulesTests
             string? useWinUi = GetProperty(project, "UseWinUI");
             string? enableMsixTooling = GetProperty(project, "EnableMsixTooling");
 
-            if (rule.Name is "IptvSuite.Windows" or "IptvSuite.PackageLifecycleHarness")
+            if (rule.Name is "IptvSuite.Windows" or "IptvSuite.PackageLifecycleHarness" or "IptvSuite.PlaybackCompatibilitySpike")
             {
                 Assert.AreEqual("true", useWinUi, ignoreCase: true);
                 Assert.AreEqual("true", enableMsixTooling, ignoreCase: true);
@@ -983,9 +993,12 @@ public sealed class DependencyRulesTests
                 content.Contains("IptvSuite.IntegrationTests", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.SecretStoreSpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.ProtectedCatalogSpike", StringComparison.Ordinal) ||
+                content.Contains("IptvSuite.PlaybackCompatibilitySpike", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.PackageLifecycleHarness", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.DpapiUserBoundaryHarness", StringComparison.Ordinal) ||
                 content.Contains("IptvSuite.CatalogCrashHarness", StringComparison.Ordinal) ||
+                content.Contains("LibVLCSharp", StringComparison.Ordinal) ||
+                content.Contains("VideoLAN.LibVLC", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.Extensions.TimeProvider.Testing", StringComparison.Ordinal) ||
                 content.Contains("Microsoft.AspNetCore.App", StringComparison.Ordinal) ||
                 content.Contains("IPTVSUITE_TEST_ONLY_CANARY_V1", StringComparison.Ordinal),
@@ -1015,6 +1028,35 @@ public sealed class DependencyRulesTests
         Assert.AreEqual("x64", GetProperty(protectedCatalogSpikeProject, "PlatformTarget"));
         Assert.AreEqual("false", GetProperty(protectedCatalogSpikeProject, "Prefer32Bit"));
 
+        XDocument playbackSpikeProject = LoadXml(
+            "apps/windows/tests/IptvSuite.PlaybackCompatibilitySpike/IptvSuite.PlaybackCompatibilitySpike.csproj");
+        Assert.AreEqual("WinExe", GetProperty(playbackSpikeProject, "OutputType"));
+        Assert.AreEqual("false", GetProperty(playbackSpikeProject, "IsTestProject"));
+        Assert.AreEqual("false", GetProperty(playbackSpikeProject, "IsPackable"));
+        Assert.AreEqual("false", GetProperty(playbackSpikeProject, "IsPublishable"));
+        Assert.AreEqual("x64", GetProperty(playbackSpikeProject, "Platforms"));
+        Assert.AreEqual("x64", GetProperty(playbackSpikeProject, "PlatformTarget"));
+        Assert.AreEqual("win-x64", GetProperty(playbackSpikeProject, "RuntimeIdentifier"));
+        Assert.AreEqual("true", GetProperty(playbackSpikeProject, "UseWinUI"));
+
+        string playbackLockPath = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.PlaybackCompatibilitySpike",
+            "packages.lock.json");
+        using JsonDocument playbackLock = JsonDocument.Parse(File.ReadAllText(playbackLockPath));
+        JsonElement playbackDependencies = playbackLock.RootElement
+            .GetProperty("dependencies")
+            .GetProperty("net10.0-windows10.0.26100");
+        Assert.AreEqual("3.10.0", playbackDependencies.GetProperty("LibVLCSharp").GetProperty("resolved").GetString());
+        Assert.AreEqual("3.10.0", playbackDependencies.GetProperty("LibVLCSharp.WinUI").GetProperty("resolved").GetString());
+        Assert.AreEqual("3.0.23.1", playbackDependencies.GetProperty("VideoLAN.LibVLC.Windows").GetProperty("resolved").GetString());
+        Assert.IsFalse(
+            playbackDependencies.TryGetProperty("VideoLAN.LibVLC.Windows.GPL", out _),
+            "The M10 baseline must never resolve the GPL native package.");
+
         XDocument catalogCrashHarnessProject = LoadXml(
             "apps/windows/tests/IptvSuite.CatalogCrashHarness/IptvSuite.CatalogCrashHarness.csproj");
         Assert.AreEqual("Exe", GetProperty(catalogCrashHarnessProject, "OutputType"));
@@ -1041,6 +1083,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             packageSmoke,
             "$entry.Name -match '^(?i:IptvSuite\\.CatalogUiAcceptanceHarness(?:\\..*)?)$'");
+        StringAssert.Contains(
+            packageSmoke,
+            "$entry.Name -match '^(?i:IptvSuite\\.PlaybackCompatibilitySpike(?:\\..*)?)$'");
         StringAssert.Contains(packageSmoke, "PackagedApplicationActivator]::Activate($aumid)");
         StringAssert.Contains(packageSmoke, "CoCreateInstance");
         StringAssert.Contains(packageSmoke, "LocalServer = 0x00000004");
