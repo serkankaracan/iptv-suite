@@ -1,12 +1,29 @@
 # M10 native Tier A cancellation/recovery kanıt kaydı
 
-**Durum:** `IMPLEMENTED; HOSTED PACKAGED RESULT PENDING, 2026-08-22`
+**Durum:** `HOSTED PACKAGED VERIFIED; ACCEPTANCE OPEN, 2026-08-22`
 
 ## Amaç ve kanıt durumu
 
-Bu kayıt, ADR-007 Windows-native Tier A spike'ının test-only schema-10 cancellation/recovery sözleşmesini sınırlar. Kalıcı sanitized evidence schema sürümü `10`, packaged probe envelope sürümü `5`tir. Kod, controller, exact JSON validator ve architecture guard sözleşmesi hazırdır; ancak bu değişikliklere bağlı commit-bound GitHub-hosted packaged sonuç, artifact kimliği ve digest henüz yoktur. Bu nedenle aşağıdaki maddeler uygulanan contract'ı açıklar; hosted `PASS`, reference-device acceptance veya M10 completion iddiası değildir.
+Bu kayıt, ADR-007 Windows-native Tier A spike'ının test-only schema-10 cancellation/recovery sözleşmesini sınırlar. Kalıcı sanitized evidence schema sürümü `10`, packaged probe envelope sürümü `5`tir. Commit `29bb89ce5a2c411f000c5678f4a4eb482e6a9a61` için GitHub Actions [run #151 (`32549714175`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32549714175), exact controller/validator contract'ını commit-bound hosted packaged koşuda doğruladı. Bu başarı reference-device acceptance veya M10 completion iddiası değildir.
 
-Schema-9 [startup attribution kaydındaki](M10_NATIVE_TIER_A_STARTUP_ATTRIBUTION.md) run #150, bu dilimin predecessor kapısını kapatmıştır. Schema-10 sonucu ayrı bir successor koşuda doğrulanacaktır.
+Schema-9 [startup attribution kaydındaki](M10_NATIVE_TIER_A_STARTUP_ATTRIBUTION.md) run #150, bu dilimin predecessor kapısını kapatmıştır. Run #151 schema-10 successor kapısını aşağıdaki exact evidence ile geçti.
+
+## Hosted doğrulama
+
+`VERIFIED`: Run #151'de beş workflow işinin tamamı, required coordinator dahil yeşildir. [Native job `96974702542`](https://github.com/serkankaracan/iptv-suite/actions/runs/32549714175/job/96974702542) `7m0s` sürdü. `windows-native-playback-evidence` artifact'ı ID `9469790188`, boyut `1567` byte ve ZIP digest `sha256:c5c3d29c2f487ee7cc23147d41abd7aacac7673750c365db9c91b17a7de1bb21` ile kaydedildi. İçindeki sanitized JSON `3969` byte ve SHA-256 `b32044049659158a0a0d9a79b6f3c24fad588d0aa08434f22b47aeac426c5c78`dir.
+
+Commit-bound schema-10/envelope-v5 sonucu:
+
+- `SwitchCount=100`; startup p95 `2149.623 ms`, maximum `4974.486 ms`, HLS/direct p95 `2167.69/2140.485 ms`;
+- `DetachedSourceCount=102`, `PlaybackRetryCount=0`; detach p95/maximum `4.984/9.278 ms`;
+- exact bir network interruption/recovery ve request ordinal `54→56`;
+- `CancellationProbeCount=1`; observed, cancellation detach, recovery ve recovery detach count'larının dördü de exact `1`;
+- cancellation latency `2.834 ms`, application-owned quiescence `5.392 ms`, no-auto-restart observation `1000 ms`, cancellation detach `2.224 ms`;
+- fresh recovery startup `20.583 ms`, exact current-source advance `2616.587 ms`, recovery detach `3.938 ms`;
+- `CancellationSourceNullAfterObservation`, `CancellationRecoveryUsedFreshSource` ve `CancellationNoAutomaticRestart` değerlerinin üçü de `true`;
+- bütün cleanup Boolean'ları `true`; runtime baseline korundu, disposition `SharedAdditionsPreserved` ve shared addition count `2` oldu.
+
+Bu değerler short lane'in cancellation ve network fault'larını ayrı sayaç/ordinal sınırlarıyla tamamladığını, iki ek cancellation-owned detach'ın toplam `102` detached source formülüne girdiğini ve security/cleanup gate'lerinin success evidence öncesinde geçtiğini doğrular.
 
 ## Kısa lane profili ve bağımsız fault'lar
 
@@ -84,4 +101,4 @@ Bu checkpoint aşağıdakileri kanıtlamaz:
 - reference-device, device/HW-decode, WACK, geniş surface/lifecycle veya uzun soak kabulü;
 - M10 completion.
 
-Hosted packaged schema-10 sonucu **PENDING**dir. [ADR-007](../adr/ADR-007-windows-native-tier-a-playback-fallback.md) `Proposed`, R15 `ACTIVE` ve M10 `IN PROGRESS` kalır.
+Run #151 schema-10 hosted packaged checkpoint'ini **VERIFIED** yapar. [ADR-007](../adr/ADR-007-windows-native-tier-a-playback-fallback.md) `Proposed`, R15 `ACTIVE` ve M10 `IN PROGRESS` kalır.
