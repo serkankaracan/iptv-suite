@@ -1751,7 +1751,7 @@ try {
         "Probe"
     )
     if (-not (Test-JsonInteger -Value $probeEnvelope.SchemaVersion) -or
-        [int]$probeEnvelope.SchemaVersion -ne 5 -or
+        [int]$probeEnvelope.SchemaVersion -ne 6 -or
         $probeEnvelope.RunId -isnot [string] -or
         -not [string]::Equals(
             $probeEnvelope.RunId,
@@ -1761,7 +1761,7 @@ try {
         $null -eq $probeEnvelope.Probe) {
         throw "The native playback probe evidence is not bound to this controller run."
     }
-    $probeEnvelopeSchemaVersion = 5
+    $probeEnvelopeSchemaVersion = 6
     $probeRunIdBound = $true
 
     Assert-ExactJsonProperties -Value $probeEnvelope.RuntimeDependency -ExpectedNames @(
@@ -1834,6 +1834,10 @@ try {
         "StartupFailureSourceAssignmentMilliseconds",
         "StartupFailurePlayInvocationMilliseconds",
         "StartupFailureSourceOpen",
+        "StartupFailureMediaOpenedCompletionObserved",
+        "StartupFailureMediaOpenedCompletionMilliseconds",
+        "StartupFailureMediaOpenedWithinWaitDeadline",
+        "StartupFailureMediaOpenedWithinStartupBudget",
         "StartupFailureActiveStageElapsedMilliseconds",
         "SoakMinutes",
         "ResourceSampleCount",
@@ -1927,6 +1931,7 @@ try {
             "HlsStartupMaximumMilliseconds", "DirectStartupMaximumMilliseconds",
             "StartupFailureTotalMilliseconds", "StartupFailureSourceCreationMilliseconds",
             "StartupFailureSourceAssignmentMilliseconds", "StartupFailurePlayInvocationMilliseconds",
+            "StartupFailureMediaOpenedCompletionMilliseconds",
             "StartupFailureActiveStageElapsedMilliseconds",
             "MemoryNetGrowthPercent", "SourceDetachP95Milliseconds",
             "SourceDetachMaximumMilliseconds", "CancellationLatencyMilliseconds",
@@ -1941,6 +1946,9 @@ try {
     foreach ($propertyName in @(
             "Success", "MemoryMonotonicIncrease", "SourceDetached",
             "CanPauseBeforeDetach", "CanSeekBeforeDetach",
+            "StartupFailureMediaOpenedCompletionObserved",
+            "StartupFailureMediaOpenedWithinWaitDeadline",
+            "StartupFailureMediaOpenedWithinStartupBudget",
             "CancellationSourceNullAfterObservation",
             "CancellationRecoveryUsedFreshSource",
             "CancellationNoAutomaticRestart")) {
@@ -2048,6 +2056,14 @@ try {
         [double]$probe.StartupFailureSourceOpen.CompletionMilliseconds
     $startupFailurePostSourceOpenElapsedMilliseconds =
         [double]$probe.StartupFailureSourceOpen.PostCompletionElapsedMilliseconds
+    $startupFailureMediaOpenedCompletionObserved =
+        [bool]$probe.StartupFailureMediaOpenedCompletionObserved
+    $startupFailureMediaOpenedCompletionMilliseconds =
+        [double]$probe.StartupFailureMediaOpenedCompletionMilliseconds
+    $startupFailureMediaOpenedWithinWaitDeadline =
+        [bool]$probe.StartupFailureMediaOpenedWithinWaitDeadline
+    $startupFailureMediaOpenedWithinStartupBudget =
+        [bool]$probe.StartupFailureMediaOpenedWithinStartupBudget
     $startupFailureActiveStageElapsedMilliseconds =
         [double]$probe.StartupFailureActiveStageElapsedMilliseconds
     $allowedStartupFailureStages = @(
@@ -2075,6 +2091,22 @@ try {
                     ($startupFailureSourceOpenCompletionMilliseconds +
                         $startupFailurePostSourceOpenElapsedMilliseconds) -
                     $startupFailureTotalMilliseconds) -gt 0.002)) -or
+        $startupFailureMediaOpenedCompletionMilliseconds -lt 0 -or
+        ($startupFailureMediaOpenedCompletionObserved -and
+            ($startupFailureMediaOpenedCompletionMilliseconds -le 0 -or
+                $startupFailureMediaOpenedCompletionMilliseconds -gt
+                    ($startupFailureTotalMilliseconds + 0.002))) -or
+        (-not $startupFailureMediaOpenedCompletionObserved -and
+            ($startupFailureMediaOpenedCompletionMilliseconds -ne 0 -or
+                $startupFailureMediaOpenedWithinWaitDeadline -or
+                $startupFailureMediaOpenedWithinStartupBudget)) -or
+        ($startupFailureMediaOpenedWithinStartupBudget -and
+            -not $startupFailureMediaOpenedWithinWaitDeadline) -or
+        ($startupFailureMediaOpenedWithinStartupBudget -and
+            $startupFailureMediaOpenedCompletionMilliseconds -gt 5000.002) -or
+        (-not $startupFailureMediaOpenedWithinStartupBudget -and
+            $startupFailureMediaOpenedCompletionObserved -and
+            $startupFailureMediaOpenedCompletionMilliseconds -lt 4999.998) -or
         $startupFailureActiveStageElapsedMilliseconds -lt 0 -or
         $startupFailureActiveStageElapsedMilliseconds -gt ($startupFailureTotalMilliseconds + 0.002) -or
         ($startupFailureSourceCreationMilliseconds +
@@ -2097,6 +2129,10 @@ try {
             $startupFailureSourceOpenError -or
             $startupFailureSourceOpenCompletionMilliseconds -ne 0 -or
             $startupFailurePostSourceOpenElapsedMilliseconds -ne 0 -or
+            $startupFailureMediaOpenedCompletionObserved -or
+            $startupFailureMediaOpenedCompletionMilliseconds -ne 0 -or
+            $startupFailureMediaOpenedWithinWaitDeadline -or
+            $startupFailureMediaOpenedWithinStartupBudget -or
             $startupFailureActiveStageElapsedMilliseconds -ne 0) {
             throw "The inactive native playback startup failure diagnostic is not empty."
         }
@@ -2162,6 +2198,13 @@ try {
             -not $startupFailureSourceOpenObserved)) {
         throw "The native playback source-open failure stage is inconsistent."
     }
+    if ($probe.Failure -ne "MediaOpenTimeout" -and
+        ($startupFailureMediaOpenedCompletionObserved -or
+            $startupFailureMediaOpenedCompletionMilliseconds -ne 0 -or
+            $startupFailureMediaOpenedWithinWaitDeadline -or
+            $startupFailureMediaOpenedWithinStartupBudget)) {
+        throw "The native playback MediaOpened timeout diagnostic is active outside its failure domain."
+    }
     if (($probe.Failure -eq "SurfaceReadinessTimeout" -and
             $startupFailureStage -ne "SurfaceReadiness") -or
         ($probe.Failure -eq "MediaOpenTimeout" -and
@@ -2182,7 +2225,7 @@ try {
         [int]$probe.SurfaceTransitionCount -ne $expectedSurfaceTransitions -or
         [int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount -or
         [int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount) {
-        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), playbackRetries=$($probe.PlaybackRetryCount), startupFailureStage=$startupFailureStage, startupFailureOrdinal=$startupFailureSwitchOrdinal, startupFailureFixture=$startupFailureFixture, startupFailureAttempts=$startupFailureAttemptCount, startupFailureTransitions=$startupFailureSurfaceTransitionCount, startupFailureTotal=$startupFailureTotalMilliseconds, startupFailureSourceCreation=$startupFailureSourceCreationMilliseconds, startupFailureSourceAssignment=$startupFailureSourceAssignmentMilliseconds, startupFailurePlayInvocation=$startupFailurePlayInvocationMilliseconds, startupFailureSourceOpenObserved=$startupFailureSourceOpenObserved, startupFailureSourceOpenError=$startupFailureSourceOpenError, startupFailureSourceOpenCompletion=$startupFailureSourceOpenCompletionMilliseconds, startupFailurePostSourceOpenElapsed=$startupFailurePostSourceOpenElapsedMilliseconds, startupFailureActiveStageElapsed=$startupFailureActiveStageElapsedMilliseconds, startupMaximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), startupMaximumFixture=$($probe.StartupMaximumFixture), startupMaximumAttempts=$($probe.StartupMaximumAttemptCount), startupMaximumTransitions=$($probe.StartupMaximumSurfaceTransitionCount), startupMaximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), startupMaximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), startupMaximumSourceOpenObserved=$($probe.StartupMaximumSourceOpen.CompletionObserved), startupMaximumSourceOpenError=$($probe.StartupMaximumSourceOpen.ErrorPresent), startupMaximumSourceOpenCompletion=$($probe.StartupMaximumSourceOpen.CompletionMilliseconds), startupMaximumPostSourceOpenMediaOpened=$($probe.StartupMaximumSourceOpen.PostCompletionElapsedMilliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackStateBeforeDetach=$($probe.PlaybackStateBeforeDetach), sourceDetached=$($probe.SourceDetached), canPauseBeforeDetach=$($probe.CanPauseBeforeDetach), canSeekBeforeDetach=$($probe.CanSeekBeforeDetach), teardownStage=$($probe.TeardownStage), exceptionCategory=$($probe.ExceptionCategory), exceptionHResult=$($probe.ExceptionHResult), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), injectedRequestOrdinal=$($tlsServer.LastInjectedRequestOrdinal), recoveryRequestOrdinal=$($tlsServer.LastRecoveryRequestOrdinal), cancellationProbes=$cancellationProbeCount, cancellationsObserved=$cancellationObservedCount, cancellationDetaches=$cancellationSourceDetachCount, cancellationRecoveries=$cancellationRecoveryCount, cancellationRecoveryDetaches=$cancellationRecoverySourceDetachCount, cancellationLatency=$cancellationLatencyMilliseconds, cancellationQuiescence=$cancellationQuiescenceMilliseconds, cancellationObservation=$cancellationObservationMilliseconds, cancellationSourceNull=$cancellationSourceNullAfterObservation, cancellationFreshRecovery=$cancellationRecoveryUsedFreshSource, cancellationNoAutomaticRestart=$cancellationNoAutomaticRestart, h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
+        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), playbackRetries=$($probe.PlaybackRetryCount), startupFailureStage=$startupFailureStage, startupFailureOrdinal=$startupFailureSwitchOrdinal, startupFailureFixture=$startupFailureFixture, startupFailureAttempts=$startupFailureAttemptCount, startupFailureTransitions=$startupFailureSurfaceTransitionCount, startupFailureTotal=$startupFailureTotalMilliseconds, startupFailureSourceCreation=$startupFailureSourceCreationMilliseconds, startupFailureSourceAssignment=$startupFailureSourceAssignmentMilliseconds, startupFailurePlayInvocation=$startupFailurePlayInvocationMilliseconds, startupFailureSourceOpenObserved=$startupFailureSourceOpenObserved, startupFailureSourceOpenError=$startupFailureSourceOpenError, startupFailureSourceOpenCompletion=$startupFailureSourceOpenCompletionMilliseconds, startupFailurePostSourceOpenElapsed=$startupFailurePostSourceOpenElapsedMilliseconds, startupFailureMediaOpenedObserved=$startupFailureMediaOpenedCompletionObserved, startupFailureMediaOpenedCompletion=$startupFailureMediaOpenedCompletionMilliseconds, startupFailureMediaOpenedWithinWaitDeadline=$startupFailureMediaOpenedWithinWaitDeadline, startupFailureMediaOpenedWithinStartupBudget=$startupFailureMediaOpenedWithinStartupBudget, startupFailureActiveStageElapsed=$startupFailureActiveStageElapsedMilliseconds, startupMaximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), startupMaximumFixture=$($probe.StartupMaximumFixture), startupMaximumAttempts=$($probe.StartupMaximumAttemptCount), startupMaximumTransitions=$($probe.StartupMaximumSurfaceTransitionCount), startupMaximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), startupMaximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), startupMaximumSourceOpenObserved=$($probe.StartupMaximumSourceOpen.CompletionObserved), startupMaximumSourceOpenError=$($probe.StartupMaximumSourceOpen.ErrorPresent), startupMaximumSourceOpenCompletion=$($probe.StartupMaximumSourceOpen.CompletionMilliseconds), startupMaximumPostSourceOpenMediaOpened=$($probe.StartupMaximumSourceOpen.PostCompletionElapsedMilliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackStateBeforeDetach=$($probe.PlaybackStateBeforeDetach), sourceDetached=$($probe.SourceDetached), canPauseBeforeDetach=$($probe.CanPauseBeforeDetach), canSeekBeforeDetach=$($probe.CanSeekBeforeDetach), teardownStage=$($probe.TeardownStage), exceptionCategory=$($probe.ExceptionCategory), exceptionHResult=$($probe.ExceptionHResult), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), injectedRequestOrdinal=$($tlsServer.LastInjectedRequestOrdinal), recoveryRequestOrdinal=$($tlsServer.LastRecoveryRequestOrdinal), cancellationProbes=$cancellationProbeCount, cancellationsObserved=$cancellationObservedCount, cancellationDetaches=$cancellationSourceDetachCount, cancellationRecoveries=$cancellationRecoveryCount, cancellationRecoveryDetaches=$cancellationRecoverySourceDetachCount, cancellationLatency=$cancellationLatencyMilliseconds, cancellationQuiescence=$cancellationQuiescenceMilliseconds, cancellationObservation=$cancellationObservationMilliseconds, cancellationSourceNull=$cancellationSourceNullAfterObservation, cancellationFreshRecovery=$cancellationRecoveryUsedFreshSource, cancellationNoAutomaticRestart=$cancellationNoAutomaticRestart, h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     $startupMaximumSwitchOrdinal = [int]$probe.StartupMaximumSwitchOrdinal
     $startupMaximumFixture = [string]$probe.StartupMaximumFixture

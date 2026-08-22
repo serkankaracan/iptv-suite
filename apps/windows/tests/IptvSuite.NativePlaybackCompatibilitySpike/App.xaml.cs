@@ -81,7 +81,7 @@ public partial class App : Application
         NativePlaybackProbeResult result)
     {
         var evidence = new NativePlaybackProbeEnvelope(
-            5,
+            6,
             request.RunId.ToString("N"),
             runtimeDependency,
             result);

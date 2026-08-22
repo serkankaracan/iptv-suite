@@ -514,6 +514,8 @@ Envelope-v3 commit `c299410` için [run `32543488245`](https://github.com/serkan
 
 `VERIFIED`: Commit `29bb89ce5a2c411f000c5678f4a4eb482e6a9a61` için [run #151 (`32549714175`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32549714175), [schema-10 cancellation/recovery checkpoint'ini](../quality/M10_NATIVE_TIER_A_CANCELLATION_RECOVERY_EVIDENCE.md) bütün beş workflow işi yeşil olarak geçti. Envelope v5 short lane'de bağımsız `CancellationProbeCount=1` ve `NetworkInterruptionCount=1`; `100` switch, `0` retry, `102` detach, `1000 ms` no-auto-restart observation, fresh source-specific `OpenOperationCompleted` ve exact current-source advance kaydedildi. Bu native API cancellation, OS audio/session quiescence, M13 reconnect veya completion sonucu değildir; ADR-007 `Proposed`, R15 `ACTIVE` ve M10 `IN PROGRESS` kalır.
 
+`VERIFIED — current graph blocker`: Commit `0503ed7` run `32555764285` ve tek bounded failed-job rerun'u signed package inventory validation'ı geçti; native ilk HLS ise eksiksiz `5/5` loopback response ve hatasız source-open sonrasında `5103,4564/5139,9608 ms` toplamlarla iki kez `MediaOpenTimeout` verdi. Probe envelope v6, yalnız failure snapshot anındaki `MediaOpened` completion/deadline bağını fail-closed ölçer; threshold, HLS-first sıra, retry ve security/cleanup sözleşmeleri değişmez. Hosted v6 sonucu ve ardından güncel graph kısa lane PASS olmadan sonraki M10 kapısı kapanmaz; 8 saat acceptance ayrı açık kullanıcı iznine bağlı kalır.
+
 ### Kapsam
 
 - Küçük throwaway harness; LibVLCSharp.WinUI 3.10.0 + compatible core + non-GPL VideoLAN.LibVLC.Windows 3.0.23.1 başlangıç seti.

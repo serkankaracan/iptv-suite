@@ -376,6 +376,8 @@ Envelope-v3 commit `c299410` için [run `32543488245`](https://github.com/serkan
 
 `VERIFIED`: Commit `29bb89ce5a2c411f000c5678f4a4eb482e6a9a61` için [run #151 (`32549714175`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32549714175), schema-10/envelope-v5 kısa lane'i `100` switch, `0` soak, bağımsız bir network interruption/recovery ve bir application-owned managed cancellation/recovery ile geçti. Startup p95/maximum `2149.623/4974.486 ms`, retry `0`, detach `102`; dört cancellation/recovery count'u `1`, observation `1000 ms` ve üç Boolean `true` oldu. Exact detach/dispose sonrasındaki fresh recovery source-specific `OpenOperationCompleted` ve exact current-source position advance'a bağlıdır. [Contract/evidence kaydı](M10_NATIVE_TIER_A_CANCELLATION_RECOVERY_EVIDENCE.md) artifact/JSON digest'lerini ve exact bütçeleri içerir. Bu OS audio/session quiescence, native API cancellation, M13 reconnect veya M10 completion kanıtı değildir.
 
+`VERIFIED — successor graph timeout reproduction`: Commit `0503ed7` run `32555764285` ve tek failed-job rerun'u fail-closed signed package inventory adımını geçti; native ilk HLS iki attempt'te de hatasız source-open ve eksiksiz `5/5`/`940229` byte transfer sonrasında `MediaOpenTimeout` verdi. Toplam/source-open/post-source-open süreleri `5103,4564/2454,8078/2648,6486 ms` ve `5139,9608/2567,7833/2572,1775 ms` idi. Envelope v6 salt diagnostic'i, timeout catch'inde ek bekleme yapmadan `MediaOpened` completion timestamp'ini mevcut wait deadline ve hard `5000 ms` startup bütçesine bağlar. Bu instrumentation failure'ı PASS yapmaz; hosted attribution sonrası yalnız kanıtın desteklediği en küçük düzeltme değerlendirilecektir.
+
 ### M16 RC
 
 - Packaged private-flight build ile 24 saat.

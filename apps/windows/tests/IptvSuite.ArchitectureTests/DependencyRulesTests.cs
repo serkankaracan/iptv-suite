@@ -2100,7 +2100,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(app, "new NativePlaybackProbeEnvelope(");
         StringAssert.Contains(
             normalizedApp,
-            "new NativePlaybackProbeEnvelope( 5, request.RunId.ToString(\"N\"), runtimeDependency, result);");
+            "new NativePlaybackProbeEnvelope( 6, request.RunId.ToString(\"N\"), runtimeDependency, result);");
         StringAssert.Contains(app, "request.RunId.ToString(\"N\")");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.json\"");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.pending\"");
@@ -2268,6 +2268,24 @@ public sealed class DependencyRulesTests
             window,
             "sourceOpenDeadline = mediaOpenWaitStarted + (Stopwatch.Frequency * 5);");
         StringAssert.Contains(
+            window,
+            "activeStartupMediaOpenDeadline = sourceOpenDeadline;");
+        StringAssert.Contains(
+            window,
+            "Task<long> mediaOpenedTask = _opened.Task;");
+        StringAssert.Contains(
+            window,
+            "!mediaOpenedTask.IsCompletedSuccessfully");
+        StringAssert.Contains(
+            window,
+            "activeStartupMediaOpenedCompleted = mediaOpenedTask.Result;");
+        StringAssert.Contains(
+            normalizedWindow,
+            "activeStartupMediaOpenedCompleted <= activeStartupStarted + (Stopwatch.Frequency * 5)");
+        StringAssert.Contains(
+            window,
+            "activeStartupMediaOpenedCompleted <= activeStartupMediaOpenDeadline");
+        StringAssert.Contains(
             normalizedWindow,
             "activeStartupStageStarted = Math.Max( sourceOpenWaitStarted, completion.Timestamp);");
         int cancellationProbeBoundaryIndex = window.IndexOf(
@@ -2361,14 +2379,19 @@ public sealed class DependencyRulesTests
         int startupFailureSnapshotIndex = window.IndexOf(
             "startupFailureDiagnostic = CaptureStartupFailureDiagnostic();",
             StringComparison.Ordinal);
+        int mediaOpenedFailureSnapshotIndex = window.IndexOf(
+            "CaptureMediaOpenedCompletionIfAvailable(mediaOpenedTask);",
+            StringComparison.Ordinal);
         int startupAttemptFinallyIndex = window.IndexOf(
             "finally",
             startupFailureSnapshotIndex,
             StringComparison.Ordinal);
         Assert.IsTrue(
             startupFailureSnapshotIndex >= 0 &&
+            mediaOpenedFailureSnapshotIndex >= 0 &&
+            mediaOpenedFailureSnapshotIndex < startupFailureSnapshotIndex &&
             startupAttemptFinallyIndex > startupFailureSnapshotIndex,
-            "A startup timeout must be snapshotted before reset and source disposal.");
+            "A startup timeout must capture MediaOpened and startup state before reset and source disposal.");
         StringAssert.Contains(window, "NativePlaybackFixture.HlsH264AacMpegTs");
         StringAssert.Contains(window, "NativePlaybackFixture.DirectH264AacMpegTs");
         StringAssert.Contains(
@@ -2874,8 +2897,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "SchemaVersion = 10");
-        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 5");
-        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 5");
+        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 6");
+        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 6");
         StringAssert.Contains(controller, "[ValidateRange(0, 1)]");
         StringAssert.Contains(controller, "$CancellationProbeCount -gt 0 -and");
         StringAssert.Contains(controller, "$cancellationProbeCount -ne $CancellationProbeCount");
@@ -2901,6 +2924,16 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "$startupFailureStage -notin $allowedStartupFailureStages");
         StringAssert.Contains(controller, "\"MediaSourceOpenWait\"");
         StringAssert.Contains(controller, "$startupFailureSourceOpenObserved");
+        StringAssert.Contains(controller, "$startupFailureMediaOpenedCompletionObserved");
+        StringAssert.Contains(controller, "$startupFailureMediaOpenedCompletionMilliseconds");
+        StringAssert.Contains(controller, "$startupFailureMediaOpenedWithinWaitDeadline");
+        StringAssert.Contains(controller, "$startupFailureMediaOpenedWithinStartupBudget");
+        StringAssert.Contains(
+            controller,
+            "$startupFailureMediaOpenedWithinStartupBudget -and");
+        StringAssert.Contains(
+            controller,
+            "$probe.Failure -ne \"MediaOpenTimeout\"");
         StringAssert.Contains(controller, "$startupMaximumSourceOpenObserved");
         StringAssert.Contains(controller, "$startupFailureSwitchOrdinal -ne $expectedFailureSwitchOrdinal");
         StringAssert.Contains(controller, "$startupFailureAttemptCount -gt (1 + [int]$probe.PlaybackRetryCount)");
@@ -2989,6 +3022,10 @@ public sealed class DependencyRulesTests
             "startupFailureSourceOpenError=",
             "startupFailureSourceOpenCompletion=",
             "startupFailurePostSourceOpenElapsed=",
+            "startupFailureMediaOpenedObserved=",
+            "startupFailureMediaOpenedCompletion=",
+            "startupFailureMediaOpenedWithinWaitDeadline=",
+            "startupFailureMediaOpenedWithinStartupBudget=",
             "startupFailureActiveStageElapsed=",
             "startupMaximumOrdinal=",
             "startupMaximumFixture=",

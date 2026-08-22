@@ -1,6 +1,6 @@
 # M10 native Tier A hosted startup attribution
 
-**Durum:** `HOSTED OUTLIER PHASE VERIFIED; FIRST-RENDER HYPOTHESIS REJECTED; OPEN-OPERATION ATTRIBUTION PENDING, 2026-08-22`
+**Durum:** `SUCCESSOR GRAPH HOSTED TIMEOUT REPRODUCED; MEDIAOPENED DEADLINE ATTRIBUTION IN PROGRESS, 2026-08-22`
 
 Bu checkpoint bir acceptance sonucu veya threshold değişikliği değildir. Amacı, hosted Windows Server koşusunda tek startup örneğinin `≤5000 ms` hard maximum sınırını neden az farkla aştığını fixture ya da retry tahminiyle örtmeden ölçmektir.
 
@@ -47,6 +47,10 @@ Kalıcı success evidence schema `9` ve 71 alan olarak kalır; yalnız `ProbeEnv
 ## Schema-10 successor sınırı
 
 `VERIFIED`: Commit `29bb89ce5a2c411f000c5678f4a4eb482e6a9a61` için [run #151 (`32549714175`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32549714175), predecessor schema-9/envelope-v4 attribution sonucunu değiştirmeden kalıcı evidence schema `10` ve probe envelope v5'i hosted packaged koşuda geçti. Startup p95/maximum `2149.623/4974.486 ms`, HLS/direct p95 `2167.69/2140.485 ms` idi. Tek network interruption/recovery'den bağımsız cancellation probe; exact detach/dispose, `1000 ms` no-auto-restart observation, source-specific `OpenOperationCompleted` ve exact current-source advance ile tamamlandı; retry `0` kaldı. [Cancellation/recovery kaydı](M10_NATIVE_TIER_A_CANCELLATION_RECOVERY_EVIDENCE.md) artifact/JSON digest'lerini ve exact metrikleri taşır. Startup threshold'ları ile yalnız-explicit-`MediaFailed` retry kuralı değişmez; bu native API cancellation, OS session quiescence, M13 reconnect ya da M10 completion kanıtı değildir.
+
+`VERIFIED — successor graph reproduction`: Windows App SDK `2.4.0 → WinUI 2.3.6` ve fail-closed signed-package inventory düzeltmesini taşıyan commit `0503ed7cd983ad0b1062dd768eeb69b448d33165` için [run `32555764285`](https://github.com/serkankaracan/iptv-suite/actions/runs/32555764285), locked quality, packaged install/lifecycle ve DPAPI real-user boundary işlerini geçti; gerçek imzalı MSIX inventory adımı da iki native attempt'te geçti. Native attempt 1 ilk HLS/attempt-1'de toplam `5103,4564 ms`, hatasız source-open `2454,8078 ms` ve source-open sonrası `2648,6486 ms` ile `MediaOpenTimeout` verdi. Aynı committeki tek bounded failed-job rerun'u toplam `5139,9608 ms`, hatasız source-open `2567,7833 ms` ve sonraki `2572,1775 ms` ile aynı failure domain'ini yeniden üretti. Her iki attempt de `5/5` loopback response, `940229` byte, `ioAbort=0` ve `transportFailure=0` kaydetti. Bu nedenle sonuç inventory, eksik transfer veya source-open hatası değildir; `MediaOpened` completion/deadline sınırında tekrarlanabilir hosted Windows Server ihlalidir. Required gate yalnız native iş nedeniyle kırmızıdır ve bu kayıt PASS/acceptance değildir.
+
+`IMPLEMENTED; HOSTED ATTRIBUTION PENDING`: Probe envelope v6, timeout yolunu başarıya çevirmeden attempt-local `MediaOpened` task'ını reset/dispose öncesinde bir kez gözler. Yalnız dört bounded failure alanı taşır: completion gözlendi mi, handler timestamp'inin source-creation öncesindeki başlangıca göre süresi, mevcut media-open wait deadline'ı içinde mi ve değişmeyen `5000 ms` startup bütçesi içinde mi. Yeni await, grace, retry, sample exclusion veya threshold değişikliği yoktur. Success ve `MediaOpenTimeout` dışındaki failure sonuçlarında alanlar neutral kalır; controller exact shape/type/parity kurallarını fail-closed doğrular. URI, raw tick, task/WinRT nesnesi, exception/message, path veya header serialize edilmez. Hosted v6 sonucu gelmeden timeout yarışına ilişkin davranış düzeltmesi yapılmaz.
 
 ## Karar sınırı
 

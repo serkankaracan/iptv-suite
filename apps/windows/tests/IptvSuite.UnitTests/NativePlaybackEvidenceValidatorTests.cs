@@ -158,7 +158,7 @@ public sealed class NativePlaybackEvidenceValidatorTests
         (string Original, string Replacement)[] mutations =
         [
             ("\"SchemaVersion\":10", "\"SchemaVersion\":9"),
-            ("\"ProbeEnvelopeSchemaVersion\":5", "\"ProbeEnvelopeSchemaVersion\":4"),
+            ("\"ProbeEnvelopeSchemaVersion\":6", "\"ProbeEnvelopeSchemaVersion\":5"),
             ("\"DetachedSourceCount\":103", "\"DetachedSourceCount\":101"),
             ("\"CancellationProbeCount\":1", "\"CancellationProbeCount\":0"),
             ("\"CancellationObservedCount\":1", "\"CancellationObservedCount\":2"),
@@ -352,7 +352,7 @@ public sealed class NativePlaybackEvidenceValidatorTests
             writer.WriteString("HarnessAssemblySha256", new string('b', 64));
             writer.WriteString("FixtureManifestSha256", new string('c', 64));
             writer.WriteBoolean("FixtureCorpusVerified", true);
-            writer.WriteNumber("ProbeEnvelopeSchemaVersion", 5);
+            writer.WriteNumber("ProbeEnvelopeSchemaVersion", 6);
             writer.WriteBoolean("ProbeRunIdBound", true);
             writer.WriteNumber("SwitchCount", 100);
             writer.WriteNumber("StartupP95Milliseconds", 250.125);
