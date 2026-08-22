@@ -14,7 +14,10 @@ param(
     [int]$SoakMinutes = 0,
 
     [ValidateRange(0, 7)]
-    [int]$NetworkInterruptionCount = 0
+    [int]$NetworkInterruptionCount = 0,
+
+    [ValidateRange(0, 1)]
+    [int]$CancellationProbeCount = 0
 )
 
 Set-StrictMode -Version Latest
@@ -1490,6 +1493,10 @@ try {
     if ($NetworkInterruptionCount -gt 0 -and $SwitchCount -ne 100) {
         throw "A native playback network interruption probe requires exactly 100 alternating switches."
     }
+    if ($CancellationProbeCount -gt 0 -and
+        ($SwitchCount -ne 100 -or $SoakMinutes -ne 0)) {
+        throw "A native playback cancellation probe requires exactly 100 alternating switches and no soak."
+    }
 
     Set-FailurePoint -Stage "ControllerCompilation" -Code "EmbeddedControllerCompilationFailed"
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
@@ -1659,7 +1666,7 @@ try {
     Set-FailurePoint -Stage "ProbeActivation" -Code "ProbeActivationFailed"
     $tlsServer = [IptvSuite.NativePlaybackSmoke.TierATlsServer]::new($fixtureRoot, $tlsCertificate)
     $authority = "https://localhost:$($tlsServer.Port)"
-    $arguments = "probe $runId $authority/direct-h264-aac.ts $authority/hls.m3u8 $SwitchCount $SoakMinutes"
+    $arguments = "probe $runId $authority/direct-h264-aac.ts $authority/hls.m3u8 $SwitchCount $SoakMinutes $CancellationProbeCount"
     $aumid = "$packageFamilyName!$expectedApplicationId"
     $activationAttempted = $true
     $processId = [IptvSuite.NativePlaybackSmoke.PackagedApplicationActivator]::Activate($aumid, $arguments)
@@ -1719,7 +1726,7 @@ try {
         "Probe"
     )
     if (-not (Test-JsonInteger -Value $probeEnvelope.SchemaVersion) -or
-        [int]$probeEnvelope.SchemaVersion -ne 4 -or
+        [int]$probeEnvelope.SchemaVersion -ne 5 -or
         $probeEnvelope.RunId -isnot [string] -or
         -not [string]::Equals(
             $probeEnvelope.RunId,
@@ -1729,7 +1736,7 @@ try {
         $null -eq $probeEnvelope.Probe) {
         throw "The native playback probe evidence is not bound to this controller run."
     }
-    $probeEnvelopeSchemaVersion = 4
+    $probeEnvelopeSchemaVersion = 5
     $probeRunIdBound = $true
 
     Assert-ExactJsonProperties -Value $probeEnvelope.RuntimeDependency -ExpectedNames @(
@@ -1816,6 +1823,21 @@ try {
         "PlaybackRetryCount",
         "SourceDetachP95Milliseconds",
         "SourceDetachMaximumMilliseconds",
+        "CancellationProbeCount",
+        "CancellationObservedCount",
+        "CancellationSourceDetachCount",
+        "CancellationRecoveryCount",
+        "CancellationRecoverySourceDetachCount",
+        "CancellationLatencyMilliseconds",
+        "CancellationQuiescenceMilliseconds",
+        "CancellationObservationMilliseconds",
+        "CancellationSourceDetachMilliseconds",
+        "CancellationRecoveryStartupMilliseconds",
+        "CancellationRecoveryAdvanceMilliseconds",
+        "CancellationRecoverySourceDetachMilliseconds",
+        "CancellationSourceNullAfterObservation",
+        "CancellationRecoveryUsedFreshSource",
+        "CancellationNoAutomaticRestart",
         "PlaybackStateBeforeDetach",
         "SourceDetached",
         "CanPauseBeforeDetach",
@@ -1860,6 +1882,9 @@ try {
             "SwitchCount", "SoakMinutes", "ResourceSampleCount", "WarmupPrivateBytes",
             "MemoryNetGrowthBytes", "WarmupHandleCount", "HandleNetGrowth",
             "SurfaceTransitionCount", "DetachedSourceCount", "PlaybackRetryCount",
+            "CancellationProbeCount", "CancellationObservedCount",
+            "CancellationSourceDetachCount", "CancellationRecoveryCount",
+            "CancellationRecoverySourceDetachCount",
             "StartupMaximumSwitchOrdinal", "StartupMaximumAttemptCount",
             "StartupMaximumSurfaceTransitionCount",
             "StartupFailureSwitchOrdinal", "StartupFailureAttemptCount",
@@ -1879,14 +1904,21 @@ try {
             "StartupFailureSourceAssignmentMilliseconds", "StartupFailurePlayInvocationMilliseconds",
             "StartupFailureActiveStageElapsedMilliseconds",
             "MemoryNetGrowthPercent", "SourceDetachP95Milliseconds",
-            "SourceDetachMaximumMilliseconds")) {
+            "SourceDetachMaximumMilliseconds", "CancellationLatencyMilliseconds",
+            "CancellationQuiescenceMilliseconds", "CancellationObservationMilliseconds",
+            "CancellationSourceDetachMilliseconds", "CancellationRecoveryStartupMilliseconds",
+            "CancellationRecoveryAdvanceMilliseconds",
+            "CancellationRecoverySourceDetachMilliseconds")) {
         if (-not (Test-JsonNumber -Value $probe.PSObject.Properties[$propertyName].Value)) {
             throw "A native playback probe metric has an invalid JSON type."
         }
     }
     foreach ($propertyName in @(
             "Success", "MemoryMonotonicIncrease", "SourceDetached",
-            "CanPauseBeforeDetach", "CanSeekBeforeDetach")) {
+            "CanPauseBeforeDetach", "CanSeekBeforeDetach",
+            "CancellationSourceNullAfterObservation",
+            "CancellationRecoveryUsedFreshSource",
+            "CancellationNoAutomaticRestart")) {
         if ($probe.PSObject.Properties[$propertyName].Value -isnot [bool]) {
             throw "A native playback probe Boolean field has an invalid JSON type."
         }
@@ -1897,6 +1929,82 @@ try {
             "TeardownStage", "ExceptionCategory")) {
         if ($probe.PSObject.Properties[$propertyName].Value -isnot [string]) {
             throw "A native playback probe enum field has an invalid JSON type."
+        }
+    }
+    $cancellationProbeCount = [int]$probe.CancellationProbeCount
+    $cancellationObservedCount = [int]$probe.CancellationObservedCount
+    $cancellationSourceDetachCount = [int]$probe.CancellationSourceDetachCount
+    $cancellationRecoveryCount = [int]$probe.CancellationRecoveryCount
+    $cancellationRecoverySourceDetachCount =
+        [int]$probe.CancellationRecoverySourceDetachCount
+    $cancellationLatencyMilliseconds = [double]$probe.CancellationLatencyMilliseconds
+    $cancellationQuiescenceMilliseconds = [double]$probe.CancellationQuiescenceMilliseconds
+    $cancellationObservationMilliseconds = [double]$probe.CancellationObservationMilliseconds
+    $cancellationSourceDetachMilliseconds = [double]$probe.CancellationSourceDetachMilliseconds
+    $cancellationRecoveryStartupMilliseconds =
+        [double]$probe.CancellationRecoveryStartupMilliseconds
+    $cancellationRecoveryAdvanceMilliseconds =
+        [double]$probe.CancellationRecoveryAdvanceMilliseconds
+    $cancellationRecoverySourceDetachMilliseconds =
+        [double]$probe.CancellationRecoverySourceDetachMilliseconds
+    $cancellationSourceNullAfterObservation =
+        [bool]$probe.CancellationSourceNullAfterObservation
+    $cancellationRecoveryUsedFreshSource =
+        [bool]$probe.CancellationRecoveryUsedFreshSource
+    $cancellationNoAutomaticRestart = [bool]$probe.CancellationNoAutomaticRestart
+    if ($probe.Success -eq $true) {
+        if ($cancellationProbeCount -ne $CancellationProbeCount) {
+            throw "The native playback cancellation probe count is not bound to the controller request."
+        }
+        if ($CancellationProbeCount -eq 0) {
+            if ($cancellationObservedCount -ne 0 -or
+                $cancellationSourceDetachCount -ne 0 -or
+                $cancellationRecoveryCount -ne 0 -or
+                $cancellationRecoverySourceDetachCount -ne 0 -or
+                $cancellationLatencyMilliseconds -ne 0 -or
+                $cancellationQuiescenceMilliseconds -ne 0 -or
+                $cancellationObservationMilliseconds -ne 0 -or
+                $cancellationSourceDetachMilliseconds -ne 0 -or
+                $cancellationRecoveryStartupMilliseconds -ne 0 -or
+                $cancellationRecoveryAdvanceMilliseconds -ne 0 -or
+                $cancellationRecoverySourceDetachMilliseconds -ne 0 -or
+                $cancellationSourceNullAfterObservation -or
+                $cancellationRecoveryUsedFreshSource -or
+                $cancellationNoAutomaticRestart) {
+                throw "The inactive native playback cancellation probe evidence is not empty."
+            }
+        }
+        elseif ($cancellationProbeCount -ne 1 -or
+            $cancellationObservedCount -ne 1 -or
+            $cancellationSourceDetachCount -ne 1 -or
+            $cancellationRecoveryCount -ne 1 -or
+            $cancellationRecoverySourceDetachCount -ne 1 -or
+            $cancellationLatencyMilliseconds -lt 0 -or
+            $cancellationLatencyMilliseconds -gt 1000 -or
+            $cancellationQuiescenceMilliseconds -lt 0 -or
+            $cancellationQuiescenceMilliseconds -gt 1000 -or
+            $cancellationObservationMilliseconds -lt 1000 -or
+            $cancellationObservationMilliseconds -gt 1500 -or
+            $cancellationSourceDetachMilliseconds -lt 0 -or
+            $cancellationSourceDetachMilliseconds -gt 5000 -or
+            $cancellationRecoveryStartupMilliseconds -le 0 -or
+            $cancellationRecoveryStartupMilliseconds -gt 5000 -or
+            $cancellationRecoveryAdvanceMilliseconds -le 0 -or
+            $cancellationRecoveryAdvanceMilliseconds -gt 3000 -or
+            $cancellationRecoverySourceDetachMilliseconds -lt 0 -or
+            $cancellationRecoverySourceDetachMilliseconds -gt 5000 -or
+            ($cancellationLatencyMilliseconds + $cancellationSourceDetachMilliseconds) -gt
+                ($cancellationQuiescenceMilliseconds + 0.002) -or
+            ($cancellationQuiescenceMilliseconds + $cancellationObservationMilliseconds) -lt
+                999.998 -or
+            $cancellationSourceDetachMilliseconds -gt
+                ([double]$probe.SourceDetachMaximumMilliseconds + 0.002) -or
+            $cancellationRecoverySourceDetachMilliseconds -gt
+                ([double]$probe.SourceDetachMaximumMilliseconds + 0.002) -or
+            -not $cancellationSourceNullAfterObservation -or
+            -not $cancellationRecoveryUsedFreshSource -or
+            -not $cancellationNoAutomaticRestart) {
+            throw "The active native playback cancellation probe evidence is outside policy."
         }
     }
     $startupFailureStage = [string]$probe.StartupFailureStage
@@ -2038,14 +2146,18 @@ try {
         throw "The native playback timeout failure is not bound to its active startup stage."
     }
     $expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }
-    $expectedDetachedSourceCount = $SwitchCount + [int]$probe.PlaybackRetryCount
+    $expectedDetachedSourceCount =
+        $SwitchCount +
+        [int]$probe.PlaybackRetryCount +
+        $cancellationSourceDetachCount +
+        $cancellationRecoverySourceDetachCount
     if ($SoakMinutes -gt 0) { $expectedDetachedSourceCount++ }
     if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or
         [int]$probe.SwitchCount -ne $SwitchCount -or
         [int]$probe.SurfaceTransitionCount -ne $expectedSurfaceTransitions -or
         [int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount -or
         [int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount) {
-        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), playbackRetries=$($probe.PlaybackRetryCount), startupFailureStage=$startupFailureStage, startupFailureOrdinal=$startupFailureSwitchOrdinal, startupFailureFixture=$startupFailureFixture, startupFailureAttempts=$startupFailureAttemptCount, startupFailureTransitions=$startupFailureSurfaceTransitionCount, startupFailureTotal=$startupFailureTotalMilliseconds, startupFailureSourceCreation=$startupFailureSourceCreationMilliseconds, startupFailureSourceAssignment=$startupFailureSourceAssignmentMilliseconds, startupFailurePlayInvocation=$startupFailurePlayInvocationMilliseconds, startupFailureSourceOpenObserved=$startupFailureSourceOpenObserved, startupFailureSourceOpenError=$startupFailureSourceOpenError, startupFailureSourceOpenCompletion=$startupFailureSourceOpenCompletionMilliseconds, startupFailurePostSourceOpenElapsed=$startupFailurePostSourceOpenElapsedMilliseconds, startupFailureActiveStageElapsed=$startupFailureActiveStageElapsedMilliseconds, startupMaximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), startupMaximumFixture=$($probe.StartupMaximumFixture), startupMaximumAttempts=$($probe.StartupMaximumAttemptCount), startupMaximumTransitions=$($probe.StartupMaximumSurfaceTransitionCount), startupMaximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), startupMaximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), startupMaximumSourceOpenObserved=$($probe.StartupMaximumSourceOpen.CompletionObserved), startupMaximumSourceOpenError=$($probe.StartupMaximumSourceOpen.ErrorPresent), startupMaximumSourceOpenCompletion=$($probe.StartupMaximumSourceOpen.CompletionMilliseconds), startupMaximumPostSourceOpenMediaOpened=$($probe.StartupMaximumSourceOpen.PostCompletionElapsedMilliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackStateBeforeDetach=$($probe.PlaybackStateBeforeDetach), sourceDetached=$($probe.SourceDetached), canPauseBeforeDetach=$($probe.CanPauseBeforeDetach), canSeekBeforeDetach=$($probe.CanSeekBeforeDetach), teardownStage=$($probe.TeardownStage), exceptionCategory=$($probe.ExceptionCategory), exceptionHResult=$($probe.ExceptionHResult), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), injectedRequestOrdinal=$($tlsServer.LastInjectedRequestOrdinal), recoveryRequestOrdinal=$($tlsServer.LastRecoveryRequestOrdinal), h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
+        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), playbackRetries=$($probe.PlaybackRetryCount), startupFailureStage=$startupFailureStage, startupFailureOrdinal=$startupFailureSwitchOrdinal, startupFailureFixture=$startupFailureFixture, startupFailureAttempts=$startupFailureAttemptCount, startupFailureTransitions=$startupFailureSurfaceTransitionCount, startupFailureTotal=$startupFailureTotalMilliseconds, startupFailureSourceCreation=$startupFailureSourceCreationMilliseconds, startupFailureSourceAssignment=$startupFailureSourceAssignmentMilliseconds, startupFailurePlayInvocation=$startupFailurePlayInvocationMilliseconds, startupFailureSourceOpenObserved=$startupFailureSourceOpenObserved, startupFailureSourceOpenError=$startupFailureSourceOpenError, startupFailureSourceOpenCompletion=$startupFailureSourceOpenCompletionMilliseconds, startupFailurePostSourceOpenElapsed=$startupFailurePostSourceOpenElapsedMilliseconds, startupFailureActiveStageElapsed=$startupFailureActiveStageElapsedMilliseconds, startupMaximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), startupMaximumFixture=$($probe.StartupMaximumFixture), startupMaximumAttempts=$($probe.StartupMaximumAttemptCount), startupMaximumTransitions=$($probe.StartupMaximumSurfaceTransitionCount), startupMaximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), startupMaximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), startupMaximumSourceOpenObserved=$($probe.StartupMaximumSourceOpen.CompletionObserved), startupMaximumSourceOpenError=$($probe.StartupMaximumSourceOpen.ErrorPresent), startupMaximumSourceOpenCompletion=$($probe.StartupMaximumSourceOpen.CompletionMilliseconds), startupMaximumPostSourceOpenMediaOpened=$($probe.StartupMaximumSourceOpen.PostCompletionElapsedMilliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackStateBeforeDetach=$($probe.PlaybackStateBeforeDetach), sourceDetached=$($probe.SourceDetached), canPauseBeforeDetach=$($probe.CanPauseBeforeDetach), canSeekBeforeDetach=$($probe.CanSeekBeforeDetach), teardownStage=$($probe.TeardownStage), exceptionCategory=$($probe.ExceptionCategory), exceptionHResult=$($probe.ExceptionHResult), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), injectedRequestOrdinal=$($tlsServer.LastInjectedRequestOrdinal), recoveryRequestOrdinal=$($tlsServer.LastRecoveryRequestOrdinal), cancellationProbes=$cancellationProbeCount, cancellationsObserved=$cancellationObservedCount, cancellationDetaches=$cancellationSourceDetachCount, cancellationRecoveries=$cancellationRecoveryCount, cancellationRecoveryDetaches=$cancellationRecoverySourceDetachCount, cancellationLatency=$cancellationLatencyMilliseconds, cancellationQuiescence=$cancellationQuiescenceMilliseconds, cancellationObservation=$cancellationObservationMilliseconds, cancellationSourceNull=$cancellationSourceNullAfterObservation, cancellationFreshRecovery=$cancellationRecoveryUsedFreshSource, cancellationNoAutomaticRestart=$cancellationNoAutomaticRestart, h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     $startupMaximumSwitchOrdinal = [int]$probe.StartupMaximumSwitchOrdinal
     $startupMaximumFixture = [string]$probe.StartupMaximumFixture
@@ -2176,7 +2288,7 @@ try {
 
     Set-FailurePoint -Stage "EvidencePreparation" -Code "EvidencePreparationFailed"
     $successCandidate = [ordered]@{
-        SchemaVersion = 9
+        SchemaVersion = 10
         Stage = "M10NativeTierAPlayback"
         Result = "Passed"
         RunId = $runId
@@ -2214,6 +2326,21 @@ try {
         NetworkRecoveryCount = $tlsRecoveryCount
         LastInjectedRequestOrdinal = $tlsLastInjectedRequestOrdinal
         LastRecoveryRequestOrdinal = $tlsLastRecoveryRequestOrdinal
+        CancellationProbeCount = $cancellationProbeCount
+        CancellationObservedCount = $cancellationObservedCount
+        CancellationSourceDetachCount = $cancellationSourceDetachCount
+        CancellationRecoveryCount = $cancellationRecoveryCount
+        CancellationRecoverySourceDetachCount = $cancellationRecoverySourceDetachCount
+        CancellationLatencyMilliseconds = [Math]::Round($cancellationLatencyMilliseconds, 3)
+        CancellationQuiescenceMilliseconds = [Math]::Round($cancellationQuiescenceMilliseconds, 3)
+        CancellationObservationMilliseconds = [Math]::Round($cancellationObservationMilliseconds, 3)
+        CancellationSourceDetachMilliseconds = [Math]::Round($cancellationSourceDetachMilliseconds, 3)
+        CancellationRecoveryStartupMilliseconds = [Math]::Round($cancellationRecoveryStartupMilliseconds, 3)
+        CancellationRecoveryAdvanceMilliseconds = [Math]::Round($cancellationRecoveryAdvanceMilliseconds, 3)
+        CancellationRecoverySourceDetachMilliseconds = [Math]::Round($cancellationRecoverySourceDetachMilliseconds, 3)
+        CancellationSourceNullAfterObservation = $cancellationSourceNullAfterObservation
+        CancellationRecoveryUsedFreshSource = $cancellationRecoveryUsedFreshSource
+        CancellationNoAutomaticRestart = $cancellationNoAutomaticRestart
         InitialPrivateBytes = [long]$probe.InitialPrivateBytes
         FinalPrivateBytes = [long]$probe.FinalPrivateBytes
         InitialHandleCount = [int]$probe.InitialHandleCount

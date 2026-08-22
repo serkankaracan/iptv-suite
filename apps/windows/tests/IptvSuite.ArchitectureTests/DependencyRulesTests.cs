@@ -2100,7 +2100,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(app, "new NativePlaybackProbeEnvelope(");
         StringAssert.Contains(
             normalizedApp,
-            "new NativePlaybackProbeEnvelope( 4, request.RunId.ToString(\"N\"), runtimeDependency, result);");
+            "new NativePlaybackProbeEnvelope( 5, request.RunId.ToString(\"N\"), runtimeDependency, result);");
         StringAssert.Contains(app, "request.RunId.ToString(\"N\")");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.json\"");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.pending\"");
@@ -2122,6 +2122,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "switchCount is < 2 or > 100");
         StringAssert.Contains(window, "soakMinutes is < 0 or > 480");
         StringAssert.Contains(window, "soakMinutes > 0 && switchCount != 100");
+        StringAssert.Contains(window, "cancellationProbeCount is < 0 or > 1");
+        StringAssert.Contains(
+            normalizedWindow,
+            "cancellationProbeCount == 1 && (switchCount != 100 || soakMinutes != 0)");
         StringAssert.Contains(window, "RealTimePlayback = true,");
         Assert.AreEqual(
             1,
@@ -2266,50 +2270,55 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             normalizedWindow,
             "activeStartupStageStarted = Math.Max( sourceOpenWaitStarted, completion.Timestamp);");
+        int cancellationProbeBoundaryIndex = window.IndexOf(
+            "private async Task<NativePlaybackCancellationMetrics> RunCancellationProbeAsync(",
+            StringComparison.Ordinal);
+        Assert.IsTrue(cancellationProbeBoundaryIndex > 0);
+        string measuredPlaybackHelper = window[..cancellationProbeBoundaryIndex];
         Assert.AreEqual(
             1,
             Regex.Count(
-                window,
+                measuredPlaybackHelper,
                 Regex.Escape("source.OpenOperationCompleted += Source_OpenOperationCompleted;"),
                 RegexOptions.CultureInvariant),
             "Each attempt must bind one source-open diagnostic handler.");
         Assert.AreEqual(
             1,
             Regex.Count(
-                window,
+                measuredPlaybackHelper,
                 Regex.Escape("source.OpenOperationCompleted -= Source_OpenOperationCompleted;"),
                 RegexOptions.CultureInvariant),
             "The idempotent helper must own the source-open event removal.");
         Assert.AreEqual(
             3,
             Regex.Count(
-                window,
+                measuredPlaybackHelper,
                 Regex.Escape("UnsubscribeSourceOpenHandler();"),
                 RegexOptions.CultureInvariant),
             "Success, retry, and finally paths must all close the attempt-owned handler.");
-        int sourceOpenSubscribeIndex = window.IndexOf(
+        int sourceOpenSubscribeIndex = measuredPlaybackHelper.IndexOf(
             "source.OpenOperationCompleted += Source_OpenOperationCompleted;",
             StringComparison.Ordinal);
-        int firstSourceOpenUnsubscribeCallIndex = window.IndexOf(
+        int firstSourceOpenUnsubscribeCallIndex = measuredPlaybackHelper.IndexOf(
             "UnsubscribeSourceOpenHandler();",
             sourceOpenSubscribeIndex,
             StringComparison.Ordinal);
-        int firstSourceDetachIndex = window.IndexOf(
+        int firstSourceDetachIndex = measuredPlaybackHelper.IndexOf(
             "sourceDetachSamples.Add(await DetachSourceAsync(",
             firstSourceOpenUnsubscribeCallIndex,
             StringComparison.Ordinal);
-        int retrySourceOpenUnsubscribeCallIndex = window.IndexOf(
+        int retrySourceOpenUnsubscribeCallIndex = measuredPlaybackHelper.IndexOf(
             "UnsubscribeSourceOpenHandler();",
             firstSourceDetachIndex,
             StringComparison.Ordinal);
-        int retrySourceDetachIndex = window.IndexOf(
+        int retrySourceDetachIndex = measuredPlaybackHelper.IndexOf(
             "sourceDetachSamples.Add(await DetachSourceAsync(",
             retrySourceOpenUnsubscribeCallIndex,
             StringComparison.Ordinal);
-        int finalSourceOpenUnsubscribeCallIndex = window.LastIndexOf(
+        int finalSourceOpenUnsubscribeCallIndex = measuredPlaybackHelper.LastIndexOf(
             "UnsubscribeSourceOpenHandler();",
             StringComparison.Ordinal);
-        int attemptResetIndex = window.IndexOf(
+        int attemptResetIndex = measuredPlaybackHelper.IndexOf(
             "BestEffortResetAfterProbe();",
             finalSourceOpenUnsubscribeCallIndex,
             StringComparison.Ordinal);
@@ -2363,8 +2372,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "NativePlaybackFixture.HlsH264AacMpegTs");
         StringAssert.Contains(window, "NativePlaybackFixture.DirectH264AacMpegTs");
         StringAssert.Contains(
-            window,
-            "return new NativePlaybackProbeRequest(runId, [hlsUri, directUri]");
+            normalizedWindow,
+            "return new NativePlaybackProbeRequest( runId, [hlsUri, directUri], switchCount, TimeSpan.FromMinutes(soakMinutes), cancellationProbeCount);");
         StringAssert.Contains(window, "if (startupMilliseconds > startupMaximumMilliseconds)");
         StringAssert.Contains(window, "startupMaximumSwitchOrdinal = index + 1;");
         StringAssert.Contains(window, "startupMaximumAttemptCount = startupAttemptCount;");
@@ -2390,6 +2399,421 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "growthBytes <= 100L * 1024 * 1024 && growthPercent <= 10d && !monotonic");
         StringAssert.Contains(window, "right.PrivateBytes > left.PrivateBytes");
         StringAssert.Contains(window, "sender.Position >= TimeSpan.FromMilliseconds(500)");
+        StringAssert.Contains(window, "RunCancellationProbeAsync(");
+        StringAssert.Contains(window, "const int controlledObservationMilliseconds = 1000;");
+        StringAssert.Contains(
+            window,
+            "Task cancellationWait = Task.Delay(Timeout.InfiniteTimeSpan, localCancellation.Token);");
+        StringAssert.Contains(window, "localCancellation.Cancel();");
+        StringAssert.Contains(window, "!cancellationToken.IsCancellationRequested");
+        StringAssert.Contains(window, "DisposeMediaSource(cancellationSource);");
+        StringAssert.Contains(window, "MediaSource recoverySource = MediaSource.CreateFromUri(fixture);");
+        StringAssert.Contains(window, "!ReferenceEquals(cancellationSource, recoverySource)");
+        StringAssert.Contains(window, "DisposeMediaSource(recoverySource);");
+        StringAssert.Contains(window, "CancellationNoAutomaticRestart");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                window,
+                @"\bnew\s+MediaPlayer\b",
+                RegexOptions.CultureInvariant),
+            "The cancellation/recovery probe must keep the single native MediaPlayer boundary.");
+        int cancellationProbeHelperStart = cancellationProbeBoundaryIndex;
+        int cancellationOperationHelperStart = window.IndexOf(
+            "private async Task<NativePlaybackCancellationOperationResult> RunCancellationOperationAsync(",
+            cancellationProbeHelperStart,
+            StringComparison.Ordinal);
+        int cancellationRecoveryHelperStart = window.IndexOf(
+            "private async Task<NativePlaybackCancellationRecoveryResult> RunCancellationRecoveryAsync(",
+            cancellationOperationHelperStart,
+            StringComparison.Ordinal);
+        int cancellationRecoveryGuardHelperStart = window.IndexOf(
+            "private void ThrowIfCancellationRecoveryFailedOrChanged(MediaSource recoverySource)",
+            cancellationRecoveryHelperStart,
+            StringComparison.Ordinal);
+        int soakHelperStart = window.IndexOf(
+            "private async Task<NativePlaybackSoakMetrics> RunSoakAsync(",
+            cancellationRecoveryGuardHelperStart,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            cancellationProbeHelperStart >= 0 &&
+            cancellationProbeHelperStart < cancellationOperationHelperStart &&
+            cancellationOperationHelperStart < cancellationRecoveryHelperStart &&
+            cancellationRecoveryHelperStart < cancellationRecoveryGuardHelperStart &&
+            cancellationRecoveryGuardHelperStart < soakHelperStart,
+            "Cancellation, recovery, and source-identity guards must remain distinct helpers.");
+        string cancellationProbeHelper =
+            window[cancellationProbeHelperStart..cancellationOperationHelperStart];
+        string cancellationOperationHelper =
+            window[cancellationOperationHelperStart..cancellationRecoveryHelperStart];
+        string cancellationRecoveryHelper =
+            window[cancellationRecoveryHelperStart..cancellationRecoveryGuardHelperStart];
+        string normalizedCancellationOperationHelper = Regex.Replace(
+            cancellationOperationHelper,
+            @"\s+",
+            " ",
+            RegexOptions.CultureInvariant);
+
+        Assert.IsFalse(
+            cancellationProbeHelper.Contains("_opened.Task", StringComparison.Ordinal) ||
+            cancellationProbeHelper.Contains("_advanced.Task", StringComparison.Ordinal) ||
+            Regex.IsMatch(
+                cancellationOperationHelper,
+                @"\b_(?:opened|advanced)\b",
+                RegexOptions.CultureInvariant) ||
+            Regex.IsMatch(
+                cancellationRecoveryHelper,
+                @"\b_(?:opened|advanced)\b",
+                RegexOptions.CultureInvariant),
+            "Cancellation and recovery must not consume the switch loop's global completion TCSs.");
+        Assert.IsFalse(
+            cancellationProbeHelper.Contains(
+                "controlledObservationMilliseconds = 250",
+                StringComparison.Ordinal),
+            "The obsolete 250 ms cancellation observation must not return.");
+
+        StringAssert.Contains(
+            cancellationOperationHelper,
+            "CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)");
+        StringAssert.Contains(
+            normalizedCancellationOperationHelper,
+            "if (!ReferenceEquals(_mediaPlayer.Source, cancellationSource) || sourceAssignmentCount != 1 || playInvocationCount != 1)");
+        StringAssert.Contains(
+            normalizedCancellationOperationHelper,
+            "exception.CancellationToken == localCancellation.Token && localCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested");
+        int localCancellationCreationIndex = cancellationOperationHelper.IndexOf(
+            "CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)",
+            StringComparison.Ordinal);
+        int cancellationWaitIndex = cancellationOperationHelper.IndexOf(
+            "Task cancellationWait = Task.Delay(Timeout.InfiniteTimeSpan, localCancellation.Token);",
+            localCancellationCreationIndex,
+            StringComparison.Ordinal);
+        int cancellationOuterPreconditionIndex = cancellationOperationHelper.IndexOf(
+            "cancellationToken.ThrowIfCancellationRequested();",
+            cancellationWaitIndex,
+            StringComparison.Ordinal);
+        int cancellationSourceAssignmentIndex = cancellationOperationHelper.IndexOf(
+            "_mediaPlayer.Source = cancellationSource;",
+            cancellationOuterPreconditionIndex,
+            StringComparison.Ordinal);
+        int sourceAssignmentCountIndex = cancellationOperationHelper.IndexOf(
+            "sourceAssignmentCount++;",
+            cancellationSourceAssignmentIndex,
+            StringComparison.Ordinal);
+        int cancellationPlayIndex = cancellationOperationHelper.IndexOf(
+            "_mediaPlayer.Play();",
+            sourceAssignmentCountIndex,
+            StringComparison.Ordinal);
+        int playInvocationCountIndex = cancellationOperationHelper.IndexOf(
+            "playInvocationCount++;",
+            cancellationPlayIndex,
+            StringComparison.Ordinal);
+        int cancellationPreconditionIndex = cancellationOperationHelper.IndexOf(
+            "if (!ReferenceEquals(_mediaPlayer.Source, cancellationSource)",
+            playInvocationCountIndex,
+            StringComparison.Ordinal);
+        int sourceAssignmentSnapshotIndex = cancellationOperationHelper.IndexOf(
+            "int sourceAssignmentCountAtCancellation = sourceAssignmentCount;",
+            cancellationPreconditionIndex,
+            StringComparison.Ordinal);
+        int playInvocationSnapshotIndex = cancellationOperationHelper.IndexOf(
+            "int playInvocationCountAtCancellation = playInvocationCount;",
+            sourceAssignmentSnapshotIndex,
+            StringComparison.Ordinal);
+        int cancellationTimestampIndex = cancellationOperationHelper.IndexOf(
+            "long cancellationRequested = Stopwatch.GetTimestamp();",
+            playInvocationSnapshotIndex,
+            StringComparison.Ordinal);
+        int cancellationRequestIndex = cancellationOperationHelper.IndexOf(
+            "localCancellation.Cancel();",
+            cancellationTimestampIndex,
+            StringComparison.Ordinal);
+        int cancellationAwaitIndex = cancellationOperationHelper.IndexOf(
+            "await cancellationWait;",
+            cancellationRequestIndex,
+            StringComparison.Ordinal);
+        int cancellationDetachIndex = cancellationOperationHelper.IndexOf(
+            "double sourceDetachMilliseconds = await DetachSourceAsync(",
+            cancellationAwaitIndex,
+            StringComparison.Ordinal);
+        int cancellationDisposeIndex = cancellationOperationHelper.IndexOf(
+            "DisposeMediaSource(cancellationSource);",
+            cancellationDetachIndex,
+            StringComparison.Ordinal);
+        int cancellationObservationIndex = cancellationOperationHelper.IndexOf(
+            "var observation = Stopwatch.StartNew();",
+            cancellationDisposeIndex,
+            StringComparison.Ordinal);
+        int cancellationObservationLoopIndex = cancellationOperationHelper.IndexOf(
+            "while (observation.Elapsed < observationTarget)",
+            cancellationObservationIndex,
+            StringComparison.Ordinal);
+        int cancellationNoRestartIndex = cancellationOperationHelper.IndexOf(
+            "bool noAutomaticRestart = sourceNullAfterObservation && operationCountsUnchanged;",
+            cancellationObservationLoopIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            localCancellationCreationIndex >= 0 &&
+            localCancellationCreationIndex < cancellationWaitIndex &&
+            cancellationWaitIndex < cancellationOuterPreconditionIndex &&
+            cancellationOuterPreconditionIndex < cancellationSourceAssignmentIndex &&
+            cancellationSourceAssignmentIndex < sourceAssignmentCountIndex &&
+            sourceAssignmentCountIndex < cancellationPlayIndex &&
+            cancellationPlayIndex < playInvocationCountIndex &&
+            playInvocationCountIndex < cancellationPreconditionIndex &&
+            cancellationPreconditionIndex < sourceAssignmentSnapshotIndex &&
+            sourceAssignmentSnapshotIndex < playInvocationSnapshotIndex &&
+            playInvocationSnapshotIndex < cancellationTimestampIndex &&
+            cancellationTimestampIndex < cancellationRequestIndex &&
+            cancellationRequestIndex < cancellationAwaitIndex &&
+            cancellationRequestIndex < cancellationDetachIndex &&
+            cancellationDetachIndex < cancellationDisposeIndex &&
+            cancellationDisposeIndex < cancellationObservationIndex &&
+            cancellationObservationIndex < cancellationObservationLoopIndex &&
+            cancellationObservationLoopIndex < cancellationNoRestartIndex,
+            "App-owned cancellation must be preconditioned and timestamped before exact teardown and observation.");
+        int cancellationDetachCallEnd = cancellationOperationHelper.IndexOf(
+            "sourceDetached = true;",
+            cancellationDetachIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(cancellationDetachCallEnd > cancellationDetachIndex);
+        string cancellationDetachCall =
+            cancellationOperationHelper[cancellationDetachIndex..cancellationDetachCallEnd];
+        StringAssert.Contains(cancellationDetachCall, "cancellationToken);");
+        Assert.IsFalse(
+            cancellationDetachCall.Contains("localCancellation.Token", StringComparison.Ordinal),
+            "The cancelled operation token must not control exact source teardown.");
+
+        const string operationCountsInvariantPattern =
+            @"sourceAssignmentCount\s*==\s*sourceAssignmentCountAtCancellation\s*&&\s*" +
+            @"playInvocationCount\s*==\s*playInvocationCountAtCancellation";
+        MatchCollection operationCountsInvariantMatches = Regex.Matches(
+            cancellationOperationHelper,
+            operationCountsInvariantPattern,
+            RegexOptions.CultureInvariant);
+        MatchCollection sourceNullObservationUpdates = Regex.Matches(
+            cancellationOperationHelper,
+            Regex.Escape("sourceRemainedNull &= _mediaPlayer.Source is null;"),
+            RegexOptions.CultureInvariant);
+        Assert.AreEqual(
+            3,
+            operationCountsInvariantMatches.Count,
+            "Assignment and Play counts must be sampled before, during, and after observation.");
+        Assert.AreEqual(
+            2,
+            sourceNullObservationUpdates.Count,
+            "Source nullness must be sampled inside and after the observation loop.");
+        Assert.IsTrue(
+            operationCountsInvariantMatches[0].Index < cancellationObservationLoopIndex &&
+            cancellationObservationLoopIndex < sourceNullObservationUpdates[0].Index &&
+            sourceNullObservationUpdates[0].Index < operationCountsInvariantMatches[1].Index &&
+            operationCountsInvariantMatches[1].Index < sourceNullObservationUpdates[1].Index &&
+            sourceNullObservationUpdates[1].Index < operationCountsInvariantMatches[2].Index &&
+            operationCountsInvariantMatches[2].Index < cancellationNoRestartIndex,
+            "The no-restart proof must retain invariant samples across the complete observation window.");
+
+        Assert.IsFalse(
+            Regex.IsMatch(
+                cancellationRecoveryHelper,
+                @"\b_(?:opened|advanced)\b",
+                RegexOptions.CultureInvariant),
+            "Recovery must use source-owned completion and position observations.");
+        StringAssert.Contains(
+            cancellationRecoveryHelper,
+            "new TaskCompletionSource<NativePlaybackSourceOpenCompletion>(");
+        StringAssert.Contains(
+            cancellationRecoveryHelper,
+            "if (ReferenceEquals(sender, recoverySource))");
+        StringAssert.Contains(
+            cancellationRecoveryHelper,
+            "args.Error is not null");
+        int recoverySourceIndex = cancellationRecoveryHelper.IndexOf(
+            "MediaSource recoverySource = MediaSource.CreateFromUri(fixture);",
+            StringComparison.Ordinal);
+        int recoveryHandlerIndex = cancellationRecoveryHelper.IndexOf(
+            "void RecoverySource_OpenOperationCompleted(",
+            recoverySourceIndex,
+            StringComparison.Ordinal);
+        int recoverySourceBoundIndex = cancellationRecoveryHelper.IndexOf(
+            "if (ReferenceEquals(sender, recoverySource))",
+            recoveryHandlerIndex,
+            StringComparison.Ordinal);
+        int recoveryOpenTimestampIndex = cancellationRecoveryHelper.IndexOf(
+            "Stopwatch.GetTimestamp(),",
+            recoverySourceBoundIndex,
+            StringComparison.Ordinal);
+        int recoveryOpenErrorCaptureIndex = cancellationRecoveryHelper.IndexOf(
+            "args.Error is not null",
+            recoveryOpenTimestampIndex,
+            StringComparison.Ordinal);
+        int recoveryOpenSubscribeIndex = cancellationRecoveryHelper.IndexOf(
+            "recoverySource.OpenOperationCompleted += RecoverySource_OpenOperationCompleted;",
+            recoveryOpenErrorCaptureIndex,
+            StringComparison.Ordinal);
+        int recoverySourceAssignmentIndex = cancellationRecoveryHelper.IndexOf(
+            "_mediaPlayer.Source = recoverySource;",
+            recoveryOpenSubscribeIndex,
+            StringComparison.Ordinal);
+        int recoveryPlayIndex = cancellationRecoveryHelper.IndexOf(
+            "_mediaPlayer.Play();",
+            recoverySourceAssignmentIndex,
+            StringComparison.Ordinal);
+        int recoveryOpenWaitIndex = cancellationRecoveryHelper.IndexOf(
+            "openCompletion = await sourceOpenCompletion.Task.WaitAsync(",
+            recoveryPlayIndex,
+            StringComparison.Ordinal);
+        int recoveryOpenErrorCheckIndex = cancellationRecoveryHelper.IndexOf(
+            "if (openCompletion.ErrorPresent)",
+            recoveryOpenWaitIndex,
+            StringComparison.Ordinal);
+        int recoveryCurrentSourceCheckIndex = cancellationRecoveryHelper.IndexOf(
+            "ThrowIfCancellationRecoveryFailedOrChanged(recoverySource);",
+            recoveryOpenErrorCheckIndex,
+            StringComparison.Ordinal);
+        int recoveryPositionBaselineIndex = cancellationRecoveryHelper.IndexOf(
+            "positionBaseline = _mediaPlayer.PlaybackSession.Position;",
+            recoveryCurrentSourceCheckIndex,
+            StringComparison.Ordinal);
+        int recoveryAdvanceLoopIndex = cancellationRecoveryHelper.IndexOf(
+            "while (true)",
+            recoveryPositionBaselineIndex,
+            StringComparison.Ordinal);
+        int recoveryLoopCurrentSourceCheckIndex = cancellationRecoveryHelper.IndexOf(
+            "ThrowIfCancellationRecoveryFailedOrChanged(recoverySource);",
+            recoveryAdvanceLoopIndex,
+            StringComparison.Ordinal);
+        int recoveryPositionIndex = cancellationRecoveryHelper.IndexOf(
+            "position = _mediaPlayer.PlaybackSession.Position;",
+            recoveryLoopCurrentSourceCheckIndex,
+            StringComparison.Ordinal);
+        int recoveryProgressIndex = cancellationRecoveryHelper.IndexOf(
+            "position - positionBaseline >= TimeSpan.FromMilliseconds(500)",
+            recoveryPositionIndex,
+            StringComparison.Ordinal);
+        int recoveryOpenUnsubscribeIndex = cancellationRecoveryHelper.IndexOf(
+            "UnsubscribeSourceOpenHandler();",
+            recoveryProgressIndex,
+            StringComparison.Ordinal);
+        int recoveryDetachIndex = cancellationRecoveryHelper.IndexOf(
+            "double sourceDetachMilliseconds = await DetachSourceAsync(",
+            recoveryOpenUnsubscribeIndex,
+            StringComparison.Ordinal);
+        int recoveryDisposeIndex = cancellationRecoveryHelper.IndexOf(
+            "DisposeMediaSource(recoverySource);",
+            recoveryDetachIndex,
+            StringComparison.Ordinal);
+        int recoveryFinallyUnsubscribeIndex = cancellationRecoveryHelper.LastIndexOf(
+            "UnsubscribeSourceOpenHandler();",
+            StringComparison.Ordinal);
+        int recoveryBestEffortResetIndex = cancellationRecoveryHelper.IndexOf(
+            "BestEffortResetAfterProbe();",
+            recoveryFinallyUnsubscribeIndex,
+            StringComparison.Ordinal);
+        int recoveryBestEffortDisposeIndex = cancellationRecoveryHelper.IndexOf(
+            "BestEffortDisposeMediaSource(recoverySource);",
+            recoveryFinallyUnsubscribeIndex,
+            StringComparison.Ordinal);
+        Assert.AreEqual(
+            2,
+            Regex.Count(
+                cancellationRecoveryHelper,
+                Regex.Escape("UnsubscribeSourceOpenHandler();"),
+                RegexOptions.CultureInvariant),
+            "Success and finally paths must both unbind the recovery source-open handler.");
+        Assert.AreEqual(
+            2,
+            Regex.Count(
+                cancellationRecoveryHelper,
+                Regex.Escape("ThrowIfCancellationRecoveryFailedOrChanged(recoverySource);"),
+                RegexOptions.CultureInvariant),
+            "Recovery must prove current-source identity before baseline and every progress sample.");
+        Assert.IsTrue(
+            recoverySourceIndex >= 0 &&
+            recoverySourceIndex < recoveryHandlerIndex &&
+            recoveryHandlerIndex < recoverySourceBoundIndex &&
+            recoverySourceBoundIndex < recoveryOpenTimestampIndex &&
+            recoveryOpenTimestampIndex < recoveryOpenErrorCaptureIndex &&
+            recoveryOpenErrorCaptureIndex < recoveryOpenSubscribeIndex &&
+            recoveryOpenSubscribeIndex < recoverySourceAssignmentIndex &&
+            recoverySourceAssignmentIndex < recoveryPlayIndex &&
+            recoveryPlayIndex < recoveryOpenWaitIndex &&
+            recoveryOpenWaitIndex < recoveryOpenErrorCheckIndex &&
+            recoveryOpenErrorCheckIndex < recoveryCurrentSourceCheckIndex &&
+            recoveryCurrentSourceCheckIndex < recoveryPositionBaselineIndex &&
+            recoveryPositionBaselineIndex < recoveryAdvanceLoopIndex &&
+            recoveryAdvanceLoopIndex < recoveryLoopCurrentSourceCheckIndex &&
+            recoveryLoopCurrentSourceCheckIndex < recoveryPositionIndex &&
+            recoveryPositionIndex < recoveryProgressIndex &&
+            recoveryProgressIndex < recoveryOpenUnsubscribeIndex &&
+            recoveryOpenUnsubscribeIndex < recoveryDetachIndex &&
+            recoveryDetachIndex < recoveryDisposeIndex &&
+            recoveryDisposeIndex < recoveryFinallyUnsubscribeIndex &&
+            recoveryFinallyUnsubscribeIndex < recoveryBestEffortResetIndex &&
+            recoveryFinallyUnsubscribeIndex < recoveryBestEffortDisposeIndex,
+            "Recovery must bind source-local open evidence before assignment, prove exact-source progress, and unbind before teardown.");
+
+        StringAssert.Contains(
+            window,
+            "internal readonly record struct NativePlaybackCancellationOperationResult(");
+        StringAssert.Contains(
+            window,
+            "internal readonly record struct NativePlaybackCancellationRecoveryResult(");
+        StringAssert.Contains(
+            window,
+            "internal readonly record struct NativePlaybackCancellationMetrics(");
+        StringAssert.Contains(
+            cancellationProbeHelper,
+            "result => cancellationOperation = result,");
+        StringAssert.Contains(
+            cancellationProbeHelper,
+            "result => recovery = result,");
+        StringAssert.Contains(
+            cancellationProbeHelper,
+            "CreateCancellationMetrics(cancellationOperation, recovery));");
+        StringAssert.Contains(
+            window,
+            "NativePlaybackCancellationMetrics metrics = default) : Exception");
+        StringAssert.Contains(
+            window,
+            "internal NativePlaybackCancellationMetrics Metrics { get; } = metrics;");
+        Assert.IsFalse(
+            window.Contains("NativePlaybackCancellationMetrics Metrics { get; set; }", StringComparison.Ordinal),
+            "Partial cancellation diagnostics must remain immutable once attached to the typed exception.");
+        int cancellationFailureCatchIndex = window.IndexOf(
+            "catch (NativePlaybackCancellationException exception)",
+            StringComparison.Ordinal);
+        int cancellationFailureCatchEnd = window.IndexOf(
+            "catch (InvalidOperationException)",
+            cancellationFailureCatchIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            cancellationFailureCatchIndex >= 0 &&
+            cancellationFailureCatchIndex < cancellationFailureCatchEnd &&
+            cancellationFailureCatchEnd < cancellationProbeBoundaryIndex,
+            "The top-level probe must preserve typed cancellation evidence before helper declarations.");
+        string normalizedCancellationFailureCatch = Regex.Replace(
+            window[cancellationFailureCatchIndex..cancellationFailureCatchEnd],
+            @"\s+",
+            " ",
+            RegexOptions.CultureInvariant);
+        StringAssert.Contains(
+            normalizedCancellationFailureCatch,
+            "cancellationMetrics = exception.Metrics; detachedSourceCount += cancellationMetrics.CancellationSourceDetachCount + cancellationMetrics.CancellationRecoverySourceDetachCount;");
+        StringAssert.Contains(
+            normalizedCancellationFailureCatch,
+            "detachedSourceCount: detachedSourceCount");
+
+        int cancellationInvocationIndex = window.IndexOf(
+            "cancellationMetrics = await RunCancellationProbeAsync(",
+            switchLoopIndex,
+            StringComparison.Ordinal);
+        int optionalSoakIndex = window.IndexOf(
+            "NativePlaybackSoakMetrics soakMetrics = NativePlaybackSoakMetrics.None;",
+            cancellationInvocationIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            cancellationInvocationIndex > switchLoopIndex && optionalSoakIndex > cancellationInvocationIndex,
+            "Cancellation/recovery must run after the measured switch loop and before optional soak.");
         StringAssert.Contains(app, "JsonStringEnumConverter");
         Assert.IsFalse(
             window.Contains("fixture.ToString()", StringComparison.Ordinal) ||
@@ -2440,16 +2864,36 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "$tlsLastRecoveryRequestOrdinal -le $tlsLastInjectedRequestOrdinal");
         StringAssert.Contains(controller, "NetworkInterruptionCount = $tlsInjectedFailureCount");
         StringAssert.Contains(controller, "NetworkRecoveryCount = $tlsRecoveryCount");
-        StringAssert.Contains(controller, "$expectedDetachedSourceCount = $SwitchCount + [int]$probe.PlaybackRetryCount");
+        StringAssert.Contains(controller, "$expectedDetachedSourceCount =");
+        StringAssert.Contains(controller, "$cancellationSourceDetachCount +");
+        StringAssert.Contains(controller, "$cancellationRecoverySourceDetachCount");
         StringAssert.Contains(controller, "[int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount");
         StringAssert.Contains(controller, "DetachedSourceCount = [int]$probe.DetachedSourceCount");
         StringAssert.Contains(controller, "SourceDetachP95Milliseconds -gt 3000");
         StringAssert.Contains(controller, "SourceDetachMaximumMilliseconds -gt 5000");
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
-        StringAssert.Contains(controller, "SchemaVersion = 9");
-        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 4");
-        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 4");
+        StringAssert.Contains(controller, "SchemaVersion = 10");
+        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 5");
+        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 5");
+        StringAssert.Contains(controller, "[ValidateRange(0, 1)]");
+        StringAssert.Contains(controller, "$CancellationProbeCount -gt 0 -and");
+        StringAssert.Contains(controller, "$cancellationProbeCount -ne $CancellationProbeCount");
+        StringAssert.Contains(controller, "$cancellationObservedCount -ne 1");
+        StringAssert.Contains(controller, "$cancellationQuiescenceMilliseconds -gt 1000");
+        StringAssert.Contains(controller, "$cancellationObservationMilliseconds -lt 1000");
+        StringAssert.Contains(controller, "$cancellationObservationMilliseconds -gt 1500");
+        StringAssert.Contains(
+            controller,
+            "$cancellationLatencyMilliseconds + $cancellationSourceDetachMilliseconds");
+        StringAssert.Contains(
+            controller,
+            "$cancellationQuiescenceMilliseconds + $cancellationObservationMilliseconds");
+        StringAssert.Contains(controller, "$cancellationRecoveryStartupMilliseconds -gt 5000");
+        StringAssert.Contains(controller, "$cancellationRecoveryAdvanceMilliseconds -gt 3000");
+        StringAssert.Contains(controller, "-not $cancellationSourceNullAfterObservation");
+        StringAssert.Contains(controller, "-not $cancellationRecoveryUsedFreshSource");
+        StringAssert.Contains(controller, "-not $cancellationNoAutomaticRestart");
         StringAssert.Contains(controller, "\"StartupMaximumSourceOpen\"");
         StringAssert.Contains(controller, "\"StartupFailureSourceOpen\"");
         StringAssert.Contains(controller, "\"CompletionObserved\"");
@@ -2742,6 +3186,21 @@ public sealed class DependencyRulesTests
             "NetworkRecoveryCount",
             "LastInjectedRequestOrdinal",
             "LastRecoveryRequestOrdinal",
+            "CancellationProbeCount",
+            "CancellationObservedCount",
+            "CancellationSourceDetachCount",
+            "CancellationRecoveryCount",
+            "CancellationRecoverySourceDetachCount",
+            "CancellationLatencyMilliseconds",
+            "CancellationQuiescenceMilliseconds",
+            "CancellationObservationMilliseconds",
+            "CancellationSourceDetachMilliseconds",
+            "CancellationRecoveryStartupMilliseconds",
+            "CancellationRecoveryAdvanceMilliseconds",
+            "CancellationRecoverySourceDetachMilliseconds",
+            "CancellationSourceNullAfterObservation",
+            "CancellationRecoveryUsedFreshSource",
+            "CancellationNoAutomaticRestart",
             "InitialPrivateBytes",
             "FinalPrivateBytes",
             "InitialHandleCount",
@@ -3332,6 +3791,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(workflow, "-SwitchCount 100");
         StringAssert.Contains(workflow, "-SoakMinutes 0");
         StringAssert.Contains(workflow, "-NetworkInterruptionCount 1");
+        StringAssert.Contains(workflow, "-CancellationProbeCount 1");
         StringAssert.Contains(workflow, "validate-native-playback-evidence `");
         StringAssert.Contains(workflow, ".\\eng\\Invoke-WindowsNativePlaybackSmoke.ps1 `");
         StringAssert.Contains(workflow, "$env:GITHUB_SHA.ToLowerInvariant() `");

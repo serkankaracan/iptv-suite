@@ -60,6 +60,18 @@ public sealed class NativePlaybackEvidenceValidatorTests
         [
             ReplaceOnce(evidence, "\"SwitchCount\":100", "\"SwitchCount\":\"100\""),
             ReplaceOnce(evidence, "\"ProbeRunIdBound\":true", "\"ProbeRunIdBound\":\"true\""),
+            ReplaceOnce(
+                evidence,
+                "\"CancellationProbeCount\":1",
+                "\"CancellationProbeCount\":\"1\""),
+            ReplaceOnce(
+                evidence,
+                "\"CancellationLatencyMilliseconds\":125.25",
+                "\"CancellationLatencyMilliseconds\":\"125.25\""),
+            ReplaceOnce(
+                evidence,
+                "\"CancellationNoAutomaticRestart\":true",
+                "\"CancellationNoAutomaticRestart\":\"true\""),
         ];
 
         foreach (string candidate in coercedEvidence)
@@ -101,7 +113,6 @@ public sealed class NativePlaybackEvidenceValidatorTests
         string evidence = CreateValidEvidence(files.ControllerSha256);
         (string Original, string Replacement)[] mutations =
         [
-            ("\"ProbeEnvelopeSchemaVersion\":4", "\"ProbeEnvelopeSchemaVersion\":3"),
             ("\"StartupP95Milliseconds\":250.125", "\"StartupP95Milliseconds\":3000.001"),
             ("\"StartupMaximumMilliseconds\":2500.5", "\"StartupMaximumMilliseconds\":5000.001"),
             ("\"SourceDetachP95Milliseconds\":8.25", "\"SourceDetachP95Milliseconds\":3000.001"),
@@ -140,6 +151,170 @@ public sealed class NativePlaybackEvidenceValidatorTests
     }
 
     [TestMethod]
+    public void CancellationRecoverySchemaCountsBoundsAndPostconditionsFailClosed()
+    {
+        using ValidationFiles files = ValidationFiles.Create("native-evidence-cancellation-recovery");
+        string evidence = CreateValidEvidence(files.ControllerSha256);
+        (string Original, string Replacement)[] mutations =
+        [
+            ("\"SchemaVersion\":10", "\"SchemaVersion\":9"),
+            ("\"ProbeEnvelopeSchemaVersion\":5", "\"ProbeEnvelopeSchemaVersion\":4"),
+            ("\"DetachedSourceCount\":103", "\"DetachedSourceCount\":101"),
+            ("\"CancellationProbeCount\":1", "\"CancellationProbeCount\":0"),
+            ("\"CancellationObservedCount\":1", "\"CancellationObservedCount\":2"),
+            ("\"CancellationSourceDetachCount\":1", "\"CancellationSourceDetachCount\":0"),
+            ("\"CancellationRecoveryCount\":1", "\"CancellationRecoveryCount\":0"),
+            (
+                "\"CancellationRecoverySourceDetachCount\":1",
+                "\"CancellationRecoverySourceDetachCount\":0"),
+            (
+                "\"CancellationLatencyMilliseconds\":125.25",
+                "\"CancellationLatencyMilliseconds\":-0.001"),
+            (
+                "\"CancellationLatencyMilliseconds\":125.25",
+                "\"CancellationLatencyMilliseconds\":1000.001"),
+            (
+                "\"CancellationQuiescenceMilliseconds\":175.5",
+                "\"CancellationQuiescenceMilliseconds\":-0.001"),
+            (
+                "\"CancellationQuiescenceMilliseconds\":175.5",
+                "\"CancellationQuiescenceMilliseconds\":1000.001"),
+            (
+                "\"CancellationObservationMilliseconds\":1025.75",
+                "\"CancellationObservationMilliseconds\":999.999"),
+            (
+                "\"CancellationObservationMilliseconds\":1025.75",
+                "\"CancellationObservationMilliseconds\":1500.001"),
+            (
+                "\"CancellationSourceDetachMilliseconds\":9.5",
+                "\"CancellationSourceDetachMilliseconds\":-0.001"),
+            (
+                "\"CancellationSourceDetachMilliseconds\":9.5",
+                "\"CancellationSourceDetachMilliseconds\":5000.001"),
+            (
+                "\"CancellationQuiescenceMilliseconds\":175.5",
+                "\"CancellationQuiescenceMilliseconds\":130"),
+            (
+                "\"CancellationSourceDetachMilliseconds\":9.5",
+                "\"CancellationSourceDetachMilliseconds\":10.51"),
+            (
+                "\"CancellationRecoveryStartupMilliseconds\":225.25",
+                "\"CancellationRecoveryStartupMilliseconds\":0"),
+            (
+                "\"CancellationRecoveryStartupMilliseconds\":225.25",
+                "\"CancellationRecoveryStartupMilliseconds\":5000.001"),
+            (
+                "\"CancellationRecoveryAdvanceMilliseconds\":275.5",
+                "\"CancellationRecoveryAdvanceMilliseconds\":0"),
+            (
+                "\"CancellationRecoveryAdvanceMilliseconds\":275.5",
+                "\"CancellationRecoveryAdvanceMilliseconds\":3000.001"),
+            (
+                "\"CancellationRecoverySourceDetachMilliseconds\":10.25",
+                "\"CancellationRecoverySourceDetachMilliseconds\":-0.001"),
+            (
+                "\"CancellationRecoverySourceDetachMilliseconds\":10.25",
+                "\"CancellationRecoverySourceDetachMilliseconds\":5000.001"),
+            (
+                "\"CancellationRecoverySourceDetachMilliseconds\":10.25",
+                "\"CancellationRecoverySourceDetachMilliseconds\":10.51"),
+            (
+                "\"CancellationSourceNullAfterObservation\":true",
+                "\"CancellationSourceNullAfterObservation\":false"),
+            (
+                "\"CancellationRecoveryUsedFreshSource\":true",
+                "\"CancellationRecoveryUsedFreshSource\":false"),
+            (
+                "\"CancellationNoAutomaticRestart\":true",
+                "\"CancellationNoAutomaticRestart\":false"),
+        ];
+
+        foreach ((string original, string replacement) in mutations)
+        {
+            files.WriteEvidence(ReplaceOnce(evidence, original, replacement));
+            _ = Assert.ThrowsExactly<InvalidDataException>(files.Validate);
+        }
+    }
+
+    [TestMethod]
+    public void CancellationRoundedLatencyAndQuiescenceMayBeZero()
+    {
+        using ValidationFiles files = ValidationFiles.Create("native-evidence-cancellation-rounded-zero");
+        string evidence = ReplaceOnce(
+            ReplaceOnce(
+                ReplaceOnce(
+                    CreateValidEvidence(files.ControllerSha256),
+                    "\"CancellationLatencyMilliseconds\":125.25",
+                    "\"CancellationLatencyMilliseconds\":0"),
+                "\"CancellationSourceDetachMilliseconds\":9.5",
+                "\"CancellationSourceDetachMilliseconds\":0"),
+            "\"CancellationQuiescenceMilliseconds\":175.5",
+            "\"CancellationQuiescenceMilliseconds\":0");
+
+        files.WriteEvidence(evidence);
+        files.Validate();
+    }
+
+    [TestMethod]
+    public void CancellationDisabledModeRequiresZeroedEvidenceAndNoAdditionalDetaches()
+    {
+        using ValidationFiles files = ValidationFiles.Create("native-evidence-cancellation-disabled");
+        string evidence = CreateCancellationDisabledEvidence(
+            CreateValidEvidence(files.ControllerSha256));
+
+        files.WriteEvidence(evidence);
+        files.Validate();
+
+        (string Original, string Replacement)[] mutations =
+        [
+            ("\"CancellationProbeCount\":0", "\"CancellationProbeCount\":2"),
+            ("\"DetachedSourceCount\":101", "\"DetachedSourceCount\":103"),
+            ("\"CancellationObservedCount\":0", "\"CancellationObservedCount\":1"),
+            ("\"CancellationSourceDetachCount\":0", "\"CancellationSourceDetachCount\":1"),
+            ("\"CancellationRecoveryCount\":0", "\"CancellationRecoveryCount\":1"),
+            (
+                "\"CancellationRecoverySourceDetachCount\":0",
+                "\"CancellationRecoverySourceDetachCount\":1"),
+            (
+                "\"CancellationLatencyMilliseconds\":0",
+                "\"CancellationLatencyMilliseconds\":1"),
+            (
+                "\"CancellationQuiescenceMilliseconds\":0",
+                "\"CancellationQuiescenceMilliseconds\":1"),
+            (
+                "\"CancellationObservationMilliseconds\":0",
+                "\"CancellationObservationMilliseconds\":1"),
+            (
+                "\"CancellationSourceDetachMilliseconds\":0",
+                "\"CancellationSourceDetachMilliseconds\":1"),
+            (
+                "\"CancellationRecoveryStartupMilliseconds\":0",
+                "\"CancellationRecoveryStartupMilliseconds\":1"),
+            (
+                "\"CancellationRecoveryAdvanceMilliseconds\":0",
+                "\"CancellationRecoveryAdvanceMilliseconds\":1"),
+            (
+                "\"CancellationRecoverySourceDetachMilliseconds\":0",
+                "\"CancellationRecoverySourceDetachMilliseconds\":1"),
+            (
+                "\"CancellationSourceNullAfterObservation\":false",
+                "\"CancellationSourceNullAfterObservation\":true"),
+            (
+                "\"CancellationRecoveryUsedFreshSource\":false",
+                "\"CancellationRecoveryUsedFreshSource\":true"),
+            (
+                "\"CancellationNoAutomaticRestart\":false",
+                "\"CancellationNoAutomaticRestart\":true"),
+        ];
+
+        foreach ((string original, string replacement) in mutations)
+        {
+            files.WriteEvidence(ReplaceOnce(evidence, original, replacement));
+            _ = Assert.ThrowsExactly<InvalidDataException>(files.Validate);
+        }
+    }
+
+    [TestMethod]
     public void ValidationErrorsDoNotEchoPathsOrUntrustedValues()
     {
         using ValidationFiles files = ValidationFiles.Create("native-evidence-sanitized-error");
@@ -163,7 +338,7 @@ public sealed class NativePlaybackEvidenceValidatorTests
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteNumber("SchemaVersion", 9);
+            writer.WriteNumber("SchemaVersion", 10);
             writer.WriteString("Stage", "M10NativeTierAPlayback");
             writer.WriteString("Result", "Passed");
             writer.WriteString("RunId", RunId);
@@ -177,7 +352,7 @@ public sealed class NativePlaybackEvidenceValidatorTests
             writer.WriteString("HarnessAssemblySha256", new string('b', 64));
             writer.WriteString("FixtureManifestSha256", new string('c', 64));
             writer.WriteBoolean("FixtureCorpusVerified", true);
-            writer.WriteNumber("ProbeEnvelopeSchemaVersion", 4);
+            writer.WriteNumber("ProbeEnvelopeSchemaVersion", 5);
             writer.WriteBoolean("ProbeRunIdBound", true);
             writer.WriteNumber("SwitchCount", 100);
             writer.WriteNumber("StartupP95Milliseconds", 250.125);
@@ -193,7 +368,7 @@ public sealed class NativePlaybackEvidenceValidatorTests
             writer.WriteNumber("WarmupHandleCount", 0);
             writer.WriteNumber("HandleNetGrowth", 0);
             writer.WriteNumber("SurfaceTransitionCount", 6);
-            writer.WriteNumber("DetachedSourceCount", 101);
+            writer.WriteNumber("DetachedSourceCount", 103);
             writer.WriteNumber("PlaybackRetryCount", 1);
             writer.WriteNumber("SourceDetachP95Milliseconds", 8.25);
             writer.WriteNumber("SourceDetachMaximumMilliseconds", 10.5);
@@ -201,6 +376,21 @@ public sealed class NativePlaybackEvidenceValidatorTests
             writer.WriteNumber("NetworkRecoveryCount", 1);
             writer.WriteNumber("LastInjectedRequestOrdinal", 50);
             writer.WriteNumber("LastRecoveryRequestOrdinal", 52);
+            writer.WriteNumber("CancellationProbeCount", 1);
+            writer.WriteNumber("CancellationObservedCount", 1);
+            writer.WriteNumber("CancellationSourceDetachCount", 1);
+            writer.WriteNumber("CancellationRecoveryCount", 1);
+            writer.WriteNumber("CancellationRecoverySourceDetachCount", 1);
+            writer.WriteNumber("CancellationLatencyMilliseconds", 125.25);
+            writer.WriteNumber("CancellationQuiescenceMilliseconds", 175.5);
+            writer.WriteNumber("CancellationObservationMilliseconds", 1025.75);
+            writer.WriteNumber("CancellationSourceDetachMilliseconds", 9.5);
+            writer.WriteNumber("CancellationRecoveryStartupMilliseconds", 225.25);
+            writer.WriteNumber("CancellationRecoveryAdvanceMilliseconds", 275.5);
+            writer.WriteNumber("CancellationRecoverySourceDetachMilliseconds", 10.25);
+            writer.WriteBoolean("CancellationSourceNullAfterObservation", true);
+            writer.WriteBoolean("CancellationRecoveryUsedFreshSource", true);
+            writer.WriteBoolean("CancellationNoAutomaticRestart", true);
             writer.WriteNumber("InitialPrivateBytes", 100_000_000);
             writer.WriteNumber("FinalPrivateBytes", 101_000_000);
             writer.WriteNumber("InitialHandleCount", 100);
@@ -241,6 +431,58 @@ public sealed class NativePlaybackEvidenceValidatorTests
         }
 
         return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static string CreateCancellationDisabledEvidence(string evidence)
+    {
+        (string Original, string Replacement)[] replacements =
+        [
+            ("\"DetachedSourceCount\":103", "\"DetachedSourceCount\":101"),
+            ("\"CancellationProbeCount\":1", "\"CancellationProbeCount\":0"),
+            ("\"CancellationObservedCount\":1", "\"CancellationObservedCount\":0"),
+            ("\"CancellationSourceDetachCount\":1", "\"CancellationSourceDetachCount\":0"),
+            ("\"CancellationRecoveryCount\":1", "\"CancellationRecoveryCount\":0"),
+            (
+                "\"CancellationRecoverySourceDetachCount\":1",
+                "\"CancellationRecoverySourceDetachCount\":0"),
+            (
+                "\"CancellationLatencyMilliseconds\":125.25",
+                "\"CancellationLatencyMilliseconds\":0"),
+            (
+                "\"CancellationQuiescenceMilliseconds\":175.5",
+                "\"CancellationQuiescenceMilliseconds\":0"),
+            (
+                "\"CancellationObservationMilliseconds\":1025.75",
+                "\"CancellationObservationMilliseconds\":0"),
+            (
+                "\"CancellationSourceDetachMilliseconds\":9.5",
+                "\"CancellationSourceDetachMilliseconds\":0"),
+            (
+                "\"CancellationRecoveryStartupMilliseconds\":225.25",
+                "\"CancellationRecoveryStartupMilliseconds\":0"),
+            (
+                "\"CancellationRecoveryAdvanceMilliseconds\":275.5",
+                "\"CancellationRecoveryAdvanceMilliseconds\":0"),
+            (
+                "\"CancellationRecoverySourceDetachMilliseconds\":10.25",
+                "\"CancellationRecoverySourceDetachMilliseconds\":0"),
+            (
+                "\"CancellationSourceNullAfterObservation\":true",
+                "\"CancellationSourceNullAfterObservation\":false"),
+            (
+                "\"CancellationRecoveryUsedFreshSource\":true",
+                "\"CancellationRecoveryUsedFreshSource\":false"),
+            (
+                "\"CancellationNoAutomaticRestart\":true",
+                "\"CancellationNoAutomaticRestart\":false"),
+        ];
+
+        foreach ((string original, string replacement) in replacements)
+        {
+            evidence = ReplaceOnce(evidence, original, replacement);
+        }
+
+        return evidence;
     }
 
     private static string ReplaceOnce(string value, string original, string replacement)

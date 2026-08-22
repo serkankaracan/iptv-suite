@@ -52,6 +52,21 @@ public static class NativePlaybackEvidenceValidator
         "NetworkRecoveryCount",
         "LastInjectedRequestOrdinal",
         "LastRecoveryRequestOrdinal",
+        "CancellationProbeCount",
+        "CancellationObservedCount",
+        "CancellationSourceDetachCount",
+        "CancellationRecoveryCount",
+        "CancellationRecoverySourceDetachCount",
+        "CancellationLatencyMilliseconds",
+        "CancellationQuiescenceMilliseconds",
+        "CancellationObservationMilliseconds",
+        "CancellationSourceDetachMilliseconds",
+        "CancellationRecoveryStartupMilliseconds",
+        "CancellationRecoveryAdvanceMilliseconds",
+        "CancellationRecoverySourceDetachMilliseconds",
+        "CancellationSourceNullAfterObservation",
+        "CancellationRecoveryUsedFreshSource",
+        "CancellationNoAutomaticRestart",
         "InitialPrivateBytes",
         "FinalPrivateBytes",
         "InitialHandleCount",
@@ -161,7 +176,7 @@ public static class NativePlaybackEvidenceValidator
             throw Invalid("Native playback evidence property sequence is invalid.");
         }
 
-        RequireEqual(RequireInt32(root, "SchemaVersion"), 9, "SchemaVersion");
+        RequireEqual(RequireInt32(root, "SchemaVersion"), 10, "SchemaVersion");
         RequireEqual(RequireString(root, "Stage"), ExpectedStage, "Stage");
         RequireEqual(RequireString(root, "Result"), "Passed", "Result");
         RequireLowerHex(root, "RunId", 32);
@@ -178,7 +193,7 @@ public static class NativePlaybackEvidenceValidator
         RequireLowerHex(root, "HarnessAssemblySha256", 64);
         RequireLowerHex(root, "FixtureManifestSha256", 64);
         RequireEqual(RequireBoolean(root, "FixtureCorpusVerified"), true, "FixtureCorpusVerified");
-        RequireEqual(RequireInt32(root, "ProbeEnvelopeSchemaVersion"), 4, "ProbeEnvelopeSchemaVersion");
+        RequireEqual(RequireInt32(root, "ProbeEnvelopeSchemaVersion"), 5, "ProbeEnvelopeSchemaVersion");
         RequireEqual(RequireBoolean(root, "ProbeRunIdBound"), true, "ProbeRunIdBound");
 
         int switchCount = RequireInt32(root, "SwitchCount");
@@ -209,16 +224,159 @@ public static class NativePlaybackEvidenceValidator
             throw InvalidProperty("PlaybackRetryCount");
         }
 
-        RequireEqual(
-            RequireInt32(root, "DetachedSourceCount"),
-            switchCount + playbackRetryCount,
-            "DetachedSourceCount");
         double sourceDetachP95 = RequireNonNegativeDouble(root, "SourceDetachP95Milliseconds");
         double sourceDetachMaximum = RequireNonNegativeDouble(root, "SourceDetachMaximumMilliseconds");
         if (sourceDetachP95 > 3000 || sourceDetachMaximum > 5000 ||
             sourceDetachP95 > sourceDetachMaximum)
         {
             throw InvalidProperty("SourceDetachP95Milliseconds");
+        }
+
+        int cancellationProbeCount = RequireInt32(root, "CancellationProbeCount");
+        if (cancellationProbeCount is < 0 or > 1)
+        {
+            throw InvalidProperty("CancellationProbeCount");
+        }
+
+        RequireEqual(
+            RequireInt32(root, "DetachedSourceCount"),
+            switchCount + playbackRetryCount + (cancellationProbeCount * 2),
+            "DetachedSourceCount");
+
+        int cancellationObservedCount = RequireInt32(root, "CancellationObservedCount");
+        int cancellationSourceDetachCount = RequireInt32(root, "CancellationSourceDetachCount");
+        int cancellationRecoveryCount = RequireInt32(root, "CancellationRecoveryCount");
+        int cancellationRecoverySourceDetachCount =
+            RequireInt32(root, "CancellationRecoverySourceDetachCount");
+        double cancellationLatency = RequireDouble(root, "CancellationLatencyMilliseconds");
+        double cancellationQuiescence = RequireDouble(root, "CancellationQuiescenceMilliseconds");
+        double cancellationObservation = RequireDouble(root, "CancellationObservationMilliseconds");
+        double cancellationSourceDetach = RequireDouble(root, "CancellationSourceDetachMilliseconds");
+        double cancellationRecoveryStartup =
+            RequireDouble(root, "CancellationRecoveryStartupMilliseconds");
+        double cancellationRecoveryAdvance =
+            RequireDouble(root, "CancellationRecoveryAdvanceMilliseconds");
+        double cancellationRecoverySourceDetach =
+            RequireDouble(root, "CancellationRecoverySourceDetachMilliseconds");
+        bool cancellationSourceNullAfterObservation =
+            RequireBoolean(root, "CancellationSourceNullAfterObservation");
+        bool cancellationRecoveryUsedFreshSource =
+            RequireBoolean(root, "CancellationRecoveryUsedFreshSource");
+        bool cancellationNoAutomaticRestart =
+            RequireBoolean(root, "CancellationNoAutomaticRestart");
+
+        if (cancellationProbeCount == 0)
+        {
+            RequireEqual(cancellationObservedCount, 0, "CancellationObservedCount");
+            RequireEqual(cancellationSourceDetachCount, 0, "CancellationSourceDetachCount");
+            RequireEqual(cancellationRecoveryCount, 0, "CancellationRecoveryCount");
+            RequireEqual(
+                cancellationRecoverySourceDetachCount,
+                0,
+                "CancellationRecoverySourceDetachCount");
+            RequireEqual(cancellationLatency, 0d, "CancellationLatencyMilliseconds");
+            RequireEqual(cancellationQuiescence, 0d, "CancellationQuiescenceMilliseconds");
+            RequireEqual(cancellationObservation, 0d, "CancellationObservationMilliseconds");
+            RequireEqual(cancellationSourceDetach, 0d, "CancellationSourceDetachMilliseconds");
+            RequireEqual(
+                cancellationRecoveryStartup,
+                0d,
+                "CancellationRecoveryStartupMilliseconds");
+            RequireEqual(
+                cancellationRecoveryAdvance,
+                0d,
+                "CancellationRecoveryAdvanceMilliseconds");
+            RequireEqual(
+                cancellationRecoverySourceDetach,
+                0d,
+                "CancellationRecoverySourceDetachMilliseconds");
+            RequireEqual(
+                cancellationSourceNullAfterObservation,
+                false,
+                "CancellationSourceNullAfterObservation");
+            RequireEqual(
+                cancellationRecoveryUsedFreshSource,
+                false,
+                "CancellationRecoveryUsedFreshSource");
+            RequireEqual(
+                cancellationNoAutomaticRestart,
+                false,
+                "CancellationNoAutomaticRestart");
+        }
+        else
+        {
+            RequireEqual(cancellationObservedCount, 1, "CancellationObservedCount");
+            RequireEqual(cancellationSourceDetachCount, 1, "CancellationSourceDetachCount");
+            RequireEqual(cancellationRecoveryCount, 1, "CancellationRecoveryCount");
+            RequireEqual(
+                cancellationRecoverySourceDetachCount,
+                1,
+                "CancellationRecoverySourceDetachCount");
+            if (cancellationLatency < 0 || cancellationLatency > 1000)
+            {
+                throw InvalidProperty("CancellationLatencyMilliseconds");
+            }
+
+            if (cancellationQuiescence < 0 || cancellationQuiescence > 1000)
+            {
+                throw InvalidProperty("CancellationQuiescenceMilliseconds");
+            }
+
+            if (cancellationObservation < 1000 || cancellationObservation > 1500)
+            {
+                throw InvalidProperty("CancellationObservationMilliseconds");
+            }
+
+            if (cancellationSourceDetach < 0 || cancellationSourceDetach > 5000)
+            {
+                throw InvalidProperty("CancellationSourceDetachMilliseconds");
+            }
+
+            if (cancellationRecoveryStartup <= 0 || cancellationRecoveryStartup > 5000)
+            {
+                throw InvalidProperty("CancellationRecoveryStartupMilliseconds");
+            }
+
+            if (cancellationRecoveryAdvance <= 0 || cancellationRecoveryAdvance > 3000)
+            {
+                throw InvalidProperty("CancellationRecoveryAdvanceMilliseconds");
+            }
+
+            if (cancellationRecoverySourceDetach < 0 || cancellationRecoverySourceDetach > 5000)
+            {
+                throw InvalidProperty("CancellationRecoverySourceDetachMilliseconds");
+            }
+
+            const double roundingTolerance = 0.002;
+            if (cancellationLatency + cancellationSourceDetach >
+                cancellationQuiescence + roundingTolerance)
+            {
+                throw InvalidProperty("CancellationQuiescenceMilliseconds");
+            }
+
+            if (cancellationQuiescence + cancellationObservation < 1000 - roundingTolerance)
+            {
+                throw InvalidProperty("CancellationObservationMilliseconds");
+            }
+
+            if (cancellationSourceDetach > sourceDetachMaximum + roundingTolerance ||
+                cancellationRecoverySourceDetach > sourceDetachMaximum + roundingTolerance)
+            {
+                throw InvalidProperty("SourceDetachMaximumMilliseconds");
+            }
+
+            RequireEqual(
+                cancellationSourceNullAfterObservation,
+                true,
+                "CancellationSourceNullAfterObservation");
+            RequireEqual(
+                cancellationRecoveryUsedFreshSource,
+                true,
+                "CancellationRecoveryUsedFreshSource");
+            RequireEqual(
+                cancellationNoAutomaticRestart,
+                true,
+                "CancellationNoAutomaticRestart");
         }
 
         RequireEqual(RequireInt32(root, "NetworkInterruptionCount"), 1, "NetworkInterruptionCount");

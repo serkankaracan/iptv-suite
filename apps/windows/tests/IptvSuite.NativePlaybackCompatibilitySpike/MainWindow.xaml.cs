@@ -59,6 +59,7 @@ public sealed partial class MainWindow : Window, IDisposable
         int surfaceTransitionCount = 0;
         int detachedSourceCount = 0;
         int playbackRetryCount = 0;
+        NativePlaybackCancellationMetrics cancellationMetrics = default;
         double startupMaximumMilliseconds = -1;
         int startupMaximumSwitchOrdinal = 0;
         NativePlaybackFixture startupMaximumFixture = NativePlaybackFixture.None;
@@ -366,6 +367,17 @@ public sealed partial class MainWindow : Window, IDisposable
                 timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
             }
 
+            if (request.CancellationProbeCount == 1)
+            {
+                cancellationMetrics = await RunCancellationProbeAsync(
+                    request.Fixtures[0],
+                    sourceDetachSamples,
+                    probeCancellationToken);
+                detachedSourceCount +=
+                    cancellationMetrics.CancellationSourceDetachCount +
+                    cancellationMetrics.CancellationRecoverySourceDetachCount;
+            }
+
             NativePlaybackSoakMetrics soakMetrics = NativePlaybackSoakMetrics.None;
             if (request.SoakDuration > TimeSpan.Zero)
             {
@@ -407,6 +419,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 detachedSourceCount,
                 playbackRetryCount,
                 sourceDetachSamples,
+                cancellationMetrics,
                 initialPrivateBytes,
                 process.PrivateMemorySize64,
                 initialHandles,
@@ -429,6 +442,20 @@ public sealed partial class MainWindow : Window, IDisposable
                 completedSwitchCount,
                 playbackRetryCount: playbackRetryCount,
                 startupFailureDiagnostic: CaptureStartupFailureDiagnostic());
+        }
+        catch (NativePlaybackCancellationException exception)
+        {
+            cancellationMetrics = exception.Metrics;
+            detachedSourceCount +=
+                cancellationMetrics.CancellationSourceDetachCount +
+                cancellationMetrics.CancellationRecoverySourceDetachCount;
+            return NativePlaybackProbeResult.Failed(
+                exception.Failure,
+                completedSwitchCount,
+                surfaceTransitionCount: surfaceTransitionCount,
+                detachedSourceCount: detachedSourceCount,
+                playbackRetryCount: playbackRetryCount,
+                cancellationMetrics: cancellationMetrics);
         }
         catch (InvalidOperationException) when (_mediaFailure == NativePlaybackFailure.MediaFailed)
         {
@@ -675,6 +702,506 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
+    private async Task<NativePlaybackCancellationMetrics> RunCancellationProbeAsync(
+        Uri fixture,
+        List<double> sourceDetachSamples,
+        CancellationToken cancellationToken)
+    {
+        _opened = null;
+        _advanced = null;
+        _failureSignal = null;
+        _mediaFailure = NativePlaybackFailure.None;
+        MediaSource cancellationSource = MediaSource.CreateFromUri(fixture);
+        NativePlaybackCancellationOperationResult cancellationOperation = default;
+        NativePlaybackCancellationRecoveryResult recovery = default;
+        try
+        {
+            cancellationOperation = await RunCancellationOperationAsync(
+                cancellationSource,
+                sourceDetachSamples,
+                result => cancellationOperation = result,
+                cancellationToken);
+
+            _opened = null;
+            _advanced = null;
+            _failureSignal = null;
+            _mediaFailure = NativePlaybackFailure.None;
+            recovery = await RunCancellationRecoveryAsync(
+                cancellationSource,
+                fixture,
+                sourceDetachSamples,
+                result => recovery = result,
+                cancellationToken);
+            return CreateCancellationMetrics(cancellationOperation, recovery);
+        }
+        catch (NativePlaybackCancellationException exception)
+        {
+            throw new NativePlaybackCancellationException(
+                exception.Failure,
+                CreateCancellationMetrics(cancellationOperation, recovery));
+        }
+    }
+
+    private static NativePlaybackCancellationMetrics CreateCancellationMetrics(
+        NativePlaybackCancellationOperationResult cancellationOperation,
+        NativePlaybackCancellationRecoveryResult recovery) =>
+        new(
+            1,
+            cancellationOperation.ObservedCount,
+            cancellationOperation.SourceDetachCount,
+            recovery.RecoveryCount,
+            recovery.SourceDetachCount,
+            cancellationOperation.LatencyMilliseconds,
+            cancellationOperation.QuiescenceMilliseconds,
+            cancellationOperation.ObservationMilliseconds,
+            cancellationOperation.SourceDetachMilliseconds,
+            recovery.StartupMilliseconds,
+            recovery.AdvanceMilliseconds,
+            recovery.SourceDetachMilliseconds,
+            cancellationOperation.SourceNullAfterObservation,
+            recovery.UsedFreshSource,
+            cancellationOperation.NoAutomaticRestart);
+
+    private async Task<NativePlaybackCancellationOperationResult> RunCancellationOperationAsync(
+        MediaSource cancellationSource,
+        List<double> sourceDetachSamples,
+        Action<NativePlaybackCancellationOperationResult> captureResult,
+        CancellationToken cancellationToken)
+    {
+        const int controlledObservationMilliseconds = 1000;
+        int sourceAssignmentCount = 0;
+        int playInvocationCount = 0;
+        int cancellationObservedCount = 0;
+        double cancellationLatencyMilliseconds = 0;
+        bool sourceDetached = false;
+        bool sourceDisposed = false;
+        NativePlaybackCancellationOperationResult result = default;
+        captureResult(result);
+        using CancellationTokenSource localCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task cancellationWait = Task.Delay(Timeout.InfiniteTimeSpan, localCancellation.Token);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _mediaPlayer.Source = cancellationSource;
+            sourceAssignmentCount++;
+            _mediaPlayer.Play();
+            playInvocationCount++;
+            if (!ReferenceEquals(_mediaPlayer.Source, cancellationSource) ||
+                sourceAssignmentCount != 1 ||
+                playInvocationCount != 1)
+            {
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationTriggerFailed);
+            }
+
+            int sourceAssignmentCountAtCancellation = sourceAssignmentCount;
+            int playInvocationCountAtCancellation = playInvocationCount;
+            long cancellationRequested = Stopwatch.GetTimestamp();
+            localCancellation.Cancel();
+            try
+            {
+                await cancellationWait;
+            }
+            catch (OperationCanceledException exception) when (
+                exception.CancellationToken == localCancellation.Token &&
+                localCancellation.IsCancellationRequested &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                cancellationObservedCount = 1;
+                cancellationLatencyMilliseconds =
+                    Stopwatch.GetElapsedTime(cancellationRequested).TotalMilliseconds;
+            }
+
+            if (cancellationObservedCount != 1)
+            {
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationNotObserved);
+            }
+
+            result = result with
+            {
+                ObservedCount = cancellationObservedCount,
+                LatencyMilliseconds = cancellationLatencyMilliseconds,
+            };
+            captureResult(result);
+
+            double sourceDetachMilliseconds = await DetachSourceAsync(
+                pauseIfSupported: false,
+                cancellationToken);
+            sourceDetached = true;
+            sourceDetachSamples.Add(sourceDetachMilliseconds);
+            result = result with
+            {
+                SourceDetachCount = 1,
+                SourceDetachMilliseconds = sourceDetachMilliseconds,
+            };
+            captureResult(result);
+            DisposeMediaSource(cancellationSource);
+            sourceDisposed = true;
+
+            double quiescenceMilliseconds =
+                Stopwatch.GetElapsedTime(cancellationRequested).TotalMilliseconds;
+            result = result with { QuiescenceMilliseconds = quiescenceMilliseconds };
+            captureResult(result);
+            if (quiescenceMilliseconds > 1000)
+            {
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationQuiescenceTimeout);
+            }
+
+            var observation = Stopwatch.StartNew();
+            bool sourceRemainedNull = _mediaPlayer.Source is null;
+            bool operationCountsUnchanged =
+                sourceAssignmentCount == sourceAssignmentCountAtCancellation &&
+                playInvocationCount == playInvocationCountAtCancellation;
+            TimeSpan observationTarget =
+                TimeSpan.FromMilliseconds(controlledObservationMilliseconds);
+            while (observation.Elapsed < observationTarget)
+            {
+                TimeSpan remaining = observationTarget - observation.Elapsed;
+                await Task.Delay(
+                    remaining < TimeSpan.FromMilliseconds(20)
+                        ? remaining
+                        : TimeSpan.FromMilliseconds(20),
+                    cancellationToken);
+                sourceRemainedNull &= _mediaPlayer.Source is null;
+                operationCountsUnchanged &=
+                    sourceAssignmentCount == sourceAssignmentCountAtCancellation &&
+                    playInvocationCount == playInvocationCountAtCancellation;
+            }
+
+            sourceRemainedNull &= _mediaPlayer.Source is null;
+            operationCountsUnchanged &=
+                sourceAssignmentCount == sourceAssignmentCountAtCancellation &&
+                playInvocationCount == playInvocationCountAtCancellation;
+            bool sourceNullAfterObservation = sourceRemainedNull && _mediaPlayer.Source is null;
+            bool noAutomaticRestart = sourceNullAfterObservation && operationCountsUnchanged;
+            result = result with
+            {
+                ObservationMilliseconds = observation.Elapsed.TotalMilliseconds,
+                SourceNullAfterObservation = sourceNullAfterObservation,
+                NoAutomaticRestart = noAutomaticRestart,
+            };
+            captureResult(result);
+            if (!noAutomaticRestart)
+            {
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationAutomaticRestart);
+            }
+
+            return result;
+        }
+        catch (NativePlaybackSourceDetachmentException)
+        {
+            throw new NativePlaybackCancellationException(
+                NativePlaybackFailure.CancellationSourceDetachmentTimeout);
+        }
+        catch (NativePlaybackTeardownException exception)
+        {
+            throw new NativePlaybackCancellationException(
+                exception.Stage == NativePlaybackTeardownStage.MediaSourceDispose
+                    ? NativePlaybackFailure.CancellationSourceDisposeFailed
+                    : NativePlaybackFailure.CancellationSourceDetachmentFailed);
+        }
+        finally
+        {
+            if (!sourceDetached)
+            {
+                BestEffortResetAfterProbe();
+            }
+
+            if (!sourceDisposed)
+            {
+                BestEffortDisposeMediaSource(cancellationSource);
+            }
+        }
+    }
+
+    private async Task<NativePlaybackCancellationRecoveryResult> RunCancellationRecoveryAsync(
+        MediaSource cancellationSource,
+        Uri fixture,
+        List<double> sourceDetachSamples,
+        Action<NativePlaybackCancellationRecoveryResult> captureResult,
+        CancellationToken cancellationToken)
+    {
+        long recoveryStarted = Stopwatch.GetTimestamp();
+        MediaSource recoverySource = MediaSource.CreateFromUri(fixture);
+        bool usedFreshSource = !ReferenceEquals(cancellationSource, recoverySource);
+        if (!usedFreshSource)
+        {
+            BestEffortDisposeMediaSource(recoverySource);
+            throw new NativePlaybackCancellationException(
+                NativePlaybackFailure.CancellationRecoverySourceReused);
+        }
+
+        var sourceOpenCompletion =
+            new TaskCompletionSource<NativePlaybackSourceOpenCompletion>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+        bool sourceOpenHandlerBound = false;
+        bool sourceDetached = false;
+        bool sourceDisposed = false;
+        NativePlaybackCancellationRecoveryResult result = new(
+            UsedFreshSource: usedFreshSource);
+        captureResult(result);
+        void RecoverySource_OpenOperationCompleted(
+            MediaSource sender,
+            MediaSourceOpenOperationCompletedEventArgs args)
+        {
+            if (ReferenceEquals(sender, recoverySource))
+            {
+                sourceOpenCompletion.TrySetResult(new NativePlaybackSourceOpenCompletion(
+                    Stopwatch.GetTimestamp(),
+                    args.Error is not null));
+            }
+        }
+
+        void UnsubscribeSourceOpenHandler()
+        {
+            if (!sourceOpenHandlerBound)
+            {
+                return;
+            }
+
+            recoverySource.OpenOperationCompleted -= RecoverySource_OpenOperationCompleted;
+            sourceOpenHandlerBound = false;
+        }
+
+        recoverySource.OpenOperationCompleted += RecoverySource_OpenOperationCompleted;
+        sourceOpenHandlerBound = true;
+        try
+        {
+            _mediaPlayer.Source = recoverySource;
+            _mediaPlayer.Play();
+            if (!ReferenceEquals(_mediaPlayer.Source, recoverySource))
+            {
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationRecoverySourceChanged);
+            }
+
+            long openDeadline = recoveryStarted + (Stopwatch.Frequency * 5);
+            long beforeOpenWait = Stopwatch.GetTimestamp();
+            if (beforeOpenWait >= openDeadline)
+            {
+                result = result with
+                {
+                    StartupMilliseconds =
+                        Stopwatch.GetElapsedTime(recoveryStarted).TotalMilliseconds,
+                };
+                captureResult(result);
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationRecoveryOpenTimeout);
+            }
+
+            NativePlaybackSourceOpenCompletion openCompletion;
+            try
+            {
+                openCompletion = await sourceOpenCompletion.Task.WaitAsync(
+                    TimeSpan.FromSeconds(
+                        (openDeadline - beforeOpenWait) / (double)Stopwatch.Frequency),
+                    cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                result = result with
+                {
+                    StartupMilliseconds =
+                        Stopwatch.GetElapsedTime(recoveryStarted).TotalMilliseconds,
+                };
+                captureResult(result);
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationRecoveryOpenTimeout);
+            }
+
+            double startupMilliseconds = Math.Max(
+                0,
+                Stopwatch.GetElapsedTime(
+                    recoveryStarted,
+                    openCompletion.Timestamp).TotalMilliseconds);
+            result = result with { StartupMilliseconds = startupMilliseconds };
+            captureResult(result);
+            if (openCompletion.Timestamp > openDeadline)
+            {
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationRecoveryOpenTimeout);
+            }
+
+            if (openCompletion.ErrorPresent)
+            {
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationRecoverySourceOpenFailed);
+            }
+
+            ThrowIfCancellationRecoveryFailedOrChanged(recoverySource);
+            long advanceDeadline = openCompletion.Timestamp + (Stopwatch.Frequency * 3);
+            if (Stopwatch.GetTimestamp() > advanceDeadline)
+            {
+                result = result with
+                {
+                    AdvanceMilliseconds =
+                        Stopwatch.GetElapsedTime(openCompletion.Timestamp).TotalMilliseconds,
+                };
+                captureResult(result);
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationRecoveryAdvanceTimeout);
+            }
+
+            TimeSpan positionBaseline;
+            try
+            {
+                positionBaseline = _mediaPlayer.PlaybackSession.Position;
+            }
+            catch (Exception exception) when (
+                exception is not OutOfMemoryException and
+                not StackOverflowException and
+                not AccessViolationException)
+            {
+                result = result with
+                {
+                    AdvanceMilliseconds =
+                        Stopwatch.GetElapsedTime(openCompletion.Timestamp).TotalMilliseconds,
+                };
+                captureResult(result);
+                throw new NativePlaybackCancellationException(
+                    NativePlaybackFailure.CancellationRecoveryAdvanceFailed);
+            }
+
+            long advanceCompleted;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfCancellationRecoveryFailedOrChanged(recoverySource);
+                long beforePositionRead = Stopwatch.GetTimestamp();
+                if (beforePositionRead > advanceDeadline)
+                {
+                    result = result with
+                    {
+                        AdvanceMilliseconds =
+                            Stopwatch.GetElapsedTime(
+                                openCompletion.Timestamp,
+                                beforePositionRead).TotalMilliseconds,
+                    };
+                    captureResult(result);
+                    throw new NativePlaybackCancellationException(
+                        NativePlaybackFailure.CancellationRecoveryAdvanceTimeout);
+                }
+
+                TimeSpan position;
+                try
+                {
+                    position = _mediaPlayer.PlaybackSession.Position;
+                }
+                catch (Exception exception) when (
+                    exception is not OutOfMemoryException and
+                    not StackOverflowException and
+                    not AccessViolationException)
+                {
+                    result = result with
+                    {
+                        AdvanceMilliseconds =
+                            Stopwatch.GetElapsedTime(openCompletion.Timestamp).TotalMilliseconds,
+                    };
+                    captureResult(result);
+                    throw new NativePlaybackCancellationException(
+                        NativePlaybackFailure.CancellationRecoveryAdvanceFailed);
+                }
+
+                advanceCompleted = Stopwatch.GetTimestamp();
+                if (advanceCompleted > advanceDeadline)
+                {
+                    result = result with
+                    {
+                        AdvanceMilliseconds =
+                            Stopwatch.GetElapsedTime(
+                                openCompletion.Timestamp,
+                                advanceCompleted).TotalMilliseconds,
+                    };
+                    captureResult(result);
+                    throw new NativePlaybackCancellationException(
+                        NativePlaybackFailure.CancellationRecoveryAdvanceTimeout);
+                }
+
+                if (position - positionBaseline >= TimeSpan.FromMilliseconds(500))
+                {
+                    break;
+                }
+
+                TimeSpan remaining = TimeSpan.FromSeconds(
+                    (advanceDeadline - advanceCompleted) / (double)Stopwatch.Frequency);
+                await Task.Delay(
+                    remaining < TimeSpan.FromMilliseconds(20)
+                        ? remaining
+                        : TimeSpan.FromMilliseconds(20),
+                    cancellationToken);
+            }
+
+            double advanceMilliseconds = Math.Max(
+                0,
+                Stopwatch.GetElapsedTime(
+                    openCompletion.Timestamp,
+                    advanceCompleted).TotalMilliseconds);
+            result = result with { AdvanceMilliseconds = advanceMilliseconds };
+            captureResult(result);
+            UnsubscribeSourceOpenHandler();
+            double sourceDetachMilliseconds = await DetachSourceAsync(
+                pauseIfSupported: true,
+                cancellationToken);
+            sourceDetached = true;
+            sourceDetachSamples.Add(sourceDetachMilliseconds);
+            result = result with
+            {
+                SourceDetachCount = 1,
+                SourceDetachMilliseconds = sourceDetachMilliseconds,
+            };
+            captureResult(result);
+            DisposeMediaSource(recoverySource);
+            sourceDisposed = true;
+            result = result with { RecoveryCount = 1 };
+            captureResult(result);
+            return result;
+        }
+        catch (NativePlaybackSourceDetachmentException)
+        {
+            throw new NativePlaybackCancellationException(
+                NativePlaybackFailure.CancellationRecoverySourceDetachmentTimeout);
+        }
+        catch (NativePlaybackTeardownException exception)
+        {
+            throw new NativePlaybackCancellationException(
+                exception.Stage == NativePlaybackTeardownStage.MediaSourceDispose
+                    ? NativePlaybackFailure.CancellationRecoverySourceDisposeFailed
+                    : NativePlaybackFailure.CancellationRecoverySourceDetachmentFailed);
+        }
+        finally
+        {
+            UnsubscribeSourceOpenHandler();
+            if (!sourceDetached)
+            {
+                BestEffortResetAfterProbe();
+            }
+
+            if (!sourceDisposed)
+            {
+                BestEffortDisposeMediaSource(recoverySource);
+            }
+        }
+    }
+
+    private void ThrowIfCancellationRecoveryFailedOrChanged(MediaSource recoverySource)
+    {
+        if (_mediaFailure == NativePlaybackFailure.MediaFailed)
+        {
+            throw new NativePlaybackCancellationException(
+                NativePlaybackFailure.CancellationRecoveryMediaFailed);
+        }
+
+        if (!ReferenceEquals(_mediaPlayer.Source, recoverySource))
+        {
+            throw new NativePlaybackCancellationException(
+                NativePlaybackFailure.CancellationRecoverySourceChanged);
+        }
+    }
+
     private async Task<NativePlaybackSoakMetrics> RunSoakAsync(
         Uri fixture,
         TimeSpan soakDuration,
@@ -802,7 +1329,8 @@ internal sealed record NativePlaybackProbeRequest(
     Guid RunId,
     IReadOnlyList<Uri> Fixtures,
     int SwitchCount,
-    TimeSpan SoakDuration)
+    TimeSpan SoakDuration,
+    int CancellationProbeCount)
 {
     private static readonly HashSet<string> AllowedPaths =
     [
@@ -813,12 +1341,23 @@ internal sealed record NativePlaybackProbeRequest(
     internal static NativePlaybackProbeRequest Parse(string? arguments)
     {
         string[] parts = arguments?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
-        if (parts is not ["probe", string runIdText, string direct, string hls, string switchText, string soakText] ||
+        if (parts is not [
+                "probe",
+                string runIdText,
+                string direct,
+                string hls,
+                string switchText,
+                string soakText,
+                string cancellationProbeText] ||
             !Guid.TryParseExact(runIdText, "N", out Guid runId) ||
             runId.ToString("N") != runIdText ||
             !int.TryParse(switchText, out int switchCount) || switchCount is < 2 or > 100 ||
             !int.TryParse(soakText, out int soakMinutes) || soakMinutes is < 0 or > 480 ||
             (soakMinutes > 0 && switchCount != 100) ||
+            (cancellationProbeText != "0" && cancellationProbeText != "1") ||
+            !int.TryParse(cancellationProbeText, out int cancellationProbeCount) ||
+            cancellationProbeCount is < 0 or > 1 ||
+            (cancellationProbeCount == 1 && (switchCount != 100 || soakMinutes != 0)) ||
             !Uri.TryCreate(direct, UriKind.Absolute, out Uri? directUri) ||
             !Uri.TryCreate(hls, UriKind.Absolute, out Uri? hlsUri))
         {
@@ -832,7 +1371,12 @@ internal sealed record NativePlaybackProbeRequest(
             throw new ArgumentException("Native playback fixtures must share one loopback authority and use distinct paths.", nameof(arguments));
         }
 
-        return new NativePlaybackProbeRequest(runId, [hlsUri, directUri], switchCount, TimeSpan.FromMinutes(soakMinutes));
+        return new NativePlaybackProbeRequest(
+            runId,
+            [hlsUri, directUri],
+            switchCount,
+            TimeSpan.FromMinutes(soakMinutes),
+            cancellationProbeCount);
     }
 
     private static void ValidateFixture(Uri fixture)
@@ -860,6 +1404,23 @@ internal enum NativePlaybackFailure
     SourceDetachmentTimeout,
     SourceDetachmentFailed,
     Cancelled,
+    CancellationTriggerFailed,
+    CancellationNotObserved,
+    CancellationQuiescenceTimeout,
+    CancellationAutomaticRestart,
+    CancellationSourceDetachmentTimeout,
+    CancellationSourceDetachmentFailed,
+    CancellationSourceDisposeFailed,
+    CancellationRecoverySourceReused,
+    CancellationRecoveryOpenTimeout,
+    CancellationRecoverySourceOpenFailed,
+    CancellationRecoveryMediaFailed,
+    CancellationRecoverySourceChanged,
+    CancellationRecoveryAdvanceTimeout,
+    CancellationRecoveryAdvanceFailed,
+    CancellationRecoverySourceDetachmentTimeout,
+    CancellationRecoverySourceDetachmentFailed,
+    CancellationRecoverySourceDisposeFailed,
     UnexpectedFailure,
 }
 
@@ -905,6 +1466,41 @@ internal readonly record struct NativePlaybackStartupFailureDiagnostic(
     NativePlaybackSourceOpenDiagnostic SourceOpen,
     double ActiveStageElapsedMilliseconds);
 
+internal readonly record struct NativePlaybackCancellationOperationResult(
+    int ObservedCount = 0,
+    int SourceDetachCount = 0,
+    double LatencyMilliseconds = 0,
+    double QuiescenceMilliseconds = 0,
+    double ObservationMilliseconds = 0,
+    double SourceDetachMilliseconds = 0,
+    bool SourceNullAfterObservation = false,
+    bool NoAutomaticRestart = false);
+
+internal readonly record struct NativePlaybackCancellationRecoveryResult(
+    int RecoveryCount = 0,
+    int SourceDetachCount = 0,
+    double StartupMilliseconds = 0,
+    double AdvanceMilliseconds = 0,
+    double SourceDetachMilliseconds = 0,
+    bool UsedFreshSource = false);
+
+internal readonly record struct NativePlaybackCancellationMetrics(
+    int CancellationProbeCount,
+    int CancellationObservedCount,
+    int CancellationSourceDetachCount,
+    int CancellationRecoveryCount,
+    int CancellationRecoverySourceDetachCount,
+    double CancellationLatencyMilliseconds,
+    double CancellationQuiescenceMilliseconds,
+    double CancellationObservationMilliseconds,
+    double CancellationSourceDetachMilliseconds,
+    double CancellationRecoveryStartupMilliseconds,
+    double CancellationRecoveryAdvanceMilliseconds,
+    double CancellationRecoverySourceDetachMilliseconds,
+    bool CancellationSourceNullAfterObservation,
+    bool CancellationRecoveryUsedFreshSource,
+    bool CancellationNoAutomaticRestart);
+
 internal sealed record NativePlaybackProbeResult(
     bool Success,
     NativePlaybackFailure Failure,
@@ -946,6 +1542,21 @@ internal sealed record NativePlaybackProbeResult(
     int PlaybackRetryCount,
     double SourceDetachP95Milliseconds,
     double SourceDetachMaximumMilliseconds,
+    int CancellationProbeCount,
+    int CancellationObservedCount,
+    int CancellationSourceDetachCount,
+    int CancellationRecoveryCount,
+    int CancellationRecoverySourceDetachCount,
+    double CancellationLatencyMilliseconds,
+    double CancellationQuiescenceMilliseconds,
+    double CancellationObservationMilliseconds,
+    double CancellationSourceDetachMilliseconds,
+    double CancellationRecoveryStartupMilliseconds,
+    double CancellationRecoveryAdvanceMilliseconds,
+    double CancellationRecoverySourceDetachMilliseconds,
+    bool CancellationSourceNullAfterObservation,
+    bool CancellationRecoveryUsedFreshSource,
+    bool CancellationNoAutomaticRestart,
     MediaPlaybackState PlaybackStateBeforeDetach,
     bool SourceDetached,
     bool CanPauseBeforeDetach,
@@ -976,6 +1587,7 @@ internal sealed record NativePlaybackProbeResult(
         int detachedSourceCount,
         int playbackRetryCount,
         IReadOnlyList<double> sourceDetachSamples,
+        NativePlaybackCancellationMetrics cancellationMetrics,
         long initialPrivateBytes,
         long finalPrivateBytes,
         int initialHandleCount,
@@ -1023,6 +1635,21 @@ internal sealed record NativePlaybackProbeResult(
             playbackRetryCount,
             Percentile95(sourceDetachSamples),
             sourceDetachSamples.Max(),
+            cancellationMetrics.CancellationProbeCount,
+            cancellationMetrics.CancellationObservedCount,
+            cancellationMetrics.CancellationSourceDetachCount,
+            cancellationMetrics.CancellationRecoveryCount,
+            cancellationMetrics.CancellationRecoverySourceDetachCount,
+            cancellationMetrics.CancellationLatencyMilliseconds,
+            cancellationMetrics.CancellationQuiescenceMilliseconds,
+            cancellationMetrics.CancellationObservationMilliseconds,
+            cancellationMetrics.CancellationSourceDetachMilliseconds,
+            cancellationMetrics.CancellationRecoveryStartupMilliseconds,
+            cancellationMetrics.CancellationRecoveryAdvanceMilliseconds,
+            cancellationMetrics.CancellationRecoverySourceDetachMilliseconds,
+            cancellationMetrics.CancellationSourceNullAfterObservation,
+            cancellationMetrics.CancellationRecoveryUsedFreshSource,
+            cancellationMetrics.CancellationNoAutomaticRestart,
             MediaPlaybackState.None,
             true,
             false,
@@ -1051,7 +1678,8 @@ internal sealed record NativePlaybackProbeResult(
         NativePlaybackExceptionCategory exceptionCategory = NativePlaybackExceptionCategory.None,
         int exceptionHResult = 0,
         int playbackRetryCount = 0,
-        NativePlaybackStartupFailureDiagnostic startupFailureDiagnostic = default) =>
+        NativePlaybackStartupFailureDiagnostic startupFailureDiagnostic = default,
+        NativePlaybackCancellationMetrics cancellationMetrics = default) =>
         new(false, failure, completedSwitchCount, 0, 0, 0, 0,
             0, NativePlaybackFixture.None, 0, 0, 0, 0, default, 0, 0,
             startupFailureDiagnostic.Stage,
@@ -1078,6 +1706,21 @@ internal sealed record NativePlaybackProbeResult(
             playbackRetryCount,
             0,
             0,
+            cancellationMetrics.CancellationProbeCount,
+            cancellationMetrics.CancellationObservedCount,
+            cancellationMetrics.CancellationSourceDetachCount,
+            cancellationMetrics.CancellationRecoveryCount,
+            cancellationMetrics.CancellationRecoverySourceDetachCount,
+            cancellationMetrics.CancellationLatencyMilliseconds,
+            cancellationMetrics.CancellationQuiescenceMilliseconds,
+            cancellationMetrics.CancellationObservationMilliseconds,
+            cancellationMetrics.CancellationSourceDetachMilliseconds,
+            cancellationMetrics.CancellationRecoveryStartupMilliseconds,
+            cancellationMetrics.CancellationRecoveryAdvanceMilliseconds,
+            cancellationMetrics.CancellationRecoverySourceDetachMilliseconds,
+            cancellationMetrics.CancellationSourceNullAfterObservation,
+            cancellationMetrics.CancellationRecoveryUsedFreshSource,
+            cancellationMetrics.CancellationNoAutomaticRestart,
             playbackStateBeforeDetach,
             sourceDetached,
             canPauseBeforeDetach,
@@ -1097,6 +1740,15 @@ internal sealed record NativePlaybackProbeResult(
 }
 
 internal sealed class NativePlaybackSurfaceException : Exception;
+
+internal sealed class NativePlaybackCancellationException(
+    NativePlaybackFailure failure,
+    NativePlaybackCancellationMetrics metrics = default) : Exception
+{
+    internal NativePlaybackFailure Failure { get; } = failure;
+
+    internal NativePlaybackCancellationMetrics Metrics { get; } = metrics;
+}
 
 internal sealed class NativePlaybackSourceDetachmentException(
     MediaPlaybackState playbackStateBeforeDetach,

@@ -193,6 +193,7 @@ jobs:
           -SwitchCount 100
           -SoakMinutes 0
           -NetworkInterruptionCount 1
+          -CancellationProbeCount 1
 
       - name: Scan native playback evidence
         shell: pwsh
