@@ -59,6 +59,13 @@ public sealed partial class MainWindow : Window, IDisposable
         int surfaceTransitionCount = 0;
         int detachedSourceCount = 0;
         int playbackRetryCount = 0;
+        double startupMaximumMilliseconds = -1;
+        int startupMaximumSwitchOrdinal = 0;
+        NativePlaybackFixture startupMaximumFixture = NativePlaybackFixture.None;
+        int startupMaximumAttemptCount = 0;
+        int startupMaximumSurfaceTransitionCount = 0;
+        double startupMaximumPreWaitMilliseconds = 0;
+        double startupMaximumMediaOpenWaitMilliseconds = 0;
         var resourceSamples = new List<NativePlaybackResourceSample>();
         var soakStopwatch = Stopwatch.StartNew();
         CaptureResourceSample(process, soakStopwatch, resourceSamples);
@@ -71,15 +78,23 @@ public sealed partial class MainWindow : Window, IDisposable
             for (int index = 0; index < request.SwitchCount; index++)
             {
                 probeCancellationToken.ThrowIfCancellationRequested();
-                surfaceTransitionCount += await ApplySurfaceTransitionAsync(
+                int switchSurfaceTransitionCount = await ApplySurfaceTransitionAsync(
                     index,
                     request.SwitchCount,
                     probeCancellationToken);
+                surfaceTransitionCount += switchSurfaceTransitionCount;
                 Uri fixture = request.Fixtures[index % request.Fixtures.Count];
+                NativePlaybackFixture fixtureKind = index % request.Fixtures.Count == 0
+                    ? NativePlaybackFixture.HlsH264AacMpegTs
+                    : NativePlaybackFixture.DirectH264AacMpegTs;
                 long startupStarted = Stopwatch.GetTimestamp();
                 double startupMilliseconds = 0;
+                double startupPreWaitMilliseconds = 0;
+                double startupMediaOpenWaitMilliseconds = 0;
+                int startupAttemptCount = 0;
                 for (int attempt = 0; attempt < 2; attempt++)
                 {
+                    startupAttemptCount = attempt + 1;
                     bool retryRequested = false;
                     bool sourceDetached = false;
                     _mediaFailure = NativePlaybackFailure.None;
@@ -91,10 +106,16 @@ public sealed partial class MainWindow : Window, IDisposable
                     {
                         _mediaPlayer.Source = source;
                         _mediaPlayer.Play();
+                        long mediaOpenWaitStarted = Stopwatch.GetTimestamp();
                         long openedTimestamp = await _opened.Task.WaitAsync(
                             TimeSpan.FromSeconds(5),
                             probeCancellationToken);
+                        long effectiveWaitStarted = Math.Min(mediaOpenWaitStarted, openedTimestamp);
                         startupMilliseconds = Stopwatch.GetElapsedTime(startupStarted, openedTimestamp).TotalMilliseconds;
+                        startupPreWaitMilliseconds =
+                            Stopwatch.GetElapsedTime(startupStarted, effectiveWaitStarted).TotalMilliseconds;
+                        startupMediaOpenWaitMilliseconds =
+                            Stopwatch.GetElapsedTime(effectiveWaitStarted, openedTimestamp).TotalMilliseconds;
                         timeoutFailure = NativePlaybackFailure.PlaybackAdvanceTimeout;
                         await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), probeCancellationToken);
                         sourceDetachSamples.Add(await DetachSourceAsync(
@@ -137,6 +158,16 @@ public sealed partial class MainWindow : Window, IDisposable
                 startupSamples.Add(startupMilliseconds);
                 (index % request.Fixtures.Count == 0 ? hlsStartupSamples : directStartupSamples)
                     .Add(startupMilliseconds);
+                if (startupMilliseconds > startupMaximumMilliseconds)
+                {
+                    startupMaximumMilliseconds = startupMilliseconds;
+                    startupMaximumSwitchOrdinal = index + 1;
+                    startupMaximumFixture = fixtureKind;
+                    startupMaximumAttemptCount = startupAttemptCount;
+                    startupMaximumSurfaceTransitionCount = switchSurfaceTransitionCount;
+                    startupMaximumPreWaitMilliseconds = startupPreWaitMilliseconds;
+                    startupMaximumMediaOpenWaitMilliseconds = startupMediaOpenWaitMilliseconds;
+                }
                 completedSwitchCount++;
                 timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
             }
@@ -169,6 +200,12 @@ public sealed partial class MainWindow : Window, IDisposable
                 startupSamples,
                 hlsStartupSamples,
                 directStartupSamples,
+                startupMaximumSwitchOrdinal,
+                startupMaximumFixture,
+                startupMaximumAttemptCount,
+                startupMaximumSurfaceTransitionCount,
+                startupMaximumPreWaitMilliseconds,
+                startupMaximumMediaOpenWaitMilliseconds,
                 request.SoakDuration,
                 soakMetrics,
                 surfaceTransitionCount,
@@ -627,6 +664,13 @@ internal enum NativePlaybackFailure
     UnexpectedFailure,
 }
 
+internal enum NativePlaybackFixture
+{
+    None,
+    HlsH264AacMpegTs,
+    DirectH264AacMpegTs,
+}
+
 internal sealed record NativePlaybackProbeResult(
     bool Success,
     NativePlaybackFailure Failure,
@@ -635,6 +679,14 @@ internal sealed record NativePlaybackProbeResult(
     double StartupMaximumMilliseconds,
     double HlsStartupP95Milliseconds,
     double DirectStartupP95Milliseconds,
+    int StartupMaximumSwitchOrdinal,
+    NativePlaybackFixture StartupMaximumFixture,
+    int StartupMaximumAttemptCount,
+    int StartupMaximumSurfaceTransitionCount,
+    double StartupMaximumPreWaitMilliseconds,
+    double StartupMaximumMediaOpenWaitMilliseconds,
+    double HlsStartupMaximumMilliseconds,
+    double DirectStartupMaximumMilliseconds,
     int SoakMinutes,
     int ResourceSampleCount,
     long WarmupPrivateBytes,
@@ -665,6 +717,12 @@ internal sealed record NativePlaybackProbeResult(
         IReadOnlyList<double> startupSamples,
         IReadOnlyList<double> hlsStartupSamples,
         IReadOnlyList<double> directStartupSamples,
+        int startupMaximumSwitchOrdinal,
+        NativePlaybackFixture startupMaximumFixture,
+        int startupMaximumAttemptCount,
+        int startupMaximumSurfaceTransitionCount,
+        double startupMaximumPreWaitMilliseconds,
+        double startupMaximumMediaOpenWaitMilliseconds,
         TimeSpan soakDuration,
         NativePlaybackSoakMetrics soakMetrics,
         int surfaceTransitionCount,
@@ -685,6 +743,14 @@ internal sealed record NativePlaybackProbeResult(
             ordered[^1],
             Percentile95(hlsStartupSamples),
             Percentile95(directStartupSamples),
+            startupMaximumSwitchOrdinal,
+            startupMaximumFixture,
+            startupMaximumAttemptCount,
+            startupMaximumSurfaceTransitionCount,
+            startupMaximumPreWaitMilliseconds,
+            startupMaximumMediaOpenWaitMilliseconds,
+            hlsStartupSamples.Max(),
+            directStartupSamples.Max(),
             (int)soakDuration.TotalMinutes,
             soakMetrics.ResourceSampleCount,
             soakMetrics.WarmupPrivateBytes,
@@ -727,6 +793,7 @@ internal sealed record NativePlaybackProbeResult(
         int exceptionHResult = 0,
         int playbackRetryCount = 0) =>
         new(false, failure, completedSwitchCount, 0, 0, 0, 0,
+            0, NativePlaybackFixture.None, 0, 0, 0, 0, 0, 0,
             (int)soakDuration.TotalMinutes,
             soakMetrics.ResourceSampleCount,
             soakMetrics.WarmupPrivateBytes,

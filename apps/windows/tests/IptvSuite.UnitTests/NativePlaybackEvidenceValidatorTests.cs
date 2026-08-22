@@ -101,6 +101,7 @@ public sealed class NativePlaybackEvidenceValidatorTests
         string evidence = CreateValidEvidence(files.ControllerSha256);
         (string Original, string Replacement)[] mutations =
         [
+            ("\"ProbeEnvelopeSchemaVersion\":2", "\"ProbeEnvelopeSchemaVersion\":1"),
             ("\"StartupP95Milliseconds\":250.125", "\"StartupP95Milliseconds\":3000.001"),
             ("\"StartupMaximumMilliseconds\":2500.5", "\"StartupMaximumMilliseconds\":5000.001"),
             ("\"SourceDetachP95Milliseconds\":8.25", "\"SourceDetachP95Milliseconds\":3000.001"),
@@ -176,7 +177,7 @@ public sealed class NativePlaybackEvidenceValidatorTests
             writer.WriteString("HarnessAssemblySha256", new string('b', 64));
             writer.WriteString("FixtureManifestSha256", new string('c', 64));
             writer.WriteBoolean("FixtureCorpusVerified", true);
-            writer.WriteNumber("ProbeEnvelopeSchemaVersion", 1);
+            writer.WriteNumber("ProbeEnvelopeSchemaVersion", 2);
             writer.WriteBoolean("ProbeRunIdBound", true);
             writer.WriteNumber("SwitchCount", 100);
             writer.WriteNumber("StartupP95Milliseconds", 250.125);

@@ -202,6 +202,82 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile(
     [ref]$parseErrors)
 Assert-Contract ($parseErrors.Count -eq 0) "The native playback controller has PowerShell 5.1 parse errors."
 
+$probePropertyAssertions = @($ast.FindAll({
+    param($node)
+    if ($node -isnot [System.Management.Automation.Language.CommandAst] -or
+        $node.GetCommandName() -ne "Assert-ExactJsonProperties") {
+        return $false
+    }
+
+    $valueArgument = Get-CommandArgument -Command $node -Name "Value"
+    if ($null -eq $valueArgument) {
+        return $false
+    }
+
+    $valueExpression = Get-UnwrappedExpression -Node $valueArgument
+    return (Get-VariableName -Node $valueExpression) -eq "probe"
+}, $true))
+Assert-Contract `
+    ($probePropertyAssertions.Count -eq 1) `
+    "The nested native playback probe must have one exact property assertion."
+$probeExpectedNamesArgument = Get-CommandArgument `
+    -Command $probePropertyAssertions[0] `
+    -Name "ExpectedNames"
+Assert-Contract `
+    ($null -ne $probeExpectedNamesArgument) `
+    "The nested native playback probe property assertion must declare its allowlist."
+$actualProbePropertyNames = @($probeExpectedNamesArgument.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.StringConstantExpressionAst]
+}, $true) | ForEach-Object {
+    $_.Value
+})
+$expectedProbePropertyNames = @(
+    "Success",
+    "Failure",
+    "SwitchCount",
+    "StartupP95Milliseconds",
+    "StartupMaximumMilliseconds",
+    "HlsStartupP95Milliseconds",
+    "DirectStartupP95Milliseconds",
+    "StartupMaximumSwitchOrdinal",
+    "StartupMaximumFixture",
+    "StartupMaximumAttemptCount",
+    "StartupMaximumSurfaceTransitionCount",
+    "StartupMaximumPreWaitMilliseconds",
+    "StartupMaximumMediaOpenWaitMilliseconds",
+    "HlsStartupMaximumMilliseconds",
+    "DirectStartupMaximumMilliseconds",
+    "SoakMinutes",
+    "ResourceSampleCount",
+    "WarmupPrivateBytes",
+    "MemoryNetGrowthBytes",
+    "MemoryNetGrowthPercent",
+    "MemoryMonotonicIncrease",
+    "WarmupHandleCount",
+    "HandleNetGrowth",
+    "SurfaceTransitionCount",
+    "DetachedSourceCount",
+    "PlaybackRetryCount",
+    "SourceDetachP95Milliseconds",
+    "SourceDetachMaximumMilliseconds",
+    "PlaybackStateBeforeDetach",
+    "SourceDetached",
+    "CanPauseBeforeDetach",
+    "CanSeekBeforeDetach",
+    "TeardownStage",
+    "ExceptionCategory",
+    "ExceptionHResult",
+    "InitialPrivateBytes",
+    "FinalPrivateBytes",
+    "InitialHandleCount",
+    "FinalHandleCount"
+)
+Assert-ExactSequence `
+    -Actual $actualProbePropertyNames `
+    -Expected $expectedProbePropertyNames `
+    -Message "The nested native playback probe must remain an exact ordered allowlist."
+
 $mainTryCandidates = @($ast.EndBlock.Statements | Where-Object {
     if ($_ -isnot [System.Management.Automation.Language.TryStatementAst]) {
         return $false

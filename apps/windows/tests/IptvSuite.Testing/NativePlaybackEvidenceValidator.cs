@@ -178,7 +178,7 @@ public static class NativePlaybackEvidenceValidator
         RequireLowerHex(root, "HarnessAssemblySha256", 64);
         RequireLowerHex(root, "FixtureManifestSha256", 64);
         RequireEqual(RequireBoolean(root, "FixtureCorpusVerified"), true, "FixtureCorpusVerified");
-        RequireEqual(RequireInt32(root, "ProbeEnvelopeSchemaVersion"), 1, "ProbeEnvelopeSchemaVersion");
+        RequireEqual(RequireInt32(root, "ProbeEnvelopeSchemaVersion"), 2, "ProbeEnvelopeSchemaVersion");
         RequireEqual(RequireBoolean(root, "ProbeRunIdBound"), true, "ProbeRunIdBound");
 
         int switchCount = RequireInt32(root, "SwitchCount");

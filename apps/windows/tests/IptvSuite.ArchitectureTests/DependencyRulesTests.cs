@@ -2077,6 +2077,11 @@ public sealed class DependencyRulesTests
             "IptvSuite.NativePlaybackCompatibilitySpike");
         string app = File.ReadAllText(Path.Combine(spikeRoot, "App.xaml.cs"));
         string window = File.ReadAllText(Path.Combine(spikeRoot, "MainWindow.xaml.cs"));
+        string normalizedApp = Regex.Replace(
+            app,
+            @"\s+",
+            " ",
+            RegexOptions.CultureInvariant);
         string normalizedWindow = Regex.Replace(
             window,
             @"\s+",
@@ -2093,6 +2098,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "Guid.TryParseExact(runIdText, \"N\", out Guid runId)");
         StringAssert.Contains(window, "runId.ToString(\"N\") != runIdText");
         StringAssert.Contains(app, "new NativePlaybackProbeEnvelope(");
+        StringAssert.Contains(
+            normalizedApp,
+            "new NativePlaybackProbeEnvelope( 2, request.RunId.ToString(\"N\"), runtimeDependency, result);");
         StringAssert.Contains(app, "request.RunId.ToString(\"N\")");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.json\"");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.pending\"");
@@ -2194,6 +2202,25 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "Preserve the primary typed probe failure");
         StringAssert.Contains(window, "private TaskCompletionSource<long>? _opened;");
         StringAssert.Contains(window, "long startupStarted = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(window, "NativePlaybackFixture.HlsH264AacMpegTs");
+        StringAssert.Contains(window, "NativePlaybackFixture.DirectH264AacMpegTs");
+        StringAssert.Contains(
+            window,
+            "return new NativePlaybackProbeRequest(runId, [hlsUri, directUri]");
+        StringAssert.Contains(window, "if (startupMilliseconds > startupMaximumMilliseconds)");
+        StringAssert.Contains(window, "startupMaximumSwitchOrdinal = index + 1;");
+        StringAssert.Contains(window, "startupMaximumAttemptCount = startupAttemptCount;");
+        StringAssert.Contains(
+            window,
+            "startupMaximumSurfaceTransitionCount = switchSurfaceTransitionCount;");
+        StringAssert.Contains(
+            window,
+            "startupMaximumPreWaitMilliseconds = startupPreWaitMilliseconds;");
+        StringAssert.Contains(
+            window,
+            "startupMaximumMediaOpenWaitMilliseconds = startupMediaOpenWaitMilliseconds;");
+        StringAssert.Contains(window, "hlsStartupSamples.Max(),");
+        StringAssert.Contains(window, "directStartupSamples.Max(),");
         StringAssert.Contains(
             normalizedWindow,
             "long openedTimestamp = await _opened.Task.WaitAsync( TimeSpan.FromSeconds(5), probeCancellationToken);");
@@ -2235,6 +2262,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "{62CE7E72-4C71-4D20-B15D-452831A87D9D}");
         StringAssert.Contains(controller, "{32D186A7-218F-4C75-8876-DD77273A8999}");
         StringAssert.Contains(controller, "StartupP95Milliseconds -gt 3000");
+        StringAssert.Contains(controller, "StartupMaximumMilliseconds -gt 5000");
         StringAssert.Contains(controller, "[ValidateRange(0, 480)]");
         StringAssert.Contains(controller, "$SwitchCount -ne 100");
         StringAssert.Contains(controller, "MemoryNetGrowthBytes -gt 104857600");
@@ -2262,6 +2290,122 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "SchemaVersion = 9");
+        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 2");
+        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 2");
+        StringAssert.Contains(controller, "$startupMaximumSwitchOrdinal -lt 1");
+        StringAssert.Contains(controller, "$startupMaximumSwitchOrdinal -gt $SwitchCount");
+        StringAssert.Contains(controller, "($startupMaximumSwitchOrdinal % 2) -eq 1");
+        StringAssert.Contains(
+            controller,
+            "$expectedMaximumFixture,");
+        StringAssert.Contains(
+            controller,
+            "[System.StringComparison]::Ordinal) -or");
+        StringAssert.Contains(controller, "$startupMaximumAttemptCount -lt 1");
+        StringAssert.Contains(controller, "$startupMaximumAttemptCount -gt 2");
+        StringAssert.Contains(
+            controller,
+            "$startupMaximumAttemptCount -gt (1 + [int]$probe.PlaybackRetryCount)");
+        StringAssert.Contains(
+            controller,
+            "$startupMaximumSurfaceTransitionCount -ne $expectedMaximumSurfaceTransitionCount");
+        StringAssert.Contains(controller, "$maximumSwitchIndex = $startupMaximumSwitchOrdinal - 1");
+        StringAssert.Contains(
+            controller,
+            "$maximumSwitchIndex -eq [Math]::Floor($SwitchCount / 5.0)");
+        StringAssert.Contains(
+            controller,
+            "$maximumSwitchIndex -eq [Math]::Floor(($SwitchCount * 2.0) / 5.0)");
+        StringAssert.Contains(
+            controller,
+            "$maximumSwitchIndex -eq [Math]::Floor(($SwitchCount * 3.0) / 5.0)");
+        StringAssert.Contains(
+            controller,
+            "$maximumSwitchIndex -eq [Math]::Floor(($SwitchCount * 4.0) / 5.0)");
+        StringAssert.Contains(controller, "$startupMaximumMilliseconds) -gt 0.002");
+        StringAssert.Contains(
+            controller,
+            "$hlsStartupMaximumMilliseconds -lt $hlsStartupP95Milliseconds");
+        StringAssert.Contains(
+            controller,
+            "$directStartupMaximumMilliseconds -lt $directStartupP95Milliseconds");
+        StringAssert.Contains(
+            controller,
+            "$hlsStartupMaximumMilliseconds -gt $startupMaximumMilliseconds");
+        StringAssert.Contains(
+            controller,
+            "$directStartupMaximumMilliseconds -gt $startupMaximumMilliseconds");
+        StringAssert.Contains(
+            controller,
+            "[Math]::Max($hlsStartupMaximumMilliseconds, $directStartupMaximumMilliseconds)");
+        StringAssert.Contains(
+            controller,
+            "[Math]::Abs($hlsStartupMaximumMilliseconds - $startupMaximumMilliseconds) -gt 0.001");
+        StringAssert.Contains(
+            controller,
+            "[Math]::Abs($directStartupMaximumMilliseconds - $startupMaximumMilliseconds) -gt 0.001");
+        string probeFailureLog = controller
+            .Split('\n')
+            .Single(line => line.Contains(
+                "Native playback probe failed with category",
+                StringComparison.Ordinal));
+        string startupBudgetFailureLog = controller
+            .Split('\n')
+            .Single(line => line.Contains(
+                "Native playback startup budget failed",
+                StringComparison.Ordinal));
+        string startupDiagnosticLog = controller
+            .Split('\n')
+            .Single(line => line.Contains(
+                "Native playback startup diagnostic:",
+                StringComparison.Ordinal));
+        string[] probeFailureDiagnosticLabels =
+        [
+            "startupMaximumOrdinal=",
+            "startupMaximumFixture=",
+            "startupMaximumAttempts=",
+            "startupMaximumTransitions=",
+            "startupMaximumPreWait=",
+            "startupMaximumMediaOpenWait=",
+            "hlsMaximum=",
+            "directMaximum=",
+        ];
+        foreach (string diagnosticLabel in probeFailureDiagnosticLabels)
+        {
+            StringAssert.Contains(probeFailureLog, diagnosticLabel);
+        }
+
+        string[] startupBudgetDiagnosticLabels =
+        [
+            "maximumOrdinal=",
+            "maximumFixture=",
+            "maximumAttempts=",
+            "maximumSurfaceTransitions=",
+            "maximumPreWait=",
+            "maximumMediaOpenWait=",
+            "hlsMaximum=",
+            "directMaximum=",
+        ];
+        foreach (string diagnosticLabel in startupBudgetDiagnosticLabels)
+        {
+            StringAssert.Contains(startupBudgetFailureLog, diagnosticLabel);
+        }
+
+        string[] startupDiagnosticLabels =
+        [
+            "ordinal=",
+            "fixture=",
+            "attempts=",
+            "surfaceTransitions=",
+            "preWait=",
+            "mediaOpenWait=",
+            "hlsMaximum=",
+            "directMaximum=",
+        ];
+        foreach (string diagnosticLabel in startupDiagnosticLabels)
+        {
+            StringAssert.Contains(startupDiagnosticLog, diagnosticLabel);
+        }
         StringAssert.Contains(controller, "foreach ($staleEvidence in @($evidencePath, $failureEvidencePath))");
         StringAssert.Contains(controller, "if (@(Get-RepositoryStatus).Count -ne 0)");
         StringAssert.Contains(controller, "$repositoryHead = Get-RepositoryHead");
