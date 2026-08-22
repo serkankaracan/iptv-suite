@@ -161,6 +161,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 {
                     startupAttemptCount = attempt + 1;
                     startupFailureDiagnostic = default;
+                    startupSourceOpenDiagnostic = default;
                     activeStartupAttemptCount = startupAttemptCount;
                     activeStartupSourceCreationMilliseconds = 0;
                     activeStartupSourceAssignmentMilliseconds = 0;
@@ -182,6 +183,9 @@ public sealed partial class MainWindow : Window, IDisposable
                     var sourceOpenCompletion =
                         new TaskCompletionSource<NativePlaybackSourceOpenCompletion>(
                             TaskCreationOptions.RunContinuationsAsynchronously);
+                    bool sourceOpenHandlerBound = false;
+                    long sourceOpenWaitStarted = 0;
+                    long sourceOpenDeadline = 0;
                     void Source_OpenOperationCompleted(
                         MediaSource sender,
                         MediaSourceOpenOperationCompletedEventArgs args) =>
@@ -197,6 +201,11 @@ public sealed partial class MainWindow : Window, IDisposable
                         }
 
                         NativePlaybackSourceOpenCompletion completion = sourceOpenCompletion.Task.Result;
+                        if (sourceOpenDeadline != 0 && completion.Timestamp > sourceOpenDeadline)
+                        {
+                            return;
+                        }
+
                         activeStartupSourceOpenCompletionObserved = true;
                         activeStartupSourceOpenErrorPresent = completion.ErrorPresent;
                         activeStartupSourceOpenCompleted = completion.Timestamp;
@@ -205,10 +214,24 @@ public sealed partial class MainWindow : Window, IDisposable
                             Stopwatch.GetElapsedTime(startupStarted, completion.Timestamp).TotalMilliseconds);
                         if (activeStartupStage == NativePlaybackStartupStage.MediaSourceOpenWait)
                         {
-                            BeginStartupStage(NativePlaybackStartupStage.MediaOpenWait);
+                            activeStartupStage = NativePlaybackStartupStage.MediaOpenWait;
+                            activeStartupStageStarted = Math.Max(
+                                sourceOpenWaitStarted,
+                                completion.Timestamp);
                         }
                     }
+                    void UnsubscribeSourceOpenHandler()
+                    {
+                        if (!sourceOpenHandlerBound)
+                        {
+                            return;
+                        }
+
+                        source.OpenOperationCompleted -= Source_OpenOperationCompleted;
+                        sourceOpenHandlerBound = false;
+                    }
                     source.OpenOperationCompleted += Source_OpenOperationCompleted;
+                    sourceOpenHandlerBound = true;
                     try
                     {
                         BeginStartupStage(NativePlaybackStartupStage.SourceAssignment);
@@ -220,8 +243,10 @@ public sealed partial class MainWindow : Window, IDisposable
                         activeStartupPlayInvocationMilliseconds =
                             Stopwatch.GetElapsedTime(activeStartupStageStarted).TotalMilliseconds;
                         long mediaOpenWaitStarted = Stopwatch.GetTimestamp();
+                        sourceOpenWaitStarted = mediaOpenWaitStarted;
                         BeginStartupStage(NativePlaybackStartupStage.MediaSourceOpenWait);
                         TimeSpan mediaOpenTimeout = TimeSpan.FromSeconds(5);
+                        sourceOpenDeadline = mediaOpenWaitStarted + (Stopwatch.Frequency * 5);
                         Task<long> mediaOpenedTask = _opened.Task;
                         Task firstCompletion = await Task.WhenAny(
                                 mediaOpenedTask,
@@ -268,6 +293,7 @@ public sealed partial class MainWindow : Window, IDisposable
                         BeginStartupStage(NativePlaybackStartupStage.PlaybackAdvanceWait);
                         await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), probeCancellationToken);
                         activeStartupStage = NativePlaybackStartupStage.None;
+                        UnsubscribeSourceOpenHandler();
                         sourceDetachSamples.Add(await DetachSourceAsync(
                             pauseIfSupported: true,
                             probeCancellationToken));
@@ -285,6 +311,7 @@ public sealed partial class MainWindow : Window, IDisposable
                         _mediaFailure == NativePlaybackFailure.MediaFailed && attempt == 0)
                     {
                         playbackRetryCount++;
+                        UnsubscribeSourceOpenHandler();
                         sourceDetachSamples.Add(await DetachSourceAsync(
                             pauseIfSupported: false,
                             probeCancellationToken));
@@ -301,7 +328,7 @@ public sealed partial class MainWindow : Window, IDisposable
                     }
                     finally
                     {
-                        source.OpenOperationCompleted -= Source_OpenOperationCompleted;
+                        UnsubscribeSourceOpenHandler();
                         BestEffortResetAfterProbe();
                         if (sourceDetached)
                         {
@@ -863,7 +890,7 @@ internal readonly record struct NativePlaybackSourceOpenDiagnostic(
     bool CompletionObserved,
     bool ErrorPresent,
     double CompletionMilliseconds,
-    double PostCompletionMediaOpenedMilliseconds);
+    double PostCompletionElapsedMilliseconds);
 
 internal readonly record struct NativePlaybackStartupFailureDiagnostic(
     NativePlaybackStartupStage Stage,

@@ -2259,6 +2259,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "NativePlaybackStartupStage.MediaSourceOpenWait");
         StringAssert.Contains(window, "Task firstCompletion = await Task.WhenAny(");
         StringAssert.Contains(window, "mediaOpenTimeout - Stopwatch.GetElapsedTime(mediaOpenWaitStarted)");
+        StringAssert.Contains(window, "completion.Timestamp > sourceOpenDeadline");
+        StringAssert.Contains(
+            window,
+            "sourceOpenDeadline = mediaOpenWaitStarted + (Stopwatch.Frequency * 5);");
+        StringAssert.Contains(
+            normalizedWindow,
+            "activeStartupStageStarted = Math.Max( sourceOpenWaitStarted, completion.Timestamp);");
         Assert.AreEqual(
             1,
             Regex.Count(
@@ -2272,23 +2279,50 @@ public sealed class DependencyRulesTests
                 window,
                 Regex.Escape("source.OpenOperationCompleted -= Source_OpenOperationCompleted;"),
                 RegexOptions.CultureInvariant),
-            "Each attempt must unbind its source-open diagnostic handler.");
+            "The idempotent helper must own the source-open event removal.");
+        Assert.AreEqual(
+            3,
+            Regex.Count(
+                window,
+                Regex.Escape("UnsubscribeSourceOpenHandler();"),
+                RegexOptions.CultureInvariant),
+            "Success, retry, and finally paths must all close the attempt-owned handler.");
         int sourceOpenSubscribeIndex = window.IndexOf(
             "source.OpenOperationCompleted += Source_OpenOperationCompleted;",
             StringComparison.Ordinal);
-        int sourceOpenUnsubscribeIndex = window.IndexOf(
-            "source.OpenOperationCompleted -= Source_OpenOperationCompleted;",
+        int firstSourceOpenUnsubscribeCallIndex = window.IndexOf(
+            "UnsubscribeSourceOpenHandler();",
+            sourceOpenSubscribeIndex,
+            StringComparison.Ordinal);
+        int firstSourceDetachIndex = window.IndexOf(
+            "sourceDetachSamples.Add(await DetachSourceAsync(",
+            firstSourceOpenUnsubscribeCallIndex,
+            StringComparison.Ordinal);
+        int retrySourceOpenUnsubscribeCallIndex = window.IndexOf(
+            "UnsubscribeSourceOpenHandler();",
+            firstSourceDetachIndex,
+            StringComparison.Ordinal);
+        int retrySourceDetachIndex = window.IndexOf(
+            "sourceDetachSamples.Add(await DetachSourceAsync(",
+            retrySourceOpenUnsubscribeCallIndex,
+            StringComparison.Ordinal);
+        int finalSourceOpenUnsubscribeCallIndex = window.LastIndexOf(
+            "UnsubscribeSourceOpenHandler();",
             StringComparison.Ordinal);
         int attemptResetIndex = window.IndexOf(
             "BestEffortResetAfterProbe();",
-            sourceOpenUnsubscribeIndex,
+            finalSourceOpenUnsubscribeCallIndex,
             StringComparison.Ordinal);
         Assert.IsTrue(
             firstSourceCreationIndex < sourceOpenSubscribeIndex &&
             sourceOpenSubscribeIndex < firstSourceAssignmentIndex &&
-            firstSourceAssignmentIndex < sourceOpenUnsubscribeIndex &&
-            sourceOpenUnsubscribeIndex < attemptResetIndex,
-            "The attempt-owned source-open handler must bind before Source assignment and unbind before reset.");
+            firstSourceAssignmentIndex < firstSourceOpenUnsubscribeCallIndex &&
+            firstSourceOpenUnsubscribeCallIndex < firstSourceDetachIndex &&
+            firstSourceDetachIndex < retrySourceOpenUnsubscribeCallIndex &&
+            retrySourceOpenUnsubscribeCallIndex < retrySourceDetachIndex &&
+            retrySourceDetachIndex < finalSourceOpenUnsubscribeCallIndex &&
+            finalSourceOpenUnsubscribeCallIndex < attemptResetIndex,
+            "The attempt-owned source-open handler must bind before Source assignment and close before success/retry detach and reset.");
         Assert.IsFalse(
             window.Contains("AdaptiveMediaSource", StringComparison.Ordinal) ||
             window.Contains("source.OpenAsync", StringComparison.Ordinal) ||
@@ -2301,6 +2335,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "private TaskCompletionSource<long>? _opened;");
         StringAssert.Contains(window, "long activeStartupStarted = Stopwatch.GetTimestamp();");
         StringAssert.Contains(window, "long startupStarted = activeStartupStarted;");
+        Assert.AreEqual(
+            2,
+            Regex.Count(
+                window,
+                Regex.Escape("startupSourceOpenDiagnostic = default;"),
+                RegexOptions.CultureInvariant),
+            "The switch diagnostic must be initialized and reset for every retry attempt.");
         StringAssert.Contains(window, "NativePlaybackStartupStage.SourceCreation");
         StringAssert.Contains(window, "NativePlaybackStartupStage.SourceAssignment");
         StringAssert.Contains(window, "NativePlaybackStartupStage.PlayInvocation");
@@ -2412,7 +2453,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "\"StartupMaximumSourceOpen\"");
         StringAssert.Contains(controller, "\"StartupFailureSourceOpen\"");
         StringAssert.Contains(controller, "\"CompletionObserved\"");
-        StringAssert.Contains(controller, "\"PostCompletionMediaOpenedMilliseconds\"");
+        StringAssert.Contains(controller, "\"PostCompletionElapsedMilliseconds\"");
         StringAssert.Contains(controller, "$startupFailureStage -notin $allowedStartupFailureStages");
         StringAssert.Contains(controller, "\"MediaSourceOpenWait\"");
         StringAssert.Contains(controller, "$startupFailureSourceOpenObserved");
@@ -2503,7 +2544,7 @@ public sealed class DependencyRulesTests
             "startupFailureSourceOpenObserved=",
             "startupFailureSourceOpenError=",
             "startupFailureSourceOpenCompletion=",
-            "startupFailurePostSourceOpenMediaOpened=",
+            "startupFailurePostSourceOpenElapsed=",
             "startupFailureActiveStageElapsed=",
             "startupMaximumOrdinal=",
             "startupMaximumFixture=",
