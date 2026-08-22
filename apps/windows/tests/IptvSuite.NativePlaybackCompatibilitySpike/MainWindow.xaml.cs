@@ -85,6 +85,7 @@ public sealed partial class MainWindow : Window, IDisposable
         bool activeStartupMediaOpenedCompletionObserved = false;
         long activeStartupMediaOpenedCompleted = 0;
         long activeStartupMediaOpenDeadline = 0;
+        NativePlaybackFirstHlsStartupClock firstHlsStartupClock = default;
         NativePlaybackStartupFailureDiagnostic startupFailureDiagnostic = default;
         var resourceSamples = new List<NativePlaybackResourceSample>();
         var soakStopwatch = Stopwatch.StartNew();
@@ -98,12 +99,13 @@ public sealed partial class MainWindow : Window, IDisposable
 
         NativePlaybackStartupFailureDiagnostic CaptureStartupFailureDiagnostic()
         {
+            long captured = Stopwatch.GetTimestamp();
+            CompleteFirstHlsStartupWindow(captured);
             if (activeStartupStage == NativePlaybackStartupStage.None)
             {
                 return default;
             }
 
-            long captured = Stopwatch.GetTimestamp();
             var sourceOpenDiagnostic = activeStartupSourceOpenCompletionObserved
                 ? new NativePlaybackSourceOpenDiagnostic(
                     true,
@@ -141,6 +143,27 @@ public sealed partial class MainWindow : Window, IDisposable
                 Stopwatch.GetElapsedTime(activeStartupStageStarted, captured).TotalMilliseconds);
         }
 
+        void CompleteFirstHlsStartupWindow(long timestamp)
+        {
+            if (firstHlsStartupClock.StartupStartedTimestamp == 0)
+            {
+                return;
+            }
+
+            if (firstHlsStartupClock.WindowCompletedTimestamp != 0)
+            {
+                return;
+            }
+
+            long completedTimestamp = firstHlsStartupClock.MediaOpenedTimestamp != 0
+                ? firstHlsStartupClock.MediaOpenedTimestamp
+                : timestamp;
+            firstHlsStartupClock = firstHlsStartupClock with
+            {
+                WindowCompletedTimestamp = completedTimestamp,
+            };
+        }
+
         try
         {
             await _surfaceReady.Task.WaitAsync(TimeSpan.FromSeconds(5), probeCancellationToken);
@@ -161,6 +184,16 @@ public sealed partial class MainWindow : Window, IDisposable
                     : NativePlaybackFixture.DirectH264AacMpegTs;
                 activeStartupStarted = Stopwatch.GetTimestamp();
                 long startupStarted = activeStartupStarted;
+                if (index == 0 && fixtureKind == NativePlaybackFixture.HlsH264AacMpegTs)
+                {
+                    firstHlsStartupClock = new NativePlaybackFirstHlsStartupClock(
+                        Stopwatch.IsHighResolution,
+                        Stopwatch.Frequency,
+                        startupStarted,
+                        0,
+                        0,
+                        0);
+                }
                 activeStartupSwitchOrdinal = index + 1;
                 activeStartupFixture = fixtureKind;
                 activeStartupAttemptCount = 0;
@@ -196,6 +229,15 @@ public sealed partial class MainWindow : Window, IDisposable
                     activeStartupMediaOpenedCompletionObserved = false;
                     activeStartupMediaOpenedCompleted = 0;
                     activeStartupMediaOpenDeadline = 0;
+                    if (index == 0 && fixtureKind == NativePlaybackFixture.HlsH264AacMpegTs)
+                    {
+                        firstHlsStartupClock = firstHlsStartupClock with
+                        {
+                            SourceOpenCompletedTimestamp = 0,
+                            MediaOpenedTimestamp = 0,
+                            WindowCompletedTimestamp = 0,
+                        };
+                    }
                     bool retryRequested = false;
                     bool sourceDetached = false;
                     _mediaFailure = NativePlaybackFailure.None;
@@ -233,6 +275,17 @@ public sealed partial class MainWindow : Window, IDisposable
                             return;
                         }
 
+                        if (index == 0 &&
+                            fixtureKind == NativePlaybackFixture.HlsH264AacMpegTs &&
+                            (firstHlsStartupClock.MediaOpenedTimestamp == 0 ||
+                                completion.Timestamp <= firstHlsStartupClock.MediaOpenedTimestamp))
+                        {
+                            firstHlsStartupClock = firstHlsStartupClock with
+                            {
+                                SourceOpenCompletedTimestamp = completion.Timestamp,
+                            };
+                        }
+
                         activeStartupSourceOpenCompletionObserved = true;
                         activeStartupSourceOpenErrorPresent = completion.ErrorPresent;
                         activeStartupSourceOpenCompleted = completion.Timestamp;
@@ -257,6 +310,14 @@ public sealed partial class MainWindow : Window, IDisposable
 
                         activeStartupMediaOpenedCompletionObserved = true;
                         activeStartupMediaOpenedCompleted = mediaOpenedTask.Result;
+                        if (index == 0 && fixtureKind == NativePlaybackFixture.HlsH264AacMpegTs)
+                        {
+                            firstHlsStartupClock = firstHlsStartupClock with
+                            {
+                                MediaOpenedTimestamp = activeStartupMediaOpenedCompleted,
+                            };
+                            CompleteFirstHlsStartupWindow(activeStartupMediaOpenedCompleted);
+                        }
                     }
                     void UnsubscribeSourceOpenHandler()
                     {
@@ -308,6 +369,14 @@ public sealed partial class MainWindow : Window, IDisposable
                             openedTimestamp = await mediaOpenedTask.WaitAsync(
                                 remainingMediaOpenTime,
                                 probeCancellationToken);
+                        }
+                        if (index == 0 && fixtureKind == NativePlaybackFixture.HlsH264AacMpegTs)
+                        {
+                            firstHlsStartupClock = firstHlsStartupClock with
+                            {
+                                MediaOpenedTimestamp = openedTimestamp,
+                            };
+                            CompleteFirstHlsStartupWindow(openedTimestamp);
                         }
                         CaptureSourceOpenCompletionIfAvailable();
                         if (activeStartupSourceOpenCompletionObserved &&
@@ -432,18 +501,10 @@ public sealed partial class MainWindow : Window, IDisposable
                     sourceDetachSamples,
                     probeCancellationToken);
                 detachedSourceCount++;
-                if (!soakMetrics.ResourceBudgetPassed)
-                {
-                    return NativePlaybackProbeResult.Failed(
-                        NativePlaybackFailure.ResourceBudgetExceeded,
-                        completedSwitchCount,
-                        request.SoakDuration,
-                        soakMetrics);
-                }
             }
 
             process.Refresh();
-            return NativePlaybackProbeResult.Passed(
+            NativePlaybackProbeResult completedResult = NativePlaybackProbeResult.Passed(
                 request.SwitchCount,
                 startupSamples,
                 hlsStartupSamples,
@@ -455,6 +516,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 startupMaximumPreWaitMilliseconds,
                 startupMaximumMediaOpenWaitMilliseconds,
                 startupMaximumSourceOpenDiagnostic,
+                firstHlsStartupClock,
                 request.SoakDuration,
                 soakMetrics,
                 surfaceTransitionCount,
@@ -466,27 +528,39 @@ public sealed partial class MainWindow : Window, IDisposable
                 process.PrivateMemorySize64,
                 initialHandles,
                 process.HandleCount);
+            return soakMetrics.ResourceBudgetPassed
+                ? completedResult
+                : completedResult with
+                {
+                    Success = false,
+                    Failure = NativePlaybackFailure.ResourceBudgetExceeded,
+                };
         }
         catch (TimeoutException)
         {
+            CompleteFirstHlsStartupWindow(Stopwatch.GetTimestamp());
             return NativePlaybackProbeResult.Failed(
                 _mediaFailure == NativePlaybackFailure.None ? timeoutFailure : _mediaFailure,
                 completedSwitchCount,
                 playbackRetryCount: playbackRetryCount,
                 startupFailureDiagnostic: startupFailureDiagnostic.Stage == NativePlaybackStartupStage.None
                     ? CaptureStartupFailureDiagnostic()
-                    : startupFailureDiagnostic);
+                    : startupFailureDiagnostic,
+                firstHlsStartupClock: firstHlsStartupClock);
         }
         catch (OperationCanceledException)
         {
+            CompleteFirstHlsStartupWindow(Stopwatch.GetTimestamp());
             return NativePlaybackProbeResult.Failed(
                 NativePlaybackFailure.Cancelled,
                 completedSwitchCount,
                 playbackRetryCount: playbackRetryCount,
-                startupFailureDiagnostic: CaptureStartupFailureDiagnostic());
+                startupFailureDiagnostic: CaptureStartupFailureDiagnostic(),
+                firstHlsStartupClock: firstHlsStartupClock);
         }
         catch (NativePlaybackCancellationException exception)
         {
+            CompleteFirstHlsStartupWindow(Stopwatch.GetTimestamp());
             cancellationMetrics = exception.Metrics;
             detachedSourceCount +=
                 cancellationMetrics.CancellationSourceDetachCount +
@@ -497,26 +571,32 @@ public sealed partial class MainWindow : Window, IDisposable
                 surfaceTransitionCount: surfaceTransitionCount,
                 detachedSourceCount: detachedSourceCount,
                 playbackRetryCount: playbackRetryCount,
-                cancellationMetrics: cancellationMetrics);
+                cancellationMetrics: cancellationMetrics,
+                firstHlsStartupClock: firstHlsStartupClock);
         }
         catch (InvalidOperationException) when (_mediaFailure == NativePlaybackFailure.MediaFailed)
         {
+            CompleteFirstHlsStartupWindow(Stopwatch.GetTimestamp());
             return NativePlaybackProbeResult.Failed(
                 NativePlaybackFailure.MediaFailed,
                 completedSwitchCount,
                 playbackRetryCount: playbackRetryCount,
-                startupFailureDiagnostic: CaptureStartupFailureDiagnostic());
+                startupFailureDiagnostic: CaptureStartupFailureDiagnostic(),
+                firstHlsStartupClock: firstHlsStartupClock);
         }
         catch (NativePlaybackSurfaceException)
         {
+            CompleteFirstHlsStartupWindow(Stopwatch.GetTimestamp());
             return NativePlaybackProbeResult.Failed(
                 NativePlaybackFailure.SurfaceLifecycleFailed,
                 completedSwitchCount,
                 surfaceTransitionCount: surfaceTransitionCount,
-                playbackRetryCount: playbackRetryCount);
+                playbackRetryCount: playbackRetryCount,
+                firstHlsStartupClock: firstHlsStartupClock);
         }
         catch (NativePlaybackSourceDetachmentException exception)
         {
+            CompleteFirstHlsStartupWindow(Stopwatch.GetTimestamp());
             return NativePlaybackProbeResult.Failed(
                 NativePlaybackFailure.SourceDetachmentTimeout,
                 completedSwitchCount,
@@ -526,10 +606,12 @@ public sealed partial class MainWindow : Window, IDisposable
                 sourceDetached: exception.SourceDetached,
                 canPauseBeforeDetach: exception.CanPauseBeforeDetach,
                 canSeekBeforeDetach: exception.CanSeekBeforeDetach,
-                playbackRetryCount: playbackRetryCount);
+                playbackRetryCount: playbackRetryCount,
+                firstHlsStartupClock: firstHlsStartupClock);
         }
         catch (NativePlaybackTeardownException exception)
         {
+            CompleteFirstHlsStartupWindow(Stopwatch.GetTimestamp());
             return NativePlaybackProbeResult.Failed(
                 NativePlaybackFailure.SourceDetachmentFailed,
                 completedSwitchCount,
@@ -538,7 +620,8 @@ public sealed partial class MainWindow : Window, IDisposable
                 teardownStage: exception.Stage,
                 exceptionCategory: exception.Category,
                 exceptionHResult: exception.ExceptionHResult,
-                playbackRetryCount: playbackRetryCount);
+                playbackRetryCount: playbackRetryCount,
+                firstHlsStartupClock: firstHlsStartupClock);
         }
         finally
         {
@@ -1495,6 +1578,14 @@ internal readonly record struct NativePlaybackSourceOpenDiagnostic(
     double CompletionMilliseconds,
     double PostCompletionElapsedMilliseconds);
 
+internal readonly record struct NativePlaybackFirstHlsStartupClock(
+    bool HighResolution,
+    long Frequency,
+    long StartupStartedTimestamp,
+    long SourceOpenCompletedTimestamp,
+    long MediaOpenedTimestamp,
+    long WindowCompletedTimestamp);
+
 internal readonly record struct NativePlaybackStartupFailureDiagnostic(
     NativePlaybackStartupStage Stage,
     int SwitchOrdinal,
@@ -1619,6 +1710,8 @@ internal sealed record NativePlaybackProbeResult(
     int InitialHandleCount,
     int FinalHandleCount)
 {
+    public NativePlaybackFirstHlsStartupClock FirstHlsStartupClock { get; init; }
+
     internal static NativePlaybackProbeResult Passed(
         int switchCount,
         IReadOnlyList<double> startupSamples,
@@ -1631,6 +1724,7 @@ internal sealed record NativePlaybackProbeResult(
         double startupMaximumPreWaitMilliseconds,
         double startupMaximumMediaOpenWaitMilliseconds,
         NativePlaybackSourceOpenDiagnostic startupMaximumSourceOpen,
+        NativePlaybackFirstHlsStartupClock firstHlsStartupClock,
         TimeSpan soakDuration,
         NativePlaybackSoakMetrics soakMetrics,
         int surfaceTransitionCount,
@@ -1714,7 +1808,10 @@ internal sealed record NativePlaybackProbeResult(
             initialPrivateBytes,
             finalPrivateBytes,
             initialHandleCount,
-            finalHandleCount);
+            finalHandleCount)
+        {
+            FirstHlsStartupClock = firstHlsStartupClock,
+        };
     }
 
     internal static NativePlaybackProbeResult Failed(
@@ -1733,8 +1830,9 @@ internal sealed record NativePlaybackProbeResult(
         int exceptionHResult = 0,
         int playbackRetryCount = 0,
         NativePlaybackStartupFailureDiagnostic startupFailureDiagnostic = default,
-        NativePlaybackCancellationMetrics cancellationMetrics = default) =>
-        new(false, failure, completedSwitchCount, 0, 0, 0, 0,
+        NativePlaybackCancellationMetrics cancellationMetrics = default,
+        NativePlaybackFirstHlsStartupClock firstHlsStartupClock = default) =>
+        new NativePlaybackProbeResult(false, failure, completedSwitchCount, 0, 0, 0, 0,
             0, NativePlaybackFixture.None, 0, 0, 0, 0, default, 0, 0,
             startupFailureDiagnostic.Stage,
             startupFailureDiagnostic.SwitchOrdinal,
@@ -1786,7 +1884,10 @@ internal sealed record NativePlaybackProbeResult(
             teardownStage,
             exceptionCategory,
             exceptionHResult,
-            0, 0, 0, 0);
+            0, 0, 0, 0)
+        {
+            FirstHlsStartupClock = firstHlsStartupClock,
+        };
 
     private static double Percentile95(IReadOnlyList<double> samples)
     {

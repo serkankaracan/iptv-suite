@@ -302,7 +302,8 @@ $expectedProbePropertyNames = @(
     "InitialPrivateBytes",
     "FinalPrivateBytes",
     "InitialHandleCount",
-    "FinalHandleCount"
+    "FinalHandleCount",
+    "FirstHlsStartupClock"
 )
 Assert-ExactSequence `
     -Actual $actualProbePropertyNames `
@@ -384,7 +385,11 @@ $forbiddenSuccessVariables = @(
     "packageAppDataPath",
     "signingCertificate",
     "tlsCertificate",
-    "packageEvidencePath"
+    "packageEvidencePath",
+    "firstHlsStartupStartedTimestamp",
+    "firstHlsSourceOpenCompletedTimestamp",
+    "firstHlsMediaOpenedTimestamp",
+    "firstHlsWindowCompletedTimestamp"
 )
 $successVariables = @($successHashtable.FindAll({
     param($node)

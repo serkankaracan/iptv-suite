@@ -166,6 +166,7 @@ $tlsServerSource = @'
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -179,14 +180,163 @@ using System.Threading.Tasks;
 
 namespace IptvSuite.NativePlaybackSmoke
 {
+    public sealed class TierARequestTrace
+    {
+        private readonly object sync = new object();
+
+        public TierARequestTrace(int acceptOrdinal, long acceptedTimestamp)
+        {
+            AcceptOrdinal = acceptOrdinal;
+            AcceptedTimestamp = acceptedTimestamp;
+            Resource = "Unclassified";
+            Method = "Pending";
+            RangeShape = "Pending";
+            Outcome = "InFlight";
+        }
+
+        public int AcceptOrdinal { get; private set; }
+        public int RequestOrdinal { get; private set; }
+        public string Resource { get; private set; }
+        public string Method { get; private set; }
+        public string RangeShape { get; private set; }
+        public int StatusCode { get; private set; }
+        public long BodyBytes { get; private set; }
+        public long AcceptedTimestamp { get; private set; }
+        public long TlsAuthenticatedTimestamp { get; private set; }
+        public long RequestHeaderCompletedTimestamp { get; private set; }
+        public long ResponseHeaderWrittenTimestamp { get; private set; }
+        public long BodyWriteCompletedTimestamp { get; private set; }
+        public long FlushCompletedTimestamp { get; private set; }
+        public string Outcome { get; private set; }
+        public long TerminalTimestamp { get; private set; }
+
+        public void MarkTlsAuthenticated(long timestamp)
+        {
+            lock (sync) TlsAuthenticatedTimestamp = timestamp;
+        }
+
+        public void MarkRequestHeaderCompleted(long timestamp)
+        {
+            lock (sync) RequestHeaderCompletedTimestamp = timestamp;
+        }
+
+        public void MarkRequest(string resource, string method)
+        {
+            lock (sync)
+            {
+                Resource = resource;
+                Method = method;
+            }
+        }
+
+        public void MarkUnsupportedMethod()
+        {
+            lock (sync) Method = "Unsupported";
+        }
+
+        public void MarkRangeShape(string rangeShape)
+        {
+            lock (sync) RangeShape = rangeShape;
+        }
+
+        public void MarkRequestOrdinal(int requestOrdinal)
+        {
+            lock (sync) RequestOrdinal = requestOrdinal;
+        }
+
+        public void MarkResponseHeader(int statusCode, long timestamp)
+        {
+            lock (sync)
+            {
+                StatusCode = statusCode;
+                ResponseHeaderWrittenTimestamp = timestamp;
+            }
+        }
+
+        public void MarkCompleted(long bodyBytes, long bodyWriteCompletedTimestamp, long flushCompletedTimestamp)
+        {
+            lock (sync)
+            {
+                BodyBytes = bodyBytes;
+                BodyWriteCompletedTimestamp = bodyWriteCompletedTimestamp;
+                FlushCompletedTimestamp = flushCompletedTimestamp;
+                Outcome = "Completed";
+                TerminalTimestamp = flushCompletedTimestamp;
+            }
+        }
+
+        public void MarkRejected(int statusCode, long timestamp)
+        {
+            lock (sync)
+            {
+                StatusCode = statusCode;
+                ResponseHeaderWrittenTimestamp = timestamp;
+                Outcome = "Rejected";
+                TerminalTimestamp = timestamp;
+            }
+        }
+
+        public void MarkTerminalFailure(string outcome, long timestamp)
+        {
+            lock (sync)
+            {
+                if (Outcome == "Completed" || Outcome == "Rejected") return;
+                Outcome = outcome;
+                TerminalTimestamp = timestamp;
+            }
+        }
+
+        public TierARequestTrace Snapshot()
+        {
+            lock (sync)
+            {
+                var snapshot = new TierARequestTrace(AcceptOrdinal, AcceptedTimestamp);
+                snapshot.RequestOrdinal = RequestOrdinal;
+                snapshot.Resource = Resource;
+                snapshot.Method = Method;
+                snapshot.RangeShape = RangeShape;
+                snapshot.StatusCode = StatusCode;
+                snapshot.BodyBytes = BodyBytes;
+                snapshot.TlsAuthenticatedTimestamp = TlsAuthenticatedTimestamp;
+                snapshot.RequestHeaderCompletedTimestamp = RequestHeaderCompletedTimestamp;
+                snapshot.ResponseHeaderWrittenTimestamp = ResponseHeaderWrittenTimestamp;
+                snapshot.BodyWriteCompletedTimestamp = BodyWriteCompletedTimestamp;
+                snapshot.FlushCompletedTimestamp = FlushCompletedTimestamp;
+                snapshot.Outcome = Outcome;
+                snapshot.TerminalTimestamp = TerminalTimestamp;
+                return snapshot;
+            }
+        }
+    }
+
+    public sealed class TierARequestTraceSnapshot
+    {
+        public TierARequestTraceSnapshot(
+            TierARequestTrace[] traces,
+            int droppedCount,
+            long firstDroppedAcceptedTimestamp)
+        {
+            Traces = traces;
+            DroppedCount = droppedCount;
+            FirstDroppedAcceptedTimestamp = firstDroppedAcceptedTimestamp;
+        }
+
+        public TierARequestTrace[] Traces { get; private set; }
+        public int DroppedCount { get; private set; }
+        public long FirstDroppedAcceptedTimestamp { get; private set; }
+    }
+
     public sealed class TierATlsServer : IDisposable
     {
+        private const int RequestTraceCapacity = 32;
         private readonly string root;
         private readonly X509Certificate2 certificate;
         private readonly TcpListener listener;
         private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
         private readonly ConcurrentDictionary<int, TcpClient> activeClients = new ConcurrentDictionary<int, TcpClient>();
         private readonly ConcurrentDictionary<int, Task> activeHandlers = new ConcurrentDictionary<int, Task>();
+        private readonly object requestTraceSync = new object();
+        private readonly List<TierARequestTrace> requestTraces = new List<TierARequestTrace>();
         private readonly Task acceptLoop;
         private int nextHandlerId;
         private int disposed;
@@ -206,6 +356,8 @@ namespace IptvSuite.NativePlaybackSmoke
         private int lastInjectedRequestOrdinal;
         private int lastRecoveryRequestOrdinal;
         private long completedBodyBytes;
+        private int requestTraceDroppedCount;
+        private long firstDroppedRequestAcceptedTimestamp;
 
         public TierATlsServer(string root, X509Certificate2 certificate)
         {
@@ -231,6 +383,19 @@ namespace IptvSuite.NativePlaybackSmoke
         public int LastInjectedRequestOrdinal { get { return Volatile.Read(ref lastInjectedRequestOrdinal); } }
         public int LastRecoveryRequestOrdinal { get { return Volatile.Read(ref lastRecoveryRequestOrdinal); } }
         public long CompletedBodyBytes { get { return Interlocked.Read(ref completedBodyBytes); } }
+        public TierARequestTraceSnapshot GetRequestTraceSnapshot()
+        {
+            lock (requestTraceSync)
+            {
+                var traces = new TierARequestTrace[requestTraces.Count];
+                for (int index = 0; index < requestTraces.Count; index++)
+                    traces[index] = requestTraces[index].Snapshot();
+                return new TierARequestTraceSnapshot(
+                    traces,
+                    requestTraceDroppedCount,
+                    firstDroppedRequestAcceptedTimestamp);
+            }
+        }
 
         public void ArmNextMediaRequestFailure()
         {
@@ -248,15 +413,21 @@ namespace IptvSuite.NativePlaybackSmoke
                 try
                 {
                     TcpClient client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                    long acceptedTimestamp = Stopwatch.GetTimestamp();
                     int handlerId = Interlocked.Increment(ref nextHandlerId);
+                    TierARequestTrace requestTrace = ReserveRequestTrace(handlerId, acceptedTimestamp);
                     if (!activeClients.TryAdd(handlerId, client))
                     {
+                        if (requestTrace != null)
+                            requestTrace.MarkTerminalFailure("TransportFailure", Stopwatch.GetTimestamp());
                         client.Dispose();
                         throw new InvalidOperationException("A loopback handler identity collided.");
                     }
-                    Task handler = Task.Run(() => HandleTrackedAsync(handlerId, client));
+                    Task handler = Task.Run(() => HandleTrackedAsync(handlerId, client, requestTrace));
                     if (!activeHandlers.TryAdd(handlerId, handler))
                     {
+                        if (requestTrace != null)
+                            requestTrace.MarkTerminalFailure("TransportFailure", Stopwatch.GetTimestamp());
                         TcpClient trackedClient;
                         activeClients.TryRemove(handlerId, out trackedClient);
                         client.Dispose();
@@ -284,11 +455,32 @@ namespace IptvSuite.NativePlaybackSmoke
             }
         }
 
-        private async Task HandleTrackedAsync(int handlerId, TcpClient client)
+        private TierARequestTrace ReserveRequestTrace(int acceptOrdinal, long acceptedTimestamp)
+        {
+            lock (requestTraceSync)
+            {
+                if (requestTraces.Count >= RequestTraceCapacity)
+                {
+                    requestTraceDroppedCount++;
+                    if (firstDroppedRequestAcceptedTimestamp == 0)
+                        firstDroppedRequestAcceptedTimestamp = acceptedTimestamp;
+                    return null;
+                }
+
+                var trace = new TierARequestTrace(acceptOrdinal, acceptedTimestamp);
+                requestTraces.Add(trace);
+                return trace;
+            }
+        }
+
+        private async Task HandleTrackedAsync(
+            int handlerId,
+            TcpClient client,
+            TierARequestTrace requestTrace)
         {
             try
             {
-                await HandleAsync(client).ConfigureAwait(false);
+                await HandleAsync(client, requestTrace).ConfigureAwait(false);
             }
             finally
             {
@@ -297,7 +489,7 @@ namespace IptvSuite.NativePlaybackSmoke
             }
         }
 
-        private async Task HandleAsync(TcpClient client)
+        private async Task HandleAsync(TcpClient client, TierARequestTrace requestTrace)
         {
             using (client)
             using (var ssl = new SslStream(client.GetStream(), false))
@@ -309,28 +501,59 @@ namespace IptvSuite.NativePlaybackSmoke
                         false,
                         SslProtocols.Tls12,
                         false).ConfigureAwait(false);
+                    long tlsAuthenticatedTimestamp = Stopwatch.GetTimestamp();
+                    if (requestTrace != null)
+                        requestTrace.MarkTlsAuthenticated(tlsAuthenticatedTimestamp);
                     byte[] headerBuffer = new byte[16384];
                     int length = 0;
                     while (length < headerBuffer.Length)
                     {
                         int read = await ssl.ReadAsync(headerBuffer, length, headerBuffer.Length - length).ConfigureAwait(false);
-                        if (read == 0) return;
+                        if (read == 0)
+                        {
+                            if (requestTrace != null)
+                                requestTrace.MarkTerminalFailure("IoAbort", Stopwatch.GetTimestamp());
+                            return;
+                        }
                         length += read;
                         if (length >= 4 && FindHeaderEnd(headerBuffer, length) >= 0) break;
                     }
-                    if (FindHeaderEnd(headerBuffer, length) < 0) { await WriteStatusAsync(ssl, 431).ConfigureAwait(false); return; }
+                    if (FindHeaderEnd(headerBuffer, length) < 0)
+                    {
+                        await WriteRejectedStatusAsync(ssl, 431, requestTrace).ConfigureAwait(false);
+                        return;
+                    }
+                    long requestHeaderCompletedTimestamp = Stopwatch.GetTimestamp();
+                    if (requestTrace != null)
+                        requestTrace.MarkRequestHeaderCompleted(requestHeaderCompletedTimestamp);
 
                     string header = Encoding.ASCII.GetString(headerBuffer, 0, length);
                     string[] lines = header.Split(new[] { "\r\n" }, StringSplitOptions.None);
                     string[] request = lines[0].Split(' ');
-                    if (request.Length != 3 || (request[0] != "GET" && request[0] != "HEAD")) { await WriteStatusAsync(ssl, 405).ConfigureAwait(false); return; }
+                    if (request.Length != 3 || (request[0] != "GET" && request[0] != "HEAD"))
+                    {
+                        if (requestTrace != null) requestTrace.MarkUnsupportedMethod();
+                        await WriteRejectedStatusAsync(ssl, 405, requestTrace).ConfigureAwait(false);
+                        return;
+                    }
+                    string traceMethod = request[0] == "GET" ? "Get" : "Head";
                     string fileName;
                     string contentType;
-                    if (!TryMap(request[1], out fileName, out contentType)) { await WriteStatusAsync(ssl, 404).ConfigureAwait(false); return; }
+                    if (!TryMap(request[1], out fileName, out contentType))
+                    {
+                        if (requestTrace != null) requestTrace.MarkRequest("Unclassified", traceMethod);
+                        await WriteRejectedStatusAsync(ssl, 404, requestTrace).ConfigureAwait(false);
+                        return;
+                    }
+                    if (requestTrace != null)
+                        requestTrace.MarkRequest(GetTraceResource(fileName), traceMethod);
 
                     string filePath = Path.GetFullPath(Path.Combine(root, fileName));
                     if (!filePath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || !File.Exists(filePath))
-                    { await WriteStatusAsync(ssl, 404).ConfigureAwait(false); return; }
+                    {
+                        await WriteRejectedStatusAsync(ssl, 404, requestTrace).ConfigureAwait(false);
+                        return;
+                    }
 
                     long total = new FileInfo(filePath).Length;
                     long start = 0;
@@ -344,13 +567,21 @@ namespace IptvSuite.NativePlaybackSmoke
                             string range = line.Substring(13);
                             string[] bounds = range.Split('-');
                             if (range.IndexOf(',') >= 0 || bounds.Length != 2)
-                            { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
+                            {
+                                if (requestTrace != null) requestTrace.MarkRangeShape("Invalid");
+                                await WriteRejectedStatusAsync(ssl, 416, requestTrace).ConfigureAwait(false);
+                                return;
+                            }
                             if (bounds[0].Length == 0)
                             {
                                 rangeShape = 2;
                                 long suffixLength;
                                 if (!Int64.TryParse(bounds[1], NumberStyles.None, CultureInfo.InvariantCulture, out suffixLength) || suffixLength <= 0)
-                                { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
+                                {
+                                    if (requestTrace != null) requestTrace.MarkRangeShape("Invalid");
+                                    await WriteRejectedStatusAsync(ssl, 416, requestTrace).ConfigureAwait(false);
+                                    return;
+                                }
                                 start = Math.Max(0, total - suffixLength);
                                 end = total - 1;
                             }
@@ -358,23 +589,34 @@ namespace IptvSuite.NativePlaybackSmoke
                             {
                                 rangeShape = bounds[1].Length == 0 ? 1 : 3;
                                 if (!Int64.TryParse(bounds[0], NumberStyles.None, CultureInfo.InvariantCulture, out start) || start < 0 || start >= total)
-                                { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
+                                {
+                                    if (requestTrace != null) requestTrace.MarkRangeShape("Invalid");
+                                    await WriteRejectedStatusAsync(ssl, 416, requestTrace).ConfigureAwait(false);
+                                    return;
+                                }
                                 if (bounds[1].Length > 0 && (!Int64.TryParse(bounds[1], NumberStyles.None, CultureInfo.InvariantCulture, out end) || end < start))
-                                { await WriteStatusAsync(ssl, 416).ConfigureAwait(false); return; }
+                                {
+                                    if (requestTrace != null) requestTrace.MarkRangeShape("Invalid");
+                                    await WriteRejectedStatusAsync(ssl, 416, requestTrace).ConfigureAwait(false);
+                                    return;
+                                }
                                 end = Math.Min(end, total - 1);
                             }
                             partial = true;
                         }
                     }
+                    if (requestTrace != null)
+                        requestTrace.MarkRangeShape(GetTraceRangeShape(rangeShape));
 
                     long contentLength = end - start + 1;
                     int requestOrdinal = Interlocked.Increment(ref requestCount);
+                    if (requestTrace != null) requestTrace.MarkRequestOrdinal(requestOrdinal);
                     if (Interlocked.Exchange(ref armedMediaFailure, 0) == 1)
                     {
                         Volatile.Write(ref lastInjectedRequestOrdinal, requestOrdinal);
                         Interlocked.Exchange(ref pendingRecovery, 1);
                         Interlocked.Increment(ref injectedFailureCount);
-                        await WriteStatusAsync(ssl, 503).ConfigureAwait(false);
+                        await WriteRejectedStatusAsync(ssl, 503, requestTrace).ConfigureAwait(false);
                         return;
                     }
                     if (request[0] == "HEAD") Interlocked.Increment(ref headRequestCount);
@@ -394,6 +636,9 @@ namespace IptvSuite.NativePlaybackSmoke
                     response.Append("Cache-Control: no-store\r\nConnection: close\r\n\r\n");
                     byte[] responseBytes = Encoding.ASCII.GetBytes(response.ToString());
                     await ssl.WriteAsync(responseBytes, 0, responseBytes.Length).ConfigureAwait(false);
+                    long responseHeaderWrittenTimestamp = Stopwatch.GetTimestamp();
+                    if (requestTrace != null)
+                        requestTrace.MarkResponseHeader(partial ? 206 : 200, responseHeaderWrittenTimestamp);
                     if (request[0] == "GET")
                     {
                         using (var file = File.OpenRead(filePath))
@@ -410,9 +655,16 @@ namespace IptvSuite.NativePlaybackSmoke
                             }
                         }
                     }
+                    long bodyWriteCompletedTimestamp = Stopwatch.GetTimestamp();
                     await ssl.FlushAsync().ConfigureAwait(false);
+                    long flushCompletedTimestamp = Stopwatch.GetTimestamp();
                     if (request[0] == "GET") Interlocked.Add(ref completedBodyBytes, contentLength);
                     Interlocked.Increment(ref completedResponseCount);
+                    if (requestTrace != null)
+                        requestTrace.MarkCompleted(
+                            request[0] == "GET" ? contentLength : 0,
+                            bodyWriteCompletedTimestamp,
+                            flushCompletedTimestamp);
                     int injectedRequestOrdinal = Volatile.Read(ref lastInjectedRequestOrdinal);
                     if (requestOrdinal > injectedRequestOrdinal &&
                         Interlocked.CompareExchange(ref pendingRecovery, 0, 1) == 1)
@@ -423,21 +675,54 @@ namespace IptvSuite.NativePlaybackSmoke
                 }
                 catch (IOException)
                 {
+                    if (requestTrace != null)
+                        requestTrace.MarkTerminalFailure("IoAbort", Stopwatch.GetTimestamp());
                     if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref ioAbortCount);
                 }
                 catch (AuthenticationException)
                 {
+                    if (requestTrace != null)
+                        requestTrace.MarkTerminalFailure("AuthFailure", Stopwatch.GetTimestamp());
                     if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref failureCount);
                 }
                 catch (ObjectDisposedException)
                 {
+                    if (requestTrace != null)
+                        requestTrace.MarkTerminalFailure("TransportFailure", Stopwatch.GetTimestamp());
                     if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref failureCount);
                 }
                 catch
                 {
+                    if (requestTrace != null)
+                        requestTrace.MarkTerminalFailure("TransportFailure", Stopwatch.GetTimestamp());
                     if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref failureCount);
                 }
             }
+        }
+
+        private static string GetTraceResource(string fileName)
+        {
+            switch (fileName)
+            {
+                case "direct-h264-aac.ts": return "Direct";
+                case "hls.m3u8": return "Playlist";
+                case "hls-000.ts": return "Segment0";
+                case "hls-001.ts": return "Segment1";
+                case "hls-002.ts": return "Segment2";
+                case "hls-003.ts": return "Segment3";
+                default: return "Unclassified";
+            }
+        }
+
+        private static string GetTraceRangeShape(int rangeShape)
+        {
+            return rangeShape == 1
+                ? "OpenEnded"
+                : rangeShape == 2
+                    ? "Suffix"
+                    : rangeShape == 3
+                        ? "Bounded"
+                        : "None";
         }
 
         private static bool TryMap(string path, out string fileName, out string contentType)
@@ -465,6 +750,16 @@ namespace IptvSuite.NativePlaybackSmoke
         {
             byte[] value = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " Rejected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             await stream.WriteAsync(value, 0, value.Length).ConfigureAwait(false);
+        }
+
+        private static async Task WriteRejectedStatusAsync(
+            Stream stream,
+            int status,
+            TierARequestTrace requestTrace)
+        {
+            await WriteStatusAsync(stream, status).ConfigureAwait(false);
+            if (requestTrace != null)
+                requestTrace.MarkRejected(status, Stopwatch.GetTimestamp());
         }
 
         public void Dispose()
@@ -619,6 +914,22 @@ $tlsRecoveryCount = 0
 $tlsLastInjectedRequestOrdinal = 0
 $tlsLastRecoveryRequestOrdinal = 0
 $tlsCompletedBodyBytes = 0L
+$firstHlsTransportAttributionObserved = $false
+$firstHlsTraceRequestCount = 0
+$firstHlsTracePlaylistResponseCount = 0
+$firstHlsTraceSegmentResponseCount = 0
+$firstHlsTraceBodyBytes = 0L
+$firstHlsTraceResponsesBeforeSourceOpen = 0
+$firstHlsTraceResponsesBeforeMediaOpened = 0
+$firstHlsStartupToFirstAcceptMilliseconds = 0.0
+$firstHlsStartupToFirstHeaderMilliseconds = 0.0
+$firstHlsMaximumTlsAuthenticationMilliseconds = 0.0
+$firstHlsTotalTlsAuthenticationMilliseconds = 0.0
+$firstHlsFirstHeaderToLastFlushMilliseconds = 0.0
+$firstHlsLastFlushToSourceOpenMilliseconds = 0.0
+$firstHlsLastFlushToMediaOpenedMilliseconds = 0.0
+$requestTraceDroppedCount = 0
+$firstDroppedRequestAcceptedTimestamp = 0L
 $msBuildEnvironment = @{
     AppxBundle = "Never"
     AppxPackageDir = "$packageOutput\"
@@ -1175,6 +1486,25 @@ function Test-JsonNumber {
     return $false
 }
 
+function Get-QpcDeltaMilliseconds {
+    param(
+        [Parameter(Mandatory)]
+        [long]$StartTimestamp,
+
+        [Parameter(Mandatory)]
+        [long]$EndTimestamp,
+
+        [Parameter(Mandatory)]
+        [long]$Frequency
+    )
+
+    if ($Frequency -le 0) {
+        throw "The native playback QPC frequency is invalid."
+    }
+
+    return (([double]$EndTimestamp - [double]$StartTimestamp) * 1000.0) / [double]$Frequency
+}
+
 function Invoke-CleanupStep {
     param(
         [Parameter(Mandatory)]
@@ -1704,9 +2034,24 @@ try {
         -EntryName "IptvSuite.NativePlaybackCompatibilitySpike.dll"
 
     Set-FailurePoint -Stage "PackageInstall" -Code "PackageInstallFailed"
-    $runtimePackagesBefore = @(Get-RuntimeDependencyPackages |
+    $runtimeDependencyPackagesBefore = @(Get-RuntimeDependencyPackages)
+    $runtimePackagesBefore = @($runtimeDependencyPackagesBefore |
         ForEach-Object { $_.PackageFullName } |
         Sort-Object)
+    $compatibleRuntimeDependencyRegistered = @($runtimeDependencyPackagesBefore |
+        Where-Object {
+            -not [string]::IsNullOrWhiteSpace([string]$_.PackageFullName) -and
+            [string]::Equals(
+                [string]$_.PackageFamilyName,
+                "$($expectedRuntimeDependencyName)_$expectedRuntimeDependencyPublisherId",
+                [System.StringComparison]::OrdinalIgnoreCase) -and
+            [string]::Equals(
+                [string]$_.Architecture,
+                "X64",
+                [System.StringComparison]::Ordinal) -and
+            $_.IsFramework -eq $true -and
+            [version]$_.Version -ge [version]$expectedRuntimeDependencyVersion
+        }).Count -gt 0
     $installAttempted = $true
     Remove-ExactPackage
     Wait-PackageAppDataRemoval
@@ -1714,7 +2059,13 @@ try {
         (Get-RegularFileSha256 -Path $dependencies[0].FullName) -cne $runtimeDependencyPackageSha256) {
         throw "A native playback package input changed after inspection."
     }
-    Add-AppxPackage -Path $packages[0].FullName -DependencyPath $dependencies[0].FullName
+    if ($compatibleRuntimeDependencyRegistered) {
+        Write-Host "Compatible Windows App Runtime dependency is already registered; package install will reuse it."
+        Add-AppxPackage -Path $packages[0].FullName
+    }
+    else {
+        Add-AppxPackage -Path $packages[0].FullName -DependencyPath $dependencies[0].FullName
+    }
     $installed = @(Get-ExactPackages)
     if ($installed.Count -ne 1) { throw "Disposable native playback package installation is ambiguous." }
     $installedPackage = $installed[0]
@@ -1792,7 +2143,7 @@ try {
         "Probe"
     )
     if (-not (Test-JsonInteger -Value $probeEnvelope.SchemaVersion) -or
-        [int]$probeEnvelope.SchemaVersion -ne 6 -or
+        [int]$probeEnvelope.SchemaVersion -ne 7 -or
         $probeEnvelope.RunId -isnot [string] -or
         -not [string]::Equals(
             $probeEnvelope.RunId,
@@ -1802,7 +2153,7 @@ try {
         $null -eq $probeEnvelope.Probe) {
         throw "The native playback probe evidence is not bound to this controller run."
     }
-    $probeEnvelopeSchemaVersion = 6
+    $probeEnvelopeSchemaVersion = 7
     $probeRunIdBound = $true
 
     Assert-ExactJsonProperties -Value $probeEnvelope.RuntimeDependency -ExpectedNames @(
@@ -1918,7 +2269,8 @@ try {
         "InitialPrivateBytes",
         "FinalPrivateBytes",
         "InitialHandleCount",
-        "FinalHandleCount"
+        "FinalHandleCount",
+        "FirstHlsStartupClock"
     )
     foreach ($sourceOpenPropertyName in @(
             "StartupMaximumSourceOpen",
@@ -1947,6 +2299,61 @@ try {
                     $postSourceOpenElapsedMilliseconds -ne 0))) {
             throw "A native playback source-open diagnostic is inconsistent."
         }
+    }
+    $firstHlsStartupClock = $probe.FirstHlsStartupClock
+    Assert-ExactJsonProperties -Value $firstHlsStartupClock -ExpectedNames @(
+        "HighResolution",
+        "Frequency",
+        "StartupStartedTimestamp",
+        "SourceOpenCompletedTimestamp",
+        "MediaOpenedTimestamp",
+        "WindowCompletedTimestamp"
+    )
+    if ($firstHlsStartupClock.HighResolution -isnot [bool]) {
+        throw "The first-HLS QPC diagnostic has an invalid Boolean type."
+    }
+    foreach ($propertyName in @(
+            "Frequency",
+            "StartupStartedTimestamp",
+            "SourceOpenCompletedTimestamp",
+            "MediaOpenedTimestamp",
+            "WindowCompletedTimestamp")) {
+        if (-not (Test-JsonInteger -Value $firstHlsStartupClock.PSObject.Properties[$propertyName].Value)) {
+            throw "The first-HLS QPC diagnostic has an invalid integer type."
+        }
+    }
+    $firstHlsClockHighResolution = [bool]$firstHlsStartupClock.HighResolution
+    $firstHlsClockFrequency = [long]$firstHlsStartupClock.Frequency
+    $firstHlsStartupStartedTimestamp = [long]$firstHlsStartupClock.StartupStartedTimestamp
+    $firstHlsSourceOpenCompletedTimestamp =
+        [long]$firstHlsStartupClock.SourceOpenCompletedTimestamp
+    $firstHlsMediaOpenedTimestamp = [long]$firstHlsStartupClock.MediaOpenedTimestamp
+    $firstHlsWindowCompletedTimestamp = [long]$firstHlsStartupClock.WindowCompletedTimestamp
+    if ($firstHlsStartupStartedTimestamp -eq 0) {
+        if ($firstHlsClockHighResolution -or
+            $firstHlsClockFrequency -ne 0 -or
+            $firstHlsSourceOpenCompletedTimestamp -ne 0 -or
+            $firstHlsMediaOpenedTimestamp -ne 0 -or
+            $firstHlsWindowCompletedTimestamp -ne 0) {
+            throw "The inactive first-HLS QPC diagnostic is not empty."
+        }
+    }
+    elseif (-not $firstHlsClockHighResolution -or
+        -not [System.Diagnostics.Stopwatch]::IsHighResolution -or
+        $firstHlsClockFrequency -ne [System.Diagnostics.Stopwatch]::Frequency -or
+        $firstHlsClockFrequency -le 0 -or
+        $firstHlsStartupStartedTimestamp -lt 1 -or
+        $firstHlsWindowCompletedTimestamp -lt $firstHlsStartupStartedTimestamp -or
+        ($firstHlsSourceOpenCompletedTimestamp -ne 0 -and
+            ($firstHlsSourceOpenCompletedTimestamp -lt $firstHlsStartupStartedTimestamp -or
+                $firstHlsSourceOpenCompletedTimestamp -gt $firstHlsWindowCompletedTimestamp)) -or
+        ($firstHlsMediaOpenedTimestamp -ne 0 -and
+            ($firstHlsMediaOpenedTimestamp -lt $firstHlsStartupStartedTimestamp -or
+                $firstHlsMediaOpenedTimestamp -gt $firstHlsWindowCompletedTimestamp)) -or
+        ($firstHlsSourceOpenCompletedTimestamp -ne 0 -and
+            $firstHlsMediaOpenedTimestamp -ne 0 -and
+            $firstHlsSourceOpenCompletedTimestamp -gt $firstHlsMediaOpenedTimestamp)) {
+        throw "The active first-HLS QPC diagnostic is inconsistent."
     }
     foreach ($propertyName in @(
             "SwitchCount", "SoakMinutes", "ResourceSampleCount", "WarmupPrivateBytes",
@@ -2254,6 +2661,261 @@ try {
             $startupFailureStage -ne "PlaybackAdvanceWait")) {
         throw "The native playback timeout failure is not bound to its active startup stage."
     }
+    if ($probe.Success -eq $true -and
+        ($firstHlsStartupStartedTimestamp -eq 0 -or
+            $firstHlsMediaOpenedTimestamp -eq 0 -or
+            $firstHlsWindowCompletedTimestamp -ne $firstHlsMediaOpenedTimestamp)) {
+        throw "The successful native playback probe omitted first-HLS QPC attribution."
+    }
+    if ($firstHlsStartupStartedTimestamp -ne 0) {
+        $requestTraceSnapshot = $tlsServer.GetRequestTraceSnapshot()
+        $requestTraces = @($requestTraceSnapshot.Traces)
+        $requestTraceDroppedCount = [int]$requestTraceSnapshot.DroppedCount
+        $firstDroppedRequestAcceptedTimestamp =
+            [long]$requestTraceSnapshot.FirstDroppedAcceptedTimestamp
+        if ($requestTraces.Count -gt 32 -or
+            $requestTraceDroppedCount -lt 0 -or
+            ($requestTraceDroppedCount -eq 0 -and
+                $firstDroppedRequestAcceptedTimestamp -ne 0) -or
+            ($requestTraceDroppedCount -gt 0 -and
+                ($requestTraces.Count -ne 32 -or
+                    $firstDroppedRequestAcceptedTimestamp -le 0))) {
+            throw "The bounded request trace snapshot is inconsistent."
+        }
+
+        $seenAcceptOrdinals = [System.Collections.Generic.HashSet[int]]::new()
+        $seenRequestOrdinals = [System.Collections.Generic.HashSet[int]]::new()
+        $previousAcceptOrdinal = 0
+        $previousAcceptedTimestamp = 0L
+        foreach ($trace in $requestTraces) {
+            $traceAcceptOrdinal = [int]$trace.AcceptOrdinal
+            $traceRequestOrdinal = [int]$trace.RequestOrdinal
+            $traceResource = [string]$trace.Resource
+            $traceMethod = [string]$trace.Method
+            $traceRangeShape = [string]$trace.RangeShape
+            $traceStatusCode = [int]$trace.StatusCode
+            $traceBodyBytes = [long]$trace.BodyBytes
+            $traceAcceptedTimestamp = [long]$trace.AcceptedTimestamp
+            $traceTlsAuthenticatedTimestamp = [long]$trace.TlsAuthenticatedTimestamp
+            $traceRequestHeaderCompletedTimestamp =
+                [long]$trace.RequestHeaderCompletedTimestamp
+            $traceResponseHeaderWrittenTimestamp =
+                [long]$trace.ResponseHeaderWrittenTimestamp
+            $traceBodyWriteCompletedTimestamp =
+                [long]$trace.BodyWriteCompletedTimestamp
+            $traceFlushCompletedTimestamp = [long]$trace.FlushCompletedTimestamp
+            $traceOutcome = [string]$trace.Outcome
+            $traceTerminalTimestamp = [long]$trace.TerminalTimestamp
+            if ($traceAcceptOrdinal -le $previousAcceptOrdinal -or
+                -not $seenAcceptOrdinals.Add($traceAcceptOrdinal) -or
+                $traceRequestOrdinal -lt 0 -or
+                ($traceRequestOrdinal -gt 0 -and
+                    -not $seenRequestOrdinals.Add($traceRequestOrdinal)) -or
+                $traceResource -notin @(
+                    "Unclassified", "Direct", "Playlist",
+                    "Segment0", "Segment1", "Segment2", "Segment3") -or
+                $traceMethod -notin @("Pending", "Unsupported", "Get", "Head") -or
+                $traceRangeShape -notin @(
+                    "Pending", "Invalid", "None", "OpenEnded", "Suffix", "Bounded") -or
+                $traceStatusCode -notin @(0, 200, 206, 404, 405, 416, 431, 503) -or
+                $traceBodyBytes -lt 0 -or
+                $traceAcceptedTimestamp -le 0 -or
+                ($previousAcceptedTimestamp -ne 0 -and
+                    $traceAcceptedTimestamp -lt $previousAcceptedTimestamp) -or
+                ($traceTlsAuthenticatedTimestamp -ne 0 -and
+                    $traceTlsAuthenticatedTimestamp -lt $traceAcceptedTimestamp) -or
+                ($traceRequestHeaderCompletedTimestamp -ne 0 -and
+                    ($traceTlsAuthenticatedTimestamp -eq 0 -or
+                        $traceRequestHeaderCompletedTimestamp -lt
+                            $traceTlsAuthenticatedTimestamp)) -or
+                ($traceResponseHeaderWrittenTimestamp -ne 0 -and
+                    ($traceTlsAuthenticatedTimestamp -eq 0 -or
+                        ($traceRequestHeaderCompletedTimestamp -ne 0 -and
+                            $traceResponseHeaderWrittenTimestamp -lt
+                                $traceRequestHeaderCompletedTimestamp) -or
+                        ($traceRequestHeaderCompletedTimestamp -eq 0 -and
+                            $traceResponseHeaderWrittenTimestamp -lt
+                                $traceTlsAuthenticatedTimestamp))) -or
+                ($traceBodyWriteCompletedTimestamp -ne 0 -and
+                    ($traceResponseHeaderWrittenTimestamp -eq 0 -or
+                        $traceBodyWriteCompletedTimestamp -lt
+                            $traceResponseHeaderWrittenTimestamp)) -or
+                ($traceFlushCompletedTimestamp -ne 0 -and
+                    ($traceBodyWriteCompletedTimestamp -eq 0 -or
+                        $traceFlushCompletedTimestamp -lt
+                            $traceBodyWriteCompletedTimestamp)) -or
+                $traceOutcome -notin @(
+                    "InFlight", "Completed", "IoAbort", "AuthFailure",
+                    "Rejected", "TransportFailure") -or
+                (($traceOutcome -eq "InFlight") -ne ($traceTerminalTimestamp -eq 0)) -or
+                ($traceTerminalTimestamp -ne 0 -and
+                    ($traceTerminalTimestamp -lt $traceAcceptedTimestamp -or
+                        ($traceTlsAuthenticatedTimestamp -ne 0 -and
+                            $traceTerminalTimestamp -lt $traceTlsAuthenticatedTimestamp) -or
+                        ($traceRequestHeaderCompletedTimestamp -ne 0 -and
+                            $traceTerminalTimestamp -lt $traceRequestHeaderCompletedTimestamp) -or
+                        ($traceResponseHeaderWrittenTimestamp -ne 0 -and
+                            $traceTerminalTimestamp -lt $traceResponseHeaderWrittenTimestamp) -or
+                        ($traceBodyWriteCompletedTimestamp -ne 0 -and
+                            $traceTerminalTimestamp -lt $traceBodyWriteCompletedTimestamp) -or
+                        ($traceFlushCompletedTimestamp -ne 0 -and
+                            $traceTerminalTimestamp -lt $traceFlushCompletedTimestamp)))) {
+                throw "A bounded request lifecycle trace is outside policy."
+            }
+            if ($traceOutcome -eq "Completed") {
+                if ($traceRequestOrdinal -le 0 -or
+                    $traceResource -notin @(
+                        "Direct", "Playlist", "Segment0", "Segment1", "Segment2", "Segment3") -or
+                    $traceMethod -notin @("Get", "Head") -or
+                    $traceRangeShape -notin @("None", "OpenEnded", "Suffix", "Bounded") -or
+                    $traceStatusCode -notin @(200, 206) -or
+                    (($traceStatusCode -eq 200) -ne ($traceRangeShape -eq "None")) -or
+                    ($traceMethod -eq "Get" -and $traceBodyBytes -le 0) -or
+                    ($traceMethod -eq "Head" -and $traceBodyBytes -ne 0) -or
+                    $traceTlsAuthenticatedTimestamp -eq 0 -or
+                    $traceRequestHeaderCompletedTimestamp -eq 0 -or
+                    $traceResponseHeaderWrittenTimestamp -eq 0 -or
+                    $traceBodyWriteCompletedTimestamp -eq 0 -or
+                    $traceFlushCompletedTimestamp -eq 0 -or
+                    $traceTerminalTimestamp -ne $traceFlushCompletedTimestamp) {
+                    throw "A completed bounded request lifecycle trace is inconsistent."
+                }
+            }
+            elseif ($traceOutcome -eq "Rejected") {
+                if ($traceStatusCode -notin @(404, 405, 416, 431, 503) -or
+                    $traceResponseHeaderWrittenTimestamp -eq 0 -or
+                    $traceBodyBytes -ne 0 -or
+                    $traceBodyWriteCompletedTimestamp -ne 0 -or
+                    $traceFlushCompletedTimestamp -ne 0 -or
+                    $traceTerminalTimestamp -ne $traceResponseHeaderWrittenTimestamp) {
+                    throw "A rejected bounded request lifecycle trace is inconsistent."
+                }
+            }
+            elseif ($traceBodyBytes -ne 0) {
+                throw "A non-completed bounded request lifecycle trace reports body bytes."
+            }
+            $previousAcceptOrdinal = $traceAcceptOrdinal
+            $previousAcceptedTimestamp = $traceAcceptedTimestamp
+        }
+        if ($firstDroppedRequestAcceptedTimestamp -ne 0 -and
+            $previousAcceptedTimestamp -ne 0 -and
+            $firstDroppedRequestAcceptedTimestamp -lt $previousAcceptedTimestamp) {
+            throw "The bounded request lifecycle trace is not accept-ordered."
+        }
+
+        $firstHlsWindowStartFloor = $firstHlsStartupStartedTimestamp - 1
+        $firstHlsWindowEndCeiling = $firstHlsWindowCompletedTimestamp + 1
+        if ($firstDroppedRequestAcceptedTimestamp -ne 0 -and
+            $firstDroppedRequestAcceptedTimestamp -le $firstHlsWindowEndCeiling) {
+            throw "The bounded request lifecycle trace was truncated during the first-HLS window."
+        }
+        $firstHlsWindowTraces = @($requestTraces | Where-Object {
+            [long]$_.AcceptedTimestamp -ge $firstHlsWindowStartFloor -and
+            [long]$_.AcceptedTimestamp -le $firstHlsWindowEndCeiling
+        })
+        if (($firstHlsSourceOpenCompletedTimestamp -ne 0 -or
+                $firstHlsMediaOpenedTimestamp -ne 0) -and
+            $firstHlsWindowTraces.Count -eq 0) {
+            throw "The first-HLS QPC window has no bounded transport trace."
+        }
+        $completedFirstHlsTraces = @()
+        if ($firstHlsWindowTraces.Count -gt 0) {
+            $nonCompletedFirstHlsWindowTraces = @($firstHlsWindowTraces | Where-Object {
+                [string]$_.Outcome -ne "Completed"
+            })
+            if ($nonCompletedFirstHlsWindowTraces.Count -gt 0) {
+                $nonCompletedOutcomes = @($nonCompletedFirstHlsWindowTraces |
+                    Group-Object -Property Outcome |
+                    Sort-Object -Property Name |
+                    ForEach-Object { "$($_.Name)=$($_.Count)" })
+                throw "The first-HLS QPC window contains non-completed transport lifecycle traces: $($nonCompletedOutcomes -join ', ')."
+            }
+            $unexpectedCompletedFirstHlsWindowTraces = @($firstHlsWindowTraces | Where-Object {
+                [string]$_.Resource -notin @("Playlist", "Segment0", "Segment1", "Segment2", "Segment3")
+            })
+            if ($unexpectedCompletedFirstHlsWindowTraces.Count -gt 0) {
+                throw "The first-HLS QPC window contains a completed non-HLS transport trace."
+            }
+            $completedFirstHlsTraces = @($firstHlsWindowTraces)
+            if (($firstHlsSourceOpenCompletedTimestamp -ne 0 -or
+                    $firstHlsMediaOpenedTimestamp -ne 0) -and
+                $completedFirstHlsTraces.Count -eq 0) {
+                throw "The first-HLS QPC window has no completed HLS response trace."
+            }
+        }
+        if ($completedFirstHlsTraces.Count -gt 0) {
+            $firstHlsTransportAttributionObserved = $true
+            $firstHlsTraceRequestCount = $completedFirstHlsTraces.Count
+            $firstAcceptedTimestamp = [long](
+                $completedFirstHlsTraces |
+                    Measure-Object -Property AcceptedTimestamp -Minimum).Minimum
+            $firstHeaderTimestamp = [long](
+                $completedFirstHlsTraces |
+                    Measure-Object -Property RequestHeaderCompletedTimestamp -Minimum).Minimum
+            $lastFlushTimestamp = [long](
+                $completedFirstHlsTraces |
+                    Measure-Object -Property FlushCompletedTimestamp -Maximum).Maximum
+            foreach ($trace in $completedFirstHlsTraces) {
+                $firstHlsTraceBodyBytes += [long]$trace.BodyBytes
+                if ([string]$trace.Resource -eq "Playlist") {
+                    $firstHlsTracePlaylistResponseCount++
+                }
+                else {
+                    $firstHlsTraceSegmentResponseCount++
+                }
+                if ($firstHlsSourceOpenCompletedTimestamp -ne 0 -and
+                    [long]$trace.FlushCompletedTimestamp -le
+                        ($firstHlsSourceOpenCompletedTimestamp + 1)) {
+                    $firstHlsTraceResponsesBeforeSourceOpen++
+                }
+                if ($firstHlsMediaOpenedTimestamp -ne 0 -and
+                    [long]$trace.FlushCompletedTimestamp -le ($firstHlsMediaOpenedTimestamp + 1)) {
+                    $firstHlsTraceResponsesBeforeMediaOpened++
+                }
+                $tlsAuthenticationMilliseconds = Get-QpcDeltaMilliseconds `
+                    -StartTimestamp ([long]$trace.AcceptedTimestamp) `
+                    -EndTimestamp ([long]$trace.TlsAuthenticatedTimestamp) `
+                    -Frequency $firstHlsClockFrequency
+                $firstHlsTotalTlsAuthenticationMilliseconds += $tlsAuthenticationMilliseconds
+                $firstHlsMaximumTlsAuthenticationMilliseconds = [Math]::Max(
+                    $firstHlsMaximumTlsAuthenticationMilliseconds,
+                    $tlsAuthenticationMilliseconds)
+            }
+            $firstHlsStartupToFirstAcceptMilliseconds = Get-QpcDeltaMilliseconds `
+                -StartTimestamp $firstHlsStartupStartedTimestamp `
+                -EndTimestamp $firstAcceptedTimestamp `
+                -Frequency $firstHlsClockFrequency
+            $firstHlsStartupToFirstHeaderMilliseconds = Get-QpcDeltaMilliseconds `
+                -StartTimestamp $firstHlsStartupStartedTimestamp `
+                -EndTimestamp $firstHeaderTimestamp `
+                -Frequency $firstHlsClockFrequency
+            $firstHlsFirstHeaderToLastFlushMilliseconds = Get-QpcDeltaMilliseconds `
+                -StartTimestamp $firstHeaderTimestamp `
+                -EndTimestamp $lastFlushTimestamp `
+                -Frequency $firstHlsClockFrequency
+            if ($firstHlsSourceOpenCompletedTimestamp -ne 0) {
+                $firstHlsLastFlushToSourceOpenMilliseconds = Get-QpcDeltaMilliseconds `
+                    -StartTimestamp $lastFlushTimestamp `
+                    -EndTimestamp $firstHlsSourceOpenCompletedTimestamp `
+                    -Frequency $firstHlsClockFrequency
+            }
+            if ($firstHlsMediaOpenedTimestamp -ne 0) {
+                $firstHlsLastFlushToMediaOpenedMilliseconds = Get-QpcDeltaMilliseconds `
+                    -StartTimestamp $lastFlushTimestamp `
+                    -EndTimestamp $firstHlsMediaOpenedTimestamp `
+                    -Frequency $firstHlsClockFrequency
+            }
+            Write-Host "First-HLS transport attribution: requests=$firstHlsTraceRequestCount, playlistResponses=$firstHlsTracePlaylistResponseCount, segmentResponses=$firstHlsTraceSegmentResponseCount, bodyBytes=$firstHlsTraceBodyBytes, responsesBeforeSourceOpen=$firstHlsTraceResponsesBeforeSourceOpen, responsesBeforeMediaOpened=$firstHlsTraceResponsesBeforeMediaOpened, startupToFirstAccept=$firstHlsStartupToFirstAcceptMilliseconds, startupToFirstHeader=$firstHlsStartupToFirstHeaderMilliseconds, maxTlsAuthentication=$firstHlsMaximumTlsAuthenticationMilliseconds, totalTlsAuthentication=$firstHlsTotalTlsAuthenticationMilliseconds, firstHeaderToLastFlush=$firstHlsFirstHeaderToLastFlushMilliseconds, lastFlushToSourceOpen=$firstHlsLastFlushToSourceOpenMilliseconds, lastFlushToMediaOpened=$firstHlsLastFlushToMediaOpenedMilliseconds, traceRecordsOmittedAfterCapacity=$requestTraceDroppedCount."
+        }
+    }
+    if ($probe.Success -eq $false -and
+        [string]::Equals(
+            [string]$probe.Failure,
+            "ResourceBudgetExceeded",
+            [System.StringComparison]::Ordinal)) {
+        Set-FailurePoint -Stage "SoakValidation" -Code "ResourceBudgetExceeded"
+        Write-Host "Native playback soak resource diagnostic: soakMinutes=$($probe.SoakMinutes), resourceSamples=$($probe.ResourceSampleCount), warmupPrivateBytes=$($probe.WarmupPrivateBytes), memoryNetGrowthBytes=$($probe.MemoryNetGrowthBytes), memoryNetGrowthPercent=$($probe.MemoryNetGrowthPercent), memoryMonotonicIncrease=$($probe.MemoryMonotonicIncrease), warmupHandleCount=$($probe.WarmupHandleCount), handleNetGrowth=$($probe.HandleNetGrowth), initialPrivateBytes=$($probe.InitialPrivateBytes), finalPrivateBytes=$($probe.FinalPrivateBytes), initialHandleCount=$($probe.InitialHandleCount), finalHandleCount=$($probe.FinalHandleCount)."
+    }
     $expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }
     $expectedDetachedSourceCount =
         $SwitchCount +
@@ -2266,7 +2928,7 @@ try {
         [int]$probe.SurfaceTransitionCount -ne $expectedSurfaceTransitions -or
         [int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount -or
         [int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount) {
-        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), playbackRetries=$($probe.PlaybackRetryCount), startupFailureStage=$startupFailureStage, startupFailureOrdinal=$startupFailureSwitchOrdinal, startupFailureFixture=$startupFailureFixture, startupFailureAttempts=$startupFailureAttemptCount, startupFailureTransitions=$startupFailureSurfaceTransitionCount, startupFailureTotal=$startupFailureTotalMilliseconds, startupFailureSourceCreation=$startupFailureSourceCreationMilliseconds, startupFailureSourceAssignment=$startupFailureSourceAssignmentMilliseconds, startupFailurePlayInvocation=$startupFailurePlayInvocationMilliseconds, startupFailureSourceOpenObserved=$startupFailureSourceOpenObserved, startupFailureSourceOpenError=$startupFailureSourceOpenError, startupFailureSourceOpenCompletion=$startupFailureSourceOpenCompletionMilliseconds, startupFailurePostSourceOpenElapsed=$startupFailurePostSourceOpenElapsedMilliseconds, startupFailureMediaOpenedObserved=$startupFailureMediaOpenedCompletionObserved, startupFailureMediaOpenedCompletion=$startupFailureMediaOpenedCompletionMilliseconds, startupFailureMediaOpenedWithinWaitDeadline=$startupFailureMediaOpenedWithinWaitDeadline, startupFailureMediaOpenedWithinStartupBudget=$startupFailureMediaOpenedWithinStartupBudget, startupFailureActiveStageElapsed=$startupFailureActiveStageElapsedMilliseconds, startupMaximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), startupMaximumFixture=$($probe.StartupMaximumFixture), startupMaximumAttempts=$($probe.StartupMaximumAttemptCount), startupMaximumTransitions=$($probe.StartupMaximumSurfaceTransitionCount), startupMaximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), startupMaximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), startupMaximumSourceOpenObserved=$($probe.StartupMaximumSourceOpen.CompletionObserved), startupMaximumSourceOpenError=$($probe.StartupMaximumSourceOpen.ErrorPresent), startupMaximumSourceOpenCompletion=$($probe.StartupMaximumSourceOpen.CompletionMilliseconds), startupMaximumPostSourceOpenMediaOpened=$($probe.StartupMaximumSourceOpen.PostCompletionElapsedMilliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackStateBeforeDetach=$($probe.PlaybackStateBeforeDetach), sourceDetached=$($probe.SourceDetached), canPauseBeforeDetach=$($probe.CanPauseBeforeDetach), canSeekBeforeDetach=$($probe.CanSeekBeforeDetach), teardownStage=$($probe.TeardownStage), exceptionCategory=$($probe.ExceptionCategory), exceptionHResult=$($probe.ExceptionHResult), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), injectedRequestOrdinal=$($tlsServer.LastInjectedRequestOrdinal), recoveryRequestOrdinal=$($tlsServer.LastRecoveryRequestOrdinal), cancellationProbes=$cancellationProbeCount, cancellationsObserved=$cancellationObservedCount, cancellationDetaches=$cancellationSourceDetachCount, cancellationRecoveries=$cancellationRecoveryCount, cancellationRecoveryDetaches=$cancellationRecoverySourceDetachCount, cancellationLatency=$cancellationLatencyMilliseconds, cancellationQuiescence=$cancellationQuiescenceMilliseconds, cancellationObservation=$cancellationObservationMilliseconds, cancellationSourceNull=$cancellationSourceNullAfterObservation, cancellationFreshRecovery=$cancellationRecoveryUsedFreshSource, cancellationNoAutomaticRestart=$cancellationNoAutomaticRestart, h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
+        throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), playbackRetries=$($probe.PlaybackRetryCount), startupFailureStage=$startupFailureStage, startupFailureOrdinal=$startupFailureSwitchOrdinal, startupFailureFixture=$startupFailureFixture, startupFailureAttempts=$startupFailureAttemptCount, startupFailureTransitions=$startupFailureSurfaceTransitionCount, startupFailureTotal=$startupFailureTotalMilliseconds, startupFailureSourceCreation=$startupFailureSourceCreationMilliseconds, startupFailureSourceAssignment=$startupFailureSourceAssignmentMilliseconds, startupFailurePlayInvocation=$startupFailurePlayInvocationMilliseconds, startupFailureSourceOpenObserved=$startupFailureSourceOpenObserved, startupFailureSourceOpenError=$startupFailureSourceOpenError, startupFailureSourceOpenCompletion=$startupFailureSourceOpenCompletionMilliseconds, startupFailurePostSourceOpenElapsed=$startupFailurePostSourceOpenElapsedMilliseconds, startupFailureMediaOpenedObserved=$startupFailureMediaOpenedCompletionObserved, startupFailureMediaOpenedCompletion=$startupFailureMediaOpenedCompletionMilliseconds, startupFailureMediaOpenedWithinWaitDeadline=$startupFailureMediaOpenedWithinWaitDeadline, startupFailureMediaOpenedWithinStartupBudget=$startupFailureMediaOpenedWithinStartupBudget, startupFailureActiveStageElapsed=$startupFailureActiveStageElapsedMilliseconds, startupMaximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), startupMaximumFixture=$($probe.StartupMaximumFixture), startupMaximumAttempts=$($probe.StartupMaximumAttemptCount), startupMaximumTransitions=$($probe.StartupMaximumSurfaceTransitionCount), startupMaximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), startupMaximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), startupMaximumSourceOpenObserved=$($probe.StartupMaximumSourceOpen.CompletionObserved), startupMaximumSourceOpenError=$($probe.StartupMaximumSourceOpen.ErrorPresent), startupMaximumSourceOpenCompletion=$($probe.StartupMaximumSourceOpen.CompletionMilliseconds), startupMaximumPostSourceOpenMediaOpened=$($probe.StartupMaximumSourceOpen.PostCompletionElapsedMilliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackStateBeforeDetach=$($probe.PlaybackStateBeforeDetach), sourceDetached=$($probe.SourceDetached), canPauseBeforeDetach=$($probe.CanPauseBeforeDetach), canSeekBeforeDetach=$($probe.CanSeekBeforeDetach), teardownStage=$($probe.TeardownStage), exceptionCategory=$($probe.ExceptionCategory), exceptionHResult=$($probe.ExceptionHResult), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), injectedRequestOrdinal=$($tlsServer.LastInjectedRequestOrdinal), recoveryRequestOrdinal=$($tlsServer.LastRecoveryRequestOrdinal), cancellationProbes=$cancellationProbeCount, cancellationsObserved=$cancellationObservedCount, cancellationDetaches=$cancellationSourceDetachCount, cancellationRecoveries=$cancellationRecoveryCount, cancellationRecoveryDetaches=$cancellationRecoverySourceDetachCount, cancellationLatency=$cancellationLatencyMilliseconds, cancellationQuiescence=$cancellationQuiescenceMilliseconds, cancellationObservation=$cancellationObservationMilliseconds, cancellationSourceNull=$cancellationSourceNullAfterObservation, cancellationFreshRecovery=$cancellationRecoveryUsedFreshSource, cancellationNoAutomaticRestart=$cancellationNoAutomaticRestart, firstHlsTransportObserved=$firstHlsTransportAttributionObserved, firstHlsRequests=$firstHlsTraceRequestCount, firstHlsBodyBytes=$firstHlsTraceBodyBytes, firstHlsResponsesBeforeSourceOpen=$firstHlsTraceResponsesBeforeSourceOpen, firstHlsResponsesBeforeMediaOpened=$firstHlsTraceResponsesBeforeMediaOpened, firstHlsLastFlushToSourceOpen=$firstHlsLastFlushToSourceOpenMilliseconds, firstHlsLastFlushToMediaOpened=$firstHlsLastFlushToMediaOpenedMilliseconds, h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     $startupMaximumSwitchOrdinal = [int]$probe.StartupMaximumSwitchOrdinal
     $startupMaximumFixture = [string]$probe.StartupMaximumFixture
@@ -2343,7 +3005,7 @@ try {
     }
     Write-Host "Native playback startup diagnostic: maximum=$($probe.StartupMaximumMilliseconds), ordinal=$startupMaximumSwitchOrdinal, fixture=$startupMaximumFixture, attempts=$startupMaximumAttemptCount, surfaceTransitions=$startupMaximumSurfaceTransitionCount, preWait=$startupMaximumPreWaitMilliseconds, mediaOpenWait=$startupMaximumMediaOpenWaitMilliseconds, sourceOpenObserved=$startupMaximumSourceOpenObserved, sourceOpenError=$startupMaximumSourceOpenError, sourceOpenCompletion=$startupMaximumSourceOpenCompletionMilliseconds, postSourceOpenMediaOpened=$startupMaximumPostSourceOpenMediaOpenedMilliseconds, hlsMaximum=$hlsStartupMaximumMilliseconds, directMaximum=$directStartupMaximumMilliseconds, playbackRetries=$($probe.PlaybackRetryCount)."
     if ([double]$probe.StartupP95Milliseconds -gt 3000 -or [double]$probe.StartupMaximumMilliseconds -gt 5000) {
-        throw "Native playback startup budget failed: p95=$($probe.StartupP95Milliseconds), maximum=$($probe.StartupMaximumMilliseconds), maximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), maximumFixture=$($probe.StartupMaximumFixture), maximumAttempts=$($probe.StartupMaximumAttemptCount), maximumSurfaceTransitions=$($probe.StartupMaximumSurfaceTransitionCount), maximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), maximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), maximumSourceOpenObserved=$startupMaximumSourceOpenObserved, maximumSourceOpenError=$startupMaximumSourceOpenError, maximumSourceOpenCompletion=$startupMaximumSourceOpenCompletionMilliseconds, maximumPostSourceOpenMediaOpened=$startupMaximumPostSourceOpenMediaOpenedMilliseconds, hlsP95=$($probe.HlsStartupP95Milliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directP95=$($probe.DirectStartupP95Milliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackRetries=$($probe.PlaybackRetryCount)."
+        throw "Native playback startup budget failed: p95=$($probe.StartupP95Milliseconds), maximum=$($probe.StartupMaximumMilliseconds), maximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), maximumFixture=$($probe.StartupMaximumFixture), maximumAttempts=$($probe.StartupMaximumAttemptCount), maximumSurfaceTransitions=$($probe.StartupMaximumSurfaceTransitionCount), maximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), maximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), maximumSourceOpenObserved=$startupMaximumSourceOpenObserved, maximumSourceOpenError=$startupMaximumSourceOpenError, maximumSourceOpenCompletion=$startupMaximumSourceOpenCompletionMilliseconds, maximumPostSourceOpenMediaOpened=$startupMaximumPostSourceOpenMediaOpenedMilliseconds, hlsP95=$($probe.HlsStartupP95Milliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directP95=$($probe.DirectStartupP95Milliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackRetries=$($probe.PlaybackRetryCount), firstHlsTransportObserved=$firstHlsTransportAttributionObserved, firstHlsRequests=$firstHlsTraceRequestCount, firstHlsPlaylistResponses=$firstHlsTracePlaylistResponseCount, firstHlsSegmentResponses=$firstHlsTraceSegmentResponseCount, firstHlsBodyBytes=$firstHlsTraceBodyBytes, firstHlsResponsesBeforeSourceOpen=$firstHlsTraceResponsesBeforeSourceOpen, firstHlsResponsesBeforeMediaOpened=$firstHlsTraceResponsesBeforeMediaOpened, firstHlsStartupToFirstAccept=$firstHlsStartupToFirstAcceptMilliseconds, firstHlsStartupToFirstHeader=$firstHlsStartupToFirstHeaderMilliseconds, firstHlsMaxTlsAuthentication=$firstHlsMaximumTlsAuthenticationMilliseconds, firstHlsTotalTlsAuthentication=$firstHlsTotalTlsAuthenticationMilliseconds, firstHlsFirstHeaderToLastFlush=$firstHlsFirstHeaderToLastFlushMilliseconds, firstHlsLastFlushToSourceOpen=$firstHlsLastFlushToSourceOpenMilliseconds, firstHlsLastFlushToMediaOpened=$firstHlsLastFlushToMediaOpenedMilliseconds."
     }
     if ([double]$probe.SourceDetachP95Milliseconds -gt 3000 -or [double]$probe.SourceDetachMaximumMilliseconds -gt 5000) {
         throw "Native playback source-detachment budget failed: p95=$($probe.SourceDetachP95Milliseconds), maximum=$($probe.SourceDetachMaximumMilliseconds)."
@@ -2354,7 +3016,8 @@ try {
         [bool]$probe.MemoryMonotonicIncrease -or
         [long]$probe.MemoryNetGrowthBytes -gt 104857600 -or
         [double]$probe.MemoryNetGrowthPercent -gt 10)) {
-        throw "Native playback soak resource budget failed."
+        Set-FailurePoint -Stage "SoakValidation" -Code "ResourceBudgetExceeded"
+        throw "Native playback soak resource budget failed: soakMinutes=$($probe.SoakMinutes), resourceSamples=$($probe.ResourceSampleCount), warmupPrivateBytes=$($probe.WarmupPrivateBytes), memoryNetGrowthBytes=$($probe.MemoryNetGrowthBytes), memoryNetGrowthPercent=$($probe.MemoryNetGrowthPercent), memoryMonotonicIncrease=$($probe.MemoryMonotonicIncrease), warmupHandleCount=$($probe.WarmupHandleCount), handleNetGrowth=$($probe.HandleNetGrowth), initialPrivateBytes=$($probe.InitialPrivateBytes), finalPrivateBytes=$($probe.FinalPrivateBytes), initialHandleCount=$($probe.InitialHandleCount), finalHandleCount=$($probe.FinalHandleCount)."
     }
     Set-FailurePoint -Stage "ProcessExit" -Code "NormalCloseFailed"
     $launchedProcess.Refresh()

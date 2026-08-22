@@ -2185,7 +2185,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(app, "new NativePlaybackProbeEnvelope(");
         StringAssert.Contains(
             normalizedApp,
-            "new NativePlaybackProbeEnvelope( 6, request.RunId.ToString(\"N\"), runtimeDependency, result);");
+            "new NativePlaybackProbeEnvelope( 7, request.RunId.ToString(\"N\"), runtimeDependency, result);");
         StringAssert.Contains(app, "request.RunId.ToString(\"N\")");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.json\"");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.pending\"");
@@ -2226,6 +2226,31 @@ public sealed class DependencyRulesTests
                 Regex.Escape("RealTimePlayback = false"),
                 RegexOptions.CultureInvariant),
             "The live Tier A probe must not disable real-time playback.");
+        StringAssert.Contains(window, "NativePlaybackFirstHlsStartupClock firstHlsStartupClock = default;");
+        StringAssert.Contains(window, "Stopwatch.IsHighResolution,");
+        StringAssert.Contains(window, "Stopwatch.Frequency,");
+        StringAssert.Contains(window, "StartupStartedTimestamp");
+        StringAssert.Contains(window, "SourceOpenCompletedTimestamp");
+        StringAssert.Contains(window, "MediaOpenedTimestamp");
+        StringAssert.Contains(window, "WindowCompletedTimestamp");
+        StringAssert.Contains(window, "FirstHlsStartupClock = firstHlsStartupClock");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                window,
+                Regex.Escape("new NativePlaybackFirstHlsStartupClock("),
+                RegexOptions.CultureInvariant),
+            "The first-HLS QPC window must be initialized exactly once.");
+        StringAssert.Contains(
+            normalizedWindow,
+            "if (firstHlsStartupClock.WindowCompletedTimestamp != 0) { return; } long completedTimestamp =");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                window,
+                Regex.Escape("WindowCompletedTimestamp = 0,"),
+                RegexOptions.CultureInvariant),
+            "Only the explicit first-HLS retry-attempt reset may reopen the completed QPC window.");
         StringAssert.Contains(window, "private readonly TaskCompletionSource _surfaceReady");
         StringAssert.Contains(window, "private readonly CancellationTokenSource _lifetimeCancellation");
         StringAssert.Contains(window, "PlaybackSurface.Loaded += PlaybackSurface_Loaded");
@@ -2279,6 +2304,12 @@ public sealed class DependencyRulesTests
                 "long startupStarted = activeStartupStarted;",
                 firstStartupTimestampIndex,
                 StringComparison.Ordinal);
+        int firstHlsClockInitializationIndex = firstStartupTimestampIndex < 0
+            ? -1
+            : window.IndexOf(
+                "firstHlsStartupClock = new NativePlaybackFirstHlsStartupClock(",
+                firstStartupTimestampIndex,
+                StringComparison.Ordinal);
         int firstPlayInvocationIndex = window.IndexOf(
             "_mediaPlayer.Play();",
             StringComparison.Ordinal);
@@ -2301,7 +2332,8 @@ public sealed class DependencyRulesTests
             surfaceWaitIndex >= 0 && surfaceWaitIndex < switchLoopIndex &&
             switchLoopIndex < firstStartupTimestampIndex &&
             firstStartupTimestampIndex < startupMeasurementBindingIndex &&
-            startupMeasurementBindingIndex < firstSourceCreationIndex &&
+            startupMeasurementBindingIndex < firstHlsClockInitializationIndex &&
+            firstHlsClockInitializationIndex < firstSourceCreationIndex &&
             firstSourceCreationIndex < firstSourceAssignmentIndex &&
             firstSourceAssignmentIndex < firstPlayInvocationIndex &&
             firstPlayInvocationIndex < firstMediaOpenWaitIndex,
@@ -2925,6 +2957,17 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             cancellationInvocationIndex > switchLoopIndex && optionalSoakIndex > cancellationInvocationIndex,
             "Cancellation/recovery must run after the measured switch loop and before optional soak.");
+        StringAssert.Contains(
+            window,
+            "NativePlaybackProbeResult completedResult = NativePlaybackProbeResult.Passed(");
+        StringAssert.Contains(
+            normalizedWindow,
+            "return soakMetrics.ResourceBudgetPassed ? completedResult : completedResult with { Success = false, Failure = NativePlaybackFailure.ResourceBudgetExceeded, };");
+        Assert.IsFalse(
+            normalizedWindow.Contains(
+                "NativePlaybackFailure.ResourceBudgetExceeded, completedSwitchCount",
+                StringComparison.Ordinal),
+            "A resource-budget failure must preserve the completed startup, lifecycle, and process metrics.");
         StringAssert.Contains(app, "JsonStringEnumConverter");
         Assert.IsFalse(
             window.Contains("fixture.ToString()", StringComparison.Ordinal) ||
@@ -2941,6 +2984,20 @@ public sealed class DependencyRulesTests
             RepositoryRoot,
             "eng",
             "Invoke-WindowsNativePlaybackSmoke.ps1"));
+        string probeApp = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.NativePlaybackCompatibilitySpike",
+            "App.xaml.cs"));
+        string evidenceValidator = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.Testing",
+            "NativePlaybackEvidenceValidator.cs"));
 
         StringAssert.Contains(controller, "NativePlaybackCompatibilitySpike.Local.a47d1387");
         StringAssert.Contains(controller, "PackageCertificateThumbprint");
@@ -2949,6 +3006,68 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "Import-Certificate -FilePath $tlsCertificatePath -CertStoreLocation \"Cert:\\LocalMachine\\Root\"");
         StringAssert.Contains(controller, "Tls12LoopbackAllowlist");
         StringAssert.Contains(controller, "new TcpListener(IPAddress.Loopback, 0)");
+        StringAssert.Contains(controller, "$compatibleRuntimeDependencyRegistered = @($runtimeDependencyPackagesBefore |");
+        StringAssert.Contains(controller, "[version]$_.Version -ge [version]$expectedRuntimeDependencyVersion");
+        StringAssert.Contains(controller, "if ($compatibleRuntimeDependencyRegistered) {");
+        StringAssert.Contains(controller, "Add-AppxPackage -Path $packages[0].FullName");
+        StringAssert.Contains(controller, "Add-AppxPackage -Path $packages[0].FullName -DependencyPath $dependencies[0].FullName");
+        Assert.IsFalse(
+            controller.Contains("ForceApplicationShutdown", StringComparison.Ordinal),
+            "The acceptance controller must not force-close shared Windows applications.");
+        StringAssert.Contains(controller, "private const int RequestTraceCapacity = 32;");
+        StringAssert.Contains(controller, "List<TierARequestTrace>");
+        StringAssert.Contains(controller, "public TierARequestTraceSnapshot GetRequestTraceSnapshot()");
+        StringAssert.Contains(controller, "long acceptedTimestamp = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(controller, "ReserveRequestTrace(handlerId, acceptedTimestamp)");
+        StringAssert.Contains(controller, "long tlsAuthenticatedTimestamp = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(controller, "long requestHeaderCompletedTimestamp = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(controller, "long responseHeaderWrittenTimestamp = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(controller, "long bodyWriteCompletedTimestamp = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(controller, "long flushCompletedTimestamp = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(controller, "requestTrace.MarkCompleted(");
+        StringAssert.Contains(controller, "case \"hls.m3u8\": return \"Playlist\";");
+        StringAssert.Contains(controller, "case \"hls-003.ts\": return \"Segment3\";");
+        StringAssert.Contains(controller, "FirstDroppedAcceptedTimestamp");
+        StringAssert.Contains(controller, "Outcome = \"InFlight\"");
+        StringAssert.Contains(controller, "requestTrace.MarkTerminalFailure(\"IoAbort\"");
+        StringAssert.Contains(controller, "requestTrace.MarkTerminalFailure(\"AuthFailure\"");
+        StringAssert.Contains(controller, "requestTrace.MarkRejected(status, Stopwatch.GetTimestamp())");
+        StringAssert.Contains(controller, "requestTrace.MarkTerminalFailure(\"TransportFailure\"");
+        int tlsAcceptIndex = controller.IndexOf(
+            "long acceptedTimestamp = Stopwatch.GetTimestamp();",
+            StringComparison.Ordinal);
+        int tlsAcceptOrdinalIndex = controller.IndexOf(
+            "int handlerId = Interlocked.Increment(ref nextHandlerId);",
+            tlsAcceptIndex,
+            StringComparison.Ordinal);
+        int requestTraceReservationIndex = controller.IndexOf(
+            "ReserveRequestTrace(handlerId, acceptedTimestamp)",
+            tlsAcceptOrdinalIndex,
+            StringComparison.Ordinal);
+        int tlsHandlerStartIndex = controller.IndexOf(
+            "Task handler = Task.Run(",
+            requestTraceReservationIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            tlsAcceptIndex >= 0 && tlsAcceptIndex < tlsAcceptOrdinalIndex &&
+            tlsAcceptOrdinalIndex < requestTraceReservationIndex &&
+            requestTraceReservationIndex < tlsHandlerStartIndex,
+            "The bounded lifecycle slot must be reserved in serial accept order before handler dispatch.");
+        int tlsFlushIndex = controller.IndexOf(
+            "await ssl.FlushAsync().ConfigureAwait(false);",
+            StringComparison.Ordinal);
+        int tlsFlushTimestampIndex = controller.IndexOf(
+            "long flushCompletedTimestamp = Stopwatch.GetTimestamp();",
+            tlsFlushIndex,
+            StringComparison.Ordinal);
+        int requestTraceCompletionIndex = controller.IndexOf(
+            "requestTrace.MarkCompleted(",
+            tlsFlushTimestampIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            tlsFlushIndex >= 0 && tlsFlushIndex < tlsFlushTimestampIndex &&
+            tlsFlushTimestampIndex < requestTraceCompletionIndex,
+            "The bounded request lifecycle must observe the existing final flush without changing it.");
         StringAssert.Contains(controller, "case \"/direct-h264-aac.ts\"");
         StringAssert.Contains(controller, "case \"/hls.m3u8\"");
         StringAssert.Contains(controller, "Range: bytes=");
@@ -2985,8 +3104,51 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "SchemaVersion = 10");
-        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 6");
-        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 6");
+        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 7");
+        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 7");
+        Match controllerEnvelopeVersion = Regex.Match(
+            controller,
+            @"\[int\]\$probeEnvelope\.SchemaVersion -ne (?<version>\d+)",
+            RegexOptions.CultureInvariant);
+        Match appEnvelopeVersion = Regex.Match(
+            probeApp,
+            @"new NativePlaybackProbeEnvelope\(\s*(?<version>\d+),",
+            RegexOptions.CultureInvariant);
+        Match validatorEnvelopeVersion = Regex.Match(
+            evidenceValidator,
+            "RequireEqual\\(RequireInt32\\(root, \\\"ProbeEnvelopeSchemaVersion\\\"\\), " +
+                @"(?<version>\d+),",
+            RegexOptions.CultureInvariant);
+        Assert.IsTrue(
+            controllerEnvelopeVersion.Success &&
+            appEnvelopeVersion.Success &&
+            validatorEnvelopeVersion.Success,
+            "The native playback envelope version declarations must remain discoverable.");
+        Assert.AreEqual(
+            controllerEnvelopeVersion.Groups["version"].Value,
+            appEnvelopeVersion.Groups["version"].Value,
+            "The probe app and controller must use the same envelope version.");
+        Assert.AreEqual(
+            controllerEnvelopeVersion.Groups["version"].Value,
+            validatorEnvelopeVersion.Groups["version"].Value,
+            "The controller and persistent evidence validator must use the same envelope version.");
+        StringAssert.Contains(controller, "\"FirstHlsStartupClock\"");
+        StringAssert.Contains(controller, "\"HighResolution\"");
+        StringAssert.Contains(controller, "\"StartupStartedTimestamp\"");
+        StringAssert.Contains(controller, "\"SourceOpenCompletedTimestamp\"");
+        StringAssert.Contains(controller, "\"MediaOpenedTimestamp\"");
+        StringAssert.Contains(controller, "\"WindowCompletedTimestamp\"");
+        StringAssert.Contains(controller, "[System.Diagnostics.Stopwatch]::IsHighResolution");
+        StringAssert.Contains(controller, "$firstHlsClockFrequency -ne [System.Diagnostics.Stopwatch]::Frequency");
+        StringAssert.Contains(controller, "$tlsServer.GetRequestTraceSnapshot()");
+        StringAssert.Contains(controller, "The bounded request lifecycle trace was truncated during the first-HLS window.");
+        StringAssert.Contains(controller, "The first-HLS QPC window contains non-completed transport lifecycle traces:");
+        StringAssert.Contains(controller, "[string]$_.Outcome -ne \"Completed\"");
+        StringAssert.Contains(controller, "$completedFirstHlsTraces");
+        StringAssert.Contains(controller, "First-HLS transport attribution:");
+        StringAssert.Contains(controller, "traceRecordsOmittedAfterCapacity=");
+        StringAssert.Contains(controller, "firstHlsLastFlushToSourceOpen");
+        StringAssert.Contains(controller, "firstHlsLastFlushToMediaOpened");
         StringAssert.Contains(controller, "[ValidateRange(0, 1)]");
         StringAssert.Contains(controller, "$CancellationProbeCount -gt 0 -and");
         StringAssert.Contains(controller, "$cancellationProbeCount -ne $CancellationProbeCount");
@@ -3095,6 +3257,11 @@ public sealed class DependencyRulesTests
             .Single(line => line.Contains(
                 "Native playback startup diagnostic:",
                 StringComparison.Ordinal));
+        string soakResourceDiagnosticLog = controller
+            .Split('\n')
+            .Single(line => line.Contains(
+                "Native playback soak resource diagnostic:",
+                StringComparison.Ordinal));
         string[] probeFailureDiagnosticLabels =
         [
             "startupFailureStage=",
@@ -3172,6 +3339,29 @@ public sealed class DependencyRulesTests
         {
             StringAssert.Contains(startupDiagnosticLog, diagnosticLabel);
         }
+
+        string[] soakResourceDiagnosticLabels =
+        [
+            "soakMinutes=",
+            "resourceSamples=",
+            "warmupPrivateBytes=",
+            "memoryNetGrowthBytes=",
+            "memoryNetGrowthPercent=",
+            "memoryMonotonicIncrease=",
+            "warmupHandleCount=",
+            "handleNetGrowth=",
+            "initialPrivateBytes=",
+            "finalPrivateBytes=",
+            "initialHandleCount=",
+            "finalHandleCount=",
+        ];
+        foreach (string diagnosticLabel in soakResourceDiagnosticLabels)
+        {
+            StringAssert.Contains(soakResourceDiagnosticLog, diagnosticLabel);
+        }
+        StringAssert.Contains(
+            controller,
+            "Set-FailurePoint -Stage \"SoakValidation\" -Code \"ResourceBudgetExceeded\"");
         StringAssert.Contains(
             controller,
             "foreach ($staleEvidence in @($evidencePath, $failureEvidencePath, $packageInventoryEvidencePath))");
