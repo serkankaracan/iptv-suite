@@ -1,0 +1,1408 @@
+{
+    "SchemaVersion":  1,
+    "Project":  "IptvSuite.NativePlaybackCompatibilitySpike",
+    "LockTargets":  [{"Name":"net10.0-windows10.0.26100","Packages":{"Microsoft.Windows.SDK.BuildTools":{"type":"Direct","requested":"[10.0.26100.8249, )","resolved":"10.0.26100.8249","contentHash":"WJ+X+fVbBcZFc5q1MufkqBNjeMqWUblbG6PmijNG0tMVt+VXdE5cdaD30dbZ90RwUTidbjxv/tmgovl5czLlrg=="},"Microsoft.WindowsAppSDK":{"type":"Direct","requested":"[2.4.0, )","resolved":"2.4.0","contentHash":"sdS48CFL5EqzFB5a63Rr6qdK5l8NqmxWKJ/DXwsF8waCDLXdD8SjSnIOfpxzq4f4aUhaeXEAwVRA9rD8QvM+2g==","dependencies":{"Microsoft.WindowsAppSDK.AI":"2.4.4","Microsoft.WindowsAppSDK.Base":"2.0.4","Microsoft.WindowsAppSDK.DWrite":"2.1.0","Microsoft.WindowsAppSDK.Foundation":"2.3.9","Microsoft.WindowsAppSDK.InteractiveExperiences":"2.1.6","Microsoft.WindowsAppSDK.ML":"2.1.74","Microsoft.WindowsAppSDK.Runtime":"[2.4.0]","Microsoft.WindowsAppSDK.Search":"2.4.4","Microsoft.WindowsAppSDK.Widgets":"2.0.5","Microsoft.WindowsAppSDK.WinUI":"2.3.6"}},"Microsoft.Web.WebView2":{"type":"Transitive","resolved":"1.0.3719.77","contentHash":"t+ucyKw5NTwMjsUrDF6R9Lk40lpcKQD1/HgyGFxl49tdA4h9dKlsj6FYGEmDRpFNfnTpENuTypMcdbrlkqBdDA=="},"Microsoft.Windows.AI.MachineLearning":{"type":"Transitive","resolved":"2.1.74","contentHash":"/Z1yAQ0J53eD1RrOl5anTDS0UQOgneERY//hLljwGcWeUX9ynCvOl5qUxAsfWvwsZZGcvV4WKjAvnAtA6N5i+w==","dependencies":{"System.Numerics.Tensors":"9.0.0"}},"Microsoft.Windows.SDK.BuildTools.MSIX":{"type":"Transitive","resolved":"1.7.251221100","contentHash":"f4aIZJ0NUth2403oxrpR+9rxVzZVI6dabqB21u8ncnk8eJAKCs9m77E4iYAnvP1YwrRe4axz3f8+yUcttNSfEA=="},"Microsoft.WindowsAppSDK.AI":{"type":"Transitive","resolved":"2.4.4","contentHash":"nwgZKIWa97bxP3UYahv9LK1WAftzsEu3x/Ws9hCs5QG9mOf25ODrhv7BOGfYvptEhrh+XhoqCa8etSVQRr8cmw==","dependencies":{"Microsoft.WindowsAppSDK.Base":"2.0.4","Microsoft.WindowsAppSDK.Foundation":"2.3.9"}},"Microsoft.WindowsAppSDK.Base":{"type":"Transitive","resolved":"2.0.4","contentHash":"QXSy2llX2/Bx9dYWGUEsb10F40q94ZiDnPMzqa2/qRmTG4y9EXxGp6uHITb7c0b4FCa+6KFBlgh6D53M0QEMEg==","dependencies":{"Microsoft.Windows.SDK.BuildTools":"10.0.26100.4654","Microsoft.Windows.SDK.BuildTools.MSIX":"1.7.251221100"}},"Microsoft.WindowsAppSDK.DWrite":{"type":"Transitive","resolved":"2.1.0","contentHash":"dgix7NSeo7Z8SZPyrsOqYm/6OUvBveHCiVyorYecmtDYoZW26dJ6/i9yveIxgWvmFpgfKXPeIuQBCvhbetHiYg==","dependencies":{"Microsoft.WindowsAppSDK.Base":"2.0.3"}},"Microsoft.WindowsAppSDK.Foundation":{"type":"Transitive","resolved":"2.3.9","contentHash":"lnfSoKvuMN2nv/NyMDWHX5u2K/tdg8AiyW+z30/YmCbJZp1k38B8/d4pKf+RjgkQbSGbIikN4irae72FXA3X5Q==","dependencies":{"Microsoft.WindowsAppSDK.Base":"2.0.4","Microsoft.WindowsAppSDK.InteractiveExperiences":"2.1.3"}},"Microsoft.WindowsAppSDK.InteractiveExperiences":{"type":"Transitive","resolved":"2.1.6","contentHash":"j7pyWfsXPQFTEWX22GgC6/JDzliBpwKESJzglCOv8wRJI7SmXiPdYqQnBI2gSKC1slJIpkczVdmmpvHmxPxyOw==","dependencies":{"Microsoft.WindowsAppSDK.Base":"2.0.4"}},"Microsoft.WindowsAppSDK.ML":{"type":"Transitive","resolved":"2.1.74","contentHash":"9Vd1ikH+n6pbqhgmCn+zNulJ6gIp9Hz9bC++ka1Uphh2gule6HiT6Jr25N/fQoEc4I9xOTKkn3DtlcpHlcocaw==","dependencies":{"Microsoft.Windows.AI.MachineLearning":"[2.1.74, 3.0.0)","Microsoft.WindowsAppSDK.Base":"2.0.4","Microsoft.WindowsAppSDK.Foundation":"2.0.21"}},"Microsoft.WindowsAppSDK.Runtime":{"type":"Transitive","resolved":"2.4.0","contentHash":"ioljT2/zivSWb6Hc375VPrRrauE5O49OccruHQFI23NdwGERCFBgCr1qCYhFciTxAX9hOMkJeAx0/Wo6Z5y6eg==","dependencies":{"Microsoft.WindowsAppSDK.Base":"2.0.4"}},"Microsoft.WindowsAppSDK.Search":{"type":"Transitive","resolved":"2.4.4","contentHash":"3IXnSBTBBQpqp3B+0R5FUEzcAHFwq4DVEDukVdqk3nP+X4LA10yPLO/uQgDaxtDxwhMJcEXX3vrKFdQTWSAOwg==","dependencies":{"Microsoft.WindowsAppSDK.AI":"[2.4.4]","Microsoft.WindowsAppSDK.Base":"2.0.4","Microsoft.WindowsAppSDK.Foundation":"2.3.9"}},"Microsoft.WindowsAppSDK.Widgets":{"type":"Transitive","resolved":"2.0.5","contentHash":"lRz+8+QU65gV8hRzLVE+GRsPKZ42lnzqkmsw96HzQd/DuFYfr4JYpUU7ZZ5YrkV2EfQe4BCmoRKAeZ3WwalMcg==","dependencies":{"Microsoft.WindowsAppSDK.Base":"2.0.3"}},"Microsoft.WindowsAppSDK.WinUI":{"type":"Transitive","resolved":"2.3.6","contentHash":"01ImKF+wYm2aehRWS2GpKeoBL1RutDcJOUSTSo3fkLjOSr+gKPcUGDAtIUwZcQTvHWOct6hT1jKIdyxbJIhpBA==","dependencies":{"Microsoft.Web.WebView2":"1.0.3719.77","Microsoft.WindowsAppSDK.Base":"2.0.4","Microsoft.WindowsAppSDK.Foundation":"2.3.9","Microsoft.WindowsAppSDK.InteractiveExperiences":"2.1.3"}},"System.Numerics.Tensors":{"type":"Transitive","resolved":"9.0.0","contentHash":"hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="}}},{"Name":"net10.0-windows10.0.26100/win-x64","Packages":{"Microsoft.Web.WebView2":{"type":"Transitive","resolved":"1.0.3719.77","contentHash":"t+ucyKw5NTwMjsUrDF6R9Lk40lpcKQD1/HgyGFxl49tdA4h9dKlsj6FYGEmDRpFNfnTpENuTypMcdbrlkqBdDA=="},"Microsoft.Windows.AI.MachineLearning":{"type":"Transitive","resolved":"2.1.74","contentHash":"/Z1yAQ0J53eD1RrOl5anTDS0UQOgneERY//hLljwGcWeUX9ynCvOl5qUxAsfWvwsZZGcvV4WKjAvnAtA6N5i+w==","dependencies":{"System.Numerics.Tensors":"9.0.0"}},"Microsoft.WindowsAppSDK.Foundation":{"type":"Transitive","resolved":"2.3.9","contentHash":"lnfSoKvuMN2nv/NyMDWHX5u2K/tdg8AiyW+z30/YmCbJZp1k38B8/d4pKf+RjgkQbSGbIikN4irae72FXA3X5Q==","dependencies":{"Microsoft.WindowsAppSDK.Base":"2.0.4","Microsoft.WindowsAppSDK.InteractiveExperiences":"2.1.3"}}}}],
+    "RuntimeIdentifier":  "win-x64",
+    "PackageIdentity":  {
+                            "Name":  "NativePlaybackCompatibilitySpike.Local.a47d1387",
+                            "Publisher":  "CN=Native Playback Compatibility Spike Local Test",
+                            "Version":  "0.0.1.0",
+                            "Architecture":  "x64"
+                        },
+    "TargetDeviceFamily":  {
+                               "Name":  "Windows.Desktop",
+                               "MinVersion":  "10.0.26100.0",
+                               "MaxVersionTested":  "10.0.26100.0"
+                           },
+    "RuntimeDependency":  {
+                              "Name":  "Microsoft.WindowsAppRuntime.2",
+                              "Publisher":  "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+                              "MinVersion":  "2.4.0.0"
+                          },
+    "Capabilities":  [
+                         "runFullTrust"
+                     ],
+    "Application":  {
+                        "Id":  "App",
+                        "SourceExecutable":  "$targetnametoken$.exe",
+                        "SourceEntryPoint":  "$targetentrypoint$",
+                        "PackagedExecutable":  "IptvSuite.NativePlaybackCompatibilitySpike.exe",
+                        "PackagedEntryPoint":  "Windows.FullTrustApplication",
+                        "PackagedRuntimeBehavior":  "",
+                        "PackagedTrustLevel":  ""
+                    },
+    "Extensions":  [
+                       {
+                           "NamespaceUri":  "http://schemas.microsoft.com/appx/manifest/foundation/windows10",
+                           "Category":  "windows.activatableClass.inProcessServer",
+                           "InProcessServerPath":  "Microsoft.Web.WebView2.Core.dll",
+                           "ActivatableClasses":  [
+                                                      {
+                                                          "Id":  "Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions",
+                                                          "ThreadingModel":  "both"
+                                                      }
+                                                  ]
+                       }
+                   ],
+    "Packages":  [
+                     {
+                         "Id":  "Microsoft.Web.WebView2",
+                         "Version":  "1.0.3719.77",
+                         "Type":  "Transitive",
+                         "ContentHash":  "t+ucyKw5NTwMjsUrDF6R9Lk40lpcKQD1/HgyGFxl49tdA4h9dKlsj6FYGEmDRpFNfnTpENuTypMcdbrlkqBdDA==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "LICENSE.txt",
+                                         "Sha256":  "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55"
+                                     },
+                         "SourceUri":  "https://aka.ms/webview",
+                         "Notices":  [
+                                         {
+                                             "Path":  "NOTICE.txt",
+                                             "Sha256":  "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90"
+                                         }
+                                     ],
+                         "NuspecSha256":  "8664509b904eec16bf806dede9297b87649f8e8e2e391083a57cc7ed6a4f873e",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "WebView2Loader.dll",
+                                             "RestoredPath":  "runtimes/win-x64/native/WebView2Loader.dll",
+                                             "Sha256":  "ae69309c5e356350ea28d6b71a900bc43ee7e3f7a457d80a1f82efe6c419cc08"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Web.WebView2.Core.winmd",
+                                             "RestoredPath":  "lib/Microsoft.Web.WebView2.Core.winmd",
+                                             "Sha256":  "88779fd2dbd142738339de337a07a7a111257fa972b9ee8d4618c34902f44f49"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Web.WebView2.Core.Projection.dll",
+                                             "RestoredPath":  "lib_manual/net8.0-windows10.0.17763.0/Microsoft.Web.WebView2.Core.Projection.dll",
+                                             "Sha256":  "c0036e5306aa9758b6ce0c1b2da2aea9ac58ce2c2b328c52d15b22b720aeadf7"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Web.WebView2.Core.dll",
+                                             "RestoredPath":  "runtimes/win-x64/native_uap/Microsoft.Web.WebView2.Core.dll",
+                                             "Sha256":  "17ccd9141c486d7a3689ed38d72d3bd8bb0e216b7990fcc76c132dc9102c6320"
+                                         }
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.Windows.AI.MachineLearning",
+                         "Version":  "2.1.74",
+                         "Type":  "Transitive",
+                         "ContentHash":  "/Z1yAQ0J53eD1RrOl5anTDS0UQOgneERY//hLljwGcWeUX9ynCvOl5qUxAsfWvwsZZGcvV4WKjAvnAtA6N5i+w==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "66395f8cb219087fae2bd025010bd9076b736c14f03b48f20295471c0c376814"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+                                         {
+                                             "Path":  "ThirdPartyNotices.txt",
+                                             "Sha256":  "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866"
+                                         }
+                                     ],
+                         "NuspecSha256":  "b68a2fe2d575cb8e1f703b69614eda0e23b5da8a65ce187f08a4ec797a6924db",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AI.MachineLearning.Projection.dll",
+                                             "RestoredPath":  "lib/net8.0-windows10.0.17763.0/Microsoft.Windows.AI.MachineLearning.Projection.dll",
+                                             "Sha256":  "60eb181b3d30bbd0fe7cf9f5ea2d2ce5e0a8fb56da6cf9db91a373af1abc306a"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.ML.OnnxRuntime.dll",
+                                             "RestoredPath":  "lib/net8.0-windows10.0.17763.0/Microsoft.ML.OnnxRuntime.dll",
+                                             "Sha256":  "3a54782bfcaad084c528bee89e34584660ec31770b7eff8c28b7d253a0a36c9a"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "DirectML.dll",
+                                             "RestoredPath":  "runtimes/win-x64/native/DirectML.dll",
+                                             "Sha256":  "257c75b2f607940c986d0b96d9309a2c897e57ef3192b6c678d707c22d747611"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AI.MachineLearning.dll",
+                                             "RestoredPath":  "runtimes/win-x64/native/Microsoft.Windows.AI.MachineLearning.dll",
+                                             "Sha256":  "bbbb34415d8ce303f8a2a2c524c46bd749e21423ccabeb7d38c5fc7334a7848f"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "onnxruntime.dll",
+                                             "RestoredPath":  "runtimes/win-x64/native/onnxruntime.dll",
+                                             "Sha256":  "3cffeff2d7c25b247a814212baab70eb1f37d727335d4c813ed73785df80a794"
+                                         }
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.Windows.SDK.BuildTools",
+                         "Version":  "10.0.26100.8249",
+                         "Type":  "Direct",
+                         "ContentHash":  "WJ+X+fVbBcZFc5q1MufkqBNjeMqWUblbG6PmijNG0tMVt+VXdE5cdaD30dbZ90RwUTidbjxv/tmgovl5czLlrg==",
+                         "License":  {
+                                         "Kind":  "url",
+                                         "Value":  "https://aka.ms/WinSDKLicenseURL",
+                                         "Sha256":  "e6edc86f93d4c16f9192b81a4c0e8b73467ea8157749e403f6d43116ff57b9cb"
+                                     },
+                         "SourceUri":  "https://aka.ms/WinSDKProjectURL",
+                         "Notices":  [
+
+                                     ],
+                         "NuspecSha256":  "37995f52b381ca9f3a38d3d1c267c71b3a547a9fc8ad52f95100756e13a7a9fb",
+                         "Payload":  [
+
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.Windows.SDK.BuildTools.MSIX",
+                         "Version":  "1.7.251221100",
+                         "Type":  "Transitive",
+                         "ContentHash":  "f4aIZJ0NUth2403oxrpR+9rxVzZVI6dabqB21u8ncnk8eJAKCs9m77E4iYAnvP1YwrRe4axz3f8+yUcttNSfEA==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "sdk_license.txt",
+                                         "Sha256":  "a7a5c7e7ff998558983d6aca2702117c328aeb0c6404d298cb275f5623c6fd13"
+                                     },
+                         "SourceUri":  "https://aka.ms/WinSDKProjectURL",
+                         "Notices":  [
+                                         {
+                                             "Path":  "NOTICE.txt",
+                                             "Sha256":  "f09ebf5de6a5c8e7ebc900bb2e52af2f75e13610a1cf91e1514530e448d956c3"
+                                         }
+                                     ],
+                         "NuspecSha256":  "8450430fbd207eb0a0cd876bb3b5f553a43c2aa85c6ae79d916df1acce77e07c",
+                         "Payload":  [
+
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK",
+                         "Version":  "2.4.0",
+                         "Type":  "Direct",
+                         "ContentHash":  "sdS48CFL5EqzFB5a63Rr6qdK5l8NqmxWKJ/DXwsF8waCDLXdD8SjSnIOfpxzq4f4aUhaeXEAwVRA9rD8QvM+2g==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+                                         {
+                                             "Path":  "NOTICE.txt",
+                                             "Sha256":  "572b43d41dea717dae7dc5de69acb20a74df025e8f5a3c0aa6f7bca02615e23c"
+                                         }
+                                     ],
+                         "NuspecSha256":  "b5249a100e332c9bc251271a3566ca2154206f8286af9991ffed26e855b02a13",
+                         "Payload":  [
+
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.AI",
+                         "Version":  "2.4.4",
+                         "Type":  "Transitive",
+                         "ContentHash":  "nwgZKIWa97bxP3UYahv9LK1WAftzsEu3x/Ws9hCs5QG9mOf25ODrhv7BOGfYvptEhrh+XhoqCa8etSVQRr8cmw==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+
+                                     ],
+                         "NuspecSha256":  "a6e512495dfe3fbd29fbe0aa8a030a8603dfc3857fc5bc9c2f25def52eee29f0",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Graphics.Imaging.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Graphics.Imaging.Projection.dll",
+                                             "Sha256":  "9602b91ba920e126aed47d53ec063752c08b322f9b7fe47a451a73688bfe5831"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AI.ContentSafety.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AI.ContentSafety.Projection.dll",
+                                             "Sha256":  "15e46bf1915e9422cdf8a1df87a3694db092b6f95959f094fa56b209f7cc2ada"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AI.Foundation.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AI.Foundation.Projection.dll",
+                                             "Sha256":  "d2805a08464b60a3f7ee525fad30ce84b0a12908cd9f1b5cd7383d8bee84da72"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AI.Imaging.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AI.Imaging.Projection.dll",
+                                             "Sha256":  "534bc88ea6b4e5e982830b503c18ea1a46c3de38f24c6a205bf3dde8b20a1190"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AI.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AI.Projection.dll",
+                                             "Sha256":  "d0a38db7be0ba46f8f6d06ad87c0b5b23e67d494631573db101c53ef28f48aa1"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AI.Text.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AI.Text.Projection.dll",
+                                             "Sha256":  "da6993f2b231e9795f6ee5792b324bf252604a5497bc65a984e461f38f497d1e"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AI.Video.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AI.Video.Projection.dll",
+                                             "Sha256":  "8213fef723feede1b7ab32f8c76905f0ecf121665bf865bf251757b87ca1c253"
+                                         }
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.Base",
+                         "Version":  "2.0.4",
+                         "Type":  "Transitive",
+                         "ContentHash":  "QXSy2llX2/Bx9dYWGUEsb10F40q94ZiDnPMzqa2/qRmTG4y9EXxGp6uHITb7c0b4FCa+6KFBlgh6D53M0QEMEg==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+                                         {
+                                             "Path":  "NOTICE.txt",
+                                             "Sha256":  "572b43d41dea717dae7dc5de69acb20a74df025e8f5a3c0aa6f7bca02615e23c"
+                                         }
+                                     ],
+                         "NuspecSha256":  "7cd50be2ac8b9d3d7e376573cce153498070f825bf1c3580062880b4b63f98bc",
+                         "Payload":  [
+
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.DWrite",
+                         "Version":  "2.1.0",
+                         "Type":  "Transitive",
+                         "ContentHash":  "dgix7NSeo7Z8SZPyrsOqYm/6OUvBveHCiVyorYecmtDYoZW26dJ6/i9yveIxgWvmFpgfKXPeIuQBCvhbetHiYg==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://aka.ms/WindowsAppSDK",
+                         "Notices":  [
+
+                                     ],
+                         "NuspecSha256":  "ee369333210804e69b6a90a75f9d4a12dc43e8f37ac2558f33cdf1ce131add62",
+                         "Payload":  [
+
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.Foundation",
+                         "Version":  "2.3.9",
+                         "Type":  "Transitive",
+                         "ContentHash":  "lnfSoKvuMN2nv/NyMDWHX5u2K/tdg8AiyW+z30/YmCbJZp1k38B8/d4pKf+RjgkQbSGbIikN4irae72FXA3X5Q==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://aka.ms/windowsappsdk",
+                         "Notices":  [
+
+                                     ],
+                         "NuspecSha256":  "6f94e75b3b3e077900a3fc72269ebd02d09b20f511eac238d7463d95d7a015ed",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Security.Authentication.OAuth.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Security.Authentication.OAuth.Projection.dll",
+                                             "Sha256":  "78e98ba24a6ba3c184872b07cf6bfcf318288a8f2e21d42c260fbe7cad29b20e"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AppLifecycle.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AppLifecycle.Projection.dll",
+                                             "Sha256":  "1a37a502e76e3911324817e4f982fb7f781d8a89082653e78d5b23c9904ad7be"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AppNotifications.Builder.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AppNotifications.Builder.Projection.dll",
+                                             "Sha256":  "373c0ba3886794c981fde0068d8c8ce6d087e41c38015ea87fdd903b5c71fea3"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.AppNotifications.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.AppNotifications.Projection.dll",
+                                             "Sha256":  "a25149de87c2be534ba7b90aea427bfc139393ed24c6cb65ad29b703ae917df5"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.ApplicationModel.Background.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.ApplicationModel.Background.Projection.dll",
+                                             "Sha256":  "a7f775c9914e4fea664eb19b5e0cddd680168e2fadcb26d11d45cabcbc696a69"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.ApplicationModel.DynamicDependency.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.ApplicationModel.DynamicDependency.Projection.dll",
+                                             "Sha256":  "0f98cab97ee3e03ec99d19e9582659073900503964feb3368053270aaae7e475"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.ApplicationModel.Resources.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.ApplicationModel.Resources.Projection.dll",
+                                             "Sha256":  "e0afd11594f6883c7510d1cee693a81a897f8a1d1ed6207410c74cc4228f9d10"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.ApplicationModel.WindowsAppRuntime.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.ApplicationModel.WindowsAppRuntime.Projection.dll",
+                                             "Sha256":  "b8f5803a3bbdc0bb72fe1c9c815949c1a634c0ec0795aec5269f2ad1f6b1c550"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.BadgeNotifications.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.BadgeNotifications.Projection.dll",
+                                             "Sha256":  "8b1c3c56d7eda236eaaa14b2f95db654a21ba4c7d7c01ea81da61dbbca468e98"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.Foundation.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.Foundation.Projection.dll",
+                                             "Sha256":  "27113385da03417cb6fbab7ef2f9b4370d674f9a26def62ea0f098c49fee6138"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.Management.Deployment.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.Management.Deployment.Projection.dll",
+                                             "Sha256":  "c0e59987bae0749f633defa2d0392068803571ead9683cd1c47010c597d0d37b"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.Media.Capture.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.Media.Capture.Projection.dll",
+                                             "Sha256":  "93df3998828669bdb254812c3a2508e0933e4e1c9daf5976c4ac1f2b0c383c37"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.PushNotifications.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.PushNotifications.Projection.dll",
+                                             "Sha256":  "0e26a8f6751b4d7de94a188446127bbc10457f5a096eae08aeed7948934234c4"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.Security.AccessControl.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.Security.AccessControl.Projection.dll",
+                                             "Sha256":  "5910ad99a335fd053ec5ed0350ce766dc85fd31c2d720f37d765fd65c6a90676"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.Storage.Pickers.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.Storage.Pickers.Projection.dll",
+                                             "Sha256":  "d0ece132264ae172ea8d327d14600472c9f4742f2f463755d480d490111c6c4e"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.Storage.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.Storage.Projection.dll",
+                                             "Sha256":  "cf73b675e61b4bc71ea4030035965721f9d9117ada18cef1b52bcca8b4ba719b"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.System.Power.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.System.Power.Projection.dll",
+                                             "Sha256":  "3a3d621d69be5d46a9e3c5228d5a7bee8b60a645f1dd051bd0b037bbd3defd35"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.System.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.System.Projection.dll",
+                                             "Sha256":  "815d220fee9d092ad649be1ff207b821fa4fbfd7565467a13de7d36c24ca6824"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.WindowsAppRuntime.Bootstrap.Net.dll",
+                                             "Sha256":  "718282b7af26e23251feac10466423528fde3cf43e70b8d6e04ccc3b8bf73706"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.dll",
+                                             "RestoredPath":  "runtimes/win-x64/native/Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.dll",
+                                             "Sha256":  "85077869f9bebadefe0c976193bee70ef5948c82bcbfd195f35a966088247b78"
+                                         },
+                                         {
+                                             "PackageEntryPath":  "Microsoft.WindowsAppRuntime.Bootstrap.dll",
+                                             "RestoredPath":  "runtimes/win-x64/native/Microsoft.WindowsAppRuntime.Bootstrap.dll",
+                                             "Sha256":  "44752d799b8d7cead99d6a20cb9a46009a9a2dfaa9701176a573e50a30ab089c"
+                                         }
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.InteractiveExperiences",
+                         "Version":  "2.1.6",
+                         "Type":  "Transitive",
+                         "ContentHash":  "j7pyWfsXPQFTEWX22GgC6/JDzliBpwKESJzglCOv8wRJI7SmXiPdYqQnBI2gSKC1slJIpkczVdmmpvHmxPxyOw==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://aka.ms/windowsappsdk",
+                         "Notices":  [
+
+                                     ],
+                         "NuspecSha256":  "d45db7ee5722eabb9b89cd9c9f7bfca3ec428babc30ab51c7810a75b1817dc1b",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "Microsoft.InteractiveExperiences.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.18362.0/Microsoft.InteractiveExperiences.Projection.dll",
+                                             "Sha256":  "1d8cf85ca147fda98afcd5df35e93dcc249f7f2756a0764a529cf78444282336"
+                                         }
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.ML",
+                         "Version":  "2.1.74",
+                         "Type":  "Transitive",
+                         "ContentHash":  "9Vd1ikH+n6pbqhgmCn+zNulJ6gIp9Hz9bC++ka1Uphh2gule6HiT6Jr25N/fQoEc4I9xOTKkn3DtlcpHlcocaw==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "656aab74c15aa9f9964bcdcc993eb2755cbdb4822d5e0e3bc61d2e281897f758"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+                                         {
+                                             "Path":  "ThirdPartyNotices.txt",
+                                             "Sha256":  "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866"
+                                         }
+                                     ],
+                         "NuspecSha256":  "99a6ef76b3b66c433c351b8aa98f028a757a6fa26ff24f36f0d47b4719de8f4c",
+                         "Payload":  [
+
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.Runtime",
+                         "Version":  "2.4.0",
+                         "Type":  "Transitive",
+                         "ContentHash":  "ioljT2/zivSWb6Hc375VPrRrauE5O49OccruHQFI23NdwGERCFBgCr1qCYhFciTxAX9hOMkJeAx0/Wo6Z5y6eg==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+                                         {
+                                             "Path":  "NOTICE.txt",
+                                             "Sha256":  "572b43d41dea717dae7dc5de69acb20a74df025e8f5a3c0aa6f7bca02615e23c"
+                                         }
+                                     ],
+                         "NuspecSha256":  "406c27c8651b854e0742ddf7c6c8c4d836414fc28aec13664194a22678bfa0b5",
+                         "Payload":  [
+
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.Search",
+                         "Version":  "2.4.4",
+                         "Type":  "Transitive",
+                         "ContentHash":  "3IXnSBTBBQpqp3B+0R5FUEzcAHFwq4DVEDukVdqk3nP+X4LA10yPLO/uQgDaxtDxwhMJcEXX3vrKFdQTWSAOwg==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+
+                                     ],
+                         "NuspecSha256":  "34baee6e79ce587c39dead33f7e3480019e4190ffcf2375b2cf1cc33c89cd487",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.Search.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.Search.Projection.dll",
+                                             "Sha256":  "b5439c317dcea1af513df71c920c4003d9bafa4ba7513ff962e58f25e6533085"
+                                         }
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.Widgets",
+                         "Version":  "2.0.5",
+                         "Type":  "Transitive",
+                         "ContentHash":  "lRz+8+QU65gV8hRzLVE+GRsPKZ42lnzqkmsw96HzQd/DuFYfr4JYpUU7ZZ5YrkV2EfQe4BCmoRKAeZ3WwalMcg==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+
+                                     ],
+                         "NuspecSha256":  "c5aeb6cad1f91a8e025944ceee3f4ac1ca306e432b3afae23a7fbac70b07dea7",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "Microsoft.Windows.Widgets.Projection.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.Windows.Widgets.Projection.dll",
+                                             "Sha256":  "8d6e5d3418e2f6eff2b27df0ac51b7dc452a40fc4c98c86f61e305d04b21f89f"
+                                         }
+                                     ]
+                     },
+                     {
+                         "Id":  "Microsoft.WindowsAppSDK.WinUI",
+                         "Version":  "2.3.6",
+                         "Type":  "Transitive",
+                         "ContentHash":  "01ImKF+wYm2aehRWS2GpKeoBL1RutDcJOUSTSo3fkLjOSr+gKPcUGDAtIUwZcQTvHWOct6hT1jKIdyxbJIhpBA==",
+                         "License":  {
+                                         "Kind":  "file",
+                                         "Value":  "license.txt",
+                                         "Sha256":  "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501"
+                                     },
+                         "SourceUri":  "https://github.com/microsoft/windowsappsdk",
+                         "Notices":  [
+                                         {
+                                             "Path":  "NOTICE.txt",
+                                             "Sha256":  "e25393c0d340a1821827b093fa4dbbfcccd8feb7bf769e7fa773e3955cd5314b"
+                                         },
+                                         {
+                                             "Path":  "tools/NOTICE.txt",
+                                             "Sha256":  "4a9321fd173ebf4e8bbc79130794d4c3fe233acccbf7db8765e0addb8fbfb8ca"
+                                         }
+                                     ],
+                         "NuspecSha256":  "bbc9fc937a148ea02f3ec75f0aff099fa761c6bbac405f4ee709d44b0851e571",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "Microsoft.WinUI.dll",
+                                             "RestoredPath":  "lib/net6.0-windows10.0.17763.0/Microsoft.WinUI.dll",
+                                             "Sha256":  "ea2b496534a9e8975cf9e59a75caa4f887c5045fec916c97ec9bab13e46e8244"
+                                         }
+                                     ]
+                     },
+                     {
+                         "Id":  "System.Numerics.Tensors",
+                         "Version":  "9.0.0",
+                         "Type":  "Transitive",
+                         "ContentHash":  "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A==",
+                         "License":  {
+                                         "Kind":  "expression",
+                                         "Value":  "MIT",
+                                         "Sha256":  "e5dcffe836b6ec8a58e492419b550e65fb8cbdc308503979e5dacb33ac7ea3b7"
+                                     },
+                         "SourceUri":  "https://github.com/dotnet/runtime",
+                         "Notices":  [
+                                         {
+                                             "Path":  "THIRD-PARTY-NOTICES.TXT",
+                                             "Sha256":  "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5"
+                                         }
+                                     ],
+                         "NuspecSha256":  "52f3ac41d9235ca1e544e27145aeeef36c2dc2159c33936932d5f9c34267a14e",
+                         "Payload":  [
+                                         {
+                                             "PackageEntryPath":  "System.Numerics.Tensors.dll",
+                                             "RestoredPath":  "lib/net9.0/System.Numerics.Tensors.dll",
+                                             "Sha256":  "9d96dc759fdb54cbc3c26ee65cfd78ff32e3745f418119cc0811e63d3f29ecb9"
+                                         }
+                                     ]
+                     }
+                 ],
+    "ToolchainPayload":  [
+                             {
+                                 "Path":  "Microsoft.Windows.SDK.NET.dll",
+                                 "Sha256":  "c633ab241cd09846c2aa409f0bee2026962610404a7bf132c75cbd66b0e5a9f4",
+                                 "OriginKind":  "runtimepack",
+                                 "OriginVersion":  "10.0.26100.57"
+                             },
+                             {
+                                 "Path":  "WinRT.Runtime.dll",
+                                 "Sha256":  "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db",
+                                 "OriginKind":  "runtimepack",
+                                 "OriginVersion":  "10.0.26100.57"
+                             }
+                         ],
+    "AppOwnedFiles":  [
+                          {
+                              "PackageEntryPath":  "IptvSuite.NativePlaybackCompatibilitySpike.dll",
+                              "OutputSiblingPath":  "IptvSuite.NativePlaybackCompatibilitySpike.dll"
+                          },
+                          {
+                              "PackageEntryPath":  "IptvSuite.NativePlaybackCompatibilitySpike.exe",
+                              "OutputSiblingPath":  "IptvSuite.NativePlaybackCompatibilitySpike.exe"
+                          }
+                      ],
+    "AllowedPackageEntries":  [
+                                  "[Content_Types].xml",
+                                  "AppxBlockMap.xml",
+                                  "AppxManifest.xml",
+                                  "AppxSignature.p7x",
+                                  "Assets/SplashScreen.scale-200.png",
+                                  "Assets/Square150x150Logo.scale-200.png",
+                                  "Assets/Square44x44Logo.scale-200.png",
+                                  "Assets/StoreLogo.png",
+                                  "DirectML.dll",
+                                  "IptvSuite.NativePlaybackCompatibilitySpike.deps.json",
+                                  "IptvSuite.NativePlaybackCompatibilitySpike.dll",
+                                  "IptvSuite.NativePlaybackCompatibilitySpike.exe",
+                                  "IptvSuite.NativePlaybackCompatibilitySpike.runtimeconfig.json",
+                                  "Microsoft.Graphics.Imaging.Projection.dll",
+                                  "Microsoft.InteractiveExperiences.Projection.dll",
+                                  "Microsoft.ML.OnnxRuntime.dll",
+                                  "Microsoft.Security.Authentication.OAuth.Projection.dll",
+                                  "Microsoft.Web.WebView2.Core.dll",
+                                  "Microsoft.Web.WebView2.Core.Projection.dll",
+                                  "Microsoft.Web.WebView2.Core.winmd",
+                                  "Microsoft.Windows.AI.ContentSafety.Projection.dll",
+                                  "Microsoft.Windows.AI.Foundation.Projection.dll",
+                                  "Microsoft.Windows.AI.Imaging.Projection.dll",
+                                  "Microsoft.Windows.AI.MachineLearning.dll",
+                                  "Microsoft.Windows.AI.MachineLearning.Projection.dll",
+                                  "Microsoft.Windows.AI.Projection.dll",
+                                  "Microsoft.Windows.AI.Text.Projection.dll",
+                                  "Microsoft.Windows.AI.Video.Projection.dll",
+                                  "Microsoft.Windows.ApplicationModel.Background.Projection.dll",
+                                  "Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.dll",
+                                  "Microsoft.Windows.ApplicationModel.DynamicDependency.Projection.dll",
+                                  "Microsoft.Windows.ApplicationModel.Resources.Projection.dll",
+                                  "Microsoft.Windows.ApplicationModel.WindowsAppRuntime.Projection.dll",
+                                  "Microsoft.Windows.AppLifecycle.Projection.dll",
+                                  "Microsoft.Windows.AppNotifications.Builder.Projection.dll",
+                                  "Microsoft.Windows.AppNotifications.Projection.dll",
+                                  "Microsoft.Windows.BadgeNotifications.Projection.dll",
+                                  "Microsoft.Windows.Foundation.Projection.dll",
+                                  "Microsoft.Windows.Management.Deployment.Projection.dll",
+                                  "Microsoft.Windows.Media.Capture.Projection.dll",
+                                  "Microsoft.Windows.PushNotifications.Projection.dll",
+                                  "Microsoft.Windows.SDK.NET.dll",
+                                  "Microsoft.Windows.Search.Projection.dll",
+                                  "Microsoft.Windows.Security.AccessControl.Projection.dll",
+                                  "Microsoft.Windows.Storage.Pickers.Projection.dll",
+                                  "Microsoft.Windows.Storage.Projection.dll",
+                                  "Microsoft.Windows.System.Power.Projection.dll",
+                                  "Microsoft.Windows.System.Projection.dll",
+                                  "Microsoft.Windows.Widgets.Projection.dll",
+                                  "Microsoft.WindowsAppRuntime.Bootstrap.dll",
+                                  "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll",
+                                  "Microsoft.WinUI.dll",
+                                  "onnxruntime.dll",
+                                  "resources.pri",
+                                  "System.Numerics.Tensors.dll",
+                                  "WebView2Loader.dll",
+                                  "WinRT.Runtime.dll"
+                              ],
+    "RuntimePackage":  {
+                           "FileName":  "Microsoft.WindowsAppRuntime.2.msix",
+                           "Sha256":  "a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf",
+                           "Identity":  "Microsoft.WindowsAppRuntime.2",
+                           "Publisher":  "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+                           "Version":  "2.4.0.0",
+                           "Architecture":  "x64",
+                           "AllowedTopLevelEntries":  [
+                                                          "[Content_Types].xml",
+                                                          "af-ZA/Microsoft.ui.xaml.dll.mui",
+                                                          "af-ZA/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "am-ET/Microsoft.ui.xaml.dll.mui",
+                                                          "am-ET/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "AppxBlockMap.xml",
+                                                          "AppxManifest.xml",
+                                                          "AppxMetadata/CodeIntegrity.cat",
+                                                          "AppxSignature.p7x",
+                                                          "ar-SA/Microsoft.ui.xaml.dll.mui",
+                                                          "ar-SA/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "as-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "as-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "az-Latn-AZ/Microsoft.ui.xaml.dll.mui",
+                                                          "az-Latn-AZ/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "bg-BG/Microsoft.ui.xaml.dll.mui",
+                                                          "bg-BG/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "bn-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "bn-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "bs-Latn-BA/Microsoft.ui.xaml.dll.mui",
+                                                          "bs-Latn-BA/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ca-ES/Microsoft.ui.xaml.dll.mui",
+                                                          "ca-ES/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ca-Es-VALENCIA/Microsoft.ui.xaml.dll.mui",
+                                                          "ca-Es-VALENCIA/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "CoreMessagingXP.dll",
+                                                          "cs-CZ/Microsoft.ui.xaml.dll.mui",
+                                                          "cs-CZ/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "cy-GB/Microsoft.ui.xaml.dll.mui",
+                                                          "cy-GB/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "da-DK/Microsoft.ui.xaml.dll.mui",
+                                                          "da-DK/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "dcompi.dll",
+                                                          "de-DE/Microsoft.ui.xaml.dll.mui",
+                                                          "de-DE/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "DeploymentAgent.exe",
+                                                          "DirectML.dll",
+                                                          "dwmcorei.dll",
+                                                          "DwmSceneI.dll",
+                                                          "DWriteCore.dll",
+                                                          "el-GR/Microsoft.ui.xaml.dll.mui",
+                                                          "el-GR/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "en-GB/Microsoft.ui.xaml.dll.mui",
+                                                          "en-GB/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "en-us/Microsoft.ui.xaml.dll.mui",
+                                                          "en-us/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "es-ES/Microsoft.ui.xaml.dll.mui",
+                                                          "es-ES/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "es-MX/Microsoft.ui.xaml.dll.mui",
+                                                          "es-MX/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "et-EE/Microsoft.ui.xaml.dll.mui",
+                                                          "et-EE/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "eu-ES/Microsoft.ui.xaml.dll.mui",
+                                                          "eu-ES/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "EventLog-Instrumentation.man",
+                                                          "fa-IR/Microsoft.ui.xaml.dll.mui",
+                                                          "fa-IR/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "fi-FI/Microsoft.ui.xaml.dll.mui",
+                                                          "fi-FI/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "fil-PH/Microsoft.ui.xaml.dll.mui",
+                                                          "fil-PH/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "fr-CA/Microsoft.ui.xaml.dll.mui",
+                                                          "fr-CA/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "fr-FR/Microsoft.ui.xaml.dll.mui",
+                                                          "fr-FR/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ga-IE/Microsoft.ui.xaml.dll.mui",
+                                                          "ga-IE/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "gd-gb/Microsoft.ui.xaml.dll.mui",
+                                                          "gd-gb/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "gl-ES/Microsoft.ui.xaml.dll.mui",
+                                                          "gl-ES/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "gu-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "gu-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "he-IL/Microsoft.ui.xaml.dll.mui",
+                                                          "he-IL/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "hi-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "hi-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "hr-HR/Microsoft.ui.xaml.dll.mui",
+                                                          "hr-HR/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "hu-HU/Microsoft.ui.xaml.dll.mui",
+                                                          "hu-HU/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "hy-AM/Microsoft.ui.xaml.dll.mui",
+                                                          "hy-AM/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "id-ID/Microsoft.ui.xaml.dll.mui",
+                                                          "id-ID/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "is-IS/Microsoft.ui.xaml.dll.mui",
+                                                          "is-IS/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "it-IT/Microsoft.ui.xaml.dll.mui",
+                                                          "it-IT/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ja-JP/Microsoft.ui.xaml.dll.mui",
+                                                          "ja-JP/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ka-GE/Microsoft.ui.xaml.dll.mui",
+                                                          "ka-GE/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "kk-KZ/Microsoft.ui.xaml.dll.mui",
+                                                          "kk-KZ/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "km-KH/Microsoft.ui.xaml.dll.mui",
+                                                          "km-KH/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "kn-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "kn-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "kok-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "kok-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ko-KR/Microsoft.ui.xaml.dll.mui",
+                                                          "ko-KR/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "lb-LU/Microsoft.ui.xaml.dll.mui",
+                                                          "lb-LU/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "lo-LA/Microsoft.ui.xaml.dll.mui",
+                                                          "lo-LA/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "lt-LT/Microsoft.ui.xaml.dll.mui",
+                                                          "lt-LT/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "lv-LV/Microsoft.ui.xaml.dll.mui",
+                                                          "lv-LV/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "marshal.dll",
+                                                          "Microsoft.DirectManipulation.dll",
+                                                          "Microsoft.Foundation.winmd",
+                                                          "Microsoft.Graphics.Display.dll",
+                                                          "Microsoft.Graphics.Imaging.dll",
+                                                          "Microsoft.Graphics.Imaging.winmd",
+                                                          "Microsoft.Graphics.ImagingInternal.ImageObjectRemover.winmd",
+                                                          "Microsoft.Graphics.ImagingInternal.winmd",
+                                                          "Microsoft.Graphics.Internal.Imaging.winmd",
+                                                          "Microsoft.Graphics.winmd",
+                                                          "Microsoft.InputStateManager.dll",
+                                                          "Microsoft.Internal.FrameworkUdk.dll",
+                                                          "Microsoft.Security.Authentication.OAuth.winmd",
+                                                          "Microsoft.UI.Composition.OSSupport.dll",
+                                                          "Microsoft.UI.Designer.dll",
+                                                          "Microsoft.UI.dll",
+                                                          "Microsoft.UI.Input.dll",
+                                                          "Microsoft.UI.pri",
+                                                          "Microsoft.UI.Text.winmd",
+                                                          "Microsoft.UI.Windowing.Core.dll",
+                                                          "Microsoft.UI.Windowing.dll",
+                                                          "Microsoft.UI.winmd",
+                                                          "Microsoft.UI.Xaml.Controls.dll",
+                                                          "Microsoft.UI.Xaml.Controls.pri",
+                                                          "Microsoft.ui.xaml.dll",
+                                                          "Microsoft.UI.Xaml.Internal.dll",
+                                                          "Microsoft.UI.Xaml.Phone.dll",
+                                                          "Microsoft.ui.xaml.resources.19h1.dll",
+                                                          "Microsoft.ui.xaml.resources.common.dll",
+                                                          "Microsoft.UI.Xaml.winmd",
+                                                          "Microsoft.UI.Xaml/Assets/map.html",
+                                                          "Microsoft.UI.Xaml/Assets/NoiseAsset_256x256_PNG.png",
+                                                          "Microsoft.Windows.AI.AICapabilities.dll",
+                                                          "Microsoft.Windows.AI.ContentModerationInternal.winmd",
+                                                          "Microsoft.Windows.AI.ContentSafety.dll",
+                                                          "Microsoft.Windows.AI.ContentSafety.winmd",
+                                                          "Microsoft.Windows.AI.Foundation.winmd",
+                                                          "Microsoft.Windows.AI.FoundationInternal.winmd",
+                                                          "Microsoft.Windows.AI.GenerativeInternal.winmd",
+                                                          "Microsoft.Windows.AI.Imaging.dll",
+                                                          "Microsoft.Windows.AI.Imaging.winmd",
+                                                          "Microsoft.Windows.AI.MachineLearning.dll",
+                                                          "Microsoft.Windows.AI.MachineLearning.winmd",
+                                                          "Microsoft.Windows.AI.Text.dll",
+                                                          "Microsoft.Windows.AI.Text.winmd",
+                                                          "Microsoft.Windows.AI.Video.dll",
+                                                          "Microsoft.Windows.AI.Video.winmd",
+                                                          "Microsoft.Windows.AI.winmd",
+                                                          "Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.winmd",
+                                                          "Microsoft.Windows.ApplicationModel.Background.winmd",
+                                                          "Microsoft.Windows.ApplicationModel.DynamicDependency.winmd",
+                                                          "Microsoft.Windows.ApplicationModel.Resources.dll",
+                                                          "Microsoft.Windows.ApplicationModel.Resources.winmd",
+                                                          "Microsoft.Windows.ApplicationModel.WindowsAppRuntime.winmd",
+                                                          "Microsoft.Windows.AppLifecycle.winmd",
+                                                          "Microsoft.Windows.AppNotifications.Builder.winmd",
+                                                          "Microsoft.Windows.AppNotifications.winmd",
+                                                          "Microsoft.Windows.BadgeNotifications.winmd",
+                                                          "Microsoft.Windows.Foundation.winmd",
+                                                          "Microsoft.Windows.Globalization.winmd",
+                                                          "Microsoft.Windows.ImageCreationInternal.winmd",
+                                                          "Microsoft.Windows.Internal.ImageCreation.winmd",
+                                                          "Microsoft.Windows.Internal.SemanticSearch.winmd",
+                                                          "Microsoft.Windows.Internal.Vision.winmd",
+                                                          "Microsoft.Windows.Management.Deployment.winmd",
+                                                          "Microsoft.Windows.Media.Capture.winmd",
+                                                          "Microsoft.Windows.Private.Workloads.SessionManager.winmd",
+                                                          "Microsoft.Windows.PrivateCommon.winmd",
+                                                          "Microsoft.Windows.PushNotifications.winmd",
+                                                          "Microsoft.Windows.Search.dll",
+                                                          "Microsoft.Windows.Security.AccessControl.winmd",
+                                                          "Microsoft.Windows.SemanticSearch.winmd",
+                                                          "Microsoft.Windows.SemanticSearchInternal.winmd",
+                                                          "Microsoft.Windows.Storage.Pickers.winmd",
+                                                          "Microsoft.Windows.Storage.winmd",
+                                                          "Microsoft.Windows.System.Power.winmd",
+                                                          "Microsoft.Windows.System.winmd",
+                                                          "Microsoft.Windows.Vision.winmd",
+                                                          "Microsoft.Windows.VisionInternal.winmd",
+                                                          "Microsoft.Windows.Widgets.dll",
+                                                          "Microsoft.Windows.Widgets.winmd",
+                                                          "Microsoft.Windows.Workloads.dll",
+                                                          "Microsoft.Windows.Workloads.Resources.dll",
+                                                          "Microsoft.Windows.Workloads.Resources_ec.dll",
+                                                          "Microsoft.Windows.Workloads.winmd",
+                                                          "Microsoft.WindowsAppRuntime.dll",
+                                                          "Microsoft.WindowsAppRuntime.Insights.Resource.dll",
+                                                          "Microsoft.WindowsAppRuntime.pri",
+                                                          "Microsoft.WindowsAppRuntime.Release%212.4.0",
+                                                          "mi-NZ/Microsoft.ui.xaml.dll.mui",
+                                                          "mi-NZ/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "mk-MK/Microsoft.ui.xaml.dll.mui",
+                                                          "mk-MK/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ml-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "ml-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "mr-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "mr-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "MRM.dll",
+                                                          "MSIX/Main.msix",
+                                                          "MSIX/main_license.xml",
+                                                          "MSIX/Singleton.msix",
+                                                          "MSIX/singleton_license.xml",
+                                                          "ms-MY/Microsoft.ui.xaml.dll.mui",
+                                                          "ms-MY/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "mt-MT/Microsoft.ui.xaml.dll.mui",
+                                                          "mt-MT/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "nb-NO/Microsoft.ui.xaml.dll.mui",
+                                                          "nb-NO/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ne-NP/Microsoft.ui.xaml.dll.mui",
+                                                          "ne-NP/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "nl-NL/Microsoft.ui.xaml.dll.mui",
+                                                          "nl-NL/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "nn-NO/Microsoft.ui.xaml.dll.mui",
+                                                          "nn-NO/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "NPUDetect.dll",
+                                                          "onnxruntime.dll",
+                                                          "or-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "or-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "pa-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "pa-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "PerceptiveStreaming.dll",
+                                                          "pl-PL/Microsoft.ui.xaml.dll.mui",
+                                                          "pl-PL/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "pt-BR/Microsoft.ui.xaml.dll.mui",
+                                                          "pt-BR/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "pt-PT/Microsoft.ui.xaml.dll.mui",
+                                                          "pt-PT/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "PushNotificationsLongRunningTask.ProxyStub.dll",
+                                                          "quz-PE/Microsoft.ui.xaml.dll.mui",
+                                                          "quz-PE/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "resources.pri",
+                                                          "RestartAgent.exe",
+                                                          "ro-RO/Microsoft.ui.xaml.dll.mui",
+                                                          "ro-RO/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ru-RU/Microsoft.ui.xaml.dll.mui",
+                                                          "ru-RU/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "SessionHandleIPCProxyStub.dll",
+                                                          "sk-SK/Microsoft.ui.xaml.dll.mui",
+                                                          "sk-SK/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "sl-SI/Microsoft.ui.xaml.dll.mui",
+                                                          "sl-SI/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "sq-AL/Microsoft.ui.xaml.dll.mui",
+                                                          "sq-AL/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "sr-Cyrl-BA/Microsoft.ui.xaml.dll.mui",
+                                                          "sr-Cyrl-BA/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "sr-Cyrl-RS/Microsoft.ui.xaml.dll.mui",
+                                                          "sr-Cyrl-RS/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "sr-Latn-RS/Microsoft.ui.xaml.dll.mui",
+                                                          "sr-Latn-RS/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "streaming_sr_cpu_1x192x192x3.all.onnxe",
+                                                          "streaming_sr_wodq_1x384x384x3.all.onnxe",
+                                                          "sv-SE/Microsoft.ui.xaml.dll.mui",
+                                                          "sv-SE/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ta-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "ta-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "te-IN/Microsoft.ui.xaml.dll.mui",
+                                                          "te-IN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "th-TH/Microsoft.ui.xaml.dll.mui",
+                                                          "th-TH/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "tr-TR/Microsoft.ui.xaml.dll.mui",
+                                                          "tr-TR/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "tt-RU/Microsoft.ui.xaml.dll.mui",
+                                                          "tt-RU/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ug-CN/Microsoft.ui.xaml.dll.mui",
+                                                          "ug-CN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "uk-UA/Microsoft.ui.xaml.dll.mui",
+                                                          "uk-UA/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "ur-PK/Microsoft.ui.xaml.dll.mui",
+                                                          "ur-PK/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "uz-Latn-UZ/Microsoft.ui.xaml.dll.mui",
+                                                          "uz-Latn-UZ/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "vi-VN/Microsoft.ui.xaml.dll.mui",
+                                                          "vi-VN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "WindowsAppRuntime.DeploymentExtensions.OneCore.dll",
+                                                          "WindowsAppRuntime.png",
+                                                          "WindowsAppSdk.AppxDeploymentExtensions.Desktop.dll",
+                                                          "WindowsAppSdk.AppxDeploymentExtensions.Desktop-EventLog-Instrumentation.dll",
+                                                          "WinUIEdit.dll",
+                                                          "workloads.365.json",
+                                                          "workloads.j32.json",
+                                                          "workloads.json",
+                                                          "workloads.lnl.json",
+                                                          "workloads.qnn.json",
+                                                          "workloads.stx.json",
+                                                          "wuceffectsi.dll",
+                                                          "zh-CN/Microsoft.ui.xaml.dll.mui",
+                                                          "zh-CN/Microsoft.UI.Xaml.Phone.dll.mui",
+                                                          "zh-TW/Microsoft.ui.xaml.dll.mui",
+                                                          "zh-TW/Microsoft.UI.Xaml.Phone.dll.mui"
+                                                      ],
+                           "ExecutableEntries":  [
+                                                     {
+                                                         "Path":  "Microsoft.Windows.PrivateCommon.winmd",
+                                                         "Sha256":  "b83aa1b9323d2d8b27529aac271c4ba33cd1227d650cbf07ebb787e0bd1e8ad5"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.PushNotifications.winmd",
+                                                         "Sha256":  "aef942d3a0a727410723deccd0953ce6bc2001fc6836c6f5542a21c48a6fb42c"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Search.dll",
+                                                         "Sha256":  "468bb77437da8514049b37954918aba6a7e88f762b8a23c87acafc5d02db204c"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Management.Deployment.winmd",
+                                                         "Sha256":  "673892bf5ad1df31fd283051cb6f6589c067832c610b80acb88be30ae2394c96"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Media.Capture.winmd",
+                                                         "Sha256":  "0d584d421184db2aec18c2dcd47805711748b1ec0abbc791186eea45443feba2"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Private.Workloads.SessionManager.winmd",
+                                                         "Sha256":  "c7fb3c7901c146d5fa8ea7b4eb2a4b30a66605d6a54cbabaf990812fd0b114a6"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Security.AccessControl.winmd",
+                                                         "Sha256":  "7143488011bfc10df0bbf6fcd479752396cf5afcc744f088a5fa07fd5cb33ede"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Storage.winmd",
+                                                         "Sha256":  "bcda806e5f9507b767b4d21529a95e6467dd37e6970bfa1bfa5b9f2394a49f33"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.System.Power.winmd",
+                                                         "Sha256":  "787d1c1f2a7473a5e75adf3944af0477d5dc81374a46cbde9005fa7da06d6d4a"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.System.winmd",
+                                                         "Sha256":  "966facb812db1c7de254d529e830ba70be0704b46dfd0c9bf9fa20626219b3d1"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.SemanticSearch.winmd",
+                                                         "Sha256":  "640fcf9d637ca7ec5bc43509addf41110b72af632bd3371ee5d464476495f0c4"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.SemanticSearchInternal.winmd",
+                                                         "Sha256":  "bfabc44fb7b994ca37dd1806f82d5e6d063cb3344527d1452fcf67d845fef1ab"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Storage.Pickers.winmd",
+                                                         "Sha256":  "d133a91a38fbc20abda824a5fbc4d6c084407fee4a48732e4a508bd99788a8a8"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AppLifecycle.winmd",
+                                                         "Sha256":  "1aa30fc55cebe7ed2b574df879c37799a8a289e1239dcef3a6c4d51f369c70f0"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AppNotifications.Builder.winmd",
+                                                         "Sha256":  "9dd9743e4f309d652991ca4f49cfe50e5aaf560f3cf942b41c3eef28ee4ef62d"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AppNotifications.winmd",
+                                                         "Sha256":  "b8082fc945fb74ed31c6d7056a7a8b2103df8a02176b36125c5e1adb5bd35fe9"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.ApplicationModel.Resources.dll",
+                                                         "Sha256":  "1669a1bf57f4f41a3ad0ded4e2613080d39b2e2efb3fbe12760e9607e48a949d"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.ApplicationModel.Resources.winmd",
+                                                         "Sha256":  "c719c3ffd04b343f10e81e7eeaaf2e49ef3c747bfb82c7e5d49167c5e4ba9d41"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.ApplicationModel.WindowsAppRuntime.winmd",
+                                                         "Sha256":  "ab453292f4e93d8aee47878f7545a1a5bb706e9ad3e4bb41598241c387f074f8"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.BadgeNotifications.winmd",
+                                                         "Sha256":  "b0ea984e531c5769eddf447b7b1fb4eaa132336665d6267fbbf8e36f32342133"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Internal.ImageCreation.winmd",
+                                                         "Sha256":  "0737c94d1f1e4b9b726c979ef47371d260df15ddc0003d2d747f17fbb6b33e64"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Internal.SemanticSearch.winmd",
+                                                         "Sha256":  "11f66a80b843f1d513ca8c706501d07645dd665ddc0d4b09e43387ae9163aa7b"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Internal.Vision.winmd",
+                                                         "Sha256":  "0012751300fe91775f548fba2133996dc6cce1c504a769de9f34ecd033f55275"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Foundation.winmd",
+                                                         "Sha256":  "6bb2b623475458d93d1663e2734ddcf2b8cab2b779b32c2aeef823770fd3345f"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Globalization.winmd",
+                                                         "Sha256":  "1391e840820936a07ed67e9b334ba65ccf8a36ffc244b929d0eb558b010b0e98"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.ImageCreationInternal.winmd",
+                                                         "Sha256":  "78886363ac2d904283fc06beae9206c34933b314d1803ad615b9918a24dd2689"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Vision.winmd",
+                                                         "Sha256":  "a083ea98c1d8fce757cdd1d2775a422d5b855f12262e965a780871fa88d95c92"
+                                                     },
+                                                     {
+                                                         "Path":  "onnxruntime.dll",
+                                                         "Sha256":  "3cffeff2d7c25b247a814212baab70eb1f37d727335d4c813ed73785df80a794"
+                                                     },
+                                                     {
+                                                         "Path":  "PerceptiveStreaming.dll",
+                                                         "Sha256":  "3e84a8ed23e1630db4975e471a36dbb67203878d1e61c4d276e3e1c01fa16e53"
+                                                     },
+                                                     {
+                                                         "Path":  "PushNotificationsLongRunningTask.ProxyStub.dll",
+                                                         "Sha256":  "7e0f24904fb5a93cda4a2395b09d94072e625bad78ac1495be14aa9453263373"
+                                                     },
+                                                     {
+                                                         "Path":  "MSIX/Singleton.msix!/PushNotificationsLongRunningTask.ProxyStub.dll",
+                                                         "Sha256":  "7e0f24904fb5a93cda4a2395b09d94072e625bad78ac1495be14aa9453263373"
+                                                     },
+                                                     {
+                                                         "Path":  "MSIX/Singleton.msix!/PushNotificationsLongRunningTask.StartupTask.exe",
+                                                         "Sha256":  "7872892c01f7fb2902a674140948462601a7644ecc56f16108c582f6e2d68a91"
+                                                     },
+                                                     {
+                                                         "Path":  "NPUDetect.dll",
+                                                         "Sha256":  "f8a2692d1665b22d0d71306165e80f61ef4f919883a3cfff517a107f90ba134f"
+                                                     },
+                                                     {
+                                                         "Path":  "RestartAgent.exe",
+                                                         "Sha256":  "4476f0e0a9a2f023e6c40b9d0d62d4408630d937d76384a6841790b2900c2c18"
+                                                     },
+                                                     {
+                                                         "Path":  "WindowsAppSdk.AppxDeploymentExtensions.Desktop-EventLog-Instrumentation.dll",
+                                                         "Sha256":  "f1c6eb36caa42651277c4dcfd572fec06a798bb104c7e644359fb70e61b5e043"
+                                                     },
+                                                     {
+                                                         "Path":  "WinUIEdit.dll",
+                                                         "Sha256":  "6ea48532836d0eac23a059d96d94fdb2fb25dfa2c8f73634199587c6ae3b577c"
+                                                     },
+                                                     {
+                                                         "Path":  "wuceffectsi.dll",
+                                                         "Sha256":  "a9a53e453e432fa4a2be4d9edaf8054d56e7ef2b7ea07ad1561905854a843050"
+                                                     },
+                                                     {
+                                                         "Path":  "SessionHandleIPCProxyStub.dll",
+                                                         "Sha256":  "516f75793b1904e8a48affa70063fc9b6995bdef5972b4ec681eede49c752ef7"
+                                                     },
+                                                     {
+                                                         "Path":  "WindowsAppRuntime.DeploymentExtensions.OneCore.dll",
+                                                         "Sha256":  "53adef013571c463aaf77b87e372410e7948291b450804ecebf0902e0faaa6af"
+                                                     },
+                                                     {
+                                                         "Path":  "WindowsAppSdk.AppxDeploymentExtensions.Desktop.dll",
+                                                         "Sha256":  "e81e1b4cd72286299d9c4c4c767c5e1544597ed6a5a03ffc2e249f5bf23718cc"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Workloads.dll",
+                                                         "Sha256":  "419800eee1a3adcf1b5d51ea4d5bf9325a7a7a06713913a64d5b7e0ff303a9a8"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Workloads.Resources.dll",
+                                                         "Sha256":  "e6a784d0bb818ee482b4774bf458dbe4d3ce81a7f0267cdac86be1c66dbe0952"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Workloads.Resources_ec.dll",
+                                                         "Sha256":  "f788fcff84e9b3983b37e1274911769f873944c5dc50c9f90fa77bba3dde059a"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.VisionInternal.winmd",
+                                                         "Sha256":  "2f9b810ebf1e24bca8d87623faa37fc18cacbf74a1e493782dafa60e4962ba90"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Widgets.dll",
+                                                         "Sha256":  "86aa4b3fc152adbc8bb10b58c069d5423c03542a9794bffbed27f7605aa32b81"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Widgets.winmd",
+                                                         "Sha256":  "f3b410a5772de1ef0945719bb4d9cd24e78a21928ecd0f6703c2a9996cd88bca"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.Workloads.winmd",
+                                                         "Sha256":  "9020b9a1bf57ba9e8499eb12188414e359bc6fbd76a010ce6966d022ec2d8593"
+                                                     },
+                                                     {
+                                                         "Path":  "MSIX/Main.msix!/DynamicDependency.DataStore.exe",
+                                                         "Sha256":  "8b97601925fdeb29f07a77a84a396a654d91053b6a31486ebb1c19875ba04929"
+                                                     },
+                                                     {
+                                                         "Path":  "MSIX/Main.msix!/DynamicDependency.DataStore.ProxyStub.dll",
+                                                         "Sha256":  "0858b7edece9127839f3732c685f75b3c37deb1492b52d693d72a2ad0e276362"
+                                                     },
+                                                     {
+                                                         "Path":  "MSIX/Singleton.msix!/PushNotificationsLongRunningTask.exe",
+                                                         "Sha256":  "ec8d89834ca1ff285822d82fae715be158bef3058dae52ce3b65c373d494b41e"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.WindowsAppRuntime.dll",
+                                                         "Sha256":  "945795bf788db870caa0b97a010476b6225c6df22758fe7b4eaebada044b4072"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.WindowsAppRuntime.Insights.Resource.dll",
+                                                         "Sha256":  "5485bbb3675830ab386b02b29c0fbe012764c4f04fb2573cac32985716589db6"
+                                                     },
+                                                     {
+                                                         "Path":  "MRM.dll",
+                                                         "Sha256":  "f1f4e564d780e24a6601882ffcc009f10c1ab98943254a141b83c438e5a8d509"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.ApplicationModel.DynamicDependency.winmd",
+                                                         "Sha256":  "73503bf84eacbf462566a8e9a615c99e9394a0a208406fb4721d4fccce58d9f6"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Graphics.winmd",
+                                                         "Sha256":  "a7d081cedaf9ffc4d96262ee7f22dd847ea0c8d5d3625521bc7f5fe69f40665e"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.InputStateManager.dll",
+                                                         "Sha256":  "fb9944c60e136d14421cef822073b33248bd479fd352271fbc45e61b3180899d"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Internal.FrameworkUdk.dll",
+                                                         "Sha256":  "42ec1fe202bdd84d0d1cc93743bb520fc0d13fa32fc1217f46686f8c1690f111"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Graphics.ImagingInternal.ImageObjectRemover.winmd",
+                                                         "Sha256":  "0f070f0740da6d4c697280521c752a118045f99093ccef82009b3c53c3c794e0"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Graphics.ImagingInternal.winmd",
+                                                         "Sha256":  "9423a5ed6c030c82c184cde197fe66b58c8ca70f8b41c6cce1c8d8e1affa1265"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Graphics.Internal.Imaging.winmd",
+                                                         "Sha256":  "b5c8632c851baffa9be1dfebaa794c9a4cda4ee4efca51a1e192eb7106da8dfc"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Security.Authentication.OAuth.winmd",
+                                                         "Sha256":  "6ad8dc518a973c0758a2aa3b2c9b9baa95f92c99b679eaee758a1577a7c26975"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Input.dll",
+                                                         "Sha256":  "7a23bd40172a35a8516bd5950053e19a585ded83f1e72c5a3d2879306ff97922"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Text.winmd",
+                                                         "Sha256":  "c31eafd592ea0199e2ab0cda06d23db533f8c62126819fff19c46a7db18779d7"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Windowing.Core.dll",
+                                                         "Sha256":  "ff2c5b7a3b1b36873cb462d5e3dae27c7887d65bdab9ae2f9dca61b4eed70a97"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Composition.OSSupport.dll",
+                                                         "Sha256":  "0b570e1db4888e4077a2ab77b97e6f1fcc7e67d23d81d096ecaed1975da46680"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Designer.dll",
+                                                         "Sha256":  "dc87800a0f9c01b68c88c51d295f2a588a5a709e38e9e6e7c8b450c335de28ad"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.dll",
+                                                         "Sha256":  "89774b2b23586807dd9d3c636c4d668deb2f4b7a000e2fb06edb389a44f4cefd"
+                                                     },
+                                                     {
+                                                         "Path":  "DirectML.dll",
+                                                         "Sha256":  "257c75b2f607940c986d0b96d9309a2c897e57ef3192b6c678d707c22d747611"
+                                                     },
+                                                     {
+                                                         "Path":  "dwmcorei.dll",
+                                                         "Sha256":  "c8fee14add00b80759375b642db0f9935ffb422d5bdee694e512ccd02a79090d"
+                                                     },
+                                                     {
+                                                         "Path":  "DwmSceneI.dll",
+                                                         "Sha256":  "fe3018acfb87cfabc0b5bfd5028b3c132817a39e816a1b5199b7022671897768"
+                                                     },
+                                                     {
+                                                         "Path":  "CoreMessagingXP.dll",
+                                                         "Sha256":  "c6d3a66183da33b558abb14cc83c609048a8405c29fbf8ab3ee35e27d36c440a"
+                                                     },
+                                                     {
+                                                         "Path":  "dcompi.dll",
+                                                         "Sha256":  "e8a7f36de274c83309b9142ad78ecb91ca1feb9465d5a0feedbecdf560c02c78"
+                                                     },
+                                                     {
+                                                         "Path":  "DeploymentAgent.exe",
+                                                         "Sha256":  "653f0c715dd1d74ba199c4b3d2e9de48da5df92933c30b8fea67a92230b263ab"
+                                                     },
+                                                     {
+                                                         "Path":  "DWriteCore.dll",
+                                                         "Sha256":  "426674b9c74612bd2a29d0812212faf0641ad93a48521aeb58eb9a50fac8708d"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Graphics.Display.dll",
+                                                         "Sha256":  "6427d2511d5119d266303fbecf0fba99438500a7b904009a7055e4f976a032ea"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Graphics.Imaging.dll",
+                                                         "Sha256":  "3bc81891d6837352232581914ea446841fd457dad5451d43786c27aa1c43e697"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Graphics.Imaging.winmd",
+                                                         "Sha256":  "1078e63fd77cb11733a7a8f9053a2f450ef089765afdaa3adfd52174c2351664"
+                                                     },
+                                                     {
+                                                         "Path":  "marshal.dll",
+                                                         "Sha256":  "639ef9736d7029940749561fd6ed2deb2aac9c42d47b1088afdbdba90ec7ae78"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.DirectManipulation.dll",
+                                                         "Sha256":  "8eb6da8e42f418996d80302ddfac9492f6d63810680d5ebe85dabd2be88098c5"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Foundation.winmd",
+                                                         "Sha256":  "afa7477691fe6470e5f1440f02f64416c70a29bcf6155a445d30cf6351b4cdd6"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Windowing.dll",
+                                                         "Sha256":  "5d6f9fb4316485528b1931b90ae6f374bbcef7468f9b38187205972b8ff95388"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.Imaging.winmd",
+                                                         "Sha256":  "95a70163e9b2262715b486a8a4feae03143273e3d8f742ac8361ec23e96a53f9"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.MachineLearning.dll",
+                                                         "Sha256":  "bbbb34415d8ce303f8a2a2c524c46bd749e21423ccabeb7d38c5fc7334a7848f"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.MachineLearning.winmd",
+                                                         "Sha256":  "372d4e6c55c0f003ffa97f3d4d68584f40eb7c9643bf16f5e8c71ac35b91f020"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.FoundationInternal.winmd",
+                                                         "Sha256":  "68c3d09e248c438de5441bfcfb94695f1bb7ee64406a9a2e9fb9d9f1e6238d66"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.GenerativeInternal.winmd",
+                                                         "Sha256":  "0804935350f7b031eeffb0fc80d9896da1fd4c27bc88153a70c9830c747b8cf2"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.Imaging.dll",
+                                                         "Sha256":  "e2bc9056b7c3e53ac857ca66e1ca644ac0fa2c151f943c96dd7e95487007eb5d"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.Text.dll",
+                                                         "Sha256":  "a50a5a23cdca1ebe22615de423e894dc729db555da67b1cb3efc8ad8feec49c7"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.winmd",
+                                                         "Sha256":  "ff837bcad9dc667ee638f1e927e6dfd482645d8c797542f6d6f21b63dd2a7364"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.winmd",
+                                                         "Sha256":  "b782720b56865063e064eb5b37a9e93ac5e2ed2e585f1f357f36d50244138c7c"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.ApplicationModel.Background.winmd",
+                                                         "Sha256":  "f2c4cc3d9baf0ce5fee75861f7340b10b0e2a0cc5a4b5f667a4cb217fa40e035"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.Text.winmd",
+                                                         "Sha256":  "a79129e5a8b28d2365aad546f46a266322339cf53f2cf59a7641f9b89e9137f6"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.Video.dll",
+                                                         "Sha256":  "70179f65dda57a14edd8effd22bc1c9c33e43be87797ed4691c153a09ff00d29"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.Video.winmd",
+                                                         "Sha256":  "7362d9a15832d312ae2bf149b3735ffd16f41bb51e70c7dd257a94479c3163b6"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Xaml.Internal.dll",
+                                                         "Sha256":  "2fcef08faeb8abad39d264bb9d673d8570c3223c559ec7bb42d83908eb9ce836"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Xaml.Phone.dll",
+                                                         "Sha256":  "537e0ca9e62a2165b148d3b5aa47e3f0e76db8a7d1ec49d34591a1cb8ab5c7b0"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.ui.xaml.resources.19h1.dll",
+                                                         "Sha256":  "79a52c769d3af54a51d47ab90d50c96b1af62dcdb6644a4590124a559af74c04"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.winmd",
+                                                         "Sha256":  "49699d989516c87cc8c83cc3d6335f29a80759f91358e04f3054cc2fd09a99a5"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Xaml.Controls.dll",
+                                                         "Sha256":  "bfb7ee4e86f00b9365fa50deca8d30bf32c71acaa536779d20dcf17ae32ec725"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.ui.xaml.dll",
+                                                         "Sha256":  "b241f72bfc9460e823d8a122fbdbc2e2d7ac6ba60b9e5bf981e9b5054d4555b5"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.ui.xaml.resources.common.dll",
+                                                         "Sha256":  "60d18fc33ff12eadb9a5e025adcb9e70bb67f24e42793ab44a467bd5a5e24d11"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.ContentSafety.dll",
+                                                         "Sha256":  "9023ac859fcb593dd41c69447d3b8e1cc073f08cb43fc83243101c8e8542c082"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.ContentSafety.winmd",
+                                                         "Sha256":  "f995c47e6de509530515bb7df0863613559cf53f6b53395371eaf8329600f7c8"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.Foundation.winmd",
+                                                         "Sha256":  "82f3335c9313d08bfbdbd9b6a56acd9d8f07b2f1086dbfbc0c7829741bfb210f"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.UI.Xaml.winmd",
+                                                         "Sha256":  "4c88a75617b7f3436dc130f6d2933a064955628dedf424493516ec97905cbe01"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.AICapabilities.dll",
+                                                         "Sha256":  "f62e4e2aeb9595c45b794ac4633f7c6b69784b79833c10bdd2d6586dfe257181"
+                                                     },
+                                                     {
+                                                         "Path":  "Microsoft.Windows.AI.ContentModerationInternal.winmd",
+                                                         "Sha256":  "0f833ba1554287c17f7910720857ea2a8b8af5adf8c25a49a635f49254b92b5b"
+                                                     }
+                                                 ]
+                       }
+}

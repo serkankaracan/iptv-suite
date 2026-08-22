@@ -277,7 +277,7 @@ function Assert-ManifestPolicy {
         $frameworkDependencies = @($Manifest.SelectNodes("/*[local-name()='Package']/*[local-name()='Dependencies']/*[local-name()='PackageDependency']"))
         if ($frameworkDependencies.Count -ne 1 -or
             $frameworkDependencies[0].GetAttribute("Name") -ne "Microsoft.WindowsAppRuntime.2" -or
-            $frameworkDependencies[0].GetAttribute("MinVersion") -ne "2.3.1.0") {
+            $frameworkDependencies[0].GetAttribute("MinVersion") -ne "2.4.0.0") {
             throw "The lifecycle MSIX must use the exact Windows App Runtime dependency."
         }
     }

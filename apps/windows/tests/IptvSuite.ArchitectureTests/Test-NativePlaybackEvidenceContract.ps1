@@ -721,7 +721,7 @@ $script:expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
 $script:expectedRuntimeDependencyPublisher =
     "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
 $script:expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
-$script:expectedRuntimeDependencyVersion = "2.3.1.0"
+$script:expectedRuntimeDependencyVersion = "2.4.0.0"
 $script:expectedRuntimeDependencyArchitectures = @("X64", "X86")
 $global:runtimeCleanupClock = [datetime]::Parse("2026-08-22T00:00:00Z").ToUniversalTime()
 $global:runtimeCleanupCurrentPackages = @()
@@ -848,12 +848,12 @@ $runtimeWrongFamily = New-RuntimePackageRecord `
 
 Invoke-RuntimeValidationScenario `
     -Before @() `
-    -Current @($runtimeX64V231) `
+    -Current @($runtimeX64V24) `
     -ExpectFailure $false `
     -Name "exact locked dependency becomes shared runtime state"
 Invoke-RuntimeValidationScenario `
     -Before @() `
-    -Current @($runtimeX64V231, $runtimeX64V231) `
+    -Current @($runtimeX64V24, $runtimeX64V24) `
     -ExpectFailure $true `
     -Name "duplicate shared runtime registration"
 Invoke-RuntimeValidationScenario `

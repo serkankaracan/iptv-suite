@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi, Windows-native Tier A fallback 100 switch/120 dakika developer soak'ı geçti fakat tam acceptance ve Samsung kararları açık
+**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi. Windows-native Tier A fallback'ın eski dependency graph'ındaki 100 switch/120 dakika developer soak sonucu tarihseldir; Windows App SDK 2.4.0 supply-chain rebaseline'i ve tam acceptance açıktır
 
 M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8'e bırakıldı”, `Proposed` veya “açık” ifadelerini supersede eder; exact kabul bağı [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
@@ -13,6 +13,8 @@ M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8
 Windows MVP için önerilen stack **C# / .NET 10 LTS + WinUI 3 + güncel stable Windows App SDK + framework-dependent MSIX**'tir. Uygulama tek process'li modular monolith olacak; presentation, application, domain ve infrastructure sınırları korunacaktır. Windows UI kararı playback motorundan ayrıdır.
 
 M10'da incelenen **libVLC + LibVLCSharp.WinUI** exact candidate'i restored native payload'daki GPL-risk plugin ve kapanmayan binary-to-source/notices zinciri nedeniyle reddedilmiştir. Windows native media API'leri ADR-007 kapsamında dar Tier A fallback olarak yeniden spike edilir. Gerçek Windows Client disposable MSIX koşusu 100 switch ve 120 dakika developer soak'ı geçti; ayrı schema-7 koşusu 100/100 exact source detachment'ı, detach p95 `7,986 ms`/maksimum `9,493 ms`, sıfır playback retry ve tek sentetik network interruption/recovery ile **PARTIAL VERIFIED** yaptı. Post-`Source=null` `PlaybackSession` sorgusunun `COM E_FAIL (0x80004005)` üretmesi üzerine ownership invariant'ı `CanPause` guard → exact `Source is null` → owned `MediaSource.Dispose()` olarak düzeltildi. Bu sonuç OS session quiescence veya ghost-audio yokluğunu kanıtlamaz; 8 saat, WACK, kalan surface/network, device/HW-decode, multi-monitor/display-change, audio-device ve sleep/resume matrisi henüz kapanmadı. [Session-lifecycle evidence](../quality/M10_NATIVE_TIER_A_SESSION_LIFECYCLE_EVIDENCE.md). Temiz OS'te HEVC/AC-3/E-AC-3 ve HEVC-in-TS kapsamı geniş ürün sözü değildir.
+
+`VERIFIED — 2026-08-22`: Önceki `Microsoft.WindowsAppSDK 2.3.1 → Microsoft.WindowsAppSDK.WinUI 2.3.0` graph'ındaki gömülü Engineering Preview lisansı live-environment/dağıtım sınırları taşıyordu. Microsoft issue #6654, etkilenen WinUI sürümlerini ve yayımlamadan önce geçilmesi gereken `Windows App SDK 2.4.0 → WinUI 2.3.6` düzeltmesini kaydeder [S121][S122]. Yeni exact NuGet paket/imza/license audit'i bu spesifik çelişkinin giderildiğini teknik olarak doğrulamıştır; fakat package/runtime binary seti değiştiğinden yukarıdaki playback, lifecycle ve developer-soak sonuçları güncel graph için acceptance değil, tarihsel kanıttır. Fail-closed inventory/SBOM gate'i ve successor hosted/device doğrulamaları tamamlanmadan ADR-007 `Accepted`, M10 `Completed` veya M11 başlangıcı yazılmaz.
 
 Platformlar aynı UI/player implementation'ını paylaşmayacaktır. Samsung ayrı Tizen Web + AVPlay, Android Kotlin + Media3, Apple Swift + AVFoundation/AVKit yönündedir. Paylaşım; versioned terminology, contracts, error codes ve sentetik test vectors ile sınırlıdır. İlk organizasyon modeli, platform sınırları kesin bir monorepo'dur.
 
@@ -165,7 +167,7 @@ WPF aktif ve güçlü fallback'tir; deprecated değildir. WinUI surface hard gat
 
 ### C.3 OS, architecture ve Store baseline
 
-- M1 baseline: .NET SDK 10.0.302 / runtime 10.0.10 LTS, WASDK stable 2.3.1, Windows SDK BuildTools 10.0.26100.8249. M2'de SDK resolution `global.json` ile `rollForward: disable` ve `allowPrerelease: false` olarak exact hale getirilmiştir.
+- İlk M1 baseline'ı .NET SDK 10.0.302 / runtime 10.0.10 LTS, WASDK stable 2.3.1 ve Windows SDK BuildTools 10.0.26100.8249 idi. 2026-08-22 supply-chain rebaseline'i central WASDK target'ını stable `2.4.0`a ve çözülen WinUI'ı `2.3.6`ya yükseltir; SDK resolution `global.json` ile `rollForward: disable` ve `allowPrerelease: false` olarak exact kalır [S121][S122].
 - Preview/Experimental dependency yoktur.
 - Engineering baseline: x64 Windows 11 build 10.0.26100+. Nihai product support alt sınırı M15 market/Store/clean-device verisiyle yeniden doğrulanır.
 - x64 ilk hedef; ARM64 yalnız bütün native DLL/plugin ve performance gate'leri geçerse.
@@ -424,6 +426,8 @@ Apple tarafında privacy policy, App Privacy beyanı, third-party service/stream
 
 Non-GPL/LGPL paket seçmek codec patentlerini veya content rights'ı çözmez. M10/M15'te exact binary/SBOM/notices; ticari yayın öncesi hedef ülke ve iş modeline göre uzman IP hukuk incelemesi hard gate'tir. Bu rapor hukuki görüş değildir.
 
+Windows App SDK `2.4.0` ve WinUI `2.3.6` exact paketlerinin Microsoft/NuGet imzaları ile gömülü license içeriğinin doğrulanması yalnız bu upstream dosyalar için teknik provenance sağlar. Fail-closed package inventory/SBOM hosted geçişi de tek başına ürün lisans kabulü değildir: repository kök `LICENSE`/`NOTICE`, app asset provenance'i, sentetik corpus sahipliği/CC0 dağıtım hakkı ve codec/patent uzman incelemesi M10–M15 gate'lerinde açık kalır.
+
 ### G.6 Privacy
 
 Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için privacy policy gerekir. Policy; local processing, doğrudan provider trafiği, retention/cache, deletion, support ve üçüncü taraf SDK bulunmadığını açıklamalıdır. KVKK bakımından cihaz-içi modelde yayıncının rolü/VERBİS/yurt dışı aktarımı uzman görüşü ister. Aydınlatma ve açık rıza ayrı tutulur; gereksiz rıza istenmez.
@@ -432,7 +436,7 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 
 | ID | Durum | Soru/varsayım | Kapatma yöntemi | Owner/milestone |
 |---|---|---|---|---|
-| O1 | PARTIAL | ADR-007 Windows-native Tier A fallback tam reference matrix, WinUI surface ve MSIX acceptance'ını geçer mi? 100 switch/120 dakika developer soak VERIFIED; resize/minimize/restore/fullscreen, tek HTTP interruption/recovery ve 100/100 exact source-detachment packaged alt kümeleri PARTIAL VERIFIED. Source detachment OS session quiescence/ghost-audio kanıtı değildir. 8 saat, WACK, kalan surface/network, device/HW-decode, multi-monitor/display-change, audio-device ve sleep/resume matrisi açık. | [Session lifecycle](../quality/M10_NATIVE_TIER_A_SESSION_LIFECYCLE_EVIDENCE.md) + M10 full matrix + 8 saat soak + WACK | Playback / M10 |
+| O1 | PARTIAL / REBASELINE | ADR-007 Windows-native Tier A fallback tam reference matrix, WinUI surface ve MSIX acceptance'ını geçer mi? Eski `2.3.1 → WinUI 2.3.0` graph'ında 100 switch/120 dakika developer soak VERIFIED; resize/minimize/restore/fullscreen, tek HTTP interruption/recovery ve 100/100 exact source-detachment packaged alt kümeleri PARTIAL VERIFIED idi. `2.4.0 → WinUI 2.3.6` upgrade'i binary setini değiştirdiği için bunlar tarihsel kanıttır. Fail-closed package inventory/SBOM implementation+hosted validation; WACK, gerçek cihaz/HW-decode, kalan surface/lifecycle/soak ve lisans/provenance gate'leri güncel graph'ta yeniden geçmelidir. Source detachment OS session quiescence/ghost-audio kanıtı değildir. | [Session lifecycle](../quality/M10_NATIVE_TIER_A_SESSION_LIFECYCLE_EVIDENCE.md) + S121/S122 supply-chain rebaseline + M10 full matrix + WACK | Playback / M10 |
 | O2 | VERIFIED / CLOSED, 2026-08-21 | Aynı-SQLite-transaction production yönü component bütçelerini ve process-crash old-or-new recovery invariant'ını karşılar mı? | [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) + [Decision evidence](../quality/M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) | Security/Data / M4–M8 |
 | O3 | UNVERIFIED | M1 engineering sınırı 10.0.26100/x64; nihai product minimumu ve ARM64 release talebi nedir? | Market/support data + clean devices | Product / M15 |
 | O4 | UNVERIFIED | Microsoft Store BYO IPTV modelini kabul eder mi? | Partner Center private/pre-certification | Product/Legal / M15 |

@@ -634,7 +634,7 @@ public static class NativePlaybackEvidenceValidator
             version.Revision < 0 ||
             !string.Equals(version.ToString(4), text, StringComparison.Ordinal) ||
             version.Major != 2 ||
-            version < new Version(2, 3, 1, 0))
+            version < new Version(2, 4, 0, 0))
         {
             throw InvalidProperty("ResolvedWindowsAppRuntimeVersion");
         }

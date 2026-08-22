@@ -197,7 +197,7 @@ public sealed class DependencyRulesTests
                 StringComparer.Ordinal);
         Dictionary<string, string> expected = new(StringComparer.Ordinal)
         {
-            ["Microsoft.WindowsAppSDK"] = "2.3.1",
+            ["Microsoft.WindowsAppSDK"] = "2.4.0",
             ["Microsoft.Windows.SDK.BuildTools"] = "10.0.26100.8249",
             ["Microsoft.Extensions.TimeProvider.Testing"] = "10.8.0",
             ["Microsoft.Data.Sqlite"] = "10.0.11",
@@ -3047,7 +3047,9 @@ public sealed class DependencyRulesTests
         {
             StringAssert.Contains(startupDiagnosticLog, diagnosticLabel);
         }
-        StringAssert.Contains(controller, "foreach ($staleEvidence in @($evidencePath, $failureEvidencePath))");
+        StringAssert.Contains(
+            controller,
+            "foreach ($staleEvidence in @($evidencePath, $failureEvidencePath, $packageInventoryEvidencePath))");
         StringAssert.Contains(controller, "if (@(Get-RepositoryStatus).Count -ne 0)");
         StringAssert.Contains(controller, "$repositoryHead = Get-RepositoryHead");
         StringAssert.Contains(controller, "$controllerScriptSha256 = Get-RegularFileSha256 -Path $PSCommandPath");
@@ -3329,6 +3331,83 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             contractCompleted && contractProcess.ExitCode == 0,
             $"Native playback evidence AST contract failed.{Environment.NewLine}{contractOutput}{contractError}");
+    }
+
+    [TestMethod]
+    public void NativePlaybackPackageInventoryIsExactAndFailsClosed()
+    {
+        string controller = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsNativePlaybackSmoke.ps1"));
+        string workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-quality.yml"));
+        string validator = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Test-WindowsNativePlaybackPackageInventory.ps1");
+        string specification = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.NativePlaybackCompatibilitySpike",
+            "package-inventory.json");
+
+        Assert.IsTrue(File.Exists(validator));
+        Assert.IsTrue(File.Exists(specification));
+        StringAssert.Contains(controller, "Set-FailurePoint -Stage \"PackageInventory\" -Code \"PackageInventoryMismatch\"");
+        StringAssert.Contains(controller, "& $inventoryValidatorPath `");
+        StringAssert.Contains(controller, "-SpecificationPath $inventorySpecificationPath `");
+        StringAssert.Contains(controller, "-EvidencePath $packageInventoryEvidencePath");
+        StringAssert.Contains(workflow, ".artifacts/native-playback-smoke/package-inventory.json");
+
+        string selfTest = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ArchitectureTests",
+            "Test-NativePlaybackPackageInventory.ps1");
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(File.Exists(windowsPowerShell), "Windows PowerShell 5.1 is required for the inventory contract.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(selfTest);
+
+        using Process contractProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The package inventory self-test could not start.");
+        bool contractCompleted = contractProcess.WaitForExit(60_000);
+        if (!contractCompleted)
+        {
+            contractProcess.Kill(entireProcessTree: true);
+            contractProcess.WaitForExit();
+        }
+
+        string contractOutput = contractProcess.StandardOutput.ReadToEnd();
+        string contractError = contractProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            contractCompleted && contractProcess.ExitCode == 0,
+            $"Native playback package inventory contract failed.{Environment.NewLine}{contractOutput}{contractError}");
     }
 
     [TestMethod]

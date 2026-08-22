@@ -520,6 +520,9 @@ namespace IptvSuite.NativePlaybackSmoke
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.NativePlaybackCompatibilitySpike\IptvSuite.NativePlaybackCompatibilitySpike.csproj"
 $manifestPath = Join-Path (Split-Path -Parent $projectPath) "Package.appxmanifest"
+$lockFilePath = Join-Path (Split-Path -Parent $projectPath) "packages.lock.json"
+$inventorySpecificationPath = Join-Path (Split-Path -Parent $projectPath) "package-inventory.json"
+$inventoryValidatorPath = Join-Path $repositoryRoot "eng\Test-WindowsNativePlaybackPackageInventory.ps1"
 $fixtureRoot = Join-Path $repositoryRoot "apps\windows\tests\fixtures\playback\tier-a"
 $fixtureManifestPath = Join-Path $fixtureRoot "fixture-manifest.json"
 $artifactRoot = Join-Path $repositoryRoot ".artifacts\native-playback-smoke"
@@ -531,6 +534,7 @@ $signingCertificatePath = Join-Path $artifactRoot "$runId-signing.cer"
 $tlsCertificatePath = Join-Path $artifactRoot "$runId-tls.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
 $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
+$packageInventoryEvidencePath = Join-Path $artifactRoot "package-inventory.json"
 $expectedControllerPath = Join-Path $repositoryRoot "eng\Invoke-WindowsNativePlaybackSmoke.ps1"
 $expectedName = "NativePlaybackCompatibilitySpike.Local.a47d1387"
 $expectedPublisher = "CN=Native Playback Compatibility Spike Local Test"
@@ -540,10 +544,13 @@ $expectedPackageFamilyName = "NativePlaybackCompatibilitySpike.Local.a47d1387_6c
 $expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
 $expectedRuntimeDependencyPublisher = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
 $expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
-$expectedRuntimeDependencyVersion = "2.3.1.0"
+$expectedRuntimeDependencyVersion = "2.4.0.0"
 $expectedRuntimeDependencyArchitectures = @("X64", "X86")
-$expectedRuntimeNuGetVersion = "2.3.1"
+$expectedRuntimeNuGetVersion = "2.4.0"
 $projectAssetsPath = Join-Path (Split-Path -Parent $projectPath) "obj\project.assets.json"
+$depsFilePath = Join-Path `
+    (Split-Path -Parent $projectPath) `
+    "bin\x64\$Configuration\net10.0-windows10.0.26100.0\win-x64\IptvSuite.NativePlaybackCompatibilitySpike.deps.json"
 $h264DecoderClass = "Registry::HKEY_CLASSES_ROOT\CLSID\{62CE7E72-4C71-4D20-B15D-452831A87D9D}\InprocServer32"
 $aacDecoderClass = "Registry::HKEY_CLASSES_ROOT\CLSID\{32D186A7-218F-4C75-8876-DD77273A8999}\InprocServer32"
 $signingCertificate = $null
@@ -1477,10 +1484,17 @@ try {
             [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "The native playback controller path is unexpected."
     }
+    foreach ($trackedInventoryInput in @(
+            $manifestPath,
+            $lockFilePath,
+            $inventorySpecificationPath,
+            $inventoryValidatorPath)) {
+        Assert-RegularFile -Path $trackedInventoryInput
+    }
     New-RegularDirectory -Path (Join-Path $repositoryRoot ".artifacts")
     New-RegularDirectory -Path $artifactRoot
     New-RegularDirectory -Path $packagesRoot
-    foreach ($staleEvidence in @($evidencePath, $failureEvidencePath)) {
+    foreach ($staleEvidence in @($evidencePath, $failureEvidencePath, $packageInventoryEvidencePath)) {
         if (Test-Path -LiteralPath $staleEvidence) {
             Remove-ExactOwnedFile -Path $staleEvidence -ExpectedParent $artifactRoot
         }
@@ -1633,6 +1647,17 @@ try {
     if ((Get-RegularFileSha256 -Path $lockedRuntimeDependencyPath) -cne $runtimeDependencyPackageSha256) {
         throw "The supplied Windows App Runtime package differs from the locked restore input."
     }
+    Set-FailurePoint -Stage "PackageInventory" -Code "PackageInventoryMismatch"
+    & $inventoryValidatorPath `
+        -PackagePath $packages[0].FullName `
+        -RuntimePackagePath $dependencies[0].FullName `
+        -LockFilePath $lockFilePath `
+        -AssetsFilePath $projectAssetsPath `
+        -DepsFilePath $depsFilePath `
+        -ManifestPath $manifestPath `
+        -SpecificationPath $inventorySpecificationPath `
+        -EvidencePath $packageInventoryEvidencePath
+    Assert-RegularFile -Path $packageInventoryEvidencePath
     $harnessAssemblySha256 = Get-PackageEntrySha256 `
         -PackagePath $packages[0].FullName `
         -EntryName "IptvSuite.NativePlaybackCompatibilitySpike.dll"

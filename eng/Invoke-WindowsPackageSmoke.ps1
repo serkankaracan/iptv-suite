@@ -546,8 +546,8 @@ function Assert-BuiltManifestPolicy {
     $frameworkDependencies = @($Manifest.SelectNodes("/*[local-name()='Package']/*[local-name()='Dependencies']/*[local-name()='PackageDependency']"))
     if ($frameworkDependencies.Count -ne 1 -or
         $frameworkDependencies[0].GetAttribute("Name") -ne "Microsoft.WindowsAppRuntime.2" -or
-        $frameworkDependencies[0].GetAttribute("MinVersion") -ne "2.3.1.0") {
-        throw "The MSIX must remain framework-dependent on Windows App Runtime 2.3.1."
+        $frameworkDependencies[0].GetAttribute("MinVersion") -ne "2.4.0.0") {
+        throw "The MSIX must remain framework-dependent on Windows App Runtime 2.4.0."
     }
 }
 
