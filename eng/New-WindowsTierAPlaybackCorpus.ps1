@@ -46,6 +46,135 @@ if ($versionExitCode -ne 0 -or $versionLine.IndexOf($expectedToolVersion, [Strin
     throw "Expected FFmpeg generator $expectedToolVersion, received '$versionLine'."
 }
 
+function Get-FirstPacketMetadata {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path,
+
+        [Parameter(Mandatory)]
+        [string] $StreamSelector
+    )
+
+    $packetProbeOutput = @()
+    $packetProbeExitCode = -1
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $packetProbeOutput = @(& $ffprobe `
+            -v error -select_streams $StreamSelector -read_intervals '%+#1' `
+            -show_entries 'packet=pts_time,dts_time,flags' -of json `
+            $Path 2>&1)
+        $packetProbeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($packetProbeExitCode -ne 0) {
+        throw "FFprobe failed to inspect the first $StreamSelector packet in $([IO.Path]::GetFileName($Path))."
+    }
+
+    $packetProbeText = [string]::Join("`n", [string[]]@(
+        $packetProbeOutput | ForEach-Object { [string]$_ }))
+    $packetProbe = $packetProbeText | ConvertFrom-Json
+    $packets = @($packetProbe.packets)
+    $ptsTime = 0.0
+    $dtsTime = 0.0
+    if ($packets.Count -ne 1 -or
+        -not [double]::TryParse(
+            [string]$packets[0].pts_time,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$ptsTime) -or
+        -not [double]::TryParse(
+            [string]$packets[0].dts_time,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$dtsTime) -or
+        [double]::IsNaN($ptsTime) -or
+        [double]::IsInfinity($ptsTime) -or
+        [double]::IsNaN($dtsTime) -or
+        [double]::IsInfinity($dtsTime)) {
+        throw "The first $StreamSelector packet metadata in $([IO.Path]::GetFileName($Path)) is ambiguous."
+    }
+
+    [pscustomobject]@{
+        PtsTime = $ptsTime
+        DtsTime = $dtsTime
+        Flags = [string]$packets[0].flags
+    }
+}
+
+function Get-PacketTimeline {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path,
+
+        [Parameter(Mandatory)]
+        [string] $StreamSelector
+    )
+
+    $timelineProbeOutput = @()
+    $timelineProbeExitCode = -1
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $timelineProbeOutput = @(& $ffprobe `
+            -v error -select_streams $StreamSelector `
+            -show_entries 'stream=time_base:packet=pts,dts,duration,flags' -of json `
+            $Path 2>&1)
+        $timelineProbeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($timelineProbeExitCode -ne 0) {
+        throw "FFprobe failed to inspect the $StreamSelector packet timeline in $([IO.Path]::GetFileName($Path))."
+    }
+
+    $timelineProbeText = [string]::Join("`n", [string[]]@(
+        $timelineProbeOutput | ForEach-Object { [string]$_ }))
+    $timelineProbe = $timelineProbeText | ConvertFrom-Json
+    $streams = @($timelineProbe.streams)
+    $packets = @($timelineProbe.packets)
+    if ($streams.Count -ne 1 -or
+        [string]$streams[0].time_base -notmatch '^\d+/\d+$' -or
+        $packets.Count -eq 0) {
+        throw "The $StreamSelector packet timeline in $([IO.Path]::GetFileName($Path)) is ambiguous."
+    }
+
+    $rows = @($packets | ForEach-Object {
+        $pts = 0L
+        $dts = 0L
+        $duration = 0L
+        $flags = [string]$_.flags
+        if (-not [long]::TryParse(
+                [string]$_.pts,
+                [Globalization.NumberStyles]::Integer,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$pts) -or
+            -not [long]::TryParse(
+                [string]$_.dts,
+                [Globalization.NumberStyles]::Integer,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$dts) -or
+            -not [long]::TryParse(
+                [string]$_.duration,
+                [Globalization.NumberStyles]::Integer,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$duration) -or
+            [string]::IsNullOrWhiteSpace($flags)) {
+            throw "The $StreamSelector packet timeline in $([IO.Path]::GetFileName($Path)) contains an invalid row."
+        }
+
+        "$pts|$dts|$duration|$flags"
+    })
+
+    [pscustomobject]@{
+        TimeBase = [string]$streams[0].time_base
+        Rows = [string[]]$rows
+    }
+}
+
 New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 try {
     $directPath = Join-Path $stagingRoot 'direct-h264-aac.ts'
@@ -62,13 +191,15 @@ try {
         -f mpegts $directPath
     if ($LASTEXITCODE -ne 0) { throw 'FFmpeg failed to create the direct Tier A fixture.' }
 
+    $playlistPath = Join-Path $stagingRoot 'hls.m3u8'
     & $ffmpeg `
         -hide_banner -loglevel error -nostdin -y `
         -i $directPath -map '0:v:0' -map '0:a:0' -c copy `
+        -muxdelay 0 -muxpreload 0 `
         -hls_time 2 -hls_list_size 0 -hls_playlist_type vod `
         -hls_flags independent_segments `
         -hls_segment_filename (Join-Path $stagingRoot 'hls-%03d.ts') `
-        (Join-Path $stagingRoot 'hls.m3u8')
+        $playlistPath
     if ($LASTEXITCODE -ne 0) { throw 'FFmpeg failed to create the HLS-TS Tier A fixture.' }
 
     $probeJson = & $ffprobe -v error -show_entries 'stream=index,codec_name,profile,pix_fmt,width,height,r_frame_rate,sample_rate,channels' -show_entries 'format=format_name,duration' -of json $directPath
@@ -86,7 +217,6 @@ try {
     }
     if ($probe.format.format_name -notmatch 'mpegts') { throw 'Tier A direct fixture is not MPEG-TS.' }
 
-    $playlistPath = Join-Path $stagingRoot 'hls.m3u8'
     $playlist = Get-Content -LiteralPath $playlistPath -Raw -Encoding utf8
     if ($playlist -notmatch '#EXT-X-ENDLIST' -or $playlist -match '(?i)(https?://|file:|\\|\.\.)') {
         throw 'The HLS fixture playlist must be finite and contain only local relative segment names.'
@@ -123,26 +253,26 @@ try {
     }
     $segments = @(Get-ChildItem -LiteralPath $stagingRoot -File -Filter 'hls-*.ts' | Sort-Object Name)
     if ($segments.Count -ne 4) { throw "Expected four HLS-TS segments, received $($segments.Count)." }
-    foreach ($segment in $segments) {
-        $previousErrorActionPreference = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = 'Continue'
-            $packetFlagOutput = @(& $ffprobe `
-                -v error -select_streams 'v:0' -read_intervals '%+#1' `
-                -show_entries 'packet=flags' -of 'csv=p=0' `
-                $segment.FullName 2>&1)
-            $packetFlagExitCode = $LASTEXITCODE
-        }
-        finally {
-            $ErrorActionPreference = $previousErrorActionPreference
-        }
-        $packetFlags = @($packetFlagOutput | ForEach-Object { ([string]$_).Trim() } | Where-Object {
-            -not [string]::IsNullOrWhiteSpace($_)
-        })
-        if ($packetFlagExitCode -ne 0 -or
-            $packetFlags.Count -ne 1 -or
-            -not ([string]$packetFlags[0]).StartsWith('K', [StringComparison]::Ordinal)) {
+    $directFirstVideoPacket = Get-FirstPacketMetadata -Path $directPath -StreamSelector 'v:0'
+    $directFirstAudioPacket = Get-FirstPacketMetadata -Path $directPath -StreamSelector 'a:0'
+    for ($segmentIndex = 0; $segmentIndex -lt $segments.Count; $segmentIndex++) {
+        $segment = $segments[$segmentIndex]
+        $firstVideoPacket = Get-FirstPacketMetadata -Path $segment.FullName -StreamSelector 'v:0'
+        $expectedVideoPtsTime = $directFirstVideoPacket.PtsTime + (2.0 * $segmentIndex)
+        $expectedVideoDtsTime = $directFirstVideoPacket.DtsTime + (2.0 * $segmentIndex)
+        if (-not $firstVideoPacket.Flags.StartsWith('K', [StringComparison]::Ordinal)) {
             throw "The first video packet in $($segment.Name) is not a key frame."
+        }
+        if ([Math]::Abs($firstVideoPacket.PtsTime - $expectedVideoPtsTime) -gt 0.000001 -or
+            [Math]::Abs($firstVideoPacket.DtsTime - $expectedVideoDtsTime) -gt 0.000001) {
+            throw "The first video packet timeline in $($segment.Name) is not aligned with the direct fixture."
+        }
+        if ($segmentIndex -eq 0) {
+            $firstAudioPacket = Get-FirstPacketMetadata -Path $segment.FullName -StreamSelector 'a:0'
+            if ([Math]::Abs($firstAudioPacket.PtsTime - $directFirstAudioPacket.PtsTime) -gt 0.000001 -or
+                [Math]::Abs($firstAudioPacket.DtsTime - $directFirstAudioPacket.DtsTime) -gt 0.000001) {
+                throw 'The first HLS audio packet timeline is not aligned with the direct fixture.'
+            }
         }
 
         $previousErrorActionPreference = $ErrorActionPreference
@@ -166,6 +296,51 @@ try {
             $traceText -notmatch '(?m)^\[trace_headers[^\]]*\][^\r\n]*nal_unit_type[^\r\n]*=[ \t]*8[ \t]*\r?$' -or
             $traceText -notmatch '(?m)^\[trace_headers[^\]]*\][^\r\n]*nal_unit_type[^\r\n]*=[ \t]*5[ \t]*\r?$') {
             throw "The first video access unit in $($segment.Name) does not contain SPS, PPS, and IDR NAL units."
+        }
+    }
+
+    foreach ($streamSelector in @('v:0', 'a:0')) {
+        $directTimeline = Get-PacketTimeline -Path $directPath -StreamSelector $streamSelector
+        $hlsTimeline = Get-PacketTimeline -Path $playlistPath -StreamSelector $streamSelector
+        if ($directTimeline.TimeBase -cne $hlsTimeline.TimeBase -or
+            $directTimeline.Rows.Count -ne $hlsTimeline.Rows.Count -or
+            [string]::Join("`n", $directTimeline.Rows) -cne [string]::Join("`n", $hlsTimeline.Rows)) {
+            throw "The HLS $streamSelector packet timeline changed during segmentation."
+        }
+    }
+
+    $elementaryStreamChecks = @(
+        [pscustomobject]@{ Name = 'H.264'; Map = '0:v:0'; Format = 'h264'; Extension = 'h264' }
+        [pscustomobject]@{ Name = 'AAC'; Map = '0:a:0'; Format = 'adts'; Extension = 'aac' }
+    )
+    foreach ($elementaryStreamCheck in $elementaryStreamChecks) {
+        $directElementaryPath = Join-Path $stagingRoot ".direct-parity.$($elementaryStreamCheck.Extension)"
+        $hlsElementaryPath = Join-Path $stagingRoot ".hls-parity.$($elementaryStreamCheck.Extension)"
+        try {
+            & $ffmpeg `
+                -hide_banner -loglevel error -nostdin -y `
+                -i $directPath -map $elementaryStreamCheck.Map -c copy `
+                -f $elementaryStreamCheck.Format $directElementaryPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "FFmpeg failed to extract the direct $($elementaryStreamCheck.Name) parity stream."
+            }
+            & $ffmpeg `
+                -hide_banner -loglevel error -nostdin -y `
+                -i $playlistPath -map $elementaryStreamCheck.Map -c copy `
+                -f $elementaryStreamCheck.Format $hlsElementaryPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "FFmpeg failed to extract the HLS $($elementaryStreamCheck.Name) parity stream."
+            }
+            $directElementary = Get-Item -LiteralPath $directElementaryPath
+            $hlsElementary = Get-Item -LiteralPath $hlsElementaryPath
+            if ($directElementary.Length -ne $hlsElementary.Length -or
+                (Get-FileHash -LiteralPath $directElementaryPath -Algorithm SHA256).Hash -cne
+                    (Get-FileHash -LiteralPath $hlsElementaryPath -Algorithm SHA256).Hash) {
+                throw "The HLS $($elementaryStreamCheck.Name) elementary stream changed during segmentation."
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $directElementaryPath, $hlsElementaryPath -Force -ErrorAction SilentlyContinue
         }
     }
 

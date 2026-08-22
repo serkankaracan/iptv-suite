@@ -33,23 +33,23 @@
                   },
                   {
                       "Path":  "hls-000.ts",
-                      "SizeBytes":  220336,
-                      "Sha256":  "67e0a8a424c11369d1eb193588e05f7e69518c106d05c08c868c246d55c6ec71"
+                      "SizeBytes":  229548,
+                      "Sha256":  "da91b4789dc9b59aa45cbd892f18892f8eb50eaaa3bf9a03cc1972020735e1a3"
                   },
                   {
                       "Path":  "hls-001.ts",
-                      "SizeBytes":  247220,
-                      "Sha256":  "f6ad031b2108f06fea6a29954a6cea471295202b290640c72a8126b42c20f2f0"
+                      "SizeBytes":  256808,
+                      "Sha256":  "01c114c3850b32adc8caf0e558c61e4bed1dd0e363256b848690809c80a8461c"
                   },
                   {
                       "Path":  "hls-002.ts",
-                      "SizeBytes":  228608,
-                      "Sha256":  "198e1988257e1abdc552bd4db5174be1d0253a89f172b579b141c7c0c2a23809"
+                      "SizeBytes":  238196,
+                      "Sha256":  "b6c07a9a6bf8a5ab6eff23c6d1a7d42c8afc5d7b3be7b1604fd7aa77cccb9e98"
                   },
                   {
                       "Path":  "hls-003.ts",
-                      "SizeBytes":  243836,
-                      "Sha256":  "531ae2e0bcd83a4a8d465f6efba06e2b380e1fba2d9428164449502d23b10d97"
+                      "SizeBytes":  253612,
+                      "Sha256":  "1bc412e39ec693773f43048ff0e6247e792871144e09511c97fd1e5bccff1384"
                   }
               ]
 }

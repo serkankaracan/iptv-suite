@@ -2082,9 +2082,36 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(generator, "sine=frequency=1000:sample_rate=48000");
         StringAssert.Contains(generator, "-profile:v high");
         StringAssert.Contains(generator, "-profile:a aac_low");
+        string directGenerationBlock = ExtractRequiredBlock(
+            generator,
+            "$directPath = Join-Path $stagingRoot 'direct-h264-aac.ts'",
+            "throw 'FFmpeg failed to create the direct Tier A fixture.'");
+        string hlsGenerationBlock = ExtractRequiredBlock(
+            generator,
+            "$playlistPath = Join-Path $stagingRoot 'hls.m3u8'",
+            "throw 'FFmpeg failed to create the HLS-TS Tier A fixture.'");
+        Assert.AreEqual(1, Regex.Count(directGenerationBlock, @"-muxdelay\s+0\s+-muxpreload\s+0"));
+        Assert.AreEqual(1, Regex.Count(hlsGenerationBlock, @"-muxdelay\s+0\s+-muxpreload\s+0"));
+        Assert.AreEqual(2, Regex.Count(generator, @"-muxdelay\s+"));
+        Assert.AreEqual(2, Regex.Count(generator, @"-muxpreload\s+"));
+        StringAssert.Contains(hlsGenerationBlock, "-i $directPath");
+        Assert.AreEqual(2, Regex.Count(hlsGenerationBlock, @"\$playlistPath"));
         StringAssert.Contains(generator, "-hls_flags independent_segments");
         StringAssert.Contains(generator, "-read_intervals '%+#1'");
-        StringAssert.Contains(generator, "-show_entries 'packet=flags'");
+        StringAssert.Contains(generator, "-show_entries 'packet=pts_time,dts_time,flags'");
+        StringAssert.Contains(generator, "Get-FirstPacketMetadata");
+        StringAssert.Contains(generator, "[double]::IsNaN");
+        StringAssert.Contains(generator, "[double]::IsInfinity");
+        StringAssert.Contains(generator, "is not aligned with the direct fixture");
+        StringAssert.Contains(generator, "Get-PacketTimeline -Path $directPath");
+        StringAssert.Contains(generator, "Get-PacketTimeline -Path $playlistPath");
+        StringAssert.Contains(generator, "foreach ($streamSelector in @('v:0', 'a:0'))");
+        StringAssert.Contains(generator, "stream=time_base:packet=pts,dts,duration,flags");
+        StringAssert.Contains(generator, "$directTimeline.TimeBase -cne $hlsTimeline.TimeBase");
+        StringAssert.Contains(generator, "$directTimeline.Rows.Count -ne $hlsTimeline.Rows.Count");
+        StringAssert.Contains(generator, "[string]::Join(\"`n\", $directTimeline.Rows)");
+        StringAssert.Contains(generator, "[string]::Join(\"`n\", $hlsTimeline.Rows)");
+        StringAssert.Contains(generator, "packet timeline changed during segmentation");
         StringAssert.Contains(generator, "-bsf:v trace_headers -frames:v 1");
         StringAssert.Contains(generator, "^\\[trace_headers[^\\]]*\\]");
         StringAssert.Contains(generator, "nal_unit_type");
@@ -2095,6 +2122,25 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(generator, "$previousErrorActionPreference = $ErrorActionPreference");
         StringAssert.Contains(generator, "$ErrorActionPreference = 'Continue'");
         StringAssert.Contains(generator, "$ErrorActionPreference = $previousErrorActionPreference");
+        StringAssert.Contains(generator, "Format = 'h264'");
+        StringAssert.Contains(generator, "Format = 'adts'");
+        StringAssert.Contains(generator, "elementary stream changed during segmentation");
+        string elementaryParityBlock = ExtractRequiredBlock(
+            generator,
+            "$elementaryStreamChecks = @(",
+            "$mediaFiles = @(");
+        StringAssert.Contains(
+            elementaryParityBlock,
+            "-i $directPath -map $elementaryStreamCheck.Map -c copy");
+        StringAssert.Contains(
+            elementaryParityBlock,
+            "-i $playlistPath -map $elementaryStreamCheck.Map -c copy");
+        StringAssert.Contains(
+            elementaryParityBlock,
+            "Get-FileHash -LiteralPath $directElementaryPath -Algorithm SHA256");
+        StringAssert.Contains(
+            elementaryParityBlock,
+            "Get-FileHash -LiteralPath $hlsElementaryPath -Algorithm SHA256");
 
         string controller = File.ReadAllText(Path.Combine(
             RepositoryRoot,
@@ -3993,6 +4039,23 @@ public sealed class DependencyRulesTests
     {
         string path = Path.Combine(RepositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
         return XDocument.Load(path, LoadOptions.PreserveWhitespace);
+    }
+
+    private static string ExtractRequiredBlock(string text, string startMarker, string endMarker)
+    {
+        int startIndex = text.IndexOf(startMarker, StringComparison.Ordinal);
+        if (startIndex < 0)
+        {
+            throw new InvalidDataException($"Required block start was not found: {startMarker}");
+        }
+
+        int endIndex = text.IndexOf(endMarker, startIndex + startMarker.Length, StringComparison.Ordinal);
+        if (endIndex < 0)
+        {
+            throw new InvalidDataException($"Required block end was not found: {endMarker}");
+        }
+
+        return text[startIndex..(endIndex + endMarker.Length)];
     }
 
     private static JsonDocument LoadJson(string relativePath)
