@@ -25,6 +25,8 @@ Windows `MediaPlayer` / Media Foundation yalnız Tier A için yeniden spike edil
 
 Schema-9 packaged cleanup sahipliği shared Windows App Runtime'ı disposable test varlığı saymaz. Koşu öncesindeki `Microsoft.WindowsAppRuntime.2` exact package-full-name baseline'ının her kaydı korunur; koşu sonrası ekler yalnız exact Microsoft publisher/family, framework, `>=2.3.1.0` version ve X64/X86 architecture doğrulamasını geçebilir, X86 ise aynı version'da exact X64 sibling gerektirir. Doğrulanmış shared ekler korunur ve `Remove-AppxPackage` ile kaldırılmaz; exact disposable test MSIX'i, app data, process, sertifika ve output cleanup'ı zorunlu kalır [S116]. Evidence `RuntimePackageBaselinePreserved=true`, `RuntimePackageGraphDisposition=ExactRestored|SharedAdditionsPreserved` ve bounded `RuntimePackageSharedAdditionCount` taşır. Bu sözleşme hosted PASS değildir.
 
+`VERIFIED`: Run `32537541013` ilk attempt'inde loopback HLS manifesti ve dört segmentin beş yanıtı eksiksiz tamamlandığı halde ilk `MediaOpened` 5 saniyede gelmedi. Bounded rerun 100 switch ve schema-9 cleanup yolunu tamamladı, ancak startup maximum `5056,3179 ms` ile değişmeyen 5 saniye tavanını aştı; p95 `2157,0052 ms` idi. Lifecycle incelemesi, `OnLaunched` içindeki fire-and-forget async çağrının ilk incomplete await'e kadar senkron ilerleyip ilk `Source`/`Play` çağrısını `MediaPlayerElement.Loaded` öncesinde yaptığını gösterdi. `INFERENCE`: WinUI'nin interaction-ready `Loaded` sınırını beklememek hosted cold-start outlier'ına katkı vermiş olabilir [S117]. Düzeltme, ölçümden önce bounded `Loaded` bariyeri, window-lifetime cancellation ve ayrı `SurfaceReadinessTimeout` failure'ı ekler; startup bütçesini, fixture sırasını veya retry kuralını gevşetmez. Hipotez ve değişiklik hosted yeniden doğrulama bekler.
+
 Bu ADR henüz `Accepted` değildir. Native Tier A corpus %100 başlangıç, controlled-LAN p95 ≤3 saniye, 100 switch/8 saat soak, surface/lifecycle ve package gate'leri geçmeden production adapter yazılmaz.
 
 ## Consequences
@@ -36,4 +38,4 @@ Bu ADR henüz `Accepted` değildir. Native Tier A corpus %100 başlangıç, cont
 
 ## References
 
-[S21–S23, S27, S110–S112, S115–S116](../research/SOURCES.md)
+[S21–S23, S27, S110–S112, S115–S117](../research/SOURCES.md)

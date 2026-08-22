@@ -11,6 +11,9 @@ namespace IptvSuite.NativePlaybackCompatibilitySpike;
 public sealed partial class MainWindow : Window, IDisposable
 {
     private readonly MediaPlayer _mediaPlayer;
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly TaskCompletionSource _surfaceReady =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource<long>? _opened;
     private TaskCompletionSource? _advanced;
     private TaskCompletionSource? _failureSignal;
@@ -28,6 +31,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _mediaPlayer.MediaOpened += MediaPlayer_MediaOpened;
         _mediaPlayer.MediaFailed += MediaPlayer_MediaFailed;
         _mediaPlayer.PlaybackSession.PositionChanged += PlaybackSession_PositionChanged;
+        PlaybackSurface.Loaded += PlaybackSurface_Loaded;
         PlaybackSurface.SetMediaPlayer(_mediaPlayer);
         Closed += MainWindow_Closed;
     }
@@ -38,6 +42,10 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(request);
+        using CancellationTokenSource probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        CancellationToken probeCancellationToken = probeCancellation.Token;
         var startupSamples = new List<double>(request.SwitchCount);
         var hlsStartupSamples = new List<double>((request.SwitchCount + 1) / 2);
         var directStartupSamples = new List<double>(request.SwitchCount / 2);
@@ -45,7 +53,7 @@ public sealed partial class MainWindow : Window, IDisposable
         using Process process = Process.GetCurrentProcess();
         long initialPrivateBytes = process.PrivateMemorySize64;
         int initialHandles = process.HandleCount;
-        NativePlaybackFailure timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
+        NativePlaybackFailure timeoutFailure = NativePlaybackFailure.SurfaceReadinessTimeout;
         int completedSwitchCount = 0;
         int surfaceTransitionCount = 0;
         int detachedSourceCount = 0;
@@ -56,13 +64,16 @@ public sealed partial class MainWindow : Window, IDisposable
 
         try
         {
+            await _surfaceReady.Task.WaitAsync(TimeSpan.FromSeconds(5), probeCancellationToken);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
             for (int index = 0; index < request.SwitchCount; index++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                probeCancellationToken.ThrowIfCancellationRequested();
                 surfaceTransitionCount += await ApplySurfaceTransitionAsync(
                     index,
                     request.SwitchCount,
-                    cancellationToken);
+                    probeCancellationToken);
                 Uri fixture = request.Fixtures[index % request.Fixtures.Count];
                 long startupStarted = Stopwatch.GetTimestamp();
                 double startupMilliseconds = 0;
@@ -79,13 +90,15 @@ public sealed partial class MainWindow : Window, IDisposable
                     {
                         _mediaPlayer.Source = source;
                         _mediaPlayer.Play();
-                        long openedTimestamp = await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+                        long openedTimestamp = await _opened.Task.WaitAsync(
+                            TimeSpan.FromSeconds(5),
+                            probeCancellationToken);
                         startupMilliseconds = Stopwatch.GetElapsedTime(startupStarted, openedTimestamp).TotalMilliseconds;
                         timeoutFailure = NativePlaybackFailure.PlaybackAdvanceTimeout;
-                        await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
+                        await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3), probeCancellationToken);
                         sourceDetachSamples.Add(await DetachSourceAsync(
                             pauseIfSupported: true,
-                            cancellationToken));
+                            probeCancellationToken));
                         sourceDetached = true;
                         detachedSourceCount++;
                         break;
@@ -96,7 +109,7 @@ public sealed partial class MainWindow : Window, IDisposable
                         playbackRetryCount++;
                         sourceDetachSamples.Add(await DetachSourceAsync(
                             pauseIfSupported: false,
-                            cancellationToken));
+                            probeCancellationToken));
                         sourceDetached = true;
                         detachedSourceCount++;
                         retryRequested = true;
@@ -116,7 +129,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
                     if (retryRequested)
                     {
-                        await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                        await Task.Delay(TimeSpan.FromMilliseconds(250), probeCancellationToken);
                     }
                 }
 
@@ -137,7 +150,7 @@ public sealed partial class MainWindow : Window, IDisposable
                     soakStopwatch,
                     resourceSamples,
                     sourceDetachSamples,
-                    cancellationToken);
+                    probeCancellationToken);
                 detachedSourceCount++;
                 if (!soakMetrics.ResourceBudgetPassed)
                 {
@@ -496,8 +509,17 @@ public sealed partial class MainWindow : Window, IDisposable
             process.HandleCount));
     }
 
-    internal void ShowResult(NativePlaybackProbeResult result) =>
-        DispatcherQueue.TryEnqueue(() => StateText.Text = result.Success ? "Passed" : $"Failed: {result.Failure}");
+    internal void ShowResult(NativePlaybackProbeResult result)
+    {
+        if (_disposed) return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_disposed) StateText.Text = result.Success ? "Passed" : $"Failed: {result.Failure}";
+        });
+    }
+
+    private void PlaybackSurface_Loaded(object sender, RoutedEventArgs args) =>
+        _surfaceReady.TrySetResult();
 
     private void MediaPlayer_MediaOpened(MediaPlayer sender, object args)
     {
@@ -525,13 +547,16 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _lifetimeCancellation.Cancel();
         Closed -= MainWindow_Closed;
         _mediaPlayer.MediaOpened -= MediaPlayer_MediaOpened;
         _mediaPlayer.MediaFailed -= MediaPlayer_MediaFailed;
         _mediaPlayer.PlaybackSession.PositionChanged -= PlaybackSession_PositionChanged;
+        PlaybackSurface.Loaded -= PlaybackSurface_Loaded;
         PlaybackSurface.SetMediaPlayer(null);
         _mediaPlayer.Source = null;
         _mediaPlayer.Dispose();
+        _lifetimeCancellation.Dispose();
         GC.SuppressFinalize(this);
     }
 }
@@ -589,6 +614,7 @@ internal enum NativePlaybackFailure
     None,
     InvalidArguments,
     RuntimeDependencyResolutionFailed,
+    SurfaceReadinessTimeout,
     MediaFailed,
     MediaOpenTimeout,
     PlaybackAdvanceTimeout,

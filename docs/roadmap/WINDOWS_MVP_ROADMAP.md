@@ -504,6 +504,8 @@ Proposed libVLC setinin codec/container, WinUI surface, stabilite, lisans ve pac
 
 Schema-9 cleanup sahiplik sözleşmesi, pre-run `Microsoft.WindowsAppRuntime.2` exact package-full-name baseline'ının korunmasını ve post-run eklerin exact Microsoft publisher/family/framework, `>=2.3.1.0` version, X64/X86 architecture ile; X86 için ayrıca aynı-version exact X64 sibling ile doğrulanmasını ister. Shared framework ekleri korunur, `Remove-AppxPackage` ile kaldırılmaz; exact disposable test MSIX/app data/process/certificate/output cleanup'ı zorunlu kalır. Evidence sonucu `RuntimePackageBaselinePreserved=true`, `RuntimePackageGraphDisposition=ExactRestored|SharedAdditionsPreserved` ve bounded `RuntimePackageSharedAdditionCount` ile kaydeder. Bu yalnız kod/static contract durumudur; hosted PASS değildir ve 8 saatlik acceptance soak henüz çalıştırılmamıştır.
 
+`VERIFIED`: Run `32537541013` ilk attempt'i tam HLS transferinden sonra ilk `MediaOpened` timeout'u; bounded rerun ise 100 switch ve schema-9 cleanup tamamlandıktan sonra `5056,3179 ms` startup maximum ihlali verdi (`p95=2157,0052 ms`). İlk measured playback'ın `MediaPlayerElement.Loaded` öncesinde başlatıldığı kod akışında doğrulandı. `INFERENCE`: Interaction-ready `Loaded` sınırının eksikliği hosted cold-start outlier'ına katkı vermiş olabilir [S117]. Bütçeleri veya retry kuralını değiştirmeyen bounded `Loaded` bariyeri, window-lifetime cancellation ve typed `SurfaceReadinessTimeout` eklendi. Hipotez ve checkpoint hosted yeniden doğrulama bekler; M10/ADR-007 durumu ve 8 saatlik acceptance izni değişmez.
+
 ### Kapsam
 
 - Küçük throwaway harness; LibVLCSharp.WinUI 3.10.0 + compatible core + non-GPL VideoLAN.LibVLC.Windows 3.0.23.1 başlangıç seti.

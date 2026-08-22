@@ -2077,6 +2077,11 @@ public sealed class DependencyRulesTests
             "IptvSuite.NativePlaybackCompatibilitySpike");
         string app = File.ReadAllText(Path.Combine(spikeRoot, "App.xaml.cs"));
         string window = File.ReadAllText(Path.Combine(spikeRoot, "MainWindow.xaml.cs"));
+        string normalizedWindow = Regex.Replace(
+            window,
+            @"\s+",
+            " ",
+            RegexOptions.CultureInvariant);
         string xaml = File.ReadAllText(Path.Combine(spikeRoot, "MainWindow.xaml"));
 
         StringAssert.Contains(xaml, "<MediaPlayerElement");
@@ -2109,6 +2114,39 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "switchCount is < 2 or > 100");
         StringAssert.Contains(window, "soakMinutes is < 0 or > 480");
         StringAssert.Contains(window, "soakMinutes > 0 && switchCount != 100");
+        StringAssert.Contains(window, "private readonly TaskCompletionSource _surfaceReady");
+        StringAssert.Contains(window, "private readonly CancellationTokenSource _lifetimeCancellation");
+        StringAssert.Contains(window, "PlaybackSurface.Loaded += PlaybackSurface_Loaded");
+        StringAssert.Contains(
+            window,
+            "await _surfaceReady.Task.WaitAsync(TimeSpan.FromSeconds(5), probeCancellationToken);");
+        StringAssert.Contains(window, "CancellationTokenSource.CreateLinkedTokenSource(");
+        StringAssert.Contains(window, "_lifetimeCancellation.Cancel()");
+        StringAssert.Contains(window, "NativePlaybackFailure.SurfaceReadinessTimeout");
+        StringAssert.Contains(window, "PlaybackSurface.Loaded -= PlaybackSurface_Loaded");
+        int surfaceSubscriptionIndex = window.IndexOf(
+            "PlaybackSurface.Loaded += PlaybackSurface_Loaded",
+            StringComparison.Ordinal);
+        int mediaAttachmentIndex = window.IndexOf(
+            "PlaybackSurface.SetMediaPlayer(_mediaPlayer)",
+            StringComparison.Ordinal);
+        int surfaceWaitIndex = window.IndexOf(
+            "await _surfaceReady.Task.WaitAsync(TimeSpan.FromSeconds(5)",
+            StringComparison.Ordinal);
+        int firstSourceAssignmentIndex = window.IndexOf(
+            "_mediaPlayer.Source = source;",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            surfaceSubscriptionIndex >= 0 && surfaceSubscriptionIndex < mediaAttachmentIndex &&
+            surfaceWaitIndex >= 0 && surfaceWaitIndex < firstSourceAssignmentIndex,
+            "The playback surface must be subscribed and ready before the first measured source assignment.");
+        Assert.AreEqual(
+            2,
+            Regex.Count(
+                window,
+                Regex.Escape("ObjectDisposedException.ThrowIf(_disposed, this);"),
+                RegexOptions.CultureInvariant),
+            "The probe must reject disposal both before and after the readiness boundary.");
         StringAssert.Contains(window, "AppWindow.Resize(new SizeInt32(960, 540))");
         StringAssert.Contains(window, "presenter.Minimize()");
         StringAssert.Contains(window, "presenter.Restore()");
@@ -2137,7 +2175,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "Preserve the primary typed probe failure");
         StringAssert.Contains(window, "private TaskCompletionSource<long>? _opened;");
         StringAssert.Contains(window, "long startupStarted = Stopwatch.GetTimestamp();");
-        StringAssert.Contains(window, "long openedTimestamp = await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
+        StringAssert.Contains(
+            normalizedWindow,
+            "long openedTimestamp = await _opened.Task.WaitAsync( TimeSpan.FromSeconds(5), probeCancellationToken);");
         StringAssert.Contains(window, "Stopwatch.GetElapsedTime(startupStarted, openedTimestamp).TotalMilliseconds");
         StringAssert.Contains(window, "_opened?.TrySetResult(Stopwatch.GetTimestamp())");
         StringAssert.Contains(window, "await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
