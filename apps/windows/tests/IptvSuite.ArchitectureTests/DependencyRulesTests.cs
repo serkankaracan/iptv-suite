@@ -3097,11 +3097,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "$expectedDetachedSourceCount =");
         StringAssert.Contains(controller, "$cancellationSourceDetachCount +");
         StringAssert.Contains(controller, "$cancellationRecoverySourceDetachCount");
-        StringAssert.Contains(controller, "[int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount");
+        StringAssert.Contains(controller, "[int]$probe.DetachedSourceCount -eq $expectedDetachedSourceCount");
         StringAssert.Contains(controller, "DetachedSourceCount = [int]$probe.DetachedSourceCount");
         StringAssert.Contains(controller, "SourceDetachP95Milliseconds -gt 3000");
         StringAssert.Contains(controller, "SourceDetachMaximumMilliseconds -gt 5000");
-        StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
+        StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -le $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "SchemaVersion = 10");
         StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 7");
@@ -3342,6 +3342,10 @@ public sealed class DependencyRulesTests
 
         string[] soakResourceDiagnosticLabels =
         [
+            "completedSwitches=",
+            "detachedSources=",
+            "surfaceTransitions=",
+            "playbackRetries=",
             "soakMinutes=",
             "resourceSamples=",
             "warmupPrivateBytes=",
@@ -3362,6 +3366,43 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             controller,
             "Set-FailurePoint -Stage \"SoakValidation\" -Code \"ResourceBudgetExceeded\"");
+        StringAssert.Contains(controller, "$isCompletedResourceFailure =");
+        StringAssert.Contains(controller, "$isCompletedProbeResult = $probe.Success -eq $true -or $isCompletedResourceFailure");
+        StringAssert.Contains(controller, "if ($isCompletedProbeResult) {");
+        StringAssert.Contains(controller, "$completedLifecycleInvariantPassed =");
+        StringAssert.Contains(controller, "$resourceBudgetPredicateFailed =");
+        StringAssert.Contains(
+            controller,
+            "The native playback resource failure did not preserve completed probe invariants.");
+        StringAssert.Contains(
+            controller,
+            "The native playback resource failure did not identify a failing resource budget predicate.");
+        int resourceFailureBranchIndex = controller.IndexOf(
+            "if ($isCompletedResourceFailure) {",
+            StringComparison.Ordinal);
+        int completedInvariantFailureIndex = controller.IndexOf(
+            "The native playback resource failure did not preserve completed probe invariants.",
+            resourceFailureBranchIndex,
+            StringComparison.Ordinal);
+        int predicateInvariantFailureIndex = controller.IndexOf(
+            "The native playback resource failure did not identify a failing resource budget predicate.",
+            resourceFailureBranchIndex,
+            StringComparison.Ordinal);
+        int canonicalResourceFailurePointIndex = controller.IndexOf(
+            "Set-FailurePoint -Stage \"SoakValidation\" -Code \"ResourceBudgetExceeded\"",
+            resourceFailureBranchIndex,
+            StringComparison.Ordinal);
+        int genericProbeFailureIndex = controller.IndexOf(
+            "if ((-not $isCompletedResourceFailure -and",
+            resourceFailureBranchIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            resourceFailureBranchIndex >= 0 &&
+            completedInvariantFailureIndex > resourceFailureBranchIndex &&
+            predicateInvariantFailureIndex > completedInvariantFailureIndex &&
+            genericProbeFailureIndex > predicateInvariantFailureIndex &&
+            canonicalResourceFailurePointIndex > genericProbeFailureIndex,
+            "The canonical resource failure point must follow completed-result and resource-predicate guards.");
         StringAssert.Contains(
             controller,
             "foreach ($staleEvidence in @($evidencePath, $failureEvidencePath, $packageInventoryEvidencePath))");

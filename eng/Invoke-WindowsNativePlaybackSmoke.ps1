@@ -2433,7 +2433,14 @@ try {
     $cancellationRecoveryUsedFreshSource =
         [bool]$probe.CancellationRecoveryUsedFreshSource
     $cancellationNoAutomaticRestart = [bool]$probe.CancellationNoAutomaticRestart
-    if ($probe.Success -eq $true) {
+    $isCompletedResourceFailure =
+        $probe.Success -eq $false -and
+        [string]::Equals(
+            [string]$probe.Failure,
+            "ResourceBudgetExceeded",
+            [System.StringComparison]::Ordinal)
+    $isCompletedProbeResult = $probe.Success -eq $true -or $isCompletedResourceFailure
+    if ($isCompletedProbeResult) {
         if ($cancellationProbeCount -ne $CancellationProbeCount) {
             throw "The native playback cancellation probe count is not bound to the controller request."
         }
@@ -2586,7 +2593,7 @@ try {
         }
     }
     else {
-        if ($probe.Success -eq $true -or
+        if ($isCompletedProbeResult -or
             $startupFailureTotalMilliseconds -le 0 -or
             $startupFailureActiveStageElapsedMilliseconds -le 0) {
             throw "The active native playback startup failure diagnostic is inconsistent."
@@ -2661,11 +2668,11 @@ try {
             $startupFailureStage -ne "PlaybackAdvanceWait")) {
         throw "The native playback timeout failure is not bound to its active startup stage."
     }
-    if ($probe.Success -eq $true -and
+    if ($isCompletedProbeResult -and
         ($firstHlsStartupStartedTimestamp -eq 0 -or
             $firstHlsMediaOpenedTimestamp -eq 0 -or
             $firstHlsWindowCompletedTimestamp -ne $firstHlsMediaOpenedTimestamp)) {
-        throw "The successful native playback probe omitted first-HLS QPC attribution."
+        throw "The completed native playback probe omitted first-HLS QPC attribution."
     }
     if ($firstHlsStartupStartedTimestamp -ne 0) {
         $requestTraceSnapshot = $tlsServer.GetRequestTraceSnapshot()
@@ -2908,14 +2915,6 @@ try {
             Write-Host "First-HLS transport attribution: requests=$firstHlsTraceRequestCount, playlistResponses=$firstHlsTracePlaylistResponseCount, segmentResponses=$firstHlsTraceSegmentResponseCount, bodyBytes=$firstHlsTraceBodyBytes, responsesBeforeSourceOpen=$firstHlsTraceResponsesBeforeSourceOpen, responsesBeforeMediaOpened=$firstHlsTraceResponsesBeforeMediaOpened, startupToFirstAccept=$firstHlsStartupToFirstAcceptMilliseconds, startupToFirstHeader=$firstHlsStartupToFirstHeaderMilliseconds, maxTlsAuthentication=$firstHlsMaximumTlsAuthenticationMilliseconds, totalTlsAuthentication=$firstHlsTotalTlsAuthenticationMilliseconds, firstHeaderToLastFlush=$firstHlsFirstHeaderToLastFlushMilliseconds, lastFlushToSourceOpen=$firstHlsLastFlushToSourceOpenMilliseconds, lastFlushToMediaOpened=$firstHlsLastFlushToMediaOpenedMilliseconds, traceRecordsOmittedAfterCapacity=$requestTraceDroppedCount."
         }
     }
-    if ($probe.Success -eq $false -and
-        [string]::Equals(
-            [string]$probe.Failure,
-            "ResourceBudgetExceeded",
-            [System.StringComparison]::Ordinal)) {
-        Set-FailurePoint -Stage "SoakValidation" -Code "ResourceBudgetExceeded"
-        Write-Host "Native playback soak resource diagnostic: soakMinutes=$($probe.SoakMinutes), resourceSamples=$($probe.ResourceSampleCount), warmupPrivateBytes=$($probe.WarmupPrivateBytes), memoryNetGrowthBytes=$($probe.MemoryNetGrowthBytes), memoryNetGrowthPercent=$($probe.MemoryNetGrowthPercent), memoryMonotonicIncrease=$($probe.MemoryMonotonicIncrease), warmupHandleCount=$($probe.WarmupHandleCount), handleNetGrowth=$($probe.HandleNetGrowth), initialPrivateBytes=$($probe.InitialPrivateBytes), finalPrivateBytes=$($probe.FinalPrivateBytes), initialHandleCount=$($probe.InitialHandleCount), finalHandleCount=$($probe.FinalHandleCount)."
-    }
     $expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }
     $expectedDetachedSourceCount =
         $SwitchCount +
@@ -2923,11 +2922,32 @@ try {
         $cancellationSourceDetachCount +
         $cancellationRecoverySourceDetachCount
     if ($SoakMinutes -gt 0) { $expectedDetachedSourceCount++ }
-    if ($probe.Success -ne $true -or $probe.Failure -ne "None" -or
-        [int]$probe.SwitchCount -ne $SwitchCount -or
-        [int]$probe.SurfaceTransitionCount -ne $expectedSurfaceTransitions -or
-        [int]$probe.DetachedSourceCount -ne $expectedDetachedSourceCount -or
-        [int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount) {
+    $completedLifecycleInvariantPassed =
+        [int]$probe.SwitchCount -eq $SwitchCount -and
+        [int]$probe.SurfaceTransitionCount -eq $expectedSurfaceTransitions -and
+        [int]$probe.DetachedSourceCount -eq $expectedDetachedSourceCount -and
+        [int]$probe.PlaybackRetryCount -le $NetworkInterruptionCount
+    $minimumResourceSampleCount = [Math]::Max(2, [Math]::Floor($SoakMinutes / 5) - 2)
+    $resourceBudgetPredicateFailed =
+        $SoakMinutes -gt 0 -and (
+            [int]$probe.ResourceSampleCount -lt $minimumResourceSampleCount -or
+            [bool]$probe.MemoryMonotonicIncrease -or
+            [long]$probe.MemoryNetGrowthBytes -gt 104857600 -or
+            [double]$probe.MemoryNetGrowthPercent -gt 10)
+    if ($isCompletedResourceFailure) {
+        if (-not $completedLifecycleInvariantPassed -or
+            [int]$probe.SoakMinutes -ne $SoakMinutes) {
+            Set-FailurePoint -Stage "ProbeValidation" -Code "ProbeInvariantFailed"
+            throw "The native playback resource failure did not preserve completed probe invariants."
+        }
+        if (-not $resourceBudgetPredicateFailed) {
+            Set-FailurePoint -Stage "ProbeValidation" -Code "ProbeInvariantFailed"
+            throw "The native playback resource failure did not identify a failing resource budget predicate."
+        }
+    }
+    if ((-not $isCompletedResourceFailure -and
+            ($probe.Success -ne $true -or $probe.Failure -ne "None")) -or
+        -not $completedLifecycleInvariantPassed) {
         throw "Native playback probe failed with category '$($probe.Failure)': completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), playbackRetries=$($probe.PlaybackRetryCount), startupFailureStage=$startupFailureStage, startupFailureOrdinal=$startupFailureSwitchOrdinal, startupFailureFixture=$startupFailureFixture, startupFailureAttempts=$startupFailureAttemptCount, startupFailureTransitions=$startupFailureSurfaceTransitionCount, startupFailureTotal=$startupFailureTotalMilliseconds, startupFailureSourceCreation=$startupFailureSourceCreationMilliseconds, startupFailureSourceAssignment=$startupFailureSourceAssignmentMilliseconds, startupFailurePlayInvocation=$startupFailurePlayInvocationMilliseconds, startupFailureSourceOpenObserved=$startupFailureSourceOpenObserved, startupFailureSourceOpenError=$startupFailureSourceOpenError, startupFailureSourceOpenCompletion=$startupFailureSourceOpenCompletionMilliseconds, startupFailurePostSourceOpenElapsed=$startupFailurePostSourceOpenElapsedMilliseconds, startupFailureMediaOpenedObserved=$startupFailureMediaOpenedCompletionObserved, startupFailureMediaOpenedCompletion=$startupFailureMediaOpenedCompletionMilliseconds, startupFailureMediaOpenedWithinWaitDeadline=$startupFailureMediaOpenedWithinWaitDeadline, startupFailureMediaOpenedWithinStartupBudget=$startupFailureMediaOpenedWithinStartupBudget, startupFailureActiveStageElapsed=$startupFailureActiveStageElapsedMilliseconds, startupMaximumOrdinal=$($probe.StartupMaximumSwitchOrdinal), startupMaximumFixture=$($probe.StartupMaximumFixture), startupMaximumAttempts=$($probe.StartupMaximumAttemptCount), startupMaximumTransitions=$($probe.StartupMaximumSurfaceTransitionCount), startupMaximumPreWait=$($probe.StartupMaximumPreWaitMilliseconds), startupMaximumMediaOpenWait=$($probe.StartupMaximumMediaOpenWaitMilliseconds), startupMaximumSourceOpenObserved=$($probe.StartupMaximumSourceOpen.CompletionObserved), startupMaximumSourceOpenError=$($probe.StartupMaximumSourceOpen.ErrorPresent), startupMaximumSourceOpenCompletion=$($probe.StartupMaximumSourceOpen.CompletionMilliseconds), startupMaximumPostSourceOpenMediaOpened=$($probe.StartupMaximumSourceOpen.PostCompletionElapsedMilliseconds), hlsMaximum=$($probe.HlsStartupMaximumMilliseconds), directMaximum=$($probe.DirectStartupMaximumMilliseconds), playbackStateBeforeDetach=$($probe.PlaybackStateBeforeDetach), sourceDetached=$($probe.SourceDetached), canPauseBeforeDetach=$($probe.CanPauseBeforeDetach), canSeekBeforeDetach=$($probe.CanSeekBeforeDetach), teardownStage=$($probe.TeardownStage), exceptionCategory=$($probe.ExceptionCategory), exceptionHResult=$($probe.ExceptionHResult), surfaceTransitions=$($probe.SurfaceTransitionCount), injectedInterruptions=$($tlsServer.InjectedFailureCount), recoveries=$($tlsServer.RecoveryCount), injectedRequestOrdinal=$($tlsServer.LastInjectedRequestOrdinal), recoveryRequestOrdinal=$($tlsServer.LastRecoveryRequestOrdinal), cancellationProbes=$cancellationProbeCount, cancellationsObserved=$cancellationObservedCount, cancellationDetaches=$cancellationSourceDetachCount, cancellationRecoveries=$cancellationRecoveryCount, cancellationRecoveryDetaches=$cancellationRecoverySourceDetachCount, cancellationLatency=$cancellationLatencyMilliseconds, cancellationQuiescence=$cancellationQuiescenceMilliseconds, cancellationObservation=$cancellationObservationMilliseconds, cancellationSourceNull=$cancellationSourceNullAfterObservation, cancellationFreshRecovery=$cancellationRecoveryUsedFreshSource, cancellationNoAutomaticRestart=$cancellationNoAutomaticRestart, firstHlsTransportObserved=$firstHlsTransportAttributionObserved, firstHlsRequests=$firstHlsTraceRequestCount, firstHlsBodyBytes=$firstHlsTraceBodyBytes, firstHlsResponsesBeforeSourceOpen=$firstHlsTraceResponsesBeforeSourceOpen, firstHlsResponsesBeforeMediaOpened=$firstHlsTraceResponsesBeforeMediaOpened, firstHlsLastFlushToSourceOpen=$firstHlsLastFlushToSourceOpenMilliseconds, firstHlsLastFlushToMediaOpened=$firstHlsLastFlushToMediaOpenedMilliseconds, h264Decoder=$h264DecoderRegistered, aacDecoder=$aacDecoderRegistered, audioService=$audioServiceRunning, audioEndpointService=$audioEndpointServiceRunning, userInteractive=$userInteractive, installationType=$installationType, accepted=$($tlsServer.RequestCount), completed=$($tlsServer.CompletedResponseCount), head=$($tlsServer.HeadRequestCount), range=$($tlsServer.RangeRequestCount), openEnded=$($tlsServer.OpenEndedRangeCount), suffix=$($tlsServer.SuffixRangeCount), bounded=$($tlsServer.BoundedRangeCount), bodyBytes=$($tlsServer.CompletedBodyBytes), ioAbort=$($tlsServer.IoAbortCount), transportFailure=$($tlsServer.FailureCount)."
     }
     $startupMaximumSwitchOrdinal = [int]$probe.StartupMaximumSwitchOrdinal
@@ -3012,11 +3032,9 @@ try {
     }
     if ($SoakMinutes -gt 0 -and (
         [int]$probe.SoakMinutes -ne $SoakMinutes -or
-        [int]$probe.ResourceSampleCount -lt [Math]::Max(2, [Math]::Floor($SoakMinutes / 5) - 2) -or
-        [bool]$probe.MemoryMonotonicIncrease -or
-        [long]$probe.MemoryNetGrowthBytes -gt 104857600 -or
-        [double]$probe.MemoryNetGrowthPercent -gt 10)) {
+        $resourceBudgetPredicateFailed)) {
         Set-FailurePoint -Stage "SoakValidation" -Code "ResourceBudgetExceeded"
+        Write-Host "Native playback soak resource diagnostic: completedSwitches=$($probe.SwitchCount), detachedSources=$($probe.DetachedSourceCount), surfaceTransitions=$($probe.SurfaceTransitionCount), playbackRetries=$($probe.PlaybackRetryCount), soakMinutes=$($probe.SoakMinutes), resourceSamples=$($probe.ResourceSampleCount), warmupPrivateBytes=$($probe.WarmupPrivateBytes), memoryNetGrowthBytes=$($probe.MemoryNetGrowthBytes), memoryNetGrowthPercent=$($probe.MemoryNetGrowthPercent), memoryMonotonicIncrease=$($probe.MemoryMonotonicIncrease), warmupHandleCount=$($probe.WarmupHandleCount), handleNetGrowth=$($probe.HandleNetGrowth), initialPrivateBytes=$($probe.InitialPrivateBytes), finalPrivateBytes=$($probe.FinalPrivateBytes), initialHandleCount=$($probe.InitialHandleCount), finalHandleCount=$($probe.FinalHandleCount)."
         throw "Native playback soak resource budget failed: soakMinutes=$($probe.SoakMinutes), resourceSamples=$($probe.ResourceSampleCount), warmupPrivateBytes=$($probe.WarmupPrivateBytes), memoryNetGrowthBytes=$($probe.MemoryNetGrowthBytes), memoryNetGrowthPercent=$($probe.MemoryNetGrowthPercent), memoryMonotonicIncrease=$($probe.MemoryMonotonicIncrease), warmupHandleCount=$($probe.WarmupHandleCount), handleNetGrowth=$($probe.HandleNetGrowth), initialPrivateBytes=$($probe.InitialPrivateBytes), finalPrivateBytes=$($probe.FinalPrivateBytes), initialHandleCount=$($probe.InitialHandleCount), finalHandleCount=$($probe.FinalHandleCount)."
     }
     Set-FailurePoint -Stage "ProcessExit" -Code "NormalCloseFailed"
