@@ -43,6 +43,8 @@ $script:maximumRecursiveRuntimeEntries = 20000
 $script:maximumRecursiveRuntimeBytes = 4GB
 $script:maximumPackageCount = 256
 $script:maximumPayloadCount = 2048
+$script:maximumDiagnosticEntryCount = 5
+$script:maximumDiagnosticEntryLength = 160
 $script:utf8NoBom = New-Object System.Text.UTF8Encoding($false, $true)
 $script:foundationManifestNamespace =
     "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -139,6 +141,108 @@ function Test-ExactStringSet {
         }
     }
     return $true
+}
+
+function Get-DiagnosticStringSha256 {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::Unicode.GetBytes($Value)
+        return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Test-SafeDiagnosticPackageEntry {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value) -or
+        $Value.Length -gt $script:maximumDiagnosticEntryLength -or
+        $Value.Contains("\") -or
+        $Value.StartsWith("/", [System.StringComparison]::Ordinal) -or
+        $Value.IndexOfAny([char[]]":?#@&=%") -ge 0 -or
+        $Value -cnotmatch '^[A-Za-z0-9._+\-\[\]() ]+(?:/[A-Za-z0-9._+\-\[\]() ]+)*$') {
+        return $false
+    }
+
+    foreach ($segment in @($Value.Split('/'))) {
+        if ([string]::IsNullOrEmpty($segment) -or
+            [string]::Equals($segment, ".", [System.StringComparison]::Ordinal) -or
+            [string]::Equals($segment, "..", [System.StringComparison]::Ordinal)) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Format-PackageEntryDiagnosticSet {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$Values
+    )
+
+    $sorted = @($Values | Sort-Object -CaseSensitive -Unique)
+    $formatted = New-Object 'System.Collections.Generic.List[string]'
+    $visibleCount = [Math]::Min($sorted.Count, $script:maximumDiagnosticEntryCount)
+    for ($index = 0; $index -lt $visibleCount; $index++) {
+        $value = [string]$sorted[$index]
+        $display = if (Test-SafeDiagnosticPackageEntry -Value $value) {
+            $value
+        }
+        else {
+            "<redacted-sha256:$(Get-DiagnosticStringSha256 -Value $value)>"
+        }
+        $formatted.Add("`"$display`"")
+    }
+    if ($sorted.Count -gt $visibleCount) {
+        $formatted.Add("`"<omitted:$($sorted.Count - $visibleCount)>`"")
+    }
+
+    return "[$([string]::Join(',', $formatted.ToArray()))]"
+}
+
+function Assert-PackageEntryAllowlist {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Actual,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Expected
+    )
+
+    if (Test-ExactStringSet -Actual $Actual -Expected $Expected) {
+        return
+    }
+
+    $actualSet = New-Object 'System.Collections.Generic.HashSet[string]' `
+        ([System.StringComparer]::Ordinal)
+    $expectedSet = New-Object 'System.Collections.Generic.HashSet[string]' `
+        ([System.StringComparer]::Ordinal)
+    foreach ($value in $Actual) {
+        [void]$actualSet.Add([string]$value)
+    }
+    foreach ($value in $Expected) {
+        [void]$expectedSet.Add([string]$value)
+    }
+
+    $missing = @($expectedSet | Where-Object { -not $actualSet.Contains($_) })
+    $unexpected = @($actualSet | Where-Object { -not $expectedSet.Contains($_) })
+    $missingDiagnostic = Format-PackageEntryDiagnosticSet -Values $missing
+    $unexpectedDiagnostic = Format-PackageEntryDiagnosticSet -Values $unexpected
+    throw "Native package inventory validation failed: PackageEntryAllowlistMismatch. Missing=$missingDiagnostic; Unexpected=$unexpectedDiagnostic."
 }
 
 function Assert-ExactJsonValue {
@@ -2106,10 +2210,9 @@ try {
         [System.IO.Compression.ZipArchiveMode]::Read,
         $false)
     $packageInventory = Get-ZipInventory -Archive $packageArchive -Code "PackageArchiveInvalid"
-    Assert-ExactStringSet `
+    Assert-PackageEntryAllowlist `
         -Actual @($packageInventory.Paths) `
-        -Expected @($specification.AllowedPackageEntries) `
-        -Code "PackageEntryAllowlistMismatch"
+        -Expected @($specification.AllowedPackageEntries)
     Assert-Condition `
         ($packageInventory.Records.ContainsKey("AppxManifest.xml")) `
         "PackageManifestMissing"

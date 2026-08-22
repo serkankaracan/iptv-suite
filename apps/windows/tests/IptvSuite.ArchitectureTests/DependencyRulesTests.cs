@@ -3359,6 +3359,14 @@ public sealed class DependencyRulesTests
 
         Assert.IsTrue(File.Exists(validator));
         Assert.IsTrue(File.Exists(specification));
+        using JsonDocument inventorySpecification = JsonDocument.Parse(File.ReadAllText(specification));
+        string[] allowedPackageEntries = inventorySpecification.RootElement
+            .GetProperty("AllowedPackageEntries")
+            .EnumerateArray()
+            .Select(entry => entry.GetString() ?? string.Empty)
+            .ToArray();
+        CollectionAssert.Contains(allowedPackageEntries, "AppxMetadata/CodeIntegrity.cat");
+        CollectionAssert.Contains(allowedPackageEntries, "AppxSignature.p7x");
         StringAssert.Contains(controller, "Set-FailurePoint -Stage \"PackageInventory\" -Code \"PackageInventoryMismatch\"");
         StringAssert.Contains(controller, "& $inventoryValidatorPath `");
         StringAssert.Contains(controller, "-SpecificationPath $inventorySpecificationPath `");

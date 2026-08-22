@@ -610,6 +610,7 @@
                                   "[Content_Types].xml",
                                   "AppxBlockMap.xml",
                                   "AppxManifest.xml",
+                                  "AppxMetadata/CodeIntegrity.cat",
                                   "AppxSignature.p7x",
                                   "Assets/SplashScreen.scale-200.png",
                                   "Assets/Square150x150Logo.scale-200.png",

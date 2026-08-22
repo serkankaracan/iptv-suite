@@ -48,6 +48,15 @@ function Get-TestStringSha256 {
     return Get-TestBytesSha256 -Bytes $script:utf8NoBom.GetBytes($Value)
 }
 
+function Get-TestDiagnosticStringSha256 {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    return Get-TestBytesSha256 -Bytes ([System.Text.Encoding]::Unicode.GetBytes($Value))
+}
+
 function Get-TestFileSha256 {
     param(
         [Parameter(Mandatory)]
@@ -185,6 +194,11 @@ function Invoke-InventoryScenario {
 
         [string]$ExpectedFailureCode = "",
 
+        [string]$ExpectedDiagnostic = "",
+
+        [AllowEmptyCollection()]
+        [string[]]$ForbiddenOutputFragments = @(),
+
         [string]$LockFile = "",
 
         [string]$AssetsFile = ""
@@ -235,7 +249,7 @@ function Invoke-InventoryScenario {
             ($parsed.Result -eq "Pass" -and
                 $parsed.Stage -eq "NativePackageInventory" -and
                 $parsed.SchemaVersion -eq 1 -and
-                $parsed.PackageEntryCount -eq 9 -and
+                $parsed.PackageEntryCount -eq 11 -and
                 @($parsed.LockTargets).Count -eq 2 -and
                 @($parsed.RuntimeExecutables).Count -eq 2 -and
                 @($parsed.AppOwnedFiles).Count -eq 2 -and
@@ -244,14 +258,53 @@ function Invoke-InventoryScenario {
             "Positive inventory evidence has an invalid result envelope."
     }
     else {
+        $outputText = @($output | ForEach-Object { [string]$_ }) -join "`n"
         Assert-Test ($exitCode -ne 0) "Negative inventory scenario '$Name' unexpectedly passed."
         Assert-Test (-not (Test-Path -LiteralPath $evidence)) "A failed inventory scenario published evidence."
         Assert-Test `
             (-not [string]::IsNullOrWhiteSpace($ExpectedFailureCode)) `
             "Negative inventory scenario '$Name' has no expected failure code."
         Assert-Test `
-            ((@($output | ForEach-Object { [string]$_ }) -join "`n").Contains($ExpectedFailureCode)) `
+            ($outputText.Contains($ExpectedFailureCode)) `
             "Negative inventory scenario '$Name' failed for an unexpected reason: $output"
+        $directFailureMessage = ""
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedDiagnostic)) {
+            $directEvidence = Join-Path $script:testRoot "$Name-direct-evidence.json"
+            $directSavedPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = "Stop"
+                & $script:validatorPath `
+                    -PackagePath $Package `
+                    -RuntimePackagePath $RuntimePackage `
+                    -LockFilePath $effectiveLockFile `
+                    -AssetsFilePath $effectiveAssetsFile `
+                    -DepsFilePath $script:depsPath `
+                    -ManifestPath $Manifest `
+                    -SpecificationPath $Specification `
+                    -EvidencePath $directEvidence | Out-Null
+            }
+            catch {
+                $directFailureMessage = [string]$_.Exception.Message
+            }
+            finally {
+                $ErrorActionPreference = $directSavedPreference
+            }
+            Assert-Test `
+                ([string]::Equals(
+                        $directFailureMessage,
+                        $ExpectedDiagnostic,
+                        [System.StringComparison]::Ordinal)) `
+                "Negative inventory scenario '$Name' did not emit the exact expected diagnostic: $output"
+            Assert-Test `
+                (-not (Test-Path -LiteralPath $directEvidence)) `
+                "A direct failed inventory scenario published evidence."
+        }
+        foreach ($fragment in $ForbiddenOutputFragments) {
+            Assert-Test `
+                (-not $outputText.Contains($fragment) -and
+                    -not $directFailureMessage.Contains($fragment)) `
+                "Negative inventory scenario '$Name' disclosed a forbidden diagnostic fragment."
+        }
     }
 }
 
@@ -356,6 +409,8 @@ try {
         (New-Entry -Path "[Content_Types].xml" -Bytes $script:utf8NoBom.GetBytes("<Types />")),
         (New-Entry -Path "AppxBlockMap.xml" -Bytes $script:utf8NoBom.GetBytes("<BlockMap />")),
         (New-Entry -Path "AppxManifest.xml" -Bytes (Add-TestUtf8Bom -Bytes $script:utf8NoBom.GetBytes($embeddedManifestText))),
+        (New-Entry -Path "AppxMetadata/CodeIntegrity.cat" -Bytes $script:utf8NoBom.GetBytes("synthetic catalog bytes")),
+        (New-Entry -Path "AppxSignature.p7x" -Bytes $script:utf8NoBom.GetBytes("synthetic signature bytes")),
         (New-Entry -Path "Assets/Logo.png" -Bytes ([byte[]](1, 2, 3, 4))),
         (New-Entry -Path "Harness.deps.json" -Bytes $script:utf8NoBom.GetBytes(($depsObject | ConvertTo-Json -Depth 20))),
         (New-Entry -Path "Harness.dll" -Bytes $appDllBytes),
@@ -554,6 +609,51 @@ try {
         -Manifest $manifestPath `
         -Specification $specificationPath `
         -ExpectSuccess $true
+
+    $safeMissingEntry = "Diagnostics/Missing.txt"
+    $safeUnexpectedEntry = "Diagnostics/Unexpected.txt"
+    $safeMismatchEntries = @(
+        $appEntries +
+            (New-Entry -Path $safeUnexpectedEntry -Bytes $script:utf8NoBom.GetBytes("synthetic diagnostic")))
+    $safeMismatchPackage = Join-Path $script:testRoot "safe-allowlist-mismatch.msix"
+    Write-TestArchive -Path $safeMismatchPackage -Entries $safeMismatchEntries
+    $safeMismatchSpecification = Copy-TestObject -Value $specification
+    $safeMismatchSpecification.AllowedPackageEntries = @(
+        $safeMismatchSpecification.AllowedPackageEntries + $safeMissingEntry)
+    $safeMismatchSpecificationPath = Join-Path $script:testRoot "safe-allowlist-mismatch-spec.json"
+    Write-TestJson -Path $safeMismatchSpecificationPath -Value $safeMismatchSpecification
+    $safeMismatchDiagnostic =
+        "Native package inventory validation failed: PackageEntryAllowlistMismatch. " +
+        "Missing=[`"$safeMissingEntry`"]; Unexpected=[`"$safeUnexpectedEntry`"]."
+    Invoke-InventoryScenario `
+        -Name "safe-allowlist-mismatch" `
+        -Package $safeMismatchPackage `
+        -RuntimePackage $runtimePath `
+        -Manifest $manifestPath `
+        -Specification $safeMismatchSpecificationPath `
+        -ExpectSuccess $false `
+        -ExpectedFailureCode "PackageEntryAllowlistMismatch" `
+        -ExpectedDiagnostic $safeMismatchDiagnostic
+
+    $unsafeUnexpectedEntry = "Diagnostics/Unexpected.txt?userinfo=synthetic-value"
+    $unsafeMismatchPackage = Join-Path $script:testRoot "unsafe-allowlist-mismatch.msix"
+    Write-TestArchive -Path $unsafeMismatchPackage -Entries @(
+        $appEntries +
+            (New-Entry -Path $unsafeUnexpectedEntry -Bytes $script:utf8NoBom.GetBytes("synthetic diagnostic")))
+    $unsafeEntryHash = Get-TestDiagnosticStringSha256 -Value $unsafeUnexpectedEntry
+    $unsafeMismatchDiagnostic =
+        "Native package inventory validation failed: PackageEntryAllowlistMismatch. " +
+        "Missing=[]; Unexpected=[`"<redacted-sha256:$unsafeEntryHash>`"]."
+    Invoke-InventoryScenario `
+        -Name "unsafe-allowlist-mismatch" `
+        -Package $unsafeMismatchPackage `
+        -RuntimePackage $runtimePath `
+        -Manifest $manifestPath `
+        -Specification $specificationPath `
+        -ExpectSuccess $false `
+        -ExpectedFailureCode "PackageEntryAllowlistMismatch" `
+        -ExpectedDiagnostic $unsafeMismatchDiagnostic `
+        -ForbiddenOutputFragments @($unsafeUnexpectedEntry, "synthetic-value")
 
     $mutatedAppOwnedEntries = @($appEntries | ForEach-Object {
         if ([string]::Equals($_.Path, "Harness.dll", [System.StringComparison]::Ordinal)) {
