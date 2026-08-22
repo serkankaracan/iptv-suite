@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             AutoPlay = false,
             AudioCategory = MediaPlayerAudioCategory.Media,
+            RealTimePlayback = true,
         };
         _mediaPlayer.MediaOpened += MediaPlayer_MediaOpened;
         _mediaPlayer.MediaFailed += MediaPlayer_MediaFailed;

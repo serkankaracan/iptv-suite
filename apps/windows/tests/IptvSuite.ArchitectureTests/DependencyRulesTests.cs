@@ -2114,6 +2114,21 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "switchCount is < 2 or > 100");
         StringAssert.Contains(window, "soakMinutes is < 0 or > 480");
         StringAssert.Contains(window, "soakMinutes > 0 && switchCount != 100");
+        StringAssert.Contains(window, "RealTimePlayback = true,");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                window,
+                Regex.Escape("RealTimePlayback = true,"),
+                RegexOptions.CultureInvariant),
+            "The live Tier A probe must configure real-time playback exactly once.");
+        Assert.AreEqual(
+            0,
+            Regex.Count(
+                window,
+                Regex.Escape("RealTimePlayback = false"),
+                RegexOptions.CultureInvariant),
+            "The live Tier A probe must not disable real-time playback.");
         StringAssert.Contains(window, "private readonly TaskCompletionSource _surfaceReady");
         StringAssert.Contains(window, "private readonly CancellationTokenSource _lifetimeCancellation");
         StringAssert.Contains(window, "PlaybackSurface.Loaded += PlaybackSurface_Loaded");
@@ -2130,6 +2145,9 @@ public sealed class DependencyRulesTests
         int mediaAttachmentIndex = window.IndexOf(
             "PlaybackSurface.SetMediaPlayer(_mediaPlayer)",
             StringComparison.Ordinal);
+        int realTimeConfigurationIndex = window.IndexOf(
+            "RealTimePlayback = true,",
+            StringComparison.Ordinal);
         int surfaceWaitIndex = window.IndexOf(
             "await _surfaceReady.Task.WaitAsync(TimeSpan.FromSeconds(5)",
             StringComparison.Ordinal);
@@ -2137,9 +2155,10 @@ public sealed class DependencyRulesTests
             "_mediaPlayer.Source = source;",
             StringComparison.Ordinal);
         Assert.IsTrue(
+            realTimeConfigurationIndex >= 0 && realTimeConfigurationIndex < mediaAttachmentIndex &&
             surfaceSubscriptionIndex >= 0 && surfaceSubscriptionIndex < mediaAttachmentIndex &&
             surfaceWaitIndex >= 0 && surfaceWaitIndex < firstSourceAssignmentIndex,
-            "The playback surface must be subscribed and ready before the first measured source assignment.");
+            "Real-time mode and the playback surface must be configured before the first measured source assignment.");
         Assert.AreEqual(
             2,
             Regex.Count(
