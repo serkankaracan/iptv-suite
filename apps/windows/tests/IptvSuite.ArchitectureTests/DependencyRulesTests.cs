@@ -2100,7 +2100,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(app, "new NativePlaybackProbeEnvelope(");
         StringAssert.Contains(
             normalizedApp,
-            "new NativePlaybackProbeEnvelope( 2, request.RunId.ToString(\"N\"), runtimeDependency, result);");
+            "new NativePlaybackProbeEnvelope( 3, request.RunId.ToString(\"N\"), runtimeDependency, result);");
         StringAssert.Contains(app, "request.RunId.ToString(\"N\")");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.json\"");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.pending\"");
@@ -2201,7 +2201,25 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "BestEffortDisposeMediaSource(source)");
         StringAssert.Contains(window, "Preserve the primary typed probe failure");
         StringAssert.Contains(window, "private TaskCompletionSource<long>? _opened;");
-        StringAssert.Contains(window, "long startupStarted = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(window, "long activeStartupStarted = Stopwatch.GetTimestamp();");
+        StringAssert.Contains(window, "long startupStarted = activeStartupStarted;");
+        StringAssert.Contains(window, "NativePlaybackStartupStage.SourceCreation");
+        StringAssert.Contains(window, "NativePlaybackStartupStage.SourceAssignment");
+        StringAssert.Contains(window, "NativePlaybackStartupStage.PlayInvocation");
+        StringAssert.Contains(window, "NativePlaybackStartupStage.MediaOpenWait");
+        StringAssert.Contains(window, "NativePlaybackStartupStage.PlaybackAdvanceWait");
+        StringAssert.Contains(window, "startupFailureDiagnostic = CaptureStartupFailureDiagnostic();");
+        int startupFailureSnapshotIndex = window.IndexOf(
+            "startupFailureDiagnostic = CaptureStartupFailureDiagnostic();",
+            StringComparison.Ordinal);
+        int startupAttemptFinallyIndex = window.IndexOf(
+            "finally",
+            startupFailureSnapshotIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            startupFailureSnapshotIndex >= 0 &&
+            startupAttemptFinallyIndex > startupFailureSnapshotIndex,
+            "A startup timeout must be snapshotted before reset and source disposal.");
         StringAssert.Contains(window, "NativePlaybackFixture.HlsH264AacMpegTs");
         StringAssert.Contains(window, "NativePlaybackFixture.DirectH264AacMpegTs");
         StringAssert.Contains(
@@ -2290,8 +2308,14 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "SchemaVersion = 9");
-        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 2");
-        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 2");
+        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 3");
+        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 3");
+        StringAssert.Contains(controller, "$startupFailureStage -notin $allowedStartupFailureStages");
+        StringAssert.Contains(controller, "$startupFailureSwitchOrdinal -ne $expectedFailureSwitchOrdinal");
+        StringAssert.Contains(controller, "$startupFailureAttemptCount -gt (1 + [int]$probe.PlaybackRetryCount)");
+        StringAssert.Contains(controller, "$startupFailureSurfaceTransitionCount -ne $expectedFailureSurfaceTransitionCount");
+        StringAssert.Contains(controller, "$startupFailureStage -notin $allowedMediaOpenFailureStages");
+        StringAssert.Contains(controller, "$startupFailureStage -ne \"PlaybackAdvanceWait\"");
         StringAssert.Contains(controller, "$startupMaximumSwitchOrdinal -lt 1");
         StringAssert.Contains(controller, "$startupMaximumSwitchOrdinal -gt $SwitchCount");
         StringAssert.Contains(controller, "($startupMaximumSwitchOrdinal % 2) -eq 1");
@@ -2361,6 +2385,16 @@ public sealed class DependencyRulesTests
                 StringComparison.Ordinal));
         string[] probeFailureDiagnosticLabels =
         [
+            "startupFailureStage=",
+            "startupFailureOrdinal=",
+            "startupFailureFixture=",
+            "startupFailureAttempts=",
+            "startupFailureTransitions=",
+            "startupFailureTotal=",
+            "startupFailureSourceCreation=",
+            "startupFailureSourceAssignment=",
+            "startupFailurePlayInvocation=",
+            "startupFailureActiveStageElapsed=",
             "startupMaximumOrdinal=",
             "startupMaximumFixture=",
             "startupMaximumAttempts=",
