@@ -2139,7 +2139,10 @@ public sealed class DependencyRulesTests
             "The live Tier A probe must not disable real-time playback.");
         StringAssert.Contains(window, "private readonly TaskCompletionSource _surfaceReady");
         StringAssert.Contains(window, "private readonly CancellationTokenSource _lifetimeCancellation");
+        StringAssert.Contains(window, "using Microsoft.UI.Xaml.Media;");
+        StringAssert.Contains(window, "private bool _surfaceLoaded;");
         StringAssert.Contains(window, "PlaybackSurface.Loaded += PlaybackSurface_Loaded");
+        StringAssert.Contains(window, "CompositionTarget.Rendered += CompositionTarget_Rendered");
         StringAssert.Contains(
             window,
             "await _surfaceReady.Task.WaitAsync(TimeSpan.FromSeconds(5), probeCancellationToken);");
@@ -2147,8 +2150,38 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "_lifetimeCancellation.Cancel()");
         StringAssert.Contains(window, "NativePlaybackFailure.SurfaceReadinessTimeout");
         StringAssert.Contains(window, "PlaybackSurface.Loaded -= PlaybackSurface_Loaded");
+        StringAssert.Contains(
+            normalizedWindow,
+            "private void PlaybackSurface_Loaded(object sender, RoutedEventArgs args) => _surfaceLoaded = true;");
+        StringAssert.Contains(
+            normalizedWindow,
+            "private void CompositionTarget_Rendered(object? sender, RenderedEventArgs args) { if (!_surfaceLoaded) return; CompositionTarget.Rendered -= CompositionTarget_Rendered; _surfaceReady.TrySetResult(); }");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                window,
+                Regex.Escape("CompositionTarget.Rendered += CompositionTarget_Rendered"),
+                RegexOptions.CultureInvariant),
+            "The first-frame readiness handler must be subscribed exactly once.");
+        Assert.AreEqual(
+            2,
+            Regex.Count(
+                window,
+                Regex.Escape("CompositionTarget.Rendered -= CompositionTarget_Rendered"),
+                RegexOptions.CultureInvariant),
+            "The first-frame readiness handler must detach on completion and disposal.");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                window,
+                Regex.Escape("_surfaceReady.TrySetResult();"),
+                RegexOptions.CultureInvariant),
+            "Only the Loaded-gated rendered-frame handler may complete surface readiness.");
         int surfaceSubscriptionIndex = window.IndexOf(
             "PlaybackSurface.Loaded += PlaybackSurface_Loaded",
+            StringComparison.Ordinal);
+        int renderedSubscriptionIndex = window.IndexOf(
+            "CompositionTarget.Rendered += CompositionTarget_Rendered",
             StringComparison.Ordinal);
         int mediaAttachmentIndex = window.IndexOf(
             "PlaybackSurface.SetMediaPlayer(_mediaPlayer)",
@@ -2159,14 +2192,64 @@ public sealed class DependencyRulesTests
         int surfaceWaitIndex = window.IndexOf(
             "await _surfaceReady.Task.WaitAsync(TimeSpan.FromSeconds(5)",
             StringComparison.Ordinal);
+        int switchLoopIndex = window.IndexOf(
+            "for (int index = 0; index < request.SwitchCount; index++)",
+            StringComparison.Ordinal);
         int firstSourceAssignmentIndex = window.IndexOf(
             "_mediaPlayer.Source = source;",
+            StringComparison.Ordinal);
+        int firstStartupTimestampIndex = switchLoopIndex < 0
+            ? -1
+            : window.IndexOf(
+                "activeStartupStarted = Stopwatch.GetTimestamp();",
+                switchLoopIndex,
+                StringComparison.Ordinal);
+        int firstSourceCreationIndex = window.IndexOf(
+            "MediaSource source = MediaSource.CreateFromUri(fixture);",
+            StringComparison.Ordinal);
+        int startupMeasurementBindingIndex = firstStartupTimestampIndex < 0
+            ? -1
+            : window.IndexOf(
+                "long startupStarted = activeStartupStarted;",
+                firstStartupTimestampIndex,
+                StringComparison.Ordinal);
+        int firstPlayInvocationIndex = window.IndexOf(
+            "_mediaPlayer.Play();",
+            StringComparison.Ordinal);
+        int firstMediaOpenWaitIndex = firstPlayInvocationIndex < 0
+            ? -1
+            : window.IndexOf(
+                "long openedTimestamp = await _opened.Task.WaitAsync(",
+                firstPlayInvocationIndex,
+                StringComparison.Ordinal);
+        int disposeRenderedUnsubscribeIndex = window.LastIndexOf(
+            "CompositionTarget.Rendered -= CompositionTarget_Rendered",
+            StringComparison.Ordinal);
+        int disposeSurfaceDetachIndex = window.IndexOf(
+            "PlaybackSurface.SetMediaPlayer(null)",
+            StringComparison.Ordinal);
+        int mediaPlayerDisposeIndex = window.IndexOf(
+            "_mediaPlayer.Dispose();",
             StringComparison.Ordinal);
         Assert.IsTrue(
             realTimeConfigurationIndex >= 0 && realTimeConfigurationIndex < mediaAttachmentIndex &&
             surfaceSubscriptionIndex >= 0 && surfaceSubscriptionIndex < mediaAttachmentIndex &&
-            surfaceWaitIndex >= 0 && surfaceWaitIndex < firstSourceAssignmentIndex,
-            "Real-time mode and the playback surface must be configured before the first measured source assignment.");
+            renderedSubscriptionIndex > surfaceSubscriptionIndex &&
+            renderedSubscriptionIndex < mediaAttachmentIndex &&
+            mediaAttachmentIndex < surfaceWaitIndex &&
+            surfaceWaitIndex >= 0 && surfaceWaitIndex < switchLoopIndex &&
+            switchLoopIndex < firstStartupTimestampIndex &&
+            firstStartupTimestampIndex < startupMeasurementBindingIndex &&
+            startupMeasurementBindingIndex < firstSourceCreationIndex &&
+            firstSourceCreationIndex < firstSourceAssignmentIndex &&
+            firstSourceAssignmentIndex < firstPlayInvocationIndex &&
+            firstPlayInvocationIndex < firstMediaOpenWaitIndex,
+            "The Loaded-gated first frame must precede the unchanged source-to-open startup measurement.");
+        Assert.IsTrue(
+            disposeRenderedUnsubscribeIndex >= 0 &&
+            disposeRenderedUnsubscribeIndex < disposeSurfaceDetachIndex &&
+            disposeSurfaceDetachIndex < mediaPlayerDisposeIndex,
+            "Disposal must detach the global rendered handler before the playback surface and player.");
         Assert.AreEqual(
             2,
             Regex.Count(

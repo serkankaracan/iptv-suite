@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using Windows.Media.Core;
 using Windows.Media.Playback;
@@ -18,6 +19,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private TaskCompletionSource? _advanced;
     private TaskCompletionSource? _failureSignal;
     private NativePlaybackFailure _mediaFailure;
+    private bool _surfaceLoaded;
     private bool _disposed;
 
     public MainWindow()
@@ -33,6 +35,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _mediaPlayer.MediaFailed += MediaPlayer_MediaFailed;
         _mediaPlayer.PlaybackSession.PositionChanged += PlaybackSession_PositionChanged;
         PlaybackSurface.Loaded += PlaybackSurface_Loaded;
+        CompositionTarget.Rendered += CompositionTarget_Rendered;
         PlaybackSurface.SetMediaPlayer(_mediaPlayer);
         Closed += MainWindow_Closed;
     }
@@ -639,8 +642,14 @@ public sealed partial class MainWindow : Window, IDisposable
         });
     }
 
-    private void PlaybackSurface_Loaded(object sender, RoutedEventArgs args) =>
+    private void PlaybackSurface_Loaded(object sender, RoutedEventArgs args) => _surfaceLoaded = true;
+
+    private void CompositionTarget_Rendered(object? sender, RenderedEventArgs args)
+    {
+        if (!_surfaceLoaded) return;
+        CompositionTarget.Rendered -= CompositionTarget_Rendered;
         _surfaceReady.TrySetResult();
+    }
 
     private void MediaPlayer_MediaOpened(MediaPlayer sender, object args)
     {
@@ -674,6 +683,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _mediaPlayer.MediaFailed -= MediaPlayer_MediaFailed;
         _mediaPlayer.PlaybackSession.PositionChanged -= PlaybackSession_PositionChanged;
         PlaybackSurface.Loaded -= PlaybackSurface_Loaded;
+        CompositionTarget.Rendered -= CompositionTarget_Rendered;
         PlaybackSurface.SetMediaPlayer(null);
         _mediaPlayer.Source = null;
         _mediaPlayer.Dispose();
