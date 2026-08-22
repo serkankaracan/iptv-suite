@@ -342,7 +342,8 @@ public sealed partial class MainWindow : Window, IDisposable
                     catch (TimeoutException)
                     {
                         CaptureSourceOpenCompletionIfAvailable();
-                        if (timeoutFailure == NativePlaybackFailure.MediaOpenTimeout)
+                        if (timeoutFailure == NativePlaybackFailure.MediaOpenTimeout &&
+                            _mediaFailure == NativePlaybackFailure.None)
                         {
                             CaptureMediaOpenedCompletionIfAvailable(mediaOpenedTask);
                         }

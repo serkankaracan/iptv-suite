@@ -10,7 +10,7 @@
 - Locked restore ve Release x64 gerçek `VideoView` scaffold build'i başarılıdır; production dependency/payload izolasyonu korunur.
 - Restored x64 native payload 323 plugin DLL içerir.
 - `build/x64/plugins/codec/libx26410b_plugin.dll` SHA-256: `48e97b7d639e07a31e0a185016cf890c9c0cc625684af18ed5427acc08dda28b`.
-- Upstream libvlc-nuget GPL-compliance kaydı `libx264_plugin.dll` ailesinin GPL paketine ayrılması gerektiğini bildirir [S110]. VideoLAN x264 sayfası x264'ın GNU GPL altında yayımlandığını, ticari lisansın ayrıca sunulduğunu bildirir [S111].
+- Upstream libvlc-nuget GPL-compliance kaydı `libx264_plugin.dll` ailesinin GPL paketine ayrılması gerektiğini bildirir [S123]. VideoLAN x264 sayfası x264'ın GNU GPL altında yayımlandığını, ticari lisansın ayrıca sunulduğunu bildirir [S124].
 - Nupkg nuspec'i genel `LGPL-2.1-or-later` expression taşır; arşiv exact binary/plugin-to-source, COPYING/license ve notice kabulünü kapatan bir manifest sunmaz.
 
 `eng/Invoke-WindowsPlaybackCandidateDecision.ps1` exact SDK/lock/package/version bağını doğrular, x64 plugin envanterini tarar, blocker hash'ini kaydeder ve sanitized `decision-summary.json` üretir. Scriptin başarılı çalışması candidate'in geçtiği değil, beklenen güvenlik kararının tekrarlanabilir biçimde **NO-GO** olduğu anlamına gelir.

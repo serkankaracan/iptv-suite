@@ -66,6 +66,7 @@ try {
         -hide_banner -loglevel error -nostdin -y `
         -i $directPath -map '0:v:0' -map '0:a:0' -c copy `
         -hls_time 2 -hls_list_size 0 -hls_playlist_type vod `
+        -hls_flags independent_segments `
         -hls_segment_filename (Join-Path $stagingRoot 'hls-%03d.ts') `
         (Join-Path $stagingRoot 'hls.m3u8')
     if ($LASTEXITCODE -ne 0) { throw 'FFmpeg failed to create the HLS-TS Tier A fixture.' }
@@ -85,12 +86,88 @@ try {
     }
     if ($probe.format.format_name -notmatch 'mpegts') { throw 'Tier A direct fixture is not MPEG-TS.' }
 
-    $playlist = Get-Content -LiteralPath (Join-Path $stagingRoot 'hls.m3u8') -Raw -Encoding utf8
+    $playlistPath = Join-Path $stagingRoot 'hls.m3u8'
+    $playlist = Get-Content -LiteralPath $playlistPath -Raw -Encoding utf8
     if ($playlist -notmatch '#EXT-X-ENDLIST' -or $playlist -match '(?i)(https?://|file:|\\|\.\.)') {
         throw 'The HLS fixture playlist must be finite and contain only local relative segment names.'
     }
+    $playlistLines = @(Get-Content -LiteralPath $playlistPath -Encoding utf8)
+    $playlistVersionLines = @($playlistLines | Where-Object {
+        ([string]$_).StartsWith('#EXT-X-VERSION:', [StringComparison]::Ordinal)
+    })
+    $independentSegmentLines = @($playlistLines | Where-Object {
+        ([string]$_).StartsWith('#EXT-X-INDEPENDENT-SEGMENTS', [StringComparison]::Ordinal)
+    })
+    $independentSegmentIndex = -1
+    $firstExtInfIndex = -1
+    for ($lineIndex = 0; $lineIndex -lt $playlistLines.Count; $lineIndex++) {
+        if ($independentSegmentIndex -lt 0 -and
+            [string]$playlistLines[$lineIndex] -ceq '#EXT-X-INDEPENDENT-SEGMENTS') {
+            $independentSegmentIndex = $lineIndex
+        }
+        if ($firstExtInfIndex -lt 0 -and
+            ([string]$playlistLines[$lineIndex]).StartsWith('#EXTINF:', [StringComparison]::Ordinal)) {
+            $firstExtInfIndex = $lineIndex
+        }
+    }
+    if ($playlistVersionLines.Count -ne 1 -or
+        [string]$playlistVersionLines[0] -cne '#EXT-X-VERSION:6') {
+        throw 'The HLS fixture playlist must declare exact version 6 once.'
+    }
+    if ($independentSegmentLines.Count -ne 1 -or
+        [string]$independentSegmentLines[0] -cne '#EXT-X-INDEPENDENT-SEGMENTS' -or
+        $independentSegmentIndex -lt 0 -or
+        $firstExtInfIndex -lt 0 -or
+        $independentSegmentIndex -ge $firstExtInfIndex) {
+        throw 'The HLS fixture playlist must declare exactly one independent-segments tag before media.'
+    }
     $segments = @(Get-ChildItem -LiteralPath $stagingRoot -File -Filter 'hls-*.ts' | Sort-Object Name)
     if ($segments.Count -ne 4) { throw "Expected four HLS-TS segments, received $($segments.Count)." }
+    foreach ($segment in $segments) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $packetFlagOutput = @(& $ffprobe `
+                -v error -select_streams 'v:0' -read_intervals '%+#1' `
+                -show_entries 'packet=flags' -of 'csv=p=0' `
+                $segment.FullName 2>&1)
+            $packetFlagExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        $packetFlags = @($packetFlagOutput | ForEach-Object { ([string]$_).Trim() } | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_)
+        })
+        if ($packetFlagExitCode -ne 0 -or
+            $packetFlags.Count -ne 1 -or
+            -not ([string]$packetFlags[0]).StartsWith('K', [StringComparison]::Ordinal)) {
+            throw "The first video packet in $($segment.Name) is not a key frame."
+        }
+
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            # PowerShell 5.1 represents a native process's normal stderr stream as
+            # NativeCommandError records. Capture FFmpeg's trace without weakening
+            # the script-wide stop policy; the exact native exit code remains fatal.
+            $ErrorActionPreference = 'Continue'
+            $traceOutput = @(& $ffmpeg `
+                -hide_banner -loglevel info -nostdin `
+                -i $segment.FullName -map '0:v:0' -c:v copy `
+                -bsf:v trace_headers -frames:v 1 -f null 'NUL' 2>&1)
+            $traceExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        $traceText = [string]::Join("`n", [string[]]@($traceOutput | ForEach-Object { [string]$_ }))
+        if ($traceExitCode -ne 0 -or
+            $traceText -notmatch '(?m)^\[trace_headers[^\]]*\][^\r\n]*nal_unit_type[^\r\n]*=[ \t]*7[ \t]*\r?$' -or
+            $traceText -notmatch '(?m)^\[trace_headers[^\]]*\][^\r\n]*nal_unit_type[^\r\n]*=[ \t]*8[ \t]*\r?$' -or
+            $traceText -notmatch '(?m)^\[trace_headers[^\]]*\][^\r\n]*nal_unit_type[^\r\n]*=[ \t]*5[ \t]*\r?$') {
+            throw "The first video access unit in $($segment.Name) does not contain SPS, PPS, and IDR NAL units."
+        }
+    }
 
     $mediaFiles = @(
         Get-Item -LiteralPath $directPath
@@ -127,7 +204,7 @@ try {
             }
         })
     }
-    $manifestJson = $manifest | ConvertTo-Json -Depth 8
+    $manifestJson = ($manifest | ConvertTo-Json -Depth 8).Replace("`r`n", "`n")
     [System.IO.File]::WriteAllText(
         (Join-Path $stagingRoot 'fixture-manifest.json'),
         $manifestJson,

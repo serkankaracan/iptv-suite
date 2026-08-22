@@ -2052,7 +2052,25 @@ public sealed class DependencyRulesTests
         }
 
         string playlist = File.ReadAllText(Path.Combine(fixtureRoot, "hls.m3u8"));
+        string[] playlistLines = File.ReadAllLines(Path.Combine(fixtureRoot, "hls.m3u8"));
+        string[] playlistVersionLines = playlistLines
+            .Where(line => line.StartsWith("#EXT-X-VERSION:", StringComparison.Ordinal))
+            .ToArray();
+        string[] independentSegmentLines = playlistLines
+            .Where(line => line.StartsWith("#EXT-X-INDEPENDENT-SEGMENTS", StringComparison.Ordinal))
+            .ToArray();
         StringAssert.Contains(playlist, "#EXT-X-ENDLIST");
+        Assert.HasCount(1, playlistVersionLines);
+        Assert.AreEqual("#EXT-X-VERSION:6", playlistVersionLines[0]);
+        Assert.HasCount(1, independentSegmentLines);
+        Assert.AreEqual("#EXT-X-INDEPENDENT-SEGMENTS", independentSegmentLines[0]);
+        int independentSegmentIndex = Array.IndexOf(playlistLines, "#EXT-X-INDEPENDENT-SEGMENTS");
+        int firstExtInfIndex = Array.FindIndex(
+            playlistLines,
+            line => line.StartsWith("#EXTINF:", StringComparison.Ordinal));
+        Assert.IsTrue(
+            independentSegmentIndex >= 0 && firstExtInfIndex > independentSegmentIndex,
+            "The independent-segments declaration must precede all media segments.");
         Assert.HasCount(4, Regex.Matches(playlist, @"(?m)^hls-\d{3}\.ts$"));
         Assert.IsFalse(Regex.IsMatch(playlist, @"(?i)(https?://|file:|\\|\.\.)"));
 
@@ -2064,6 +2082,27 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(generator, "sine=frequency=1000:sample_rate=48000");
         StringAssert.Contains(generator, "-profile:v high");
         StringAssert.Contains(generator, "-profile:a aac_low");
+        StringAssert.Contains(generator, "-hls_flags independent_segments");
+        StringAssert.Contains(generator, "-read_intervals '%+#1'");
+        StringAssert.Contains(generator, "-show_entries 'packet=flags'");
+        StringAssert.Contains(generator, "-bsf:v trace_headers -frames:v 1");
+        StringAssert.Contains(generator, "^\\[trace_headers[^\\]]*\\]");
+        StringAssert.Contains(generator, "nal_unit_type");
+        StringAssert.Contains(generator, "=[ \\t]*7[ \\t]*\\r?$'");
+        StringAssert.Contains(generator, "=[ \\t]*8[ \\t]*\\r?$'");
+        StringAssert.Contains(generator, "=[ \\t]*5[ \\t]*\\r?$'");
+        StringAssert.Contains(generator, "SPS, PPS, and IDR NAL units");
+        StringAssert.Contains(generator, "$previousErrorActionPreference = $ErrorActionPreference");
+        StringAssert.Contains(generator, "$ErrorActionPreference = 'Continue'");
+        StringAssert.Contains(generator, "$ErrorActionPreference = $previousErrorActionPreference");
+
+        string controller = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsNativePlaybackSmoke.ps1"));
+        StringAssert.Contains(controller, "#EXT-X-VERSION:6");
+        StringAssert.Contains(controller, "#EXT-X-INDEPENDENT-SEGMENTS");
+        StringAssert.Contains(controller, "The native playback HLS fixture segment order changed.");
     }
 
     [TestMethod]
@@ -2392,6 +2431,9 @@ public sealed class DependencyRulesTests
             mediaOpenedFailureSnapshotIndex < startupFailureSnapshotIndex &&
             startupAttemptFinallyIndex > startupFailureSnapshotIndex,
             "A startup timeout must capture MediaOpened and startup state before reset and source disposal.");
+        StringAssert.Contains(
+            normalizedWindow,
+            "if (timeoutFailure == NativePlaybackFailure.MediaOpenTimeout && _mediaFailure == NativePlaybackFailure.None)");
         StringAssert.Contains(window, "NativePlaybackFixture.HlsH264AacMpegTs");
         StringAssert.Contains(window, "NativePlaybackFixture.DirectH264AacMpegTs");
         StringAssert.Contains(

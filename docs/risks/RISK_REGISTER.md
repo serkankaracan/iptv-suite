@@ -59,6 +59,10 @@
 
 `R15 update — REBASELINE REQUIRED, 2026-08-22`: Windows App SDK/WinUI upgrade'i package/runtime binary setini değiştirmiştir. Bu nedenle yukarıdaki schema-7/9/10, hosted ve developer-soak sonuçları eski graph için `VERIFIED` tarihsel kayıtlardır; güncel graph'ın leak/deadlock/ghost-audio/recovery riskini kapatmaz. Kısa package/native regression, device/HW-decode, WACK, kalan surface/lifecycle ve soak matrisi yeniden geçmelidir. R15 **ACTIVE** kalır.
 
+`R15 successor update — VERIFIED hard-maximum classification; fixture A/B pending, 2026-08-22`: Commit `78ff98e` run `32557484626`, quality/package/DPAPI/real signed inventory adımlarını ve 100 switch'i tamamladı; native timeout yerine p95 `2160,3704 ms` ve ilk HLS maximum `5024,5709 ms` ile hard total bütçeyi `24,5709 ms` aştı. Source-open `2454,8193 ms`, sonraki `MediaOpened` `2569,7516 ms`, direct maximum `2286,6558 ms` ve retry `0` idi. Lost-event/deadline yarışı desteklenmedi. Mevcut media byte'larını koruyan independent-segment playlist + keyframe/SPS/PPS/IDR fixture checkpoint'i standards-correct hardening olarak uygulanmıştır [S126–S128]; hosted performans etkisi ve R15 azaltımı `UNVERIFIED`dır. R15 **ACTIVE** kalır.
+
+`R29 hosted inventory update — PARTIAL VERIFIED, 2026-08-22`: Run `32557484626` içindeki gerçek signed-MSIX inventory validator çalışıp geçti. Native budget failure'ı success publication adımlarını atladığı için kalıcı sanitized inventory artifact'ı ve digest bağı oluşmadı; root `LICENSE`/`NOTICE`, asset/corpus provenance, codec/patent uzman incelemesi, WACK ve dağıtım kabulü de açıktır. R29 **ACTIVE** kalır.
+
 ## Kabul edilen residual riskler
 
 | ID | Risk | Olasılık | Etki | Erken uyarı işareti | Kabul sınırı / reopen trigger | Owner veya karar |

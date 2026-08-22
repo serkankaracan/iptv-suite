@@ -28,8 +28,8 @@
                   },
                   {
                       "Path":  "hls.m3u8",
-                      "SizeBytes":  229,
-                      "Sha256":  "bcf2a05a7aee065be8dc17a05558d7b70a150bc57e3c4c25496ef40e2eca8d20"
+                      "SizeBytes":  257,
+                      "Sha256":  "351eaebb03229ce47e768b08ed83eb309d8f25ef34eb5ae37cc716dfbb2e59ab"
                   },
                   {
                       "Path":  "hls-000.ts",

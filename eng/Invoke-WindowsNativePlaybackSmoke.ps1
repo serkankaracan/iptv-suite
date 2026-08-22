@@ -1020,6 +1020,47 @@ function Assert-FixtureCorpus {
     if ([string]::Join("`n", $actualPayloadNames) -cne [string]::Join("`n", $sortedExpectedPayloadNames)) {
         throw "The native playback fixture manifest file set is ambiguous."
     }
+
+    $playlistPath = Join-Path $script:fixtureRoot "hls.m3u8"
+    $playlistLines = @(Get-Content -LiteralPath $playlistPath -Encoding UTF8)
+    $playlistVersionLines = @($playlistLines | Where-Object {
+        ([string]$_).StartsWith("#EXT-X-VERSION:", [StringComparison]::Ordinal)
+    })
+    $independentSegmentLines = @($playlistLines | Where-Object {
+        ([string]$_).StartsWith("#EXT-X-INDEPENDENT-SEGMENTS", [StringComparison]::Ordinal)
+    })
+    $playlistUris = @($playlistLines | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$_) -and
+        -not ([string]$_).StartsWith("#", [StringComparison]::Ordinal)
+    })
+    $expectedPlaylistUris = @("hls-000.ts", "hls-001.ts", "hls-002.ts", "hls-003.ts")
+    $independentSegmentIndex = -1
+    $firstExtInfIndex = -1
+    for ($lineIndex = 0; $lineIndex -lt $playlistLines.Count; $lineIndex++) {
+        if ($independentSegmentIndex -lt 0 -and
+            [string]$playlistLines[$lineIndex] -ceq "#EXT-X-INDEPENDENT-SEGMENTS") {
+            $independentSegmentIndex = $lineIndex
+        }
+        if ($firstExtInfIndex -lt 0 -and
+            ([string]$playlistLines[$lineIndex]).StartsWith("#EXTINF:", [StringComparison]::Ordinal)) {
+            $firstExtInfIndex = $lineIndex
+        }
+    }
+    if ($playlistVersionLines.Count -ne 1 -or
+        [string]$playlistVersionLines[0] -cne "#EXT-X-VERSION:6") {
+        throw "The native playback HLS fixture must declare exact version 6 once."
+    }
+    if ($independentSegmentLines.Count -ne 1 -or
+        [string]$independentSegmentLines[0] -cne "#EXT-X-INDEPENDENT-SEGMENTS" -or
+        $independentSegmentIndex -lt 0 -or
+        $firstExtInfIndex -lt 0 -or
+        $independentSegmentIndex -ge $firstExtInfIndex) {
+        throw "The native playback HLS fixture independent-segments contract changed."
+    }
+    if ([string]::Join("`n", $playlistUris) -cne
+        [string]::Join("`n", $expectedPlaylistUris)) {
+        throw "The native playback HLS fixture segment order changed."
+    }
 }
 
 function Remove-ExactCertificate {

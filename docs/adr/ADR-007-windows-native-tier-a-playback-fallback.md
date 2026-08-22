@@ -10,7 +10,7 @@
 
 **Supply-chain rebaseline:** `VERIFIED`, önceki central `Microsoft.WindowsAppSDK 2.3.1` graph'ı `Microsoft.WindowsAppSDK.WinUI 2.3.0` çözüyor ve exact WinUI paketindeki Engineering Preview lisansı live-environment/dağıtım kısıtları taşıyordu. Microsoft issue #6654 bu sürümü etkilenen set içinde tanımlar ve yayımlamadan önce `Windows App SDK 2.4.0 → WinUI 2.3.6` düzeltmesine geçilmesini ister [S121][S122]. Yeni root ve WinUI NuGet SHA-256 değerleri sırasıyla `6ec2ebb6add33ecebac1f5773ad4cabe934b82fb18d7bea98e011bb0fc0a37b9` ve `3404f14b5aad656024cf23efab49373e14be4129b1e7d8cdd18dd26712d3c8e2`; byte-identical `license.txt` SHA-256 değeri `5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501`dir. Microsoft author/NuGet repository imzaları geçmiştir ve yeni license Engineering Preview/live-use yasağı taşımamaktadır. Bu teknik doğrulama hukuk kabulü değildir.
 
-Dependency/package/runtime binary seti değiştiği için yukarıdaki bütün M10 playback, lifecycle, fault, cleanup ve developer-soak sonuçları successor graph için tarihsel kanıttır. Fail-closed exact package inventory/SBOM gate'i implementation ve hosted validation aşamasındadır; root `LICENSE`/`NOTICE`, app asset provenance'i, corpus sahipliği/CC0 dağıtım hakkı, codec/patent uzman incelemesi, WACK, gerçek cihaz/HW-decode ve kalan surface/lifecycle/soak matrisi açıktır. ADR `Proposed`, M10 `IN PROGRESS`, R15 `ACTIVE` kalır; M11 başlamaz.
+Dependency/package/runtime binary seti değiştiği için yukarıdaki bütün M10 playback, lifecycle, fault, cleanup ve developer-soak sonuçları successor graph için tarihsel kanıttır. Fail-closed gerçek signed-MSIX inventory adımı run `32557484626` içinde çalışıp geçti; native budget failure'ı nedeniyle kalıcı sanitized success artifact'ı yayımlanmadı. Bu teknik inventory execution'ı root `LICENSE`/`NOTICE`, app asset provenance'i, corpus sahipliği/CC0 dağıtım hakkı, codec/patent uzman incelemesi, WACK, gerçek cihaz/HW-decode veya kalan surface/lifecycle/soak matrisini kapatmaz. ADR `Proposed`, M10 `IN PROGRESS`, R15 `ACTIVE` kalır; M11 başlamaz.
 
 ## Context / Problem
 
@@ -43,6 +43,10 @@ Schema-9 packaged cleanup sahipliği shared Windows App Runtime'ı disposable te
 
 `VERIFIED — successor graph diagnostic`: Commit `0503ed7` için [run `32555764285`](https://github.com/serkankaracan/iptv-suite/actions/runs/32555764285) ve aynı committeki tek failed-job rerun'u, fail-closed gerçek signed-MSIX inventory adımını geçti; fakat ilk HLS source-open'ı hatasız ve `5/5` response/`940229` byte eksiksiz tamamlandıktan sonra sırasıyla `5103,4564 ms` ve `5139,9608 ms` toplamla aynı `MediaOpenTimeout` failure domain'ini üretti. Envelope v6 checkpoint'i yalnız timeout snapshot'ındaki `MediaOpened` completion timestamp'inin mevcut wait deadline ve değişmeyen hard startup bütçesiyle ilişkisini ölçer; sonucu başarıya çevirmez, grace/retry eklemez. [Ayrıntılı attribution kaydı](../quality/M10_NATIVE_TIER_A_STARTUP_ATTRIBUTION.md) hosted v6 sonucu beklenirken ADR durumunu değiştirmez.
 
+`VERIFIED — envelope v6 classification`: Commit `78ff98e4972bb075977af04597e8717c692b0f21` için [run #155 (`32557484626`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32557484626), quality/package/DPAPI/inventory adımlarını geçti ve 100 switch'i tamamladı; timeout yerine ilk HLS total maximum `5024,5709 ms` ile hard tavanı `24,5709 ms` aştı. P95 `2160,3704 ms`, pre-wait `86,1858 ms`, `MediaOpened` wait `4938,3851 ms`, hatasız source-open `2454,8193 ms`, source-open sonrası `MediaOpened` `2569,7516 ms`, direct maximum `2286,6558 ms` ve retry `0` idi. Bu actual event'in mevcut wait içinde geldiğini fakat source-creation öncesi total bütçeyi geçtiğini doğrular; lost-event arbitration gerekçesini desteklemez ve PASS değildir.
+
+`IMPLEMENTED LOCALLY; HOSTED A/B PENDING`: Aynı synthetic corpus'un TS media byte'ları korunurken generator, her HLS segmentinin ilk video paketini keyframe ve ilk access unit'ini SPS/PPS/IDR olarak doğrular; ardından playlist'e exact bir `#EXT-X-INDEPENDENT-SEGMENTS` ekler. Runtime exact version/tag/URI sırasını authenticated manifestten sonra fail-closed denetler [S126–S128]. Bu fixture truth düzeltmesi HLS-first, `CreateFromUri`, source-creation öncesi timer, `≤3000/≤5000 ms`, retry, TLS/loopback veya cleanup sözleşmelerini değiştirmez. Hosted etkisi `UNVERIFIED`dır ve run #155 kök neden kanıtı değildir.
+
 Bu ADR henüz `Accepted` değildir. Güncel `2.4.0 → WinUI 2.3.6` graph'ı fail-closed inventory/SBOM, Native Tier A corpus %100 başlangıç, controlled-LAN p95 ≤3 saniye, 100 switch/8 saat soak, surface/lifecycle ve package gate'lerini geçmeden production adapter yazılmaz.
 
 ## Consequences
@@ -54,4 +58,4 @@ Bu ADR henüz `Accepted` değildir. Güncel `2.4.0 → WinUI 2.3.6` graph'ı fai
 
 ## References
 
-[S21–S23, S27, S110–S112, S115–S122](../research/SOURCES.md)
+[S21–S23, S27, S115–S128](../research/SOURCES.md)
