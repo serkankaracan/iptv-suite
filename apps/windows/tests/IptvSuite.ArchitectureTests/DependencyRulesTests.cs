@@ -2100,7 +2100,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(app, "new NativePlaybackProbeEnvelope(");
         StringAssert.Contains(
             normalizedApp,
-            "new NativePlaybackProbeEnvelope( 3, request.RunId.ToString(\"N\"), runtimeDependency, result);");
+            "new NativePlaybackProbeEnvelope( 4, request.RunId.ToString(\"N\"), runtimeDependency, result);");
         StringAssert.Contains(app, "request.RunId.ToString(\"N\")");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.json\"");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.pending\"");
@@ -2139,10 +2139,7 @@ public sealed class DependencyRulesTests
             "The live Tier A probe must not disable real-time playback.");
         StringAssert.Contains(window, "private readonly TaskCompletionSource _surfaceReady");
         StringAssert.Contains(window, "private readonly CancellationTokenSource _lifetimeCancellation");
-        StringAssert.Contains(window, "using Microsoft.UI.Xaml.Media;");
-        StringAssert.Contains(window, "private bool _surfaceLoaded;");
         StringAssert.Contains(window, "PlaybackSurface.Loaded += PlaybackSurface_Loaded");
-        StringAssert.Contains(window, "CompositionTarget.Rendered += CompositionTarget_Rendered");
         StringAssert.Contains(
             window,
             "await _surfaceReady.Task.WaitAsync(TimeSpan.FromSeconds(5), probeCancellationToken);");
@@ -2152,36 +2149,16 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "PlaybackSurface.Loaded -= PlaybackSurface_Loaded");
         StringAssert.Contains(
             normalizedWindow,
-            "private void PlaybackSurface_Loaded(object sender, RoutedEventArgs args) => _surfaceLoaded = true;");
-        StringAssert.Contains(
-            normalizedWindow,
-            "private void CompositionTarget_Rendered(object? sender, RenderedEventArgs args) { if (!_surfaceLoaded) return; CompositionTarget.Rendered -= CompositionTarget_Rendered; _surfaceReady.TrySetResult(); }");
-        Assert.AreEqual(
-            1,
-            Regex.Count(
-                window,
-                Regex.Escape("CompositionTarget.Rendered += CompositionTarget_Rendered"),
-                RegexOptions.CultureInvariant),
-            "The first-frame readiness handler must be subscribed exactly once.");
-        Assert.AreEqual(
-            2,
-            Regex.Count(
-                window,
-                Regex.Escape("CompositionTarget.Rendered -= CompositionTarget_Rendered"),
-                RegexOptions.CultureInvariant),
-            "The first-frame readiness handler must detach on completion and disposal.");
+            "private void PlaybackSurface_Loaded(object sender, RoutedEventArgs args) => _surfaceReady.TrySetResult();");
         Assert.AreEqual(
             1,
             Regex.Count(
                 window,
                 Regex.Escape("_surfaceReady.TrySetResult();"),
                 RegexOptions.CultureInvariant),
-            "Only the Loaded-gated rendered-frame handler may complete surface readiness.");
+            "Only the Loaded handler may complete surface readiness.");
         int surfaceSubscriptionIndex = window.IndexOf(
             "PlaybackSurface.Loaded += PlaybackSurface_Loaded",
-            StringComparison.Ordinal);
-        int renderedSubscriptionIndex = window.IndexOf(
-            "CompositionTarget.Rendered += CompositionTarget_Rendered",
             StringComparison.Ordinal);
         int mediaAttachmentIndex = window.IndexOf(
             "PlaybackSurface.SetMediaPlayer(_mediaPlayer)",
@@ -2219,12 +2196,9 @@ public sealed class DependencyRulesTests
         int firstMediaOpenWaitIndex = firstPlayInvocationIndex < 0
             ? -1
             : window.IndexOf(
-                "long openedTimestamp = await _opened.Task.WaitAsync(",
+                "Task firstCompletion = await Task.WhenAny(",
                 firstPlayInvocationIndex,
                 StringComparison.Ordinal);
-        int disposeRenderedUnsubscribeIndex = window.LastIndexOf(
-            "CompositionTarget.Rendered -= CompositionTarget_Rendered",
-            StringComparison.Ordinal);
         int disposeSurfaceDetachIndex = window.IndexOf(
             "PlaybackSurface.SetMediaPlayer(null)",
             StringComparison.Ordinal);
@@ -2234,8 +2208,6 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             realTimeConfigurationIndex >= 0 && realTimeConfigurationIndex < mediaAttachmentIndex &&
             surfaceSubscriptionIndex >= 0 && surfaceSubscriptionIndex < mediaAttachmentIndex &&
-            renderedSubscriptionIndex > surfaceSubscriptionIndex &&
-            renderedSubscriptionIndex < mediaAttachmentIndex &&
             mediaAttachmentIndex < surfaceWaitIndex &&
             surfaceWaitIndex >= 0 && surfaceWaitIndex < switchLoopIndex &&
             switchLoopIndex < firstStartupTimestampIndex &&
@@ -2244,12 +2216,13 @@ public sealed class DependencyRulesTests
             firstSourceCreationIndex < firstSourceAssignmentIndex &&
             firstSourceAssignmentIndex < firstPlayInvocationIndex &&
             firstPlayInvocationIndex < firstMediaOpenWaitIndex,
-            "The Loaded-gated first frame must precede the unchanged source-to-open startup measurement.");
+            "The Loaded surface boundary must precede the unchanged source-to-open startup measurement.");
         Assert.IsTrue(
-            disposeRenderedUnsubscribeIndex >= 0 &&
-            disposeRenderedUnsubscribeIndex < disposeSurfaceDetachIndex &&
-            disposeSurfaceDetachIndex < mediaPlayerDisposeIndex,
-            "Disposal must detach the global rendered handler before the playback surface and player.");
+            disposeSurfaceDetachIndex >= 0 && disposeSurfaceDetachIndex < mediaPlayerDisposeIndex,
+            "Disposal must detach the playback surface before disposing the player.");
+        Assert.IsFalse(
+            window.Contains("CompositionTarget.Rendered", StringComparison.Ordinal),
+            "The rejected first-frame hypothesis must not leave a global rendered handler behind.");
         Assert.AreEqual(
             2,
             Regex.Count(
@@ -2279,6 +2252,48 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "for (int attempt = 0; attempt < 2; attempt++)");
         StringAssert.Contains(window, "_mediaFailure == NativePlaybackFailure.MediaFailed && attempt == 0");
         StringAssert.Contains(window, "MediaSource source = MediaSource.CreateFromUri(fixture)");
+        StringAssert.Contains(window, "MediaSourceOpenOperationCompletedEventArgs args");
+        StringAssert.Contains(window, "source.OpenOperationCompleted += Source_OpenOperationCompleted;");
+        StringAssert.Contains(window, "source.OpenOperationCompleted -= Source_OpenOperationCompleted;");
+        StringAssert.Contains(window, "args.Error is not null");
+        StringAssert.Contains(window, "NativePlaybackStartupStage.MediaSourceOpenWait");
+        StringAssert.Contains(window, "Task firstCompletion = await Task.WhenAny(");
+        StringAssert.Contains(window, "mediaOpenTimeout - Stopwatch.GetElapsedTime(mediaOpenWaitStarted)");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                window,
+                Regex.Escape("source.OpenOperationCompleted += Source_OpenOperationCompleted;"),
+                RegexOptions.CultureInvariant),
+            "Each attempt must bind one source-open diagnostic handler.");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                window,
+                Regex.Escape("source.OpenOperationCompleted -= Source_OpenOperationCompleted;"),
+                RegexOptions.CultureInvariant),
+            "Each attempt must unbind its source-open diagnostic handler.");
+        int sourceOpenSubscribeIndex = window.IndexOf(
+            "source.OpenOperationCompleted += Source_OpenOperationCompleted;",
+            StringComparison.Ordinal);
+        int sourceOpenUnsubscribeIndex = window.IndexOf(
+            "source.OpenOperationCompleted -= Source_OpenOperationCompleted;",
+            StringComparison.Ordinal);
+        int attemptResetIndex = window.IndexOf(
+            "BestEffortResetAfterProbe();",
+            sourceOpenUnsubscribeIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            firstSourceCreationIndex < sourceOpenSubscribeIndex &&
+            sourceOpenSubscribeIndex < firstSourceAssignmentIndex &&
+            firstSourceAssignmentIndex < sourceOpenUnsubscribeIndex &&
+            sourceOpenUnsubscribeIndex < attemptResetIndex,
+            "The attempt-owned source-open handler must bind before Source assignment and unbind before reset.");
+        Assert.IsFalse(
+            window.Contains("AdaptiveMediaSource", StringComparison.Ordinal) ||
+            window.Contains("source.OpenAsync", StringComparison.Ordinal) ||
+            window.Contains("ExtendedError", StringComparison.Ordinal),
+            "The attribution checkpoint must not change HLS behavior or expose native error details.");
         StringAssert.Contains(window, "NativePlaybackTeardownStage.MediaSourceDispose");
         StringAssert.Contains(window, "DisposeMediaSource(source)");
         StringAssert.Contains(window, "BestEffortDisposeMediaSource(source)");
@@ -2289,6 +2304,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "NativePlaybackStartupStage.SourceCreation");
         StringAssert.Contains(window, "NativePlaybackStartupStage.SourceAssignment");
         StringAssert.Contains(window, "NativePlaybackStartupStage.PlayInvocation");
+        StringAssert.Contains(window, "NativePlaybackStartupStage.MediaSourceOpenWait");
         StringAssert.Contains(window, "NativePlaybackStartupStage.MediaOpenWait");
         StringAssert.Contains(window, "NativePlaybackStartupStage.PlaybackAdvanceWait");
         StringAssert.Contains(window, "startupFailureDiagnostic = CaptureStartupFailureDiagnostic();");
@@ -2322,12 +2338,11 @@ public sealed class DependencyRulesTests
             "startupMaximumMediaOpenWaitMilliseconds = startupMediaOpenWaitMilliseconds;");
         StringAssert.Contains(window, "hlsStartupSamples.Max(),");
         StringAssert.Contains(window, "directStartupSamples.Max(),");
-        StringAssert.Contains(
-            normalizedWindow,
-            "long openedTimestamp = await _opened.Task.WaitAsync( TimeSpan.FromSeconds(5), probeCancellationToken);");
+        StringAssert.Contains(window, "TimeSpan mediaOpenTimeout = TimeSpan.FromSeconds(5);");
+        StringAssert.Contains(window, ".WaitAsync(mediaOpenTimeout, probeCancellationToken);");
+        StringAssert.Contains(window, "mediaOpenedTask.WaitAsync(");
         StringAssert.Contains(window, "Stopwatch.GetElapsedTime(startupStarted, openedTimestamp).TotalMilliseconds");
         StringAssert.Contains(window, "_opened?.TrySetResult(Stopwatch.GetTimestamp())");
-        StringAssert.Contains(window, "await _opened.Task.WaitAsync(TimeSpan.FromSeconds(5)");
         StringAssert.Contains(window, "await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3)");
         StringAssert.Contains(window, "TimeSpan sampleInterval = TimeSpan.FromMinutes(5)");
         StringAssert.Contains(window, "sample.Elapsed >= TimeSpan.FromMinutes(30)");
@@ -2338,7 +2353,8 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             window.Contains("fixture.ToString()", StringComparison.Ordinal) ||
             window.Contains("AbsoluteUri", StringComparison.Ordinal) ||
-            window.Contains("args.ErrorMessage", StringComparison.Ordinal),
+            window.Contains("args.ErrorMessage", StringComparison.Ordinal) ||
+            window.Contains("args.Error.ExtendedError", StringComparison.Ordinal),
             "The native playback evidence path must not serialize a locator or native diagnostic text.");
     }
 
@@ -2391,9 +2407,16 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -gt $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "SchemaVersion = 9");
-        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 3");
-        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 3");
+        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 4");
+        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 4");
+        StringAssert.Contains(controller, "\"StartupMaximumSourceOpen\"");
+        StringAssert.Contains(controller, "\"StartupFailureSourceOpen\"");
+        StringAssert.Contains(controller, "\"CompletionObserved\"");
+        StringAssert.Contains(controller, "\"PostCompletionMediaOpenedMilliseconds\"");
         StringAssert.Contains(controller, "$startupFailureStage -notin $allowedStartupFailureStages");
+        StringAssert.Contains(controller, "\"MediaSourceOpenWait\"");
+        StringAssert.Contains(controller, "$startupFailureSourceOpenObserved");
+        StringAssert.Contains(controller, "$startupMaximumSourceOpenObserved");
         StringAssert.Contains(controller, "$startupFailureSwitchOrdinal -ne $expectedFailureSwitchOrdinal");
         StringAssert.Contains(controller, "$startupFailureAttemptCount -gt (1 + [int]$probe.PlaybackRetryCount)");
         StringAssert.Contains(controller, "$startupFailureSurfaceTransitionCount -ne $expectedFailureSurfaceTransitionCount");
@@ -2477,6 +2500,10 @@ public sealed class DependencyRulesTests
             "startupFailureSourceCreation=",
             "startupFailureSourceAssignment=",
             "startupFailurePlayInvocation=",
+            "startupFailureSourceOpenObserved=",
+            "startupFailureSourceOpenError=",
+            "startupFailureSourceOpenCompletion=",
+            "startupFailurePostSourceOpenMediaOpened=",
             "startupFailureActiveStageElapsed=",
             "startupMaximumOrdinal=",
             "startupMaximumFixture=",
@@ -2484,6 +2511,10 @@ public sealed class DependencyRulesTests
             "startupMaximumTransitions=",
             "startupMaximumPreWait=",
             "startupMaximumMediaOpenWait=",
+            "startupMaximumSourceOpenObserved=",
+            "startupMaximumSourceOpenError=",
+            "startupMaximumSourceOpenCompletion=",
+            "startupMaximumPostSourceOpenMediaOpened=",
             "hlsMaximum=",
             "directMaximum=",
         ];
@@ -2500,6 +2531,10 @@ public sealed class DependencyRulesTests
             "maximumSurfaceTransitions=",
             "maximumPreWait=",
             "maximumMediaOpenWait=",
+            "maximumSourceOpenObserved=",
+            "maximumSourceOpenError=",
+            "maximumSourceOpenCompletion=",
+            "maximumPostSourceOpenMediaOpened=",
             "hlsMaximum=",
             "directMaximum=",
         ];
@@ -2516,6 +2551,10 @@ public sealed class DependencyRulesTests
             "surfaceTransitions=",
             "preWait=",
             "mediaOpenWait=",
+            "sourceOpenObserved=",
+            "sourceOpenError=",
+            "sourceOpenCompletion=",
+            "postSourceOpenMediaOpened=",
             "hlsMaximum=",
             "directMaximum=",
         ];
