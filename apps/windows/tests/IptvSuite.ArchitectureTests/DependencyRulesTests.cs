@@ -746,6 +746,100 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void PackageSmokeReusesOnlyExactCompatibleWindowsAppRuntime()
+    {
+        string packageSmoke = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        StringAssert.Contains(
+            packageSmoke,
+            "$expectedRuntimeDependencyName = \"Microsoft.WindowsAppRuntime.2\"");
+        StringAssert.Contains(
+            packageSmoke,
+            "$expectedRuntimeDependencyPublisher = \"CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US\"");
+        StringAssert.Contains(
+            packageSmoke,
+            "$expectedRuntimeDependencyPublisherId = \"8wekyb3d8bbwe\"");
+        StringAssert.Contains(
+            packageSmoke,
+            "$expectedRuntimeDependencyVersion = \"2.4.0.0\"");
+        StringAssert.Contains(packageSmoke, "function Get-RuntimeDependencyPackages {");
+        StringAssert.Contains(
+            packageSmoke,
+            "Get-AppxPackage -Name $script:expectedRuntimeDependencyName -ErrorAction Stop");
+        StringAssert.Contains(packageSmoke, "$script:expectedRuntimeDependencyPublisher,");
+        StringAssert.Contains(
+            packageSmoke,
+            "$compatibleRuntimeDependencyRegistered = @($runtimeDependencyPackagesBefore |");
+        StringAssert.Contains(
+            packageSmoke,
+            "\"$($expectedRuntimeDependencyName)_$expectedRuntimeDependencyPublisherId\"");
+        StringAssert.Contains(packageSmoke, "[string]$_.Architecture,");
+        StringAssert.Contains(packageSmoke, "\"X64\",");
+        StringAssert.Contains(packageSmoke, "$_.IsFramework -eq $true");
+        StringAssert.Contains(
+            packageSmoke,
+            "[version]$_.Version -ge [version]$expectedRuntimeDependencyVersion");
+
+        int compatibilityCheck = packageSmoke.IndexOf(
+            "$compatibleRuntimeDependencyRegistered = @($runtimeDependencyPackagesBefore |",
+            StringComparison.Ordinal);
+        int appRemoval = packageSmoke.IndexOf(
+            "    Remove-ExactDevelopmentPackage",
+            compatibilityCheck,
+            StringComparison.Ordinal);
+        int reuseBranch = packageSmoke.IndexOf(
+            "    if ($compatibleRuntimeDependencyRegistered) {",
+            appRemoval,
+            StringComparison.Ordinal);
+        int appOnlyInstall = packageSmoke.IndexOf(
+            "        Add-AppxPackage -Path $packages[0].FullName\n",
+            reuseBranch,
+            StringComparison.Ordinal);
+        int dependencyFallback = packageSmoke.IndexOf(
+            "        Add-AppxPackage -Path $packages[0].FullName -DependencyPath $runtimeDependencies[0].FullName",
+            appOnlyInstall,
+            StringComparison.Ordinal);
+        int installedPackageValidation = packageSmoke.IndexOf(
+            "    $installedPackages = @(",
+            dependencyFallback,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            compatibilityCheck >= 0 &&
+            appRemoval > compatibilityCheck &&
+            reuseBranch > appRemoval &&
+            appOnlyInstall > reuseBranch &&
+            dependencyFallback > appOnlyInstall &&
+            installedPackageValidation > dependencyFallback,
+            "Runtime compatibility must be established before exact app replacement and the fail-closed dependency fallback.");
+
+        string installationBlock = packageSmoke[compatibilityCheck..installedPackageValidation];
+        Assert.HasCount(
+            2,
+            Regex.Matches(installationBlock, @"(?m)^\s*Add-AppxPackage\b"),
+            "The install transaction must have exactly one reuse branch and one locked-dependency fallback.");
+        Assert.IsFalse(
+            Regex.IsMatch(installationBlock, @"(?im)\b(?:for|foreach|while|do)\b|Start-Sleep|ForceApplicationShutdown|-AllUsers"),
+            "Runtime installation must not retry, force shared applications closed, or broaden package scope.");
+        Assert.HasCount(
+            1,
+            Regex.Matches(packageSmoke, @"(?m)^\s*Remove-AppxPackage\b"),
+            "Package smoke may remove only its exact development application, never a shared runtime framework.");
+        StringAssert.Contains(
+            packageSmoke,
+            "$windowsAppRuntimeDisposition = \"ReusedRegisteredFramework\"");
+        StringAssert.Contains(
+            packageSmoke,
+            "$windowsAppRuntimeDisposition = \"InstalledLockedDependency\"");
+        StringAssert.Contains(
+            packageSmoke,
+            "WindowsAppRuntimeDisposition = $windowsAppRuntimeDisposition");
+    }
+
+    [TestMethod]
     public void ProtectedCatalogSpikeRequiresExplicitIsolatedExecutionAndFixedWorkload()
     {
         string wrapper = File.ReadAllText(

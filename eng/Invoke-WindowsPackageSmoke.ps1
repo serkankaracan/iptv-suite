@@ -444,6 +444,10 @@ $expectedName = "IptvSuite.LocalDev.6f0d9a64"
 $expectedPublisher = "CN=IptvSuite Local Development"
 $expectedApplicationId = "App"
 $testCanaryMarker = "IPTVSUITE_TEST_ONLY_CANARY_V1"
+$expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
+$expectedRuntimeDependencyPublisher = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+$expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
+$expectedRuntimeDependencyVersion = "2.4.0.0"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"
 $catalogUiHarnessProjectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.CatalogUiAcceptanceHarness\IptvSuite.CatalogUiAcceptanceHarness.csproj"
@@ -475,6 +479,7 @@ $catalogFrameP95Milliseconds = 0.0
 $catalogFrameMaximumMilliseconds = 0.0
 $catalogDroppedFramePercent = 0.0
 $catalogFrameIntervalCount = 0
+$windowsAppRuntimeDisposition = "NotStarted"
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
     AppxBundle                    = "Never"
@@ -1023,6 +1028,20 @@ function Remove-ExactDevelopmentPackage {
     }
 }
 
+function Get-RuntimeDependencyPackages {
+    return @(Get-AppxPackage -Name $script:expectedRuntimeDependencyName -ErrorAction Stop |
+        Where-Object {
+            [string]::Equals(
+                $_.Name,
+                $script:expectedRuntimeDependencyName,
+                [System.StringComparison]::OrdinalIgnoreCase) -and
+            [string]::Equals(
+                $_.Publisher,
+                $script:expectedRuntimeDependencyPublisher,
+                [System.StringComparison]::Ordinal)
+        })
+}
+
 function Get-RequiredAutomationElement {
     param(
         [Parameter(Mandatory)]
@@ -1273,9 +1292,33 @@ try {
     $packageSha256 = (Get-FileHash -LiteralPath $packages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-ProductionPackagePayload -PackagePath $packages[0].FullName
 
+    $runtimeDependencyPackagesBefore = @(Get-RuntimeDependencyPackages)
+    $compatibleRuntimeDependencyRegistered = @($runtimeDependencyPackagesBefore |
+        Where-Object {
+            -not [string]::IsNullOrWhiteSpace([string]$_.PackageFullName) -and
+            [string]::Equals(
+                [string]$_.PackageFamilyName,
+                "$($expectedRuntimeDependencyName)_$expectedRuntimeDependencyPublisherId",
+                [System.StringComparison]::OrdinalIgnoreCase) -and
+            [string]::Equals(
+                [string]$_.Architecture,
+                "X64",
+                [System.StringComparison]::Ordinal) -and
+            $_.IsFramework -eq $true -and
+            [version]$_.Version -ge [version]$expectedRuntimeDependencyVersion
+        }).Count -gt 0
+
     Remove-ExactDevelopmentPackage
     $installAttempted = $true
-    Add-AppxPackage -Path $packages[0].FullName -DependencyPath $runtimeDependencies[0].FullName
+    if ($compatibleRuntimeDependencyRegistered) {
+        Write-Host "Compatible Windows App Runtime dependency is already registered; package install will reuse it."
+        Add-AppxPackage -Path $packages[0].FullName
+        $windowsAppRuntimeDisposition = "ReusedRegisteredFramework"
+    }
+    else {
+        Add-AppxPackage -Path $packages[0].FullName -DependencyPath $runtimeDependencies[0].FullName
+        $windowsAppRuntimeDisposition = "InstalledLockedDependency"
+    }
 
     $installedPackages = @(
         Get-AppxPackage -Name $expectedName |
@@ -1571,6 +1614,9 @@ try {
     if (Test-Path -LiteralPath $appDataPath) {
         throw "Package app-data remains after uninstall."
     }
+    if ($windowsAppRuntimeDisposition -notin @("ReusedRegisteredFramework", "InstalledLockedDependency")) {
+        throw "The Windows App Runtime installation disposition is invalid."
+    }
 
     $successEvidence = [ordered]@{
         RunId             = $runId
@@ -1585,6 +1631,7 @@ try {
         Architecture      = "x64"
         Capabilities      = @("runFullTrust")
         SignatureStatus   = $signature.Status.ToString()
+        WindowsAppRuntimeDisposition = $windowsAppRuntimeDisposition
         PayloadLeakGate   = $true
         ProtectedStoreDirectoryInitialized = $protectedStoreDirectoryInitialized
         CatalogUiaContractVerified = $catalogUiaContractVerified
