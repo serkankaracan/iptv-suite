@@ -3964,6 +3964,72 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M11WindowsNativeAdapterKeepsSessionAndSecretOwnershipInternal()
+    {
+        string adapter = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows",
+            "WindowsNativePlaybackEngine.cs"));
+        string infrastructureAssembly = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "Properties",
+            "AssemblyInfo.cs"));
+
+        StringAssert.Contains(
+            adapter,
+            "internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine");
+        StringAssert.Contains(adapter, "using SecretLease lease = resolved.Lease!;");
+        StringAssert.Contains(adapter, "new SessionContext(sessionId, generation, source)");
+        StringAssert.Contains(adapter, "context.Source.OpenOperationCompleted += context.SourceOpenHandler;");
+        StringAssert.Contains(adapter, "PostNativeCallback(");
+        StringAssert.Contains(adapter, "ReferenceEquals(_active, context)");
+        StringAssert.Contains(adapter, "context.Generation == _generation");
+        StringAssert.Contains(adapter, "ReferenceEquals(_mediaPlayer.Source, context.Source)");
+        StringAssert.Contains(adapter, "cancellationToken.Register(workItem.CancelBeforeStart)");
+        StringAssert.Contains(adapter, "CancellationToken.None).ConfigureAwait(false);");
+        StringAssert.Contains(adapter, "PlaybackSourceResolutionFailure.StorageUnavailable");
+        StringAssert.Contains(adapter, "PlaybackTrackCapabilities.None");
+        StringAssert.Contains(
+            infrastructureAssembly,
+            "[assembly: InternalsVisibleTo(\"IptvSuite.Windows\")]");
+
+        string release = adapter[adapter.IndexOf(
+            "private void ReleaseContextOnUiThread(",
+            StringComparison.Ordinal)..];
+        Assert.IsTrue(
+            release.IndexOf("DetachSessionHandlers(context);", StringComparison.Ordinal) <
+            release.IndexOf("_mediaPlayer.Source = null;", StringComparison.Ordinal));
+        Assert.IsTrue(
+            release.IndexOf("_mediaPlayer.Source = null;", StringComparison.Ordinal) <
+            release.IndexOf("context.Source.Dispose();", StringComparison.Ordinal));
+
+        string finalDispose = adapter[adapter.IndexOf(
+            "private bool DisposeOnUiThread()",
+            StringComparison.Ordinal)..];
+        Assert.IsTrue(
+            finalDispose.IndexOf("_surface.SetMediaPlayer(null);", StringComparison.Ordinal) <
+            finalDispose.IndexOf("_mediaPlayer.Source = null;", StringComparison.Ordinal));
+        Assert.IsTrue(
+            finalDispose.IndexOf("context.Source.Dispose();", StringComparison.Ordinal) <
+            finalDispose.IndexOf("_mediaPlayer.Dispose();", StringComparison.Ordinal));
+        StringAssert.Contains(finalDispose, "(sourceDetached || playerDisposed)");
+
+        Assert.IsFalse(adapter.Contains("Console.", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("Trace.", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("Debug.", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("exception.Message", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("HResult", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("NativePlaybackCompatibilitySpike", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
     {
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
