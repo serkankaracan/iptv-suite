@@ -22,14 +22,18 @@ public sealed partial class MainPage : Page, IDisposable
 {
     private const int PageSize = 200;
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly object _operationSync = new();
     private CatalogBrowseCoordinator? _coordinator;
     private ChannelLogoCache? _logoCache;
+    private PlaybackSessionCoordinator? _playback;
     private CancellationTokenSource _logoPageCancellation = new();
     private int _offset;
     private bool _updatingSelectors;
     private bool _disposed;
     private bool _movingTabFocus;
     private long _loadingGeneration;
+    private int _activeAsyncOperations;
+    private TaskCompletionSource? _operationsDrained;
 
     public MainPage()
     {
@@ -72,18 +76,32 @@ public sealed partial class MainPage : Page, IDisposable
 
     public ObservableCollection<ChannelRow> Channels { get; } = [];
 
-    internal void Initialize(ICatalogBrowser catalogBrowser, ChannelLogoCache logoCache)
+    internal MediaPlayerElement PlaybackSurfaceElement => PlaybackSurface;
+
+    internal void Initialize(
+        ICatalogBrowser catalogBrowser,
+        ChannelLogoCache logoCache,
+        PlaybackSessionCoordinator playback)
     {
         ArgumentNullException.ThrowIfNull(catalogBrowser);
         ArgumentNullException.ThrowIfNull(logoCache);
-        if (_coordinator is not null) throw new InvalidOperationException("The catalog page is already initialized.");
+        ArgumentNullException.ThrowIfNull(playback);
+        if (_coordinator is not null || _playback is not null)
+        {
+            throw new InvalidOperationException("The application page is already initialized.");
+        }
+
         _coordinator = new CatalogBrowseCoordinator(catalogBrowser);
         _logoCache = logoCache;
+        _playback = playback;
+        _playback.StateChanged += Playback_StateChanged;
+        ApplyPlaybackState(_playback.Current);
         _ = LoadSourcesAsync();
     }
 
     private async Task LoadSourcesAsync()
     {
+        using AsyncOperationLease operation = BeginAsyncOperation();
         CatalogBrowseCoordinator coordinator = _coordinator ?? throw new InvalidOperationException("The catalog page is not initialized.");
         long loadingGeneration = BeginLoading();
         try
@@ -107,7 +125,13 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async Task BrowseAsync(bool debounce)
     {
-        if (_coordinator is null || SourceSelector.SelectedItem is not CatalogSourceItem source) return;
+        if (_disposed || _coordinator is null ||
+            SourceSelector.SelectedItem is not CatalogSourceItem source)
+        {
+            return;
+        }
+
+        using AsyncOperationLease operation = BeginAsyncOperation();
         long loadingGeneration = BeginLoading();
         try
         {
@@ -249,14 +273,134 @@ public sealed partial class MainPage : Page, IDisposable
     private async void PreviousButton_Click(object sender, RoutedEventArgs e) { _offset = Math.Max(0, _offset - PageSize); await BrowseAsync(false); }
     private async void NextButton_Click(object sender, RoutedEventArgs e) { _offset += PageSize; await BrowseAsync(false); }
 
+    private async void ChannelList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        PlaybackSessionCoordinator? playback = _playback;
+        if (_disposed || playback is null || e.ClickedItem is not ChannelRow channel)
+        {
+            return;
+        }
+
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        try
+        {
+            await playback.StartAsync(
+                channel.SourceId,
+                channel.ChannelId,
+                _lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            ApplyPlaybackState(playback.Current);
+        }
+    }
+
+    private async void PlayButton_Click(object sender, RoutedEventArgs e) =>
+        await ExecutePlaybackCommandAsync(
+            static (playback, token) => playback.PlayAsync(token));
+
+    private async void PauseButton_Click(object sender, RoutedEventArgs e) =>
+        await ExecutePlaybackCommandAsync(
+            static (playback, token) => playback.PauseAsync(token));
+
+    private async void StopButton_Click(object sender, RoutedEventArgs e) =>
+        await ExecutePlaybackCommandAsync(
+            static (playback, token) => playback.StopAsync(token));
+
+    private async Task ExecutePlaybackCommandAsync(
+        Func<PlaybackSessionCoordinator, CancellationToken,
+            ValueTask<PlaybackEngineOperationResult>> command)
+    {
+        PlaybackSessionCoordinator? playback = _playback;
+        if (_disposed || playback is null)
+        {
+            return;
+        }
+
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        try
+        {
+            PlaybackEngineOperationResult result = await command(
+                playback,
+                _lifetime.Token);
+            if (!result.IsSuccess)
+            {
+                ApplyPlaybackState(playback.Current);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            ApplyPlaybackState(playback.Current);
+        }
+    }
+
+    private void Playback_StateChanged(
+        object? sender,
+        PlaybackSessionStateChangedEventArgs args)
+    {
+        PlaybackSessionSnapshot snapshot = args.Snapshot;
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            ApplyPlaybackState(snapshot);
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(() => ApplyPlaybackState(snapshot));
+    }
+
+    private void ApplyPlaybackState(PlaybackSessionSnapshot snapshot)
+    {
+        PlaybackSessionCoordinator? playback = _playback;
+        if (_disposed || playback is null)
+        {
+            return;
+        }
+
+        PlaybackSessionSnapshot current = playback.Current;
+        if (current.SessionId != snapshot.SessionId || current.State != snapshot.State)
+        {
+            return;
+        }
+
+        PlaybackStatusText.Text = snapshot.State switch
+        {
+            PlaybackState.Opening => "Opening channel.",
+            PlaybackState.Buffering => "Buffering channel.",
+            PlaybackState.Playing => "Channel is playing.",
+            PlaybackState.Paused => "Playback paused.",
+            PlaybackState.Stopping => "Stopping playback.",
+            PlaybackState.Failed => "Playback is unavailable.",
+            _ => "Playback stopped.",
+        };
+        PlayButton.IsEnabled = snapshot.State == PlaybackState.Paused;
+        PauseButton.IsEnabled = snapshot.State == PlaybackState.Playing;
+        StopButton.IsEnabled = snapshot.State is
+            PlaybackState.Opening or
+            PlaybackState.Buffering or
+            PlaybackState.Playing or
+            PlaybackState.Paused or
+            PlaybackState.Failed;
+    }
+
     private async void ChannelList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
-        if (args.InRecycleQueue || args.Item is not ChannelRow row || !row.HasLogo || row.LogoSource is not null || _logoCache is null) return;
+        if (_disposed || args.InRecycleQueue || args.Item is not ChannelRow row ||
+            !row.HasLogo || row.LogoSource is not null || _logoCache is null)
+        {
+            return;
+        }
+        using AsyncOperationLease operation = BeginAsyncOperation();
         long generation = row.BeginLogoLoad();
         try
         {
             ChannelLogoImage? logo = await _logoCache.GetAsync(row.SourceId, row.ChannelId, _logoPageCancellation.Token);
-            if (logo is null || !row.IsCurrentLogoLoad(generation)) return;
+            if (_disposed || logo is null || !row.IsCurrentLogoLoad(generation)) return;
             using var stream = new InMemoryRandomAccessStream();
             using (var writer = new DataWriter(stream))
             {
@@ -267,7 +411,7 @@ public sealed partial class MainPage : Page, IDisposable
             stream.Seek(0);
             var image = new BitmapImage();
             await image.SetSourceAsync(stream);
-            if (row.IsCurrentLogoLoad(generation)) row.LogoSource = image;
+            if (!_disposed && row.IsCurrentLogoLoad(generation)) row.LogoSource = image;
         }
         catch (OperationCanceledException) when (_logoPageCancellation.IsCancellationRequested) { }
         catch (Exception) { }
@@ -282,6 +426,12 @@ public sealed partial class MainPage : Page, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        if (_playback is not null)
+        {
+            _playback.StateChanged -= Playback_StateChanged;
+            _playback = null;
+        }
+
         _lifetime.Cancel();
         _logoPageCancellation.Cancel();
         _coordinator?.Dispose();
@@ -290,7 +440,59 @@ public sealed partial class MainPage : Page, IDisposable
         GC.SuppressFinalize(this);
     }
 
+    internal ValueTask WaitForPendingOperationsAsync()
+    {
+        lock (_operationSync)
+        {
+            if (_activeAsyncOperations == 0)
+            {
+                return ValueTask.CompletedTask;
+            }
+
+            _operationsDrained ??= new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            return new ValueTask(_operationsDrained.Task);
+        }
+    }
+
+    private AsyncOperationLease BeginAsyncOperation()
+    {
+        lock (_operationSync)
+        {
+            _activeAsyncOperations = checked(_activeAsyncOperations + 1);
+        }
+
+        return new AsyncOperationLease(this);
+    }
+
+    private void EndAsyncOperation()
+    {
+        TaskCompletionSource? completion = null;
+        lock (_operationSync)
+        {
+            _activeAsyncOperations--;
+            if (_activeAsyncOperations == 0)
+            {
+                completion = _operationsDrained;
+                _operationsDrained = null;
+            }
+        }
+
+        completion?.TrySetResult();
+    }
+
     private sealed record CategoryOption(string Name, CategoryId? CategoryId);
+
+    private sealed class AsyncOperationLease(MainPage owner) : IDisposable
+    {
+        private MainPage? _owner = owner;
+
+        public void Dispose()
+        {
+            MainPage? current = Interlocked.Exchange(ref _owner, null);
+            current?.EndAsyncOperation();
+        }
+    }
 
     public sealed class ChannelRow : INotifyPropertyChanged
     {

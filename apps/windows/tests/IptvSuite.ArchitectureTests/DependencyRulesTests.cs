@@ -554,9 +554,7 @@ public sealed class DependencyRulesTests
             "            WindowsSecretStoreFactory.Create();\n" +
             "        ISecretStore secretStore = secretStoreInitialization.Store ??\n" +
             "            throw new InvalidOperationException(\"Protected storage is unavailable.\");\n" +
-            "        _secretStore = secretStore;\n" +
-            "        _catalogServices = WindowsCatalogBrowserFactory.Create();\n" +
-            "        _window = new MainWindow(_catalogServices.Browser, _catalogServices.LogoCache);";
+            "        _secretStore = secretStore;";
         const string neutralProtectedStorePath =
             "Path.Combine(\n" +
             "                localCachePath,\n" +
@@ -565,6 +563,11 @@ public sealed class DependencyRulesTests
 
         StringAssert.Contains(app, "private ISecretStore? _secretStore;");
         StringAssert.Contains(app, compositionSequence);
+        StringAssert.Contains(
+            app,
+            "WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create();");
+        StringAssert.Contains(app, "_window = new MainWindow(catalogServices);");
+        StringAssert.Contains(app, "catalogServices.Dispose();");
         Assert.AreEqual(
             1,
             Regex.Count(app, @"\bWindowsSecretStoreFactory\.Create\("),
@@ -654,7 +657,12 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "depth < 32");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogPreviousPage\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogNextPage\"");
-        StringAssert.Contains(page, "AutomationProperties.LiveSetting=\"Polite\"");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                page,
+                "x:Name=\"PlaybackStatusText\"[^>]*AutomationProperties.LiveSetting=\"Polite\"",
+                RegexOptions.CultureInvariant),
+            "The safe playback status must remain a polite live region.");
         StringAssert.Contains(codeBehind, "private const int PageSize = 200;");
         StringAssert.Contains(codeBehind, "await BrowseAsync(debounce: true)");
         StringAssert.Contains(codeBehind, "new CatalogBrowseCoordinator(catalogBrowser)");
@@ -731,9 +739,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "Catalog50kSeedVerified = $catalog50kSeedVerified");
         StringAssert.Contains(packageSmoke, "CatalogRealizedContainerBoundVerified = $catalogRealizedContainerBoundVerified");
         Assert.IsFalse(
-            page.Contains("MediaPlayer", StringComparison.Ordinal) ||
-            codeBehind.Contains("IPlayer", StringComparison.Ordinal),
-            "M9 catalog browsing must not pull M10 playback into the presentation graph.");
+            codeBehind.Contains("new MediaPlayer", StringComparison.Ordinal) ||
+            codeBehind.Contains("WindowsNativePlaybackEngine", StringComparison.Ordinal) ||
+            codeBehind.Contains("SqlitePlaybackSourceResolver", StringComparison.Ordinal),
+            "The catalog page may host the M11 surface but must not construct native playback dependencies.");
     }
 
     [TestMethod]
@@ -4027,6 +4036,134 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(adapter.Contains("exception.Message", StringComparison.Ordinal));
         Assert.IsFalse(adapter.Contains("HResult", StringComparison.Ordinal));
         Assert.IsFalse(adapter.Contains("NativePlaybackCompatibilitySpike", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void M11PlaybackUiDelegatesToCoordinatorAndClosesNativeLifetimeFirst()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
+        string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+        string window = File.ReadAllText(Path.Combine(windowsRoot, "MainWindow.xaml.cs"));
+        string catalogFactory = File.ReadAllText(Path.Combine(
+            windowsRoot,
+            "WindowsCatalogBrowserFactory.cs"));
+
+        StringAssert.Contains(page, "<MediaPlayerElement x:Name=\"PlaybackSurface\"");
+        StringAssert.Contains(page, "AreTransportControlsEnabled=\"False\"");
+        StringAssert.Contains(page, "IsItemClickEnabled=\"True\" ItemClick=\"ChannelList_ItemClick\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"PlaybackStatusText\"");
+        StringAssert.Contains(page, "AutomationProperties.LiveSetting=\"Polite\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"PlaybackPlayButton\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"PlaybackPauseButton\"");
+        StringAssert.Contains(page, "AutomationProperties.AutomationId=\"PlaybackStopButton\"");
+        StringAssert.Contains(codeBehind, "PlaybackSessionCoordinator playback)");
+        StringAssert.Contains(codeBehind, "await playback.StartAsync(");
+        StringAssert.Contains(codeBehind, "channel.SourceId,");
+        StringAssert.Contains(codeBehind, "channel.ChannelId,");
+        StringAssert.Contains(codeBehind, "playback.PlayAsync(token)");
+        StringAssert.Contains(codeBehind, "playback.PauseAsync(token)");
+        StringAssert.Contains(codeBehind, "playback.StopAsync(token)");
+        StringAssert.Contains(codeBehind, "_playback.StateChanged += Playback_StateChanged;");
+        StringAssert.Contains(codeBehind, "DispatcherQueue.TryEnqueue(() => ApplyPlaybackState(snapshot));");
+        StringAssert.Contains(codeBehind, "PlaybackSessionSnapshot current = playback.Current;");
+        StringAssert.Contains(codeBehind, "current.SessionId != snapshot.SessionId");
+        StringAssert.Contains(codeBehind, "current.State != snapshot.State");
+        StringAssert.Contains(codeBehind, "_playback.StateChanged -= Playback_StateChanged;");
+        StringAssert.Contains(codeBehind, "PlaybackState.Failed => \"Playback is unavailable.\"");
+        StringAssert.Contains(window, "new SqlitePlaybackSourceResolver(_catalogServices.DatabasePath)");
+        StringAssert.Contains(window, "var engine = new WindowsNativePlaybackEngine(");
+        StringAssert.Contains(window, "_mainPage.PlaybackSurfaceElement);");
+        StringAssert.Contains(window, "var playback = new PlaybackSessionCoordinator(engine);");
+        StringAssert.Contains(window, "_playback = playback;");
+        StringAssert.Contains(window, "AppWindow.Closing += AppWindow_Closing;");
+        StringAssert.Contains(window, "args.Cancel = true;");
+        StringAssert.Contains(window, "await DisposeAsync();");
+        StringAssert.Contains(window, "AppWindow.Closing -= AppWindow_Closing;");
+        StringAssert.Contains(window, "await RunOnDispatcherAsync(_mainPage.Dispose);");
+        StringAssert.Contains(window, "await _mainPage.WaitForPendingOperationsAsync();");
+        StringAssert.Contains(window, "BeginRollback(rollbackOwner);");
+        StringAssert.Contains(catalogFactory, "internal string DatabasePath { get; } = databasePath;");
+
+        int closeStart = window.IndexOf(
+            "private async Task CompleteDisposeAsync(TaskCompletionSource completion)",
+            StringComparison.Ordinal);
+        int dispatcherStart = window.IndexOf(
+            "private async Task RunOnDispatcherAsync(Action operation)",
+            StringComparison.Ordinal);
+        Assert.IsTrue(closeStart >= 0 && dispatcherStart > closeStart);
+        string close = window[closeStart..dispatcherStart];
+        StringAssert.Contains(close, "await RunOnDispatcherAsync(_mainPage.Dispose);");
+        StringAssert.Contains(close, "await _playback.DisposeAsync();");
+        StringAssert.Contains(close, "await _mainPage.WaitForPendingOperationsAsync();");
+        StringAssert.Contains(close, "_catalogServices.Dispose();");
+        Assert.IsTrue(
+            close.IndexOf("await RunOnDispatcherAsync(_mainPage.Dispose);", StringComparison.Ordinal) <
+            close.IndexOf("await _playback.DisposeAsync();", StringComparison.Ordinal));
+        Assert.IsTrue(
+            close.IndexOf("await _playback.DisposeAsync();", StringComparison.Ordinal) <
+            close.IndexOf("await _mainPage.WaitForPendingOperationsAsync();", StringComparison.Ordinal));
+        Assert.IsTrue(
+            close.IndexOf("await _mainPage.WaitForPendingOperationsAsync();", StringComparison.Ordinal) <
+            close.IndexOf("_catalogServices.Dispose();", StringComparison.Ordinal));
+        Assert.AreEqual(
+            4,
+            Regex.Count(
+                close,
+                @"catch \(Exception exception\) when \(IsRecoverable\(exception\)\)",
+                RegexOptions.CultureInvariant),
+            "Page, playback, operation drain, and catalog cleanup must fail independently.");
+        Assert.IsFalse(
+            Regex.IsMatch(window, @"\.Wait\s*\(|\.Result\b|GetAwaiter\s*\(\)\.GetResult"),
+            "Window close must not block the UI thread while native playback is released.");
+
+        string[] forbiddenPageDependencies =
+        [
+            "WindowsNativePlaybackEngine",
+            "SqlitePlaybackSourceResolver",
+            "SecretLease",
+            "ISecretStore",
+            "ProtectedLocatorReference",
+            "MediaSource",
+            "new Uri",
+            "exception.Message",
+            "HResult",
+            "snapshot.Error",
+        ];
+        foreach (string forbidden in forbiddenPageDependencies)
+        {
+            Assert.IsFalse(
+                codeBehind.Contains(forbidden, StringComparison.Ordinal),
+                $"The page must not own or expose native playback detail: {forbidden}.");
+        }
+
+        Assert.IsFalse(
+            Regex.IsMatch(codeBehind, @"\bMediaPlayer\b"),
+            "The page may expose MediaPlayerElement but must not own a MediaPlayer.");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                page,
+                @"ChannelList[^>]*SelectionChanged\s*=",
+                RegexOptions.CultureInvariant),
+            "Channel selection must not autoplay; explicit ItemClick owns playback intent.");
+
+        string closingHandler = window[
+            window.IndexOf("private async void AppWindow_Closing(", StringComparison.Ordinal)..
+            window.IndexOf("public ValueTask DisposeAsync()", StringComparison.Ordinal)];
+        Assert.IsTrue(
+            closingHandler.IndexOf("args.Cancel = true;", StringComparison.Ordinal) <
+            closingHandler.IndexOf("await DisposeAsync();", StringComparison.Ordinal));
+        Assert.IsTrue(
+            closingHandler.IndexOf("await DisposeAsync();", StringComparison.Ordinal) <
+            closingHandler.IndexOf("AppWindow.Closing -= AppWindow_Closing;", StringComparison.Ordinal));
+        Assert.IsTrue(
+            closingHandler.IndexOf("AppWindow.Closing -= AppWindow_Closing;", StringComparison.Ordinal) <
+            closingHandler.IndexOf("Close();", StringComparison.Ordinal));
     }
 
     [TestMethod]

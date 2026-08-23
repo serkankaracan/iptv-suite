@@ -6,7 +6,6 @@ namespace IptvSuite.Windows;
 public partial class App : Microsoft.UI.Xaml.Application
 {
     private ISecretStore? _secretStore;
-    private WindowsCatalogServices? _catalogServices;
     private Window? _window;
 
     public App()
@@ -21,8 +20,29 @@ public partial class App : Microsoft.UI.Xaml.Application
         ISecretStore secretStore = secretStoreInitialization.Store ??
             throw new InvalidOperationException("Protected storage is unavailable.");
         _secretStore = secretStore;
-        _catalogServices = WindowsCatalogBrowserFactory.Create();
-        _window = new MainWindow(_catalogServices.Browser, _catalogServices.LogoCache);
+        WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create();
+        try
+        {
+            _window = new MainWindow(catalogServices);
+        }
+        catch
+        {
+            try
+            {
+                catalogServices.Dispose();
+            }
+            catch (Exception exception) when (IsRecoverable(exception))
+            {
+            }
+
+            throw;
+        }
+
         _window.Activate();
     }
+
+    private static bool IsRecoverable(Exception exception) =>
+        exception is not OutOfMemoryException and
+        not StackOverflowException and
+        not AccessViolationException;
 }
