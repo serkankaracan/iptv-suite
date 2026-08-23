@@ -3925,6 +3925,45 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M11PlaybackSourceResolutionIsInternalCurrentSnapshotBoundAndFailClosed()
+    {
+        string resolver = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "SqlitePlaybackSourceResolver.cs"));
+        string catalogContract = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "CatalogBrowserContracts.cs"));
+
+        StringAssert.Contains(resolver, "internal sealed class SqlitePlaybackSourceResolver");
+        StringAssert.Contains(resolver, "internal sealed record PlaybackSourceResolutionResult(");
+        StringAssert.Contains(resolver, "JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id");
+        StringAssert.Contains(resolver, "WHERE s.source_id = $source AND c.channel_id = $channel;");
+        StringAssert.Contains(resolver, "c.stream_reference, c.provider_item_kind, c.provider_item_id");
+        StringAssert.Contains(resolver, "PlaybackSourceResolutionFailure.UnsupportedSource");
+        StringAssert.Contains(resolver, "new SqliteCatalogLocatorReader(_databasePath)");
+        StringAssert.Contains(resolver, "ProtectedValuePurpose.ChannelStreamLocator");
+        StringAssert.Contains(resolver, "StrictUtf8.GetString(locatorBytes)");
+        StringAssert.Contains(resolver, "SourceConfigurationValidator.PrepareRemotePlaylist(");
+        StringAssert.Contains(resolver, "lease?.Dispose();");
+        StringAssert.Contains(resolver, "catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)");
+        StringAssert.Contains(resolver, "[PLAYBACK-SOURCE-RESOLUTION:SUCCESS]");
+        Assert.IsFalse(resolver.Contains("Console.", StringComparison.Ordinal));
+        Assert.IsFalse(resolver.Contains("Trace.", StringComparison.Ordinal));
+        Assert.IsFalse(resolver.Contains("Debug.", StringComparison.Ordinal));
+        Assert.IsFalse(catalogContract.Contains("StreamReference", StringComparison.Ordinal));
+        Assert.IsFalse(catalogContract.Contains("SecretLease", StringComparison.Ordinal));
+        Assert.IsFalse(catalogContract.Contains("Uri", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
     {
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
