@@ -1,6 +1,6 @@
 # M10 Windows native Tier A sekiz saat acceptance soak denemesi
 
-**Durum:** `UNVERIFIED NEGATIVE — kullanıcı tarafından sağlanan terminal transcript'i ResourceBudgetExceeded bildiriyor, 2026-08-22`
+**Durum:** `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION — ürün sahibi M10→M11 geçiş waiver'ı, 2026-08-23`
 
 ## Kanıt bağı
 
@@ -11,6 +11,8 @@
 - Kalıcı success evidence: yok; resource gate başarısız olduğu için yayımlanmadı
 - Transcript'te bildirilen stable failure evidence: `Stage=ProbeValidation`, `Code=ProbeInvariantFailed`
 - Provenance: `UNVERIFIED`; bildirilen commit amend sonrasında hiçbir branch/tag/ref tarafından tutulmuyor ve failure artifact'ı run ID, commit, controller/fixture hash'i veya transcript hash'i taşımıyor
+
+Bu ilk transcript tarihsel negatif kayıttır. M10 kapanış kararı, aşağıdaki temiz ve erişilebilir `1f158883b692ed87c7dedcb9348c0d0821b2267e` checkpoint'inde çalışan envelope-v8 koşusuna ve ürün sahibinin açık sapma kabulüne dayanır.
 
 Kullanıcının sağladığı terminal transcript'i koşunun elevated ve interactive Windows Client üzerinde disposable signed x64 MSIX, TLS 1.2 loopback ve tamamen sentetik Tier A corpus ile yürütüldüğünü; package build, exact package inventory, mevcut Windows App Runtime dependency reuse, install ve activation adımlarının geçtiğini bildirir. Transcript sonunda `ResourceBudgetExceeded` gösterir. Kalıcı artifact/commit bağı olmadığı için bu sayısal sonuçlar bağımsız olarak yeniden doğrulanamaz; her durumda negatif sonuç acceptance PASS değildir.
 
@@ -55,6 +57,24 @@ Kullanıcının temiz local `856fb04` checkpoint'inden paylaştığı envelope-v
 
 Bu koşuda görünen tek resource-budget ihlali göreli büyümedir. `memoryMonotonicIncrease=false` ve negatif handle büyümesi tek başına sürekli leak kanıtı değildir. Eşik, warm-up veya sample exclusion değiştirilmez. Envelope-v8 takip teşhisi en çok `128` process sample'ını ordinal/QPC/elapsed/private-bytes/handle/phase/switch alanlarıyla ve en çok `7` injection/recovery olayını aynı QPC tabanında bağlar. Controller aggregate sonucu sample serisinden tekrar türetip fail-closed doğrular; her sample'ı recovery phase/ordinal ile, ayrıca post-warm minimum/maximum/peak/final noktalarını bounded konsol çıktısında gösterir. Kalıcı schema `10`, player/transport davranışı ve acceptance predicate'leri değişmez.
 
+## Envelope-v8 acceptance koşusu ve bounded attribution — 2026-08-23
+
+Kullanıcının temiz `1f158883b692ed87c7dedcb9348c0d0821b2267e` checkpoint'inde çalıştırdığı `480 dakika / 100 switch / 7 interruption` koşusu package build/inventory/runtime reuse/install/activation adımlarını; startup bütçesini, `100/100` switch'i, `101` exact detach'i, altı surface transition'ı, sıfır retry'ı ve `7/7` interruption/recovery zincirini tamamladı. Controller yalnız aşağıdaki göreli resource predicate'i nedeniyle `ResourceBudgetExceeded` döndürdü:
+
+| Ölçüm | Sonuç | Teknik predicate |
+|---|---:|---:|
+| Resource sample / post-warm sample | `98 / 91` | yeterli |
+| Warm-up private bytes | `162.238.464` | baseline |
+| Net büyüme | `18.161.664 byte` / yaklaşık `17,32 MiB` | `≤100 MiB`, geçti |
+| Göreli büyüme | `%11,1944255` | `≤%10`, **1.937.818 byte / yaklaşık 1,85 MiB sapma** |
+| Monotonic artış | `false` | geçti |
+| Warm-up / final handle ve delta | `2318 / 2297 / -21` | artış yok |
+| Post-warm minimum / peak / final | `162.238.464 / 181.137.408 / 180.400.128` | final peak'in altında |
+
+Yedi recovery'yi çevreleyen beş dakikalık sample çiftlerinde private-byte farkı yaklaşık `-0,422 MiB` ile `+0,723 MiB` arasında ve iki yönlüdür; recovery'ye bağlı kalıcı bir basamak gözlenmez. Üçüncü recovery sonrasından finale yaklaşık beş saatte büyüme `4,04 MiB` düzeyine yavaşlar. Bunlar `INFERENCE`tır: sürekli klasik leak veya exact allocator kanıtı değildir; retention'ın recovery mekanizmasından çok uzun yaşayan HLS/Windows-native media pipeline fazıyla ilişkili olduğunu sınırlar.
+
 ## Karar
 
-Sekiz saatlik acceptance gate **FAIL** durumundadır: negatif transcript PASS kanıtı olamaz. ADR-007 `Proposed`, R15 `ACTIVE`, M10 `IN PROGRESS` kalır ve M11 production adapter başlamaz. Envelope-v8 bounded teşhis temiz checkpoint üzerinde doğrulandıktan sonra aynı `480 dakika / 100 switch / 7 interruption` profili yeniden çalıştırılmalı; sample seyri recovery olaylarıyla ayrılmadan threshold, fixture veya player davranışı değiştirilmemelidir.
+Otomatik resource predicate teknik olarak **FAIL** kalır; threshold, warm-up, sample exclusion veya controller sonucu değiştirilmez. Ürün sahibi, temel fonksiyonel/lifecycle/startup/recovery kontrollerinin geçmesi; mutlak büyüme, handle ve monotonluk predicate'lerinin yeşil olması; tek sapmanın `%10` sınırının yaklaşık `1,85 MiB` üzerinde kalması nedeniyle M10'u `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION` olarak kapatmıştır. Bu waiver yalnız M11'e geçişi açar; ölçümü PASS'a dönüştürmez.
+
+Uzun yaşayan HLS/Windows-native media pipeline retention'ının profiler ile ayrıştırılması ve değişmeyen resource bütçeleriyle final acceptance'ın yeniden çalıştırılması Playback/Quality sahipliğinde M16 hardening borcudur. R15 bu nedenle `ACTIVE` kalır; M10 milestone'u koşullu kapanır ve M11 başlayabilir.

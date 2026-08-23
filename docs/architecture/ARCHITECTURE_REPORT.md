@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi. Windows-native Tier A fallback'ın eski dependency graph'ındaki 100 switch/120 dakika developer soak sonucu tarihseldir; Windows App SDK 2.4.0 supply-chain rebaseline'i ve tam acceptance açıktır
+**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi. Windows-native Tier A fallback M10→M11 geçişi için `Accepted with known deviation`; `%10` long-soak resource sapması ve kalan release matrix'i M15/M16'da açıktır
 
 M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8'e bırakıldı”, `Proposed` veya “açık” ifadelerini supersede eder; exact kabul bağı [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
@@ -436,7 +436,7 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 
 | ID | Durum | Soru/varsayım | Kapatma yöntemi | Owner/milestone |
 |---|---|---|---|---|
-| O1 | PARTIAL / REBASELINE | ADR-007 Windows-native Tier A fallback tam reference matrix, WinUI surface ve MSIX acceptance'ını geçer mi? Eski `2.3.1 → WinUI 2.3.0` graph'ında 100 switch/120 dakika developer soak VERIFIED; resize/minimize/restore/fullscreen, tek HTTP interruption/recovery ve 100/100 exact source-detachment packaged alt kümeleri PARTIAL VERIFIED idi. `2.4.0 → WinUI 2.3.6` upgrade'i binary setini değiştirdiği için bunlar tarihsel kanıttır. Fail-closed package inventory/SBOM implementation+hosted validation; WACK, gerçek cihaz/HW-decode, kalan surface/lifecycle/soak ve lisans/provenance gate'leri güncel graph'ta yeniden geçmelidir. Source detachment OS session quiescence/ghost-audio kanıtı değildir. | [Session lifecycle](../quality/M10_NATIVE_TIER_A_SESSION_LIFECYCLE_EVIDENCE.md) + S121/S122 supply-chain rebaseline + M10 full matrix + WACK | Playback / M10 |
+| O1 | CONDITIONAL ACCEPTANCE / M16 HARDENING | ADR-007 Windows-native Tier A fallback M11 için kabul edilebilir mi? Temiz `1f15888` envelope-v8 koşusu startup, 100 switch, 101 detach, 7/7 recovery, sıfır retry, absolute memory, handle ve non-monotonic kontrolleri geçti. Relative growth `%11,1944255 > %10` (`~1,85 MiB` sapma) teknik olarak FAIL kaldı; ürün sahibi yalnız M10→M11 geçişi için waiver verdi. WACK, gerçek cihaz/HW-decode, kalan surface/lifecycle, lisans/provenance ve final resource soak M15/M16'da açıktır. | [Acceptance/deviation](../quality/M10_NATIVE_TIER_A_ACCEPTANCE_SOAK_ATTEMPT.md) + [session lifecycle](../quality/M10_NATIVE_TIER_A_SESSION_LIFECYCLE_EVIDENCE.md) + M16 profiler/final soak | Playback / M11–M16 |
 | O2 | VERIFIED / CLOSED, 2026-08-21 | Aynı-SQLite-transaction production yönü component bütçelerini ve process-crash old-or-new recovery invariant'ını karşılar mı? | [M8 completion evidence](../quality/M8_COMPLETION_EVIDENCE.md) + [Decision evidence](../quality/M8_CATALOG_PERSISTENCE_DECISION_EVIDENCE.md) | Security/Data / M4–M8 |
 | O3 | UNVERIFIED | M1 engineering sınırı 10.0.26100/x64; nihai product minimumu ve ARM64 release talebi nedir? | Market/support data + clean devices | Product / M15 |
 | O4 | UNVERIFIED | Microsoft Store BYO IPTV modelini kabul eder mi? | Partner Center private/pre-certification | Product/Legal / M15 |

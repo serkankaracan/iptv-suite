@@ -69,6 +69,8 @@
 
 `R15 successor update — UNVERIFIED NEGATIVE kullanıcı transcript'i, 2026-08-23`: İkinci sekiz saat transcript'inde 100 switch ve 7 interruption/recovery tamamlandı. Warmup sonrası `18.698.240` byte (`~17,8 MiB`) net büyüme `≤100 MiB` mutlak sınırını geçmez; yalnız `%11,109759` değeri `≤%10` göreli sınırını ihlal eder. `memoryMonotonicIncrease=false` ve handle delta `-52` tek başına sürekli leak göstermediğinden eşikler değiştirilmeden bounded teşhis gerekir. Envelope-v8 en fazla `128` resource sample'ını ve `7` recovery olayını transient ordinal/QPC/phase bağıyla doğrular ve loglar; kalıcı schema-10 evidence ile playback/transport/resource acceptance davranışı değişmez. Temiz checkpoint üzerinde aynı sekiz saat profili geçmeden R15 **ACTIVE** kalır.
 
+`R15 milestone waiver — ACCEPTED WITH KNOWN DEVIATION, 2026-08-23`: Temiz `1f158883b692ed87c7dedcb9348c0d0821b2267e` envelope-v8 koşusu startup, 100 switch, 101 detach, 7/7 recovery, sıfır retry, `≤100 MiB`, non-monotonic trend ve handle-no-growth kontrollerini geçti. Tek teknik failure warm-up `162.238.464` byte'a göre `18.161.664` byte (`~17,32 MiB`) net büyümenin `%11,1944255` olmasıdır; `%10` sınırının aşımı `1.937.818 byte` (`~1,85 MiB`) düzeyindedir. Recovery çevresindeki sample farklarının `-0,422..+0,723 MiB` aralığında iki yönlü olması kalıcı recovery basamağını desteklemez; exact allocator/leak sonucu değildir. Ürün sahibi M10→M11 geçişi için sapmayı kabul etmiştir; otomatik gate kırmızı ve R15 **ACTIVE** kalır. Owner Playback/Quality, due M16: uzun HLS/native pipeline profiling, gerekirse optimizasyon ve değişmeyen bütçelerle final soak.
+
 `R29 hosted inventory update — PARTIAL VERIFIED, 2026-08-22`: Run `32557484626` içindeki gerçek signed-MSIX inventory validator çalışıp geçti. Native budget failure'ı success publication adımlarını atladığı için kalıcı sanitized inventory artifact'ı ve digest bağı oluşmadı; root `LICENSE`/`NOTICE`, asset/corpus provenance, codec/patent uzman incelemesi, WACK ve dağıtım kabulü de açıktır. R29 **ACTIVE** kalır.
 
 `R29 hosted inventory update — PARTIAL VERIFIED, 2026-08-22`: Run #156 (`32559852397`) signed-MSIX inventory validator'ı yeniden geçti; native hard-maximum failure'ı success publication adımlarını yine atladığı için kalıcı sanitized inventory artifact/digest bağı oluşmadı. Bu teknik tekrar root `LICENSE`/`NOTICE`, provenance, patent/hukuk, WACK veya dağıtım kabulünü kapatmaz. R29 **ACTIVE** kalır.
@@ -84,7 +86,7 @@
 ## En yüksek öncelikli gate'ler
 
 1. **M4/M8:** test-only comparative 50k kapanmıştır; protected-storage security review, production transaction atomikliği ve 50k end-to-end throughput açıktır.
-2. **M10:** Windows App SDK `2.4.0 → WinUI 2.3.6` fail-closed package inventory/SBOM ve hosted rebaseline; native playback stability, device/WACK/surface/lifecycle/soak ile exact license/provenance ayrımı.
+2. **M11/M16:** Koşullu kabul edilen Windows-native Tier A adapter sınırı; M16'da uzun HLS/native retention profiling ve değişmeyen resource bütçeleriyle final soak.
 3. **M15:** Microsoft Store private preflight, privacy, SBOM ve codec/IP hukuk incelemesi.
 4. **Samsung başlamadan:** Partner Seller/Content Manager/Türkiye yazılı business onayı.
 5. **Her release:** credential canary scan ve critical dependency/CVE incelemesi.
