@@ -579,6 +579,8 @@ Paketlenmiş spike'ta hakları temiz Tier A yayını, device/capability sonuç m
 
 ## M11 — Production player adapter ve temel playback
 
+**Implementation status:** `IN PROGRESS — application lifecycle checkpoint, 2026-08-23`. Plain `net10.0` Application katmanında engine-neutral `IPlaybackEngine`, güvenli `SourceId + ChannelId` selection contract'ı, typed state/result/event yüzeyleri ve app-owned `PlaybackSessionCoordinator` uygulanmıştır. Coordinator monoton session ID, tek engine mutation gate'i, session-lifetime cancellation, A→B exact stop-before-open, stop-during-open, caller/internal cancellation ayrımı, stale/illegal callback suppression, failure rollback ve idempotent dispose sınırlarını uygular. Public playback API locator, `Uri`, protected lease, native/WinUI tipi, exception/HRESULT veya diagnostic text taşımaz; M2 `FakePlayer` değiştirilmemiştir. Bu checkpoint production native adapter, JIT locator çözümü, volume/mute/aspect/track, UI surface veya packaged playback acceptance iddiası değildir; bunlar M11'in sıradaki checkpoint'leridir.
+
 ### Amaç
 
 Accepted motoru engine type'larını üst katmanlara sızdırmadan uygulama state modeline bağlamak.

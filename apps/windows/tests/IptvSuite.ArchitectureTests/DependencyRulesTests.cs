@@ -3856,6 +3856,60 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M11PlaybackCoreIsEngineNeutralSessionBoundAndLocatorFree()
+    {
+        string applicationRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application");
+        string contracts = File.ReadAllText(Path.Combine(applicationRoot, "PlaybackContracts.cs"));
+        string coordinator = File.ReadAllText(Path.Combine(
+            applicationRoot,
+            "PlaybackSessionCoordinator.cs"));
+        string testingPlayer = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.Testing",
+            "FakePlayer.cs"));
+
+        StringAssert.Contains(contracts, "public interface IPlaybackEngine : IAsyncDisposable");
+        StringAssert.Contains(contracts, "PlaybackSessionId sessionId,");
+        StringAssert.Contains(contracts, "PlaybackSelection selection,");
+        StringAssert.Contains(coordinator, "private readonly SemaphoreSlim _engineGate");
+        StringAssert.Contains(coordinator, "private sealed class SessionLifetime : IDisposable");
+        StringAssert.Contains(coordinator, "StopEngineSessionUnderGateAsync");
+        StringAssert.Contains(coordinator, "CanTransition(_current.State, engineSnapshot.State)");
+
+        string[] forbiddenContractSymbols =
+        [
+            "System.Uri",
+            "SecretLease",
+            "ReadOnlyMemory<byte>",
+            "ProtectedLocatorReference",
+            "Microsoft.UI",
+            "Windows.Media",
+            "MediaPlayer",
+            "MediaSource",
+            "NativePlaybackCompatibilitySpike",
+        ];
+        string playbackCore = contracts + coordinator;
+        foreach (string forbiddenSymbol in forbiddenContractSymbols)
+        {
+            Assert.IsFalse(
+                playbackCore.Contains(forbiddenSymbol, StringComparison.Ordinal),
+                $"The M11 playback core exposes forbidden symbol {forbiddenSymbol}.");
+        }
+
+        Assert.IsFalse(
+            testingPlayer.Contains("IPlaybackEngine", StringComparison.Ordinal),
+            "The M2 fake player must not become the M11 production contract double.");
+    }
+
+    [TestMethod]
     public void PersistentFormatIdentifiersDoNotFreezeTheUnverifiedCodename()
     {
         string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");

@@ -81,7 +81,7 @@ M2 implementation test seam'lerini production contract'larından ayırır. `Iptv
 - M3 — **PASS, 2026-08-09:** plain `net10.0` Domain'de typed Live TV contract'ları, NFC/Unicode scalar invariant'ları, source-scoped stable key, HTTPS-only safe configuration, opaque reference, stable error/resource key, pure redaction/redirect ve content-based catalog/HLS kararları uygulandı. Exact-SDK local gate architecture 9 + unit 91 + integration 5 = 105 testi iki koşuda aynı `Passed` setiyle tamamladı; network/storage/parser/UI/player kapsam dışı kaldı.
 - M5–M8 adapter contract ve cancellation/fault-injection testleri.
 - M9 view-model + UI automation/virtualization testleri.
-- M11 aynı player contract suite'inin fake ve gerçek adapter'a uygulanması.
+- M11 — **IN PROGRESS, 2026-08-23:** Application-only lifecycle checkpoint'i engine-neutral contract, monoton session ID, session-lifetime cancellation, serialized engine mutation, exact stop-before-replace, stale/wrong-order callback suppression, safe typed failure ve idempotent async disposal uygular. Deterministik test-local engine ile 17 focused lifecycle/security testi ve source-level architecture guard geçmiştir. Locator/native/WinUI yüzeyi public contract'a girmemiştir; JIT resolver, gerçek Windows-native adapter, kontroller/surface ve ortak fake/real suite açık kalır.
 - M12/M13 property/state transition ve rapid switch/cancel race testleri.
 
 ## Revisit triggers

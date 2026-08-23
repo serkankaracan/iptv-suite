@@ -199,6 +199,8 @@ M10 başlangıç seti:
 - VideoLAN.LibVLC.Windows 3.0.23.1 **non-GPL**;
 - `IPlaybackEngine` arkasında engine type sızıntısı olmayan adapter.
 
+`CURRENT M11 CHECKPOINT — 2026-08-23`: Application katmanı yalnız `SourceId + ChannelId` alan engine-neutral playback contract'ını ve app-owned single-session coordinator'ı taşır. Monoton session ID ile intent generation ayrıdır; engine mutasyonları tek gate üzerinden serialize edilir ve her session'ın lifetime token'ı yeni selection/stop/dispose ile iptal edilir. Rapid A→B önce fiziksel eski engine session'ını durdurur; stale veya illegal callback yeni state'i değiştiremez. Adapter exception/native metni yalnız stable `DomainError` koduna düşer. Raw locator, `Uri`, `SecretLease`, Windows Media/WinUI ve spike tipleri public Application playback yüzeyine girmez. Gerçek adapter authoritative active-snapshot binding'i JIT ve adapter-private çözecektir; bu checkpoint native playback veya M11 completion kanıtı değildir.
+
 Seçim nedeni; native API'den geniş format ihtimali, FFmpeg custom'dan düşük lifecycle sahipliği ve mpv'den daha hazır first-party .NET/Windows paketidir. Dezavantajları yaklaşık 128 MB native paket, plugin/SBOM/CVE sahipliği, WinUI surface belirsizliği ve codec patent incelemesidir.
 
 Windows native `MediaPlayer`:
