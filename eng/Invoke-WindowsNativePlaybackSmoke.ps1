@@ -326,9 +326,60 @@ namespace IptvSuite.NativePlaybackSmoke
         public long FirstDroppedAcceptedTimestamp { get; private set; }
     }
 
+    public sealed class TierANetworkRecoveryTrace
+    {
+        private readonly object sync = new object();
+
+        public TierANetworkRecoveryTrace(
+            int ordinal,
+            int injectedRequestOrdinal,
+            long injectedTimestamp)
+        {
+            Ordinal = ordinal;
+            InjectedRequestOrdinal = injectedRequestOrdinal;
+            InjectedTimestamp = injectedTimestamp;
+        }
+
+        public int Ordinal { get; private set; }
+        public int InjectedRequestOrdinal { get; private set; }
+        public long InjectedTimestamp { get; private set; }
+        public int RecoveryRequestOrdinal { get; private set; }
+        public long RecoveryTimestamp { get; private set; }
+
+        public void MarkRecovery(int recoveryRequestOrdinal, long recoveryTimestamp)
+        {
+            lock (sync)
+            {
+                if (RecoveryRequestOrdinal != 0 || recoveryRequestOrdinal <= InjectedRequestOrdinal ||
+                    recoveryTimestamp < InjectedTimestamp)
+                {
+                    throw new InvalidOperationException("A network recovery trace transition is inconsistent.");
+                }
+
+                RecoveryRequestOrdinal = recoveryRequestOrdinal;
+                RecoveryTimestamp = recoveryTimestamp;
+            }
+        }
+
+        public TierANetworkRecoveryTrace Snapshot()
+        {
+            lock (sync)
+            {
+                var snapshot = new TierANetworkRecoveryTrace(
+                    Ordinal,
+                    InjectedRequestOrdinal,
+                    InjectedTimestamp);
+                snapshot.RecoveryRequestOrdinal = RecoveryRequestOrdinal;
+                snapshot.RecoveryTimestamp = RecoveryTimestamp;
+                return snapshot;
+            }
+        }
+    }
+
     public sealed class TierATlsServer : IDisposable
     {
         private const int RequestTraceCapacity = 32;
+        private const int NetworkRecoveryTraceCapacity = 7;
         private readonly string root;
         private readonly X509Certificate2 certificate;
         private readonly TcpListener listener;
@@ -337,6 +388,9 @@ namespace IptvSuite.NativePlaybackSmoke
         private readonly ConcurrentDictionary<int, Task> activeHandlers = new ConcurrentDictionary<int, Task>();
         private readonly object requestTraceSync = new object();
         private readonly List<TierARequestTrace> requestTraces = new List<TierARequestTrace>();
+        private readonly object networkRecoveryTraceSync = new object();
+        private readonly List<TierANetworkRecoveryTrace> networkRecoveryTraces =
+            new List<TierANetworkRecoveryTrace>();
         private readonly Task acceptLoop;
         private int nextHandlerId;
         private int disposed;
@@ -394,6 +448,16 @@ namespace IptvSuite.NativePlaybackSmoke
                     traces,
                     requestTraceDroppedCount,
                     firstDroppedRequestAcceptedTimestamp);
+            }
+        }
+        public TierANetworkRecoveryTrace[] GetNetworkRecoveryTraceSnapshot()
+        {
+            lock (networkRecoveryTraceSync)
+            {
+                var traces = new TierANetworkRecoveryTrace[networkRecoveryTraces.Count];
+                for (int index = 0; index < networkRecoveryTraces.Count; index++)
+                    traces[index] = networkRecoveryTraces[index].Snapshot();
+                return traces;
             }
         }
 
@@ -613,6 +677,9 @@ namespace IptvSuite.NativePlaybackSmoke
                     if (requestTrace != null) requestTrace.MarkRequestOrdinal(requestOrdinal);
                     if (Interlocked.Exchange(ref armedMediaFailure, 0) == 1)
                     {
+                        int injectedOrdinal = Volatile.Read(ref injectedFailureCount) + 1;
+                        long injectedTimestamp = Stopwatch.GetTimestamp();
+                        RecordInjectedFailure(injectedOrdinal, requestOrdinal, injectedTimestamp);
                         Volatile.Write(ref lastInjectedRequestOrdinal, requestOrdinal);
                         Interlocked.Exchange(ref pendingRecovery, 1);
                         Interlocked.Increment(ref injectedFailureCount);
@@ -669,6 +736,9 @@ namespace IptvSuite.NativePlaybackSmoke
                     if (requestOrdinal > injectedRequestOrdinal &&
                         Interlocked.CompareExchange(ref pendingRecovery, 0, 1) == 1)
                     {
+                        int recoveryOrdinal = Volatile.Read(ref recoveryCount) + 1;
+                        long recoveryTimestamp = Stopwatch.GetTimestamp();
+                        RecordRecovery(recoveryOrdinal, requestOrdinal, recoveryTimestamp);
                         Volatile.Write(ref lastRecoveryRequestOrdinal, requestOrdinal);
                         Interlocked.Increment(ref recoveryCount);
                     }
@@ -697,6 +767,42 @@ namespace IptvSuite.NativePlaybackSmoke
                         requestTrace.MarkTerminalFailure("TransportFailure", Stopwatch.GetTimestamp());
                     if (!cancellation.IsCancellationRequested) Interlocked.Increment(ref failureCount);
                 }
+            }
+        }
+
+        private void RecordInjectedFailure(
+            int ordinal,
+            int requestOrdinal,
+            long timestamp)
+        {
+            lock (networkRecoveryTraceSync)
+            {
+                if (ordinal != networkRecoveryTraces.Count + 1 ||
+                    networkRecoveryTraces.Count >= NetworkRecoveryTraceCapacity)
+                {
+                    throw new InvalidOperationException("The bounded network recovery trace is inconsistent.");
+                }
+
+                networkRecoveryTraces.Add(new TierANetworkRecoveryTrace(
+                    ordinal,
+                    requestOrdinal,
+                    timestamp));
+            }
+        }
+
+        private void RecordRecovery(
+            int ordinal,
+            int requestOrdinal,
+            long timestamp)
+        {
+            lock (networkRecoveryTraceSync)
+            {
+                if (ordinal < 1 || ordinal > networkRecoveryTraces.Count)
+                {
+                    throw new InvalidOperationException("The bounded network recovery trace is incomplete.");
+                }
+
+                networkRecoveryTraces[ordinal - 1].MarkRecovery(requestOrdinal, timestamp);
             }
         }
 
@@ -2143,7 +2249,7 @@ try {
         "Probe"
     )
     if (-not (Test-JsonInteger -Value $probeEnvelope.SchemaVersion) -or
-        [int]$probeEnvelope.SchemaVersion -ne 7 -or
+        [int]$probeEnvelope.SchemaVersion -ne 8 -or
         $probeEnvelope.RunId -isnot [string] -or
         -not [string]::Equals(
             $probeEnvelope.RunId,
@@ -2153,7 +2259,7 @@ try {
         $null -eq $probeEnvelope.Probe) {
         throw "The native playback probe evidence is not bound to this controller run."
     }
-    $probeEnvelopeSchemaVersion = 7
+    $probeEnvelopeSchemaVersion = 8
     $probeRunIdBound = $true
 
     Assert-ExactJsonProperties -Value $probeEnvelope.RuntimeDependency -ExpectedNames @(
@@ -2270,7 +2376,8 @@ try {
         "FinalPrivateBytes",
         "InitialHandleCount",
         "FinalHandleCount",
-        "FirstHlsStartupClock"
+        "FirstHlsStartupClock",
+        "ResourceSamples"
     )
     foreach ($sourceOpenPropertyName in @(
             "StartupMaximumSourceOpen",
@@ -2354,6 +2461,55 @@ try {
             $firstHlsMediaOpenedTimestamp -ne 0 -and
             $firstHlsSourceOpenCompletedTimestamp -gt $firstHlsMediaOpenedTimestamp)) {
         throw "The active first-HLS QPC diagnostic is inconsistent."
+    }
+    $resourceSampleTrace = @($probe.ResourceSamples)
+    if ($resourceSampleTrace.Count -gt 128) {
+        throw "The native playback resource sample trace exceeded its fixed capacity."
+    }
+    $previousResourceSampleTimestamp = 0L
+    $previousResourceSampleElapsedMilliseconds = -1.0
+    for ($resourceSampleIndex = 0; $resourceSampleIndex -lt $resourceSampleTrace.Count; $resourceSampleIndex++) {
+        $resourceSample = $resourceSampleTrace[$resourceSampleIndex]
+        Assert-ExactJsonProperties -Value $resourceSample -ExpectedNames @(
+            "Ordinal",
+            "CapturedTimestamp",
+            "ElapsedMilliseconds",
+            "PrivateBytes",
+            "HandleCount",
+            "Phase",
+            "SwitchOrdinal"
+        )
+        foreach ($propertyName in @(
+                "Ordinal", "CapturedTimestamp", "PrivateBytes", "HandleCount", "SwitchOrdinal")) {
+            if (-not (Test-JsonInteger -Value $resourceSample.PSObject.Properties[$propertyName].Value)) {
+                throw "A native playback resource sample integer field has an invalid JSON type."
+            }
+        }
+        if (-not (Test-JsonNumber -Value $resourceSample.ElapsedMilliseconds) -or
+            $resourceSample.Phase -isnot [string]) {
+            throw "A native playback resource sample has an invalid JSON type."
+        }
+        $resourceSampleOrdinal = [int]$resourceSample.Ordinal
+        $resourceSampleTimestamp = [long]$resourceSample.CapturedTimestamp
+        $resourceSampleElapsedMilliseconds = [double]$resourceSample.ElapsedMilliseconds
+        $resourceSamplePrivateBytes = [long]$resourceSample.PrivateBytes
+        $resourceSampleHandleCount = [int]$resourceSample.HandleCount
+        $resourceSamplePhase = [string]$resourceSample.Phase
+        $resourceSampleSwitchOrdinal = [int]$resourceSample.SwitchOrdinal
+        if ($resourceSampleOrdinal -ne ($resourceSampleIndex + 1) -or
+            $resourceSampleTimestamp -lt 1 -or
+            $resourceSampleTimestamp -le $previousResourceSampleTimestamp -or
+            $resourceSampleElapsedMilliseconds -lt 0 -or
+            $resourceSampleElapsedMilliseconds -lt $previousResourceSampleElapsedMilliseconds -or
+            $resourceSamplePrivateBytes -le 0 -or
+            $resourceSampleHandleCount -le 0 -or
+            $resourceSamplePhase -notin @("ProbeStart", "SwitchesCompleted", "Soak") -or
+            $resourceSampleSwitchOrdinal -lt 0 -or
+            $resourceSampleSwitchOrdinal -gt $SwitchCount) {
+            throw "A native playback resource sample is inconsistent."
+        }
+        $previousResourceSampleTimestamp = $resourceSampleTimestamp
+        $previousResourceSampleElapsedMilliseconds = $resourceSampleElapsedMilliseconds
     }
     foreach ($propertyName in @(
             "SwitchCount", "SoakMinutes", "ResourceSampleCount", "WarmupPrivateBytes",
@@ -2440,7 +2596,117 @@ try {
             "ResourceBudgetExceeded",
             [System.StringComparison]::Ordinal)
     $isCompletedProbeResult = $probe.Success -eq $true -or $isCompletedResourceFailure
+    $postWarmupResourceSamples = @()
+    $postWarmupMinimumSample = $null
+    $postWarmupMaximumSample = $null
+    $postWarmupFinalSample = $null
+    $networkRecoveryTrace = @($tlsServer.GetNetworkRecoveryTraceSnapshot())
+    if ($networkRecoveryTrace.Count -gt 7) {
+        throw "The native playback network recovery trace exceeded its fixed capacity."
+    }
+    $previousInjectedTimestamp = 0L
+    $previousRecoveryTimestamp = 0L
+    for ($networkTraceIndex = 0; $networkTraceIndex -lt $networkRecoveryTrace.Count; $networkTraceIndex++) {
+        $networkTrace = $networkRecoveryTrace[$networkTraceIndex]
+        $networkTraceOrdinal = [int]$networkTrace.Ordinal
+        $networkInjectedRequestOrdinal = [int]$networkTrace.InjectedRequestOrdinal
+        $networkInjectedTimestamp = [long]$networkTrace.InjectedTimestamp
+        $networkRecoveryRequestOrdinal = [int]$networkTrace.RecoveryRequestOrdinal
+        $networkRecoveryTimestamp = [long]$networkTrace.RecoveryTimestamp
+        if ($networkTraceOrdinal -ne ($networkTraceIndex + 1) -or
+            $networkInjectedRequestOrdinal -lt 1 -or
+            $networkInjectedTimestamp -lt 1 -or
+            $networkRecoveryRequestOrdinal -le $networkInjectedRequestOrdinal -or
+            $networkRecoveryTimestamp -lt $networkInjectedTimestamp -or
+            $networkInjectedTimestamp -le $previousInjectedTimestamp -or
+            $networkRecoveryTimestamp -le $previousRecoveryTimestamp -or
+            ($networkTraceIndex -gt 0 -and
+                $networkInjectedTimestamp -le $previousRecoveryTimestamp)) {
+            throw "A native playback network recovery trace is inconsistent."
+        }
+        $previousInjectedTimestamp = $networkInjectedTimestamp
+        $previousRecoveryTimestamp = $networkRecoveryTimestamp
+    }
     if ($isCompletedProbeResult) {
+        if ($resourceSampleTrace.Count -lt 2 -or
+            [string]$resourceSampleTrace[0].Phase -ne "ProbeStart" -or
+            [int]$resourceSampleTrace[0].SwitchOrdinal -ne 0 -or
+            [string]$resourceSampleTrace[1].Phase -ne "SwitchesCompleted" -or
+            [int]$resourceSampleTrace[1].SwitchOrdinal -ne $SwitchCount -or
+            [long]$resourceSampleTrace[0].CapturedTimestamp -gt $firstHlsStartupStartedTimestamp -or
+            [long]$resourceSampleTrace[1].CapturedTimestamp -lt $firstHlsWindowCompletedTimestamp) {
+            throw "The completed native playback resource sample phase trace is inconsistent."
+        }
+        if ($SoakMinutes -eq 0) {
+            if ($resourceSampleTrace.Count -ne 2 -or [int]$probe.ResourceSampleCount -ne 0) {
+                throw "The non-soak native playback resource sample trace is inconsistent."
+            }
+        }
+        else {
+            if ($resourceSampleTrace.Count -lt 3 -or
+                [int]$probe.ResourceSampleCount -ne $resourceSampleTrace.Count) {
+                throw "The soak native playback resource sample trace count is inconsistent."
+            }
+            foreach ($soakResourceSample in @($resourceSampleTrace | Select-Object -Skip 2)) {
+                if ([string]$soakResourceSample.Phase -ne "Soak" -or
+                    [int]$soakResourceSample.SwitchOrdinal -ne $SwitchCount) {
+                    throw "A soak resource sample is not bound to the completed switch phase."
+                }
+            }
+            $postWarmupResourceSamples = @($resourceSampleTrace | Where-Object {
+                [double]$_.ElapsedMilliseconds -ge 1800000
+            })
+            if ($postWarmupResourceSamples.Count -ge 2) {
+                $postWarmupMinimumSample = $postWarmupResourceSamples |
+                    Sort-Object -Property @{ Expression = { [long]$_.PrivateBytes } },
+                        @{ Expression = { [int]$_.Ordinal } } |
+                    Select-Object -First 1
+                $postWarmupMaximumSample = $postWarmupResourceSamples |
+                    Sort-Object -Property @{ Expression = { [long]$_.PrivateBytes }; Descending = $true },
+                        @{ Expression = { [int]$_.Ordinal } } |
+                    Select-Object -First 1
+                $postWarmupFinalSample = $postWarmupResourceSamples[-1]
+                $traceMemoryNetGrowthBytes =
+                    [long]$postWarmupFinalSample.PrivateBytes -
+                    [long]$postWarmupResourceSamples[0].PrivateBytes
+                $traceMemoryNetGrowthPercent = if ([long]$postWarmupResourceSamples[0].PrivateBytes -eq 0) {
+                    [double]::PositiveInfinity
+                }
+                else {
+                    $traceMemoryNetGrowthBytes * 100.0 /
+                        [long]$postWarmupResourceSamples[0].PrivateBytes
+                }
+                $traceMemoryMonotonicIncrease = $true
+                for ($postWarmupIndex = 1;
+                    $postWarmupIndex -lt $postWarmupResourceSamples.Count;
+                    $postWarmupIndex++) {
+                    if ([long]$postWarmupResourceSamples[$postWarmupIndex].PrivateBytes -le
+                        [long]$postWarmupResourceSamples[$postWarmupIndex - 1].PrivateBytes) {
+                        $traceMemoryMonotonicIncrease = $false
+                        break
+                    }
+                }
+                if ([long]$probe.WarmupPrivateBytes -ne
+                        [long]$postWarmupResourceSamples[0].PrivateBytes -or
+                    [long]$probe.MemoryNetGrowthBytes -ne $traceMemoryNetGrowthBytes -or
+                    [Math]::Abs(
+                        [double]$probe.MemoryNetGrowthPercent -
+                        $traceMemoryNetGrowthPercent) -gt 0.000000001 -or
+                    [bool]$probe.MemoryMonotonicIncrease -ne $traceMemoryMonotonicIncrease -or
+                    [int]$probe.WarmupHandleCount -ne
+                        [int]$postWarmupResourceSamples[0].HandleCount -or
+                    [int]$probe.HandleNetGrowth -ne
+                        ([int]$postWarmupFinalSample.HandleCount -
+                            [int]$postWarmupResourceSamples[0].HandleCount)) {
+                    throw "The native playback resource aggregates are not derived from the bounded sample trace."
+                }
+            }
+        }
+        if ($networkRecoveryTrace.Count -ne $NetworkInterruptionCount -or
+            $networkRecoveryTrace.Count -ne $tlsServer.InjectedFailureCount -or
+            $networkRecoveryTrace.Count -ne $tlsServer.RecoveryCount) {
+            throw "The native playback network recovery trace is not bound to the completed probe."
+        }
         if ($cancellationProbeCount -ne $CancellationProbeCount) {
             throw "The native playback cancellation probe count is not bound to the controller request."
         }
@@ -2913,6 +3179,41 @@ try {
                     -Frequency $firstHlsClockFrequency
             }
             Write-Host "First-HLS transport attribution: requests=$firstHlsTraceRequestCount, playlistResponses=$firstHlsTracePlaylistResponseCount, segmentResponses=$firstHlsTraceSegmentResponseCount, bodyBytes=$firstHlsTraceBodyBytes, responsesBeforeSourceOpen=$firstHlsTraceResponsesBeforeSourceOpen, responsesBeforeMediaOpened=$firstHlsTraceResponsesBeforeMediaOpened, startupToFirstAccept=$firstHlsStartupToFirstAcceptMilliseconds, startupToFirstHeader=$firstHlsStartupToFirstHeaderMilliseconds, maxTlsAuthentication=$firstHlsMaximumTlsAuthenticationMilliseconds, totalTlsAuthentication=$firstHlsTotalTlsAuthenticationMilliseconds, firstHeaderToLastFlush=$firstHlsFirstHeaderToLastFlushMilliseconds, lastFlushToSourceOpen=$firstHlsLastFlushToSourceOpenMilliseconds, lastFlushToMediaOpened=$firstHlsLastFlushToMediaOpenedMilliseconds, traceRecordsOmittedAfterCapacity=$requestTraceDroppedCount."
+        }
+    }
+    if ($SoakMinutes -gt 0 -and $isCompletedProbeResult) {
+        foreach ($networkTrace in $networkRecoveryTrace) {
+            $injectedElapsedMilliseconds = Get-QpcDeltaMilliseconds `
+                -StartTimestamp ([long]$resourceSampleTrace[0].CapturedTimestamp) `
+                -EndTimestamp ([long]$networkTrace.InjectedTimestamp) `
+                -Frequency $firstHlsClockFrequency
+            $recoveryElapsedMilliseconds = Get-QpcDeltaMilliseconds `
+                -StartTimestamp ([long]$resourceSampleTrace[0].CapturedTimestamp) `
+                -EndTimestamp ([long]$networkTrace.RecoveryTimestamp) `
+                -Frequency $firstHlsClockFrequency
+            Write-Host "Native playback network recovery trace: ordinal=$($networkTrace.Ordinal), injectedRequestOrdinal=$($networkTrace.InjectedRequestOrdinal), injectedElapsedMilliseconds=$injectedElapsedMilliseconds, recoveryRequestOrdinal=$($networkTrace.RecoveryRequestOrdinal), recoveryElapsedMilliseconds=$recoveryElapsedMilliseconds."
+        }
+        foreach ($resourceSample in $resourceSampleTrace) {
+            $recoveryPhase = "BeforeFirstRecovery"
+            $relatedRecoveryOrdinal = 0
+            $relatedRequestOrdinal = 0
+            foreach ($networkTrace in $networkRecoveryTrace) {
+                if ([long]$resourceSample.CapturedTimestamp -lt [long]$networkTrace.InjectedTimestamp) {
+                    break
+                }
+                $relatedRecoveryOrdinal = [int]$networkTrace.Ordinal
+                if ([long]$resourceSample.CapturedTimestamp -lt [long]$networkTrace.RecoveryTimestamp) {
+                    $recoveryPhase = "RecoveryPending"
+                    $relatedRequestOrdinal = [int]$networkTrace.InjectedRequestOrdinal
+                    break
+                }
+                $recoveryPhase = "AfterRecovery"
+                $relatedRequestOrdinal = [int]$networkTrace.RecoveryRequestOrdinal
+            }
+            Write-Host "Native playback resource sample: ordinal=$($resourceSample.Ordinal), elapsedMilliseconds=$($resourceSample.ElapsedMilliseconds), privateBytes=$($resourceSample.PrivateBytes), handleCount=$($resourceSample.HandleCount), phase=$($resourceSample.Phase), switchOrdinal=$($resourceSample.SwitchOrdinal), recoveryPhase=$recoveryPhase, recoveryOrdinal=$relatedRecoveryOrdinal, relatedRequestOrdinal=$relatedRequestOrdinal."
+        }
+        if ($postWarmupResourceSamples.Count -ge 2) {
+            Write-Host "Native playback post-warm resource summary: count=$($postWarmupResourceSamples.Count), warmupOrdinal=$($postWarmupResourceSamples[0].Ordinal), warmupElapsedMilliseconds=$($postWarmupResourceSamples[0].ElapsedMilliseconds), warmupPrivateBytes=$($postWarmupResourceSamples[0].PrivateBytes), minimumOrdinal=$($postWarmupMinimumSample.Ordinal), minimumElapsedMilliseconds=$($postWarmupMinimumSample.ElapsedMilliseconds), minimumPrivateBytes=$($postWarmupMinimumSample.PrivateBytes), maximumOrdinal=$($postWarmupMaximumSample.Ordinal), maximumElapsedMilliseconds=$($postWarmupMaximumSample.ElapsedMilliseconds), maximumPrivateBytes=$($postWarmupMaximumSample.PrivateBytes), peakOrdinal=$($postWarmupMaximumSample.Ordinal), finalOrdinal=$($postWarmupFinalSample.Ordinal), finalElapsedMilliseconds=$($postWarmupFinalSample.ElapsedMilliseconds), finalPrivateBytes=$($postWarmupFinalSample.PrivateBytes), finalHandleCount=$($postWarmupFinalSample.HandleCount)."
         }
     }
     $expectedSurfaceTransitions = if ($SwitchCount -ge 25) { 6 } else { 0 }

@@ -303,7 +303,8 @@ $expectedProbePropertyNames = @(
     "FinalPrivateBytes",
     "InitialHandleCount",
     "FinalHandleCount",
-    "FirstHlsStartupClock"
+    "FirstHlsStartupClock",
+    "ResourceSamples"
 )
 Assert-ExactSequence `
     -Actual $actualProbePropertyNames `

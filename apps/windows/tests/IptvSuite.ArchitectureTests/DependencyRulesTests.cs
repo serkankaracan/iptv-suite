@@ -2185,7 +2185,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(app, "new NativePlaybackProbeEnvelope(");
         StringAssert.Contains(
             normalizedApp,
-            "new NativePlaybackProbeEnvelope( 7, request.RunId.ToString(\"N\"), runtimeDependency, result);");
+            "new NativePlaybackProbeEnvelope( 8, request.RunId.ToString(\"N\"), runtimeDependency, result);");
         StringAssert.Contains(app, "request.RunId.ToString(\"N\")");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.json\"");
         StringAssert.Contains(app, "$\"result-{request.RunId:N}.pending\"");
@@ -2538,7 +2538,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "_opened?.TrySetResult(Stopwatch.GetTimestamp())");
         StringAssert.Contains(window, "await _advanced.Task.WaitAsync(TimeSpan.FromSeconds(3)");
         StringAssert.Contains(window, "TimeSpan sampleInterval = TimeSpan.FromMinutes(5)");
-        StringAssert.Contains(window, "sample.Elapsed >= TimeSpan.FromMinutes(30)");
+        StringAssert.Contains(
+            window,
+            "sample.ElapsedMilliseconds >= TimeSpan.FromMinutes(30).TotalMilliseconds");
         StringAssert.Contains(window, "growthBytes <= 100L * 1024 * 1024 && growthPercent <= 10d && !monotonic");
         StringAssert.Contains(window, "right.PrivateBytes > left.PrivateBytes");
         StringAssert.Contains(window, "sender.Position >= TimeSpan.FromMilliseconds(500)");
@@ -2991,6 +2993,13 @@ public sealed class DependencyRulesTests
             "tests",
             "IptvSuite.NativePlaybackCompatibilitySpike",
             "App.xaml.cs"));
+        string probeMainWindow = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.NativePlaybackCompatibilitySpike",
+            "MainWindow.xaml.cs"));
         string evidenceValidator = File.ReadAllText(Path.Combine(
             RepositoryRoot,
             "apps",
@@ -3104,8 +3113,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -le $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "SchemaVersion = 10");
-        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 7");
-        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 7");
+        StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 8");
+        StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 8");
         Match controllerEnvelopeVersion = Regex.Match(
             controller,
             @"\[int\]\$probeEnvelope\.SchemaVersion -ne (?<version>\d+)",
@@ -3149,6 +3158,21 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "traceRecordsOmittedAfterCapacity=");
         StringAssert.Contains(controller, "firstHlsLastFlushToSourceOpen");
         StringAssert.Contains(controller, "firstHlsLastFlushToMediaOpened");
+        StringAssert.Contains(probeMainWindow, "private const int ResourceSampleCapacity = 128;");
+        StringAssert.Contains(probeMainWindow, "NativePlaybackResourcePhase.ProbeStart");
+        StringAssert.Contains(probeMainWindow, "NativePlaybackResourcePhase.SwitchesCompleted");
+        StringAssert.Contains(probeMainWindow, "NativePlaybackResourcePhase.Soak");
+        StringAssert.Contains(probeMainWindow, "public IReadOnlyList<NativePlaybackResourceSample> ResourceSamples");
+        StringAssert.Contains(controller, "$resourceSampleTrace.Count -gt 128");
+        StringAssert.Contains(controller, "$tlsServer.GetNetworkRecoveryTraceSnapshot()");
+        StringAssert.Contains(controller, "private const int NetworkRecoveryTraceCapacity = 7;");
+        StringAssert.Contains(controller, "Native playback network recovery trace:");
+        StringAssert.Contains(controller, "Native playback resource sample:");
+        StringAssert.Contains(controller, "Native playback post-warm resource summary:");
+        StringAssert.Contains(controller, "recoveryPhase=");
+        StringAssert.Contains(controller, "minimumPrivateBytes=");
+        StringAssert.Contains(controller, "maximumPrivateBytes=");
+        StringAssert.Contains(controller, "finalPrivateBytes=");
         StringAssert.Contains(controller, "[ValidateRange(0, 1)]");
         StringAssert.Contains(controller, "$CancellationProbeCount -gt 0 -and");
         StringAssert.Contains(controller, "$cancellationProbeCount -ne $CancellationProbeCount");

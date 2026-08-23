@@ -10,6 +10,7 @@ namespace IptvSuite.NativePlaybackCompatibilitySpike;
 
 public sealed partial class MainWindow : Window, IDisposable
 {
+    private const int ResourceSampleCapacity = 128;
     private readonly MediaPlayer _mediaPlayer;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly TaskCompletionSource _surfaceReady =
@@ -89,7 +90,12 @@ public sealed partial class MainWindow : Window, IDisposable
         NativePlaybackStartupFailureDiagnostic startupFailureDiagnostic = default;
         var resourceSamples = new List<NativePlaybackResourceSample>();
         var soakStopwatch = Stopwatch.StartNew();
-        CaptureResourceSample(process, soakStopwatch, resourceSamples);
+        CaptureResourceSample(
+            process,
+            soakStopwatch,
+            resourceSamples,
+            NativePlaybackResourcePhase.ProbeStart,
+            switchOrdinal: 0);
 
         void BeginStartupStage(NativePlaybackStartupStage stage)
         {
@@ -478,6 +484,13 @@ public sealed partial class MainWindow : Window, IDisposable
                 timeoutFailure = NativePlaybackFailure.MediaOpenTimeout;
             }
 
+            CaptureResourceSample(
+                process,
+                soakStopwatch,
+                resourceSamples,
+                NativePlaybackResourcePhase.SwitchesCompleted,
+                completedSwitchCount);
+
             if (request.CancellationProbeCount == 1)
             {
                 cancellationMetrics = await RunCancellationProbeAsync(
@@ -498,6 +511,7 @@ public sealed partial class MainWindow : Window, IDisposable
                     process,
                     soakStopwatch,
                     resourceSamples,
+                    completedSwitchCount,
                     sourceDetachSamples,
                     probeCancellationToken);
                 detachedSourceCount++;
@@ -519,6 +533,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 firstHlsStartupClock,
                 request.SoakDuration,
                 soakMetrics,
+                resourceSamples,
                 surfaceTransitionCount,
                 detachedSourceCount,
                 playbackRetryCount,
@@ -1333,6 +1348,7 @@ public sealed partial class MainWindow : Window, IDisposable
         Process process,
         Stopwatch soakStopwatch,
         List<NativePlaybackResourceSample> resourceSamples,
+        int switchOrdinal,
         List<double> sourceDetachSamples,
         CancellationToken cancellationToken)
     {
@@ -1362,7 +1378,12 @@ public sealed partial class MainWindow : Window, IDisposable
                 }
 
                 await delay;
-                CaptureResourceSample(process, soakStopwatch, resourceSamples);
+                CaptureResourceSample(
+                    process,
+                    soakStopwatch,
+                    resourceSamples,
+                    NativePlaybackResourcePhase.Soak,
+                    switchOrdinal);
             }
 
             _mediaPlayer.IsLoopingEnabled = false;
@@ -1390,13 +1411,24 @@ public sealed partial class MainWindow : Window, IDisposable
     private static void CaptureResourceSample(
         Process process,
         Stopwatch stopwatch,
-        List<NativePlaybackResourceSample> samples)
+        List<NativePlaybackResourceSample> samples,
+        NativePlaybackResourcePhase phase,
+        int switchOrdinal)
     {
+        if (samples.Count >= ResourceSampleCapacity)
+        {
+            throw new InvalidOperationException("The native playback resource sample trace exceeded its fixed capacity.");
+        }
+
         process.Refresh();
         samples.Add(new NativePlaybackResourceSample(
-            stopwatch.Elapsed,
+            samples.Count + 1,
+            Stopwatch.GetTimestamp(),
+            stopwatch.Elapsed.TotalMilliseconds,
             process.PrivateMemorySize64,
-            process.HandleCount));
+            process.HandleCount,
+            phase,
+            switchOrdinal));
     }
 
     internal void ShowResult(NativePlaybackProbeResult result)
@@ -1712,6 +1744,8 @@ internal sealed record NativePlaybackProbeResult(
 {
     public NativePlaybackFirstHlsStartupClock FirstHlsStartupClock { get; init; }
 
+    public IReadOnlyList<NativePlaybackResourceSample> ResourceSamples { get; init; } = [];
+
     internal static NativePlaybackProbeResult Passed(
         int switchCount,
         IReadOnlyList<double> startupSamples,
@@ -1727,6 +1761,7 @@ internal sealed record NativePlaybackProbeResult(
         NativePlaybackFirstHlsStartupClock firstHlsStartupClock,
         TimeSpan soakDuration,
         NativePlaybackSoakMetrics soakMetrics,
+        IReadOnlyList<NativePlaybackResourceSample> resourceSamples,
         int surfaceTransitionCount,
         int detachedSourceCount,
         int playbackRetryCount,
@@ -1811,6 +1846,7 @@ internal sealed record NativePlaybackProbeResult(
             finalHandleCount)
         {
             FirstHlsStartupClock = firstHlsStartupClock,
+            ResourceSamples = resourceSamples.ToArray(),
         };
     }
 
@@ -1961,9 +1997,20 @@ internal sealed class NativePlaybackTeardownException(
 }
 
 internal readonly record struct NativePlaybackResourceSample(
-    TimeSpan Elapsed,
+    int Ordinal,
+    long CapturedTimestamp,
+    double ElapsedMilliseconds,
     long PrivateBytes,
-    int HandleCount);
+    int HandleCount,
+    NativePlaybackResourcePhase Phase,
+    int SwitchOrdinal);
+
+internal enum NativePlaybackResourcePhase
+{
+    ProbeStart,
+    SwitchesCompleted,
+    Soak,
+}
 
 internal readonly record struct NativePlaybackSoakMetrics(
     int ResourceSampleCount,
@@ -1980,7 +2027,7 @@ internal readonly record struct NativePlaybackSoakMetrics(
     internal static NativePlaybackSoakMetrics From(IReadOnlyList<NativePlaybackResourceSample> samples)
     {
         NativePlaybackResourceSample[] postWarmup = samples
-            .Where(sample => sample.Elapsed >= TimeSpan.FromMinutes(30))
+            .Where(sample => sample.ElapsedMilliseconds >= TimeSpan.FromMinutes(30).TotalMilliseconds)
             .ToArray();
         if (postWarmup.Length < 2) return new(samples.Count, 0, 0, 0, true, 0, 0, false);
 

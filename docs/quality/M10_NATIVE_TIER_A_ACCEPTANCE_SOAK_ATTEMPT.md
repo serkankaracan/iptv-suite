@@ -40,6 +40,21 @@ Transcript, ilk HLS penceresi için `5` tamamlanmış response (`1` playlist + `
 
 Takip düzeltmesi eşikleri değiştirmeden tamamlanmış probe sonucunu korur ve yalnız `Success=false`, `Failure=ResourceBudgetExceeded` durumuna çevirir. Controller bu failure sınıfını kabul etmeden önce completed lifecycle/cancellation/first-HLS ve gerçekten başarısız bir resource predicate invariant'ını doğrular; safe aggregate resource/process alanlarını konsola yazar ve stable failure noktasını `SoakValidation/ResourceBudgetExceeded` yapar. Kalıcı success schema `10`, transient envelope `7`, HLS-first sırası, timeout/retry, TLS, fixture ve cleanup sınırları değişmez.
 
+## İkinci transcript ve exact predicate — 2026-08-23
+
+Kullanıcının temiz local `856fb04` checkpoint'inden paylaştığı envelope-v7 transcript'i `100/100` switch, `7/7` interruption/recovery, `101` exact source detachment, altı surface transition ve sıfır playback retry sonrasında yeniden `ResourceBudgetExceeded` bildirdi. Startup maximum `2.508,366 ms` ile geçti. Resource sonucu:
+
+| Ölçüm | Sonuç | Karar |
+|---|---:|---:|
+| Sample | `97` | yeterli |
+| Warm-up private bytes | `168.304.640` | baseline |
+| Net büyüme | `18.698.240 byte` / yaklaşık `17,8 MiB` | `≤100 MiB`, geçti |
+| Göreli büyüme | `%11,109759` | `≤%10`, **kaldı** |
+| Monotonic artış | `false` | geçti |
+| Handle büyümesi | `-52` | kayıt |
+
+Bu koşuda görünen tek resource-budget ihlali göreli büyümedir. `memoryMonotonicIncrease=false` ve negatif handle büyümesi tek başına sürekli leak kanıtı değildir. Eşik, warm-up veya sample exclusion değiştirilmez. Envelope-v8 takip teşhisi en çok `128` process sample'ını ordinal/QPC/elapsed/private-bytes/handle/phase/switch alanlarıyla ve en çok `7` injection/recovery olayını aynı QPC tabanında bağlar. Controller aggregate sonucu sample serisinden tekrar türetip fail-closed doğrular; her sample'ı recovery phase/ordinal ile, ayrıca post-warm minimum/maximum/peak/final noktalarını bounded konsol çıktısında gösterir. Kalıcı schema `10`, player/transport davranışı ve acceptance predicate'leri değişmez.
+
 ## Karar
 
-Sekiz saatlik acceptance gate **FAIL** durumundadır: unverified provenance ve negatif transcript PASS kanıtı olamaz. ADR-007 `Proposed`, R15 `ACTIVE`, M10 `IN PROGRESS` kalır ve M11 production adapter başlamaz. Diagnostic düzeltmesi temiz, erişilebilir bir commit üzerinde doğrulandıktan sonra aynı `480 dakika / 100 switch / 7 interruption` profili yeniden çalıştırılmalı; exact resource değerleri görülmeden threshold, fixture veya player davranışı değiştirilmemelidir. Bildirilen `c9d5cd6...` commit'inin provenance için kullanılacaksa garbage collection öncesinde kalıcı bir ref ile korunması ayrıca gerekir.
+Sekiz saatlik acceptance gate **FAIL** durumundadır: negatif transcript PASS kanıtı olamaz. ADR-007 `Proposed`, R15 `ACTIVE`, M10 `IN PROGRESS` kalır ve M11 production adapter başlamaz. Envelope-v8 bounded teşhis temiz checkpoint üzerinde doğrulandıktan sonra aynı `480 dakika / 100 switch / 7 interruption` profili yeniden çalıştırılmalı; sample seyri recovery olaylarıyla ayrılmadan threshold, fixture veya player davranışı değiştirilmemelidir.
