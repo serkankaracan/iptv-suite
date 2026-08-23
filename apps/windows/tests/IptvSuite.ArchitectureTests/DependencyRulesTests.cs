@@ -2008,11 +2008,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(decision, "EmbeddedLicenseOrNoticeEntries");
         StringAssert.Contains(decision, "Do not ship this candidate");
         StringAssert.Contains(rejectedAdr, "**Status:** Rejected — M10 exact binary/license hard gate");
-        StringAssert.Contains(fallbackAdr, "**Status:** Proposed");
+        StringAssert.Contains(fallbackAdr, "**Status:** Accepted with known deviation");
         StringAssert.Contains(fallbackAdr, "Windows `MediaPlayer` / Media Foundation");
-        Assert.IsFalse(
-            fallbackAdr.Contains("**Status:** Accepted", StringComparison.Ordinal),
-            "The native fallback must not be accepted before its independent playback gate passes.");
+        StringAssert.Contains(fallbackAdr, "1.937.818 byte");
+        StringAssert.Contains(fallbackAdr, "M16 final hardening");
+        StringAssert.Contains(fallbackAdr, "Otomatik gate");
     }
 
     [TestMethod]
