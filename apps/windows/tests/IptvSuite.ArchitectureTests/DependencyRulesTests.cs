@@ -4656,7 +4656,8 @@ public sealed class DependencyRulesTests
             "shell: powershell\n        run: >-\n          .\\eng\\Invoke-WindowsNativePlaybackSmoke.ps1\n          -Configuration Release");
         StringAssert.Contains(
             workflow,
-            "  native-playback:\n    name: Native Tier A packaged playback smoke\n    needs: quality\n");
+            "  native-playback:\n    name: Native Tier A packaged playback smoke\n" +
+            "    needs:\n      - quality\n      - package-smoke\n      - dpapi-user-boundary\n");
         StringAssert.Contains(workflow, "name: windows-native-playback-evidence");
         StringAssert.Contains(workflow, ".artifacts/native-playback-smoke/last-success.json");
         StringAssert.Contains(workflow, "timeout-minutes: 30");

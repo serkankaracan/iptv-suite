@@ -151,7 +151,10 @@ jobs:
 
   native-playback:
     name: Native Tier A packaged playback smoke
-    needs: quality
+    needs:
+      - quality
+      - package-smoke
+      - dpapi-user-boundary
     runs-on: windows-2025
     timeout-minutes: 30
 
