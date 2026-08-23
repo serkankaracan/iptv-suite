@@ -11,6 +11,14 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
     private PlaybackSessionId _engineSession;
     private PlaybackSelection? _currentSelection;
     private PlaybackSessionSnapshot _current = PlaybackSessionSnapshot.Closed();
+    private PlaybackVolume _volume = PlaybackVolume.FromPercent(100);
+    private bool _isMuted;
+    private PlaybackAspectMode _aspectMode = PlaybackAspectMode.Fit;
+    private PlaybackControlSnapshot _currentControls = PlaybackControlSnapshot.Idle(
+        PlaybackVolume.FromPercent(100),
+        isMuted: false,
+        PlaybackAspectMode.Fit);
+    private PlaybackTrackSnapshot? _currentTracks;
     private Task? _disposeTask;
     private long _generation;
     private long _sessionSequence;
@@ -35,6 +43,28 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
     }
 
+    public PlaybackControlSnapshot CurrentControls
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _currentControls;
+            }
+        }
+    }
+
+    public PlaybackTrackSnapshot? CurrentTracks
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _currentTracks;
+            }
+        }
+    }
+
     public async ValueTask<PlaybackSessionSnapshot?> StartAsync(
         SourceId sourceId,
         ChannelId channelId,
@@ -46,6 +76,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         SessionOperationCancellation request = lifetime.CreateOperation(cancellationToken);
         SessionLifetime? previousLifetime;
         PlaybackSessionSnapshot opening;
+        PlaybackControlSnapshot desiredControls;
         PlaybackSessionId sessionId;
         long generation;
 
@@ -64,6 +95,13 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     selection,
                     PlaybackState.Opening);
                 _current = opening;
+                _currentControls = PlaybackControlSnapshot.Active(
+                    sessionId,
+                    _volume,
+                    _isMuted,
+                    _aspectMode);
+                desiredControls = _currentControls;
+                _currentTracks = null;
             }
         }
         catch
@@ -129,6 +167,33 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     return terminal;
                 }
 
+                PlaybackEngineOperationResult controlsApplied =
+                    await ApplyDesiredControlsUnderGateAsync(
+                        generation,
+                        sessionId,
+                        desiredControls,
+                        request.Token).ConfigureAwait(false);
+                request.Token.ThrowIfCancellationRequested();
+                if (!controlsApplied.IsSuccess)
+                {
+                    await StopEngineSessionUnderGateAsync(sessionId).ConfigureAwait(false);
+                    PlaybackSessionSnapshot? terminal = GetCurrentIfCurrent(generation, sessionId);
+                    return terminal?.State == PlaybackState.Failed
+                        ? terminal
+                        : SetFailureIfCurrent(
+                            generation,
+                            sessionId,
+                            selection,
+                            controlsApplied.Error!);
+                }
+
+                if (!CanContinueStart(generation, sessionId))
+                {
+                    PlaybackSessionSnapshot? terminal = GetCurrentIfCurrent(generation, sessionId);
+                    await StopEngineSessionUnderGateAsync(sessionId).ConfigureAwait(false);
+                    return terminal;
+                }
+
                 PlaybackEngineOperationResult played = await InvokeEngineOperationAsync(
                     token => _engine.PlayAsync(sessionId, token),
                     DomainErrorCode.PlaybackStartFailed,
@@ -184,6 +249,97 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         ExecuteCurrentCommandAsync(
             (sessionId, token) => _engine.PauseAsync(sessionId, token),
             cancellationToken);
+
+    public ValueTask<PlaybackEngineOperationResult> SetVolumeAsync(
+        PlaybackSessionId sessionId,
+        PlaybackVolume volume,
+        CancellationToken cancellationToken = default) =>
+        ExecuteCurrentControlCommandAsync(
+            sessionId,
+            (currentSession, token) => _engine.SetVolumeAsync(currentSession, volume, token),
+            () =>
+            {
+                _volume = volume;
+                _currentControls = PlaybackControlSnapshot.Active(
+                    sessionId,
+                    _volume,
+                    _isMuted,
+                    _aspectMode);
+            },
+            canExecute: null,
+            cancellationToken);
+
+    public ValueTask<PlaybackEngineOperationResult> SetMutedAsync(
+        PlaybackSessionId sessionId,
+        bool isMuted,
+        CancellationToken cancellationToken = default) =>
+        ExecuteCurrentControlCommandAsync(
+            sessionId,
+            (currentSession, token) => _engine.SetMutedAsync(currentSession, isMuted, token),
+            () =>
+            {
+                _isMuted = isMuted;
+                _currentControls = PlaybackControlSnapshot.Active(
+                    sessionId,
+                    _volume,
+                    _isMuted,
+                    _aspectMode);
+            },
+            canExecute: null,
+            cancellationToken);
+
+    public ValueTask<PlaybackEngineOperationResult> SetAspectModeAsync(
+        PlaybackSessionId sessionId,
+        PlaybackAspectMode aspectMode,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Enum.IsDefined(aspectMode))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(aspectMode),
+                aspectMode,
+                "Unknown playback aspect mode.");
+        }
+
+        return ExecuteCurrentControlCommandAsync(
+            sessionId,
+            (currentSession, token) => _engine.SetAspectModeAsync(currentSession, aspectMode, token),
+            () =>
+            {
+                _aspectMode = aspectMode;
+                _currentControls = PlaybackControlSnapshot.Active(
+                    sessionId,
+                    _volume,
+                    _isMuted,
+                    _aspectMode);
+            },
+            canExecute: null,
+            cancellationToken);
+    }
+
+    public ValueTask<DomainResult<PlaybackTrackSnapshot>> GetTracksAsync(
+        PlaybackSessionId sessionId,
+        CancellationToken cancellationToken = default) =>
+        ExecuteCurrentTrackQueryAsync(sessionId, cancellationToken);
+
+    public ValueTask<PlaybackEngineOperationResult> SelectTrackAsync(
+        PlaybackTrackId trackId,
+        CancellationToken cancellationToken = default)
+    {
+        if (trackId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A session-bound playback track identifier is required.",
+                nameof(trackId));
+        }
+
+        return ExecuteCurrentControlCommandAsync(
+            trackId.SessionId,
+            (currentSession, token) => _engine.SelectTrackAsync(currentSession, trackId, token),
+            () => UpdateSelectedTrackUnderLock(trackId),
+            () => _currentTracks?.CanSelect(trackId) == true,
+            cancellationToken);
+    }
 
     public ValueTask<PlaybackEngineOperationResult> StopAsync(
         CancellationToken cancellationToken = default)
@@ -310,6 +466,337 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
     }
 
+    private async ValueTask<PlaybackEngineOperationResult> ExecuteCurrentControlCommandAsync(
+        PlaybackSessionId expectedSession,
+        Func<PlaybackSessionId, CancellationToken, ValueTask<PlaybackEngineOperationResult>> command,
+        Action applySuccessfulControlUnderLock,
+        Func<bool>? canExecute,
+        CancellationToken cancellationToken)
+    {
+        if (expectedSession.IsEmpty)
+        {
+            throw new ArgumentException("A playback session identifier is required.", nameof(expectedSession));
+        }
+
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(applySuccessfulControlUnderLock);
+        cancellationToken.ThrowIfCancellationRequested();
+        SessionOperationCancellation request;
+        long generation;
+
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_current.SessionId != expectedSession)
+            {
+                return PlaybackEngineOperationResult.Failed(DomainErrorCode.OperationCancelled);
+            }
+
+            if (_current.State is PlaybackState.Closed or PlaybackState.Stopping or PlaybackState.Failed ||
+                _currentLifetime is null ||
+                canExecute is not null && !canExecute())
+            {
+                return PlaybackEngineOperationResult.Failed(DomainErrorCode.DomainInvariantViolation);
+            }
+
+            generation = _generation;
+            request = _currentLifetime.CreateOperation(cancellationToken);
+        }
+
+        bool gateEntered = false;
+        try
+        {
+            await _engineGate.WaitAsync(request.Token).ConfigureAwait(false);
+            gateEntered = true;
+            request.Token.ThrowIfCancellationRequested();
+            DomainError? terminalBeforeDispatch;
+            bool invalidBeforeDispatch;
+            lock (_sync)
+            {
+                if (_disposed || generation != _generation || _current.SessionId != expectedSession)
+                {
+                    return PlaybackEngineOperationResult.Failed(DomainErrorCode.OperationCancelled);
+                }
+
+                terminalBeforeDispatch = _current.State == PlaybackState.Failed
+                    ? _current.Error
+                    : null;
+                invalidBeforeDispatch = terminalBeforeDispatch is null &&
+                    (_current.State is PlaybackState.Closed or PlaybackState.Stopping ||
+                        _currentLifetime is null ||
+                        canExecute is not null && !canExecute());
+            }
+
+            if (terminalBeforeDispatch is not null)
+            {
+                await StopEngineSessionUnderGateAsync(expectedSession).ConfigureAwait(false);
+                return PlaybackEngineOperationResult.Failed(terminalBeforeDispatch);
+            }
+
+            if (invalidBeforeDispatch)
+            {
+                return PlaybackEngineOperationResult.Failed(DomainErrorCode.DomainInvariantViolation);
+            }
+
+            if (_engineSession != expectedSession)
+            {
+                return PlaybackEngineOperationResult.Failed(DomainErrorCode.OperationCancelled);
+            }
+
+            PlaybackEngineOperationResult result = await InvokeEngineOperationAsync(
+                token => command(expectedSession, token),
+                DomainErrorCode.PlaybackControlFailed,
+                request.Token).ConfigureAwait(false);
+            request.Token.ThrowIfCancellationRequested();
+
+            DomainError? terminalError;
+            bool applied = false;
+            lock (_sync)
+            {
+                if (_disposed || generation != _generation || _current.SessionId != expectedSession)
+                {
+                    return PlaybackEngineOperationResult.Failed(DomainErrorCode.OperationCancelled);
+                }
+
+                terminalError = _current.State == PlaybackState.Failed
+                    ? _current.Error
+                    : null;
+                if (terminalError is null && result.IsSuccess)
+                {
+                    applySuccessfulControlUnderLock();
+                    applied = true;
+                }
+            }
+
+            if (terminalError is not null)
+            {
+                await StopEngineSessionUnderGateAsync(expectedSession).ConfigureAwait(false);
+                return PlaybackEngineOperationResult.Failed(terminalError);
+            }
+
+            return applied
+                ? PlaybackEngineOperationResult.Succeeded()
+                : result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return PlaybackEngineOperationResult.Failed(DomainErrorCode.OperationCancelled);
+        }
+        finally
+        {
+            if (gateEntered)
+            {
+                _engineGate.Release();
+            }
+
+            request.Dispose();
+        }
+    }
+
+    private async ValueTask<DomainResult<PlaybackTrackSnapshot>> ExecuteCurrentTrackQueryAsync(
+        PlaybackSessionId expectedSession,
+        CancellationToken cancellationToken)
+    {
+        if (expectedSession.IsEmpty)
+        {
+            throw new ArgumentException("A playback session identifier is required.", nameof(expectedSession));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        SessionOperationCancellation request;
+        long generation;
+
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_current.SessionId != expectedSession)
+            {
+                return DomainResult.Failure<PlaybackTrackSnapshot>(DomainErrorCode.OperationCancelled);
+            }
+
+            if (_current.State is PlaybackState.Closed or PlaybackState.Stopping or PlaybackState.Failed ||
+                _currentLifetime is null)
+            {
+                return DomainResult.Failure<PlaybackTrackSnapshot>(DomainErrorCode.DomainInvariantViolation);
+            }
+
+            generation = _generation;
+            request = _currentLifetime.CreateOperation(cancellationToken);
+        }
+
+        bool gateEntered = false;
+        try
+        {
+            await _engineGate.WaitAsync(request.Token).ConfigureAwait(false);
+            gateEntered = true;
+            request.Token.ThrowIfCancellationRequested();
+            DomainError? terminalBeforeDispatch;
+            bool invalidBeforeDispatch;
+            lock (_sync)
+            {
+                if (_disposed || generation != _generation || _current.SessionId != expectedSession)
+                {
+                    return DomainResult.Failure<PlaybackTrackSnapshot>(
+                        DomainErrorCode.OperationCancelled);
+                }
+
+                terminalBeforeDispatch = _current.State == PlaybackState.Failed
+                    ? _current.Error
+                    : null;
+                invalidBeforeDispatch = terminalBeforeDispatch is null &&
+                    (_current.State is PlaybackState.Closed or PlaybackState.Stopping ||
+                        _currentLifetime is null);
+            }
+
+            if (terminalBeforeDispatch is not null)
+            {
+                await StopEngineSessionUnderGateAsync(expectedSession).ConfigureAwait(false);
+                return DomainResult.Failure<PlaybackTrackSnapshot>(terminalBeforeDispatch);
+            }
+
+            if (invalidBeforeDispatch)
+            {
+                return DomainResult.Failure<PlaybackTrackSnapshot>(
+                    DomainErrorCode.DomainInvariantViolation);
+            }
+
+            if (_engineSession != expectedSession)
+            {
+                return DomainResult.Failure<PlaybackTrackSnapshot>(DomainErrorCode.OperationCancelled);
+            }
+
+            DomainResult<PlaybackTrackSnapshot> result = await InvokeTrackQueryAsync(
+                token => _engine.GetTracksAsync(expectedSession, token),
+                request.Token).ConfigureAwait(false);
+            request.Token.ThrowIfCancellationRequested();
+
+            DomainError? terminalError;
+            lock (_sync)
+            {
+                if (_disposed || generation != _generation || _current.SessionId != expectedSession)
+                {
+                    return DomainResult.Failure<PlaybackTrackSnapshot>(DomainErrorCode.OperationCancelled);
+                }
+
+                terminalError = _current.State == PlaybackState.Failed
+                    ? _current.Error
+                    : null;
+                if (terminalError is null && result.IsSuccess)
+                {
+                    if (result.Value!.SessionId != expectedSession)
+                    {
+                        _currentTracks = null;
+                        return DomainResult.Failure<PlaybackTrackSnapshot>(
+                            DomainErrorCode.DomainInvariantViolation);
+                    }
+
+                    _currentTracks = result.Value;
+                }
+                else if (terminalError is null)
+                {
+                    _currentTracks = null;
+                }
+            }
+
+            if (terminalError is not null)
+            {
+                await StopEngineSessionUnderGateAsync(expectedSession).ConfigureAwait(false);
+                return DomainResult.Failure<PlaybackTrackSnapshot>(terminalError);
+            }
+
+            return result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return DomainResult.Failure<PlaybackTrackSnapshot>(DomainErrorCode.OperationCancelled);
+        }
+        finally
+        {
+            if (gateEntered)
+            {
+                _engineGate.Release();
+            }
+
+            request.Dispose();
+        }
+    }
+
+    private async ValueTask<PlaybackEngineOperationResult> ApplyDesiredControlsUnderGateAsync(
+        long generation,
+        PlaybackSessionId sessionId,
+        PlaybackControlSnapshot desiredControls,
+        CancellationToken cancellationToken)
+    {
+        PlaybackEngineOperationResult volume = await InvokeEngineOperationAsync(
+            token => _engine.SetVolumeAsync(sessionId, desiredControls.Volume, token),
+            DomainErrorCode.PlaybackControlFailed,
+            cancellationToken).ConfigureAwait(false);
+        PlaybackEngineOperationResult checkedVolume = CheckControlRestoreProgress(
+            generation,
+            sessionId,
+            volume,
+            cancellationToken);
+        if (!checkedVolume.IsSuccess)
+        {
+            return checkedVolume;
+        }
+
+        PlaybackEngineOperationResult mute = await InvokeEngineOperationAsync(
+            token => _engine.SetMutedAsync(sessionId, desiredControls.IsMuted, token),
+            DomainErrorCode.PlaybackControlFailed,
+            cancellationToken).ConfigureAwait(false);
+        PlaybackEngineOperationResult checkedMute = CheckControlRestoreProgress(
+            generation,
+            sessionId,
+            mute,
+            cancellationToken);
+        if (!checkedMute.IsSuccess)
+        {
+            return checkedMute;
+        }
+
+        PlaybackEngineOperationResult aspect = await InvokeEngineOperationAsync(
+            token => _engine.SetAspectModeAsync(sessionId, desiredControls.AspectMode, token),
+            DomainErrorCode.PlaybackControlFailed,
+            cancellationToken).ConfigureAwait(false);
+        return CheckControlRestoreProgress(
+            generation,
+            sessionId,
+            aspect,
+            cancellationToken);
+    }
+
+    private PlaybackEngineOperationResult CheckControlRestoreProgress(
+        long generation,
+        PlaybackSessionId sessionId,
+        PlaybackEngineOperationResult result,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!result.IsSuccess)
+        {
+            return result;
+        }
+
+        DomainError? terminalError = GetTerminalErrorIfCurrent(generation, sessionId);
+        if (terminalError is not null)
+        {
+            return PlaybackEngineOperationResult.Failed(terminalError);
+        }
+
+        return IsCurrent(generation, sessionId)
+            ? PlaybackEngineOperationResult.Succeeded()
+            : PlaybackEngineOperationResult.Failed(DomainErrorCode.OperationCancelled);
+    }
+
     private async Task<PlaybackEngineOperationResult> StopSessionAsync(
         PlaybackSessionId? expectedSession,
         bool requireCurrentSession)
@@ -383,6 +870,11 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 {
                     _current = PlaybackSessionSnapshot.Closed();
                     _currentSelection = null;
+                    _currentControls = PlaybackControlSnapshot.Idle(
+                        _volume,
+                        _isMuted,
+                        _aspectMode);
+                    _currentTracks = null;
                 }
                 else
                 {
@@ -423,6 +915,11 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 _engineSession = default;
                 _currentSelection = null;
                 _current = PlaybackSessionSnapshot.Closed();
+                _currentControls = PlaybackControlSnapshot.Idle(
+                    _volume,
+                    _isMuted,
+                    _aspectMode);
+                _currentTracks = null;
             }
 
             completion.TrySetResult();
@@ -485,6 +982,33 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
     }
 
+    private static async ValueTask<DomainResult<PlaybackTrackSnapshot>> InvokeTrackQueryAsync(
+        Func<CancellationToken, ValueTask<DomainResult<PlaybackTrackSnapshot>>> operation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            DomainResult<PlaybackTrackSnapshot> result =
+                await operation(cancellationToken).ConfigureAwait(false);
+            return result ?? DomainResult.Failure<PlaybackTrackSnapshot>(
+                DomainErrorCode.PlaybackControlFailed);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return DomainResult.Failure<PlaybackTrackSnapshot>(
+                DomainErrorCode.PlaybackControlFailed);
+        }
+        catch (Exception)
+        {
+            return DomainResult.Failure<PlaybackTrackSnapshot>(
+                DomainErrorCode.PlaybackControlFailed);
+        }
+    }
+
     private void OnEngineStateChanged(
         object? sender,
         PlaybackEngineStateChangedEventArgs eventArgs)
@@ -507,6 +1031,11 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             {
                 _current = PlaybackSessionSnapshot.Closed();
                 _currentSelection = null;
+                _currentControls = PlaybackControlSnapshot.Idle(
+                    _volume,
+                    _isMuted,
+                    _aspectMode);
+                _currentTracks = null;
             }
             else if (engineSnapshot.State == PlaybackState.Failed)
             {
@@ -514,6 +1043,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     engineSnapshot.SessionId,
                     _currentSelection,
                     engineSnapshot.Error!);
+                _currentTracks = null;
             }
             else
             {
@@ -542,6 +1072,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             {
                 failed = PlaybackSessionSnapshot.Failed(sessionId, selection, error);
                 _current = failed;
+                _currentTracks = null;
             }
         }
 
@@ -623,6 +1154,24 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
     {
         long next = checked(++_sessionSequence);
         return PlaybackSessionId.FromSequence(next);
+    }
+
+    private void UpdateSelectedTrackUnderLock(PlaybackTrackId selectedTrack)
+    {
+        PlaybackTrackSnapshot currentTracks = _currentTracks ??
+            throw new InvalidOperationException("A track snapshot is required before selection.");
+        PlaybackTrackInfo[] updated = currentTracks.Tracks
+            .Select(track => track.Id.Kind == selectedTrack.Kind
+                ? new PlaybackTrackInfo(
+                    track.Id,
+                    isSelected: track.Id == selectedTrack,
+                    isSelectable: track.IsSelectable)
+                : track)
+            .ToArray();
+        _currentTracks = PlaybackTrackSnapshot.Create(
+            currentTracks.SessionId,
+            currentTracks.Capabilities,
+            updated);
     }
 
     private static bool CanTransition(PlaybackState current, PlaybackState next)

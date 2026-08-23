@@ -32,6 +32,7 @@ public enum DomainErrorCode
     ReconnectExhausted,
     StorageUnavailable,
     OperationCancelled,
+    PlaybackControlFailed,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<DomainRetryability>))]
@@ -85,6 +86,7 @@ public sealed record DomainError
         DomainErrorCode.RequestTimedOut => Transient(code, "Errors.Network.RequestTimedOut"),
         DomainErrorCode.TlsValidationFailed => Never(code, "Errors.Network.TlsValidationFailed"),
         DomainErrorCode.PlaybackStartFailed => Manual(code, "Errors.Playback.StartFailed"),
+        DomainErrorCode.PlaybackControlFailed => Manual(code, "Errors.Playback.ControlFailed"),
         DomainErrorCode.StreamInterrupted => Transient(code, "Errors.Playback.StreamInterrupted"),
         DomainErrorCode.ReconnectExhausted => Manual(code, "Errors.Playback.ReconnectExhausted"),
         DomainErrorCode.StorageUnavailable => Manual(code, "Errors.Storage.Unavailable"),

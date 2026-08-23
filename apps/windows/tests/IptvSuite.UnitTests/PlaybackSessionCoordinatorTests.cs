@@ -327,6 +327,10 @@ public sealed class PlaybackSessionCoordinatorTests
     {
         private readonly object _sync = new();
         private PlaybackEngineSnapshot _current = PlaybackEngineSnapshot.Closed();
+        private PlaybackControlSnapshot _currentControls = PlaybackControlSnapshot.Idle(
+            PlaybackVolume.FromPercent(100),
+            isMuted: false,
+            PlaybackAspectMode.Fit);
         private int _openCount;
         private int _disposeCount;
 
@@ -384,6 +388,17 @@ public sealed class PlaybackSessionCoordinatorTests
             }
         }
 
+        public PlaybackControlSnapshot CurrentControls
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _currentControls;
+                }
+            }
+        }
+
         internal int DisposeCount => Volatile.Read(ref _disposeCount);
 
         public async ValueTask<PlaybackEngineOperationResult> OpenAsync(
@@ -398,6 +413,11 @@ public sealed class PlaybackSessionCoordinatorTests
                 OpenSessions.Add(sessionId);
                 ordinal = ++_openCount;
                 _current = PlaybackEngineSnapshot.Active(sessionId, PlaybackState.Opening);
+                _currentControls = PlaybackControlSnapshot.Active(
+                    sessionId,
+                    _currentControls.Volume,
+                    _currentControls.IsMuted,
+                    _currentControls.AspectMode);
             }
 
             if (ordinal == 1 && BlockFirstOpen)
@@ -439,6 +459,81 @@ public sealed class PlaybackSessionCoordinatorTests
 
             Emit(PlaybackEngineSnapshot.Active(sessionId, PlaybackState.Buffering));
             return PlaybackEngineOperationResult.Succeeded();
+        }
+
+        public ValueTask<PlaybackEngineOperationResult> SetVolumeAsync(
+            PlaybackSessionId sessionId,
+            PlaybackVolume volume,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_sync)
+            {
+                _currentControls = PlaybackControlSnapshot.Active(
+                    sessionId,
+                    volume,
+                    _currentControls.IsMuted,
+                    _currentControls.AspectMode);
+            }
+
+            return ValueTask.FromResult(PlaybackEngineOperationResult.Succeeded());
+        }
+
+        public ValueTask<PlaybackEngineOperationResult> SetMutedAsync(
+            PlaybackSessionId sessionId,
+            bool isMuted,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_sync)
+            {
+                _currentControls = PlaybackControlSnapshot.Active(
+                    sessionId,
+                    _currentControls.Volume,
+                    isMuted,
+                    _currentControls.AspectMode);
+            }
+
+            return ValueTask.FromResult(PlaybackEngineOperationResult.Succeeded());
+        }
+
+        public ValueTask<PlaybackEngineOperationResult> SetAspectModeAsync(
+            PlaybackSessionId sessionId,
+            PlaybackAspectMode aspectMode,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_sync)
+            {
+                _currentControls = PlaybackControlSnapshot.Active(
+                    sessionId,
+                    _currentControls.Volume,
+                    _currentControls.IsMuted,
+                    aspectMode);
+            }
+
+            return ValueTask.FromResult(PlaybackEngineOperationResult.Succeeded());
+        }
+
+        public ValueTask<DomainResult<PlaybackTrackSnapshot>> GetTracksAsync(
+            PlaybackSessionId sessionId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(DomainResult.Success(
+                PlaybackTrackSnapshot.Create(
+                    sessionId,
+                    PlaybackTrackCapabilities.None,
+                    [])));
+        }
+
+        public ValueTask<PlaybackEngineOperationResult> SelectTrackAsync(
+            PlaybackSessionId sessionId,
+            PlaybackTrackId trackId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(PlaybackEngineOperationResult.Succeeded());
         }
 
         public ValueTask<PlaybackEngineOperationResult> PlayAsync(
@@ -493,6 +588,10 @@ public sealed class PlaybackSessionCoordinatorTests
                 Journal.Add($"Stop:{sessionId.Value}");
                 StopSessions.Add(sessionId);
                 _current = PlaybackEngineSnapshot.Closed();
+                _currentControls = PlaybackControlSnapshot.Idle(
+                    _currentControls.Volume,
+                    _currentControls.IsMuted,
+                    _currentControls.AspectMode);
             }
 
             if (BlockFirstStop && StopSessions.Count == 1)

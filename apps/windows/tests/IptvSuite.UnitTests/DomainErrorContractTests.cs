@@ -36,6 +36,7 @@ public sealed class DomainErrorContractTests
         new(DomainErrorCode.ReconnectExhausted, DomainRetryability.Manual, "Errors.Playback.ReconnectExhausted"),
         new(DomainErrorCode.StorageUnavailable, DomainRetryability.Manual, "Errors.Storage.Unavailable"),
         new(DomainErrorCode.OperationCancelled, DomainRetryability.Never, "Errors.Operation.Cancelled"),
+        new(DomainErrorCode.PlaybackControlFailed, DomainRetryability.Manual, "Errors.Playback.ControlFailed"),
     ];
 
     [TestMethod]
@@ -45,6 +46,17 @@ public sealed class DomainErrorContractTests
 
         DomainErrorCode[] codes = Enum.GetValues<DomainErrorCode>();
         CollectionAssert.AreEquivalent(ExpectedErrors.Select(item => item.Code).ToArray(), codes);
+        CollectionAssert.AreEqual(
+            ExpectedErrors.Select(item => item.Code).ToArray(),
+            codes,
+            "Domain error ordinals are persisted in catalog history and must remain append-only.");
+        for (int ordinal = 0; ordinal < codes.Length; ordinal++)
+        {
+            Assert.AreEqual(
+                ordinal,
+                (int)codes[ordinal],
+                $"Persisted domain error ordinal changed for {codes[ordinal]}.");
+        }
 
         foreach (ExpectedError expected in ExpectedErrors)
         {

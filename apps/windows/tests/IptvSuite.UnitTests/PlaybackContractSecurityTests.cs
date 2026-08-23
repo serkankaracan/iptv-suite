@@ -58,6 +58,21 @@ public sealed class PlaybackContractSecurityTests
         var eventArgs = new PlaybackEngineStateChangedEventArgs(snapshot);
         PlaybackEngineOperationResult result = PlaybackEngineOperationResult.Failed(
             DomainErrorCode.PlaybackStartFailed);
+        PlaybackSessionId sessionId = CreateSessionId();
+        PlaybackControlSnapshot controls = PlaybackControlSnapshot.Active(
+            sessionId,
+            PlaybackVolume.FromPercent(42),
+            isMuted: true,
+            PlaybackAspectMode.Fill);
+        PlaybackTrackId trackId = PlaybackTrackId.Create(
+            sessionId,
+            PlaybackTrackKind.Audio,
+            ordinal: 1);
+        PlaybackTrackSnapshot tracks = PlaybackTrackSnapshot.Create(
+            sessionId,
+            PlaybackTrackCapabilities.AudioSelection,
+            [new PlaybackTrackInfo(trackId, isSelected: true, isSelectable: true)]);
+        DomainResult<PlaybackTrackSnapshot> trackResult = DomainResult.Success(tracks);
 
         string observable = string.Join(
             '|',
@@ -65,10 +80,18 @@ public sealed class PlaybackContractSecurityTests
             snapshot,
             eventArgs,
             result,
+            controls,
+            trackId,
+            tracks,
+            trackResult,
             JsonSerializer.Serialize(selection),
             JsonSerializer.Serialize(snapshot),
             JsonSerializer.Serialize(eventArgs),
-            JsonSerializer.Serialize(result));
+            JsonSerializer.Serialize(result),
+            JsonSerializer.Serialize(controls),
+            JsonSerializer.Serialize(trackId),
+            JsonSerializer.Serialize(tracks),
+            JsonSerializer.Serialize(trackResult));
 
         SecurityTestAssertions.DoesNotContainSensitive(observable, sensitive);
         Assert.IsFalse(observable.Contains("Exception", StringComparison.Ordinal));
@@ -102,6 +125,22 @@ public sealed class PlaybackContractSecurityTests
             new PlaybackSelection(default, ChannelId.Generate()));
         Assert.ThrowsExactly<ArgumentException>(() =>
             new PlaybackSelection(SourceId.Generate(), default));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            PlaybackVolume.FromPercent(PlaybackVolume.MinimumPercent - 1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            PlaybackVolume.FromPercent(PlaybackVolume.MaximumPercent + 1));
+        Assert.ThrowsExactly<ArgumentException>(() =>
+            PlaybackControlSnapshot.Active(
+                default,
+                PlaybackVolume.FromPercent(100),
+                isMuted: false,
+                PlaybackAspectMode.Fit));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            PlaybackControlSnapshot.Active(
+                sessionId,
+                PlaybackVolume.FromPercent(100),
+                isMuted: false,
+                (PlaybackAspectMode)int.MaxValue));
     }
 
     private static IEnumerable<Type> GetObservableTypes(MemberInfo member) => member switch

@@ -179,6 +179,8 @@ public interface IPlaybackEngine : IAsyncDisposable
 
     PlaybackEngineSnapshot Current { get; }
 
+    PlaybackControlSnapshot CurrentControls { get; }
+
     ValueTask<PlaybackEngineOperationResult> OpenAsync(
         PlaybackSessionId sessionId,
         PlaybackSelection selection,
@@ -194,6 +196,30 @@ public interface IPlaybackEngine : IAsyncDisposable
 
     ValueTask<PlaybackEngineOperationResult> StopAsync(
         PlaybackSessionId sessionId,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<PlaybackEngineOperationResult> SetVolumeAsync(
+        PlaybackSessionId sessionId,
+        PlaybackVolume volume,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<PlaybackEngineOperationResult> SetMutedAsync(
+        PlaybackSessionId sessionId,
+        bool isMuted,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<PlaybackEngineOperationResult> SetAspectModeAsync(
+        PlaybackSessionId sessionId,
+        PlaybackAspectMode aspectMode,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<DomainResult<PlaybackTrackSnapshot>> GetTracksAsync(
+        PlaybackSessionId sessionId,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<PlaybackEngineOperationResult> SelectTrackAsync(
+        PlaybackSessionId sessionId,
+        PlaybackTrackId trackId,
         CancellationToken cancellationToken = default);
 }
 

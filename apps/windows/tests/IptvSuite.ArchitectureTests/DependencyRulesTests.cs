@@ -3865,6 +3865,9 @@ public sealed class DependencyRulesTests
             "src",
             "IptvSuite.Application");
         string contracts = File.ReadAllText(Path.Combine(applicationRoot, "PlaybackContracts.cs"));
+        string controlContracts = File.ReadAllText(Path.Combine(
+            applicationRoot,
+            "PlaybackControlContracts.cs"));
         string coordinator = File.ReadAllText(Path.Combine(
             applicationRoot,
             "PlaybackSessionCoordinator.cs"));
@@ -3879,6 +3882,18 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(contracts, "public interface IPlaybackEngine : IAsyncDisposable");
         StringAssert.Contains(contracts, "PlaybackSessionId sessionId,");
         StringAssert.Contains(contracts, "PlaybackSelection selection,");
+        StringAssert.Contains(contracts, "ValueTask<PlaybackEngineOperationResult> SetVolumeAsync(");
+        StringAssert.Contains(contracts, "ValueTask<DomainResult<PlaybackTrackSnapshot>> GetTracksAsync(");
+        StringAssert.Contains(controlContracts, "public const int MaximumPercent = 100;");
+        StringAssert.Contains(controlContracts, "public const int MaximumTrackCount = 64;");
+        StringAssert.Contains(controlContracts, "public PlaybackSessionId SessionId { get; }");
+        StringAssert.Contains(coordinator, "ExecuteCurrentControlCommandAsync");
+        StringAssert.Contains(coordinator, "ApplyDesiredControlsUnderGateAsync");
+        StringAssert.Contains(
+            coordinator,
+            "_engine.SetVolumeAsync(sessionId, desiredControls.Volume, token)");
+        StringAssert.Contains(coordinator, "DomainErrorCode.PlaybackControlFailed");
+        StringAssert.Contains(coordinator, "_currentTracks?.CanSelect(trackId) == true");
         StringAssert.Contains(coordinator, "private readonly SemaphoreSlim _engineGate");
         StringAssert.Contains(coordinator, "private sealed class SessionLifetime : IDisposable");
         StringAssert.Contains(coordinator, "StopEngineSessionUnderGateAsync");
@@ -3896,7 +3911,7 @@ public sealed class DependencyRulesTests
             "MediaSource",
             "NativePlaybackCompatibilitySpike",
         ];
-        string playbackCore = contracts + coordinator;
+        string playbackCore = contracts + controlContracts + coordinator;
         foreach (string forbiddenSymbol in forbiddenContractSymbols)
         {
             Assert.IsFalse(
