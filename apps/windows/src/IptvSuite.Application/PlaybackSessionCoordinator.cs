@@ -375,7 +375,9 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     PlaybackState.Opening or
                     PlaybackState.Buffering or
                     PlaybackState.Playing or
-                    PlaybackState.Paused))
+                    PlaybackState.Paused or
+                    PlaybackState.Stopping or
+                    PlaybackState.Failed))
             {
                 return ValueTask.FromResult(PlaybackEngineOperationResult.Succeeded());
             }
