@@ -7,8 +7,10 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
     private readonly IPlaybackEngine _engine;
     private readonly SemaphoreSlim _engineGate = new(1, 1);
     private readonly object _sync = new();
+    private readonly Dictionary<SourceId, SourceRetirementState> _sourceRetirements = [];
     private SessionLifetime? _currentLifetime;
     private PlaybackSessionId _engineSession;
+    private SourceId _engineSource;
     private PlaybackSelection? _currentSelection;
     private PlaybackSessionSnapshot _current = PlaybackSessionSnapshot.Closed();
     private PlaybackVolume _volume = PlaybackVolume.FromPercent(100);
@@ -21,6 +23,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
     private PlaybackTrackSnapshot? _currentTracks;
     private Task? _disposeTask;
     private long _generation;
+    private long _retirementSequence;
     private long _sessionSequence;
     private bool _disposed;
 
@@ -85,6 +88,13 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             lock (_sync)
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_sourceRetirements.ContainsKey(sourceId))
+                {
+                    request.Dispose();
+                    lifetime.Retire();
+                    return null;
+                }
+
                 sessionId = NextSessionId();
                 generation = checked(++_generation);
                 previousLifetime = _currentLifetime;
@@ -145,6 +155,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 }
 
                 _engineSession = sessionId;
+                _engineSource = sourceId;
                 PlaybackEngineOperationResult opened = await InvokeEngineOperationAsync(
                     token => _engine.OpenAsync(sessionId, selection, token),
                     DomainErrorCode.PlaybackStartFailed,
@@ -354,6 +365,41 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             StopSessionAsync(expectedSession: null, requireCurrentSession: false));
     }
 
+    internal SourceRetirementLease AcquireSourceRetirement(SourceId sourceId)
+    {
+        if (sourceId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A playback source identifier is required.",
+                nameof(sourceId));
+        }
+
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_sourceRetirements.TryGetValue(sourceId, out SourceRetirementState? existing) &&
+                existing.IsPermanent)
+            {
+                return new SourceRetirementLease(this, sourceId, reservationId: 0);
+            }
+
+            SourceRetirementState retirement = existing ?? new SourceRetirementState();
+            long reservationId = checked(++_retirementSequence);
+            retirement.Reservations.Add(reservationId);
+            _sourceRetirements[sourceId] = retirement;
+            return new SourceRetirementLease(this, sourceId, reservationId);
+        }
+    }
+
+    /// <summary>
+    /// Atomically retires a source from playback admission and drains its exact current or
+    /// in-flight physical session.
+    /// </summary>
+    /// <remarks>
+    /// Retirement is idempotent and permanent for this coordinator lifetime. Once this method
+    /// observes the source, later starts for that source are rejected even while its previous
+    /// session is still draining. A different source may replace the retiring session.
+    /// </remarks>
     public ValueTask<PlaybackEngineOperationResult> ReleaseSourceAsync(
         SourceId sourceId,
         CancellationToken cancellationToken = default)
@@ -366,27 +412,28 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        PlaybackSessionId sessionId;
+        PlaybackSessionId sessionId = default;
+        bool releaseCurrent;
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_currentSelection?.SourceId != sourceId ||
-                _current.State is not (
+            CommitSourceRetirementUnderLock(sourceId, reservationId: 0);
+            releaseCurrent = _currentSelection?.SourceId == sourceId &&
+                _current.State is (
                     PlaybackState.Opening or
                     PlaybackState.Buffering or
                     PlaybackState.Playing or
                     PlaybackState.Paused or
                     PlaybackState.Stopping or
-                    PlaybackState.Failed))
+                    PlaybackState.Failed);
+            if (releaseCurrent)
             {
-                return ValueTask.FromResult(PlaybackEngineOperationResult.Succeeded());
+                sessionId = _current.SessionId;
             }
-
-            sessionId = _current.SessionId;
         }
 
         return new ValueTask<PlaybackEngineOperationResult>(
-            StopSessionAsync(sessionId, requireCurrentSession: true));
+            ReleaseRetiredSourceAsync(sourceId, releaseCurrent, sessionId));
     }
 
     public ValueTask DisposeAsync()
@@ -948,6 +995,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             lock (_sync)
             {
                 _engineSession = default;
+                _engineSource = default;
                 _currentSelection = null;
                 _current = PlaybackSessionSnapshot.Closed();
                 _currentControls = PlaybackControlSnapshot.Idle(
@@ -988,9 +1036,92 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         if (result.IsSuccess)
         {
             _engineSession = default;
+            _engineSource = default;
         }
 
         return result;
+    }
+
+    private async Task<PlaybackEngineOperationResult> DrainRetiredSourceAsync(SourceId sourceId)
+    {
+        await _engineGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            return _engineSource == sourceId && !_engineSession.IsEmpty
+                ? await StopEngineSessionUnderGateAsync(_engineSession).ConfigureAwait(false)
+                : PlaybackEngineOperationResult.Succeeded();
+        }
+        finally
+        {
+            _engineGate.Release();
+        }
+    }
+
+    private async Task<PlaybackEngineOperationResult> ReleaseRetiredSourceAsync(
+        SourceId sourceId,
+        bool releaseCurrent,
+        PlaybackSessionId sessionId)
+    {
+        if (releaseCurrent)
+        {
+            PlaybackEngineOperationResult released = await StopSessionAsync(
+                sessionId,
+                requireCurrentSession: true).ConfigureAwait(false);
+            if (!released.IsSuccess)
+            {
+                return released;
+            }
+        }
+
+        return await DrainRetiredSourceAsync(sourceId).ConfigureAwait(false);
+    }
+
+    private void CommitSourceRetirement(SourceId sourceId, long reservationId)
+    {
+        lock (_sync)
+        {
+            CommitSourceRetirementUnderLock(sourceId, reservationId);
+        }
+    }
+
+    private void CommitSourceRetirementUnderLock(SourceId sourceId, long reservationId)
+    {
+        if (!_sourceRetirements.TryGetValue(sourceId, out SourceRetirementState? retirement))
+        {
+            retirement = new SourceRetirementState();
+            _sourceRetirements.Add(sourceId, retirement);
+        }
+
+        if (reservationId > 0)
+        {
+            retirement.Reservations.Remove(reservationId);
+        }
+
+        retirement.Reservations.Clear();
+        retirement.IsPermanent = true;
+    }
+
+    private void RollbackSourceRetirement(SourceId sourceId, long reservationId)
+    {
+        if (reservationId <= 0)
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            if (!_sourceRetirements.TryGetValue(sourceId, out SourceRetirementState? retirement) ||
+                retirement.IsPermanent)
+            {
+                return;
+            }
+
+            retirement.Reservations.Remove(reservationId);
+            if (retirement.Reservations.Count == 0)
+            {
+                _sourceRetirements.Remove(sourceId);
+            }
+        }
     }
 
     private static async ValueTask<PlaybackEngineOperationResult> InvokeEngineOperationAsync(
@@ -1317,6 +1448,42 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 _source.Dispose();
             }
         }
+    }
+
+    internal sealed class SourceRetirementLease : IDisposable
+    {
+        private PlaybackSessionCoordinator? _owner;
+        private readonly SourceId _sourceId;
+        private readonly long _reservationId;
+
+        internal SourceRetirementLease(
+            PlaybackSessionCoordinator owner,
+            SourceId sourceId,
+            long reservationId)
+        {
+            _owner = owner;
+            _sourceId = sourceId;
+            _reservationId = reservationId;
+        }
+
+        internal void Commit()
+        {
+            PlaybackSessionCoordinator? owner = Interlocked.Exchange(ref _owner, null);
+            owner?.CommitSourceRetirement(_sourceId, _reservationId);
+        }
+
+        public void Dispose()
+        {
+            PlaybackSessionCoordinator? owner = Interlocked.Exchange(ref _owner, null);
+            owner?.RollbackSourceRetirement(_sourceId, _reservationId);
+        }
+    }
+
+    private sealed class SourceRetirementState
+    {
+        internal HashSet<long> Reservations { get; } = [];
+
+        internal bool IsPermanent { get; set; }
     }
 
     private sealed class SessionOperationCancellation : IDisposable

@@ -143,10 +143,15 @@ public sealed class PlaybackSessionCoordinatorTests
 
         PlaybackEngineOperationResult first = await coordinator.ReleaseSourceAsync(sourceId);
         PlaybackEngineOperationResult repeated = await coordinator.ReleaseSourceAsync(sourceId);
+        PlaybackSessionSnapshot? rejected = await coordinator.StartAsync(
+            sourceId,
+            ChannelId.Generate());
 
         Assert.IsTrue(first.IsSuccess);
         Assert.IsTrue(repeated.IsSuccess);
+        Assert.IsNull(rejected);
         Assert.AreEqual(PlaybackState.Closed, coordinator.Current.State);
+        Assert.HasCount(1, engine.OpenSessions);
         CollectionAssert.AreEqual(
             new[] { playing.SessionId },
             engine.StopSessions.ToArray());
@@ -294,7 +299,7 @@ public sealed class PlaybackSessionCoordinatorTests
     }
 
     [TestMethod]
-    public async Task ReplacementWinsSourceReleaseRaceWithoutStoppingTheReplacement()
+    public async Task RetiredSourceCannotRestartWhileDifferentSourceReplacementWinsReleaseRace()
     {
         var engine = new ControlledPlaybackEngine
         {
@@ -315,6 +320,10 @@ public sealed class PlaybackSessionCoordinatorTests
         await engine.FirstOpenCancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.AreEqual(PlaybackState.Stopping, coordinator.Current.State);
 
+        PlaybackSessionSnapshot? retiredRestart = await coordinator.StartAsync(
+            firstSource,
+            ChannelId.Generate());
+
         Task<PlaybackSessionSnapshot?> replacement = coordinator.StartAsync(
             SourceId.Generate(),
             ChannelId.Generate()).AsTask();
@@ -322,11 +331,57 @@ public sealed class PlaybackSessionCoordinatorTests
 
         Assert.IsTrue((await release.WaitAsync(TimeSpan.FromSeconds(2))).IsSuccess);
         Assert.IsNull(await first.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.IsNull(retiredRestart);
         PlaybackSessionSnapshot? current = await replacement.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.IsNotNull(current);
         Assert.AreEqual(PlaybackState.Playing, current.State);
         CollectionAssert.AreEqual(
             new[] { firstSession },
+            engine.StopSessions.ToArray());
+        Assert.AreEqual(current, coordinator.Current);
+    }
+
+    [TestMethod]
+    public async Task SupersededPhysicalSourceReleaseWaitsForItsDrainAndBlocksRestart()
+    {
+        var engine = new ControlledPlaybackEngine
+        {
+            BlockFirstOpen = true,
+            HoldFirstOpenCancellation = true,
+        };
+        await using var coordinator = new PlaybackSessionCoordinator(engine);
+        SourceId retiringSource = SourceId.Generate();
+        Task<PlaybackSessionSnapshot?> retiring = coordinator.StartAsync(
+            retiringSource,
+            ChannelId.Generate()).AsTask();
+        await engine.FirstOpenEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        PlaybackSessionId retiringSession = engine.OpenSessions.Single();
+        SourceId replacementSource = SourceId.Generate();
+        Task<PlaybackSessionSnapshot?> replacement = coordinator.StartAsync(
+            replacementSource,
+            ChannelId.Generate()).AsTask();
+        await engine.FirstOpenCancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Task<PlaybackEngineOperationResult> release = coordinator
+            .ReleaseSourceAsync(retiringSource)
+            .AsTask();
+        PlaybackSessionSnapshot? retiredRestart = await coordinator.StartAsync(
+            retiringSource,
+            ChannelId.Generate());
+
+        Assert.IsFalse(release.IsCompleted);
+        Assert.IsNull(retiredRestart);
+        Assert.AreEqual(replacementSource, coordinator.Current.SourceId);
+        engine.ReleaseFirstOpenCancellation.TrySetResult();
+
+        Assert.IsNull(await retiring.WaitAsync(TimeSpan.FromSeconds(2)));
+        PlaybackSessionSnapshot? current = await replacement.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.IsTrue((await release.WaitAsync(TimeSpan.FromSeconds(2))).IsSuccess);
+        Assert.IsNotNull(current);
+        Assert.AreEqual(PlaybackState.Playing, current.State);
+        Assert.AreEqual(replacementSource, current.SourceId);
+        CollectionAssert.AreEqual(
+            new[] { retiringSession },
             engine.StopSessions.ToArray());
         Assert.AreEqual(current, coordinator.Current);
     }
