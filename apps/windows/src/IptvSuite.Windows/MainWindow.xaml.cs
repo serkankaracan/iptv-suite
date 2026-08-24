@@ -1,4 +1,5 @@
 using IptvSuite.Application;
+using IptvSuite.Domain;
 using IptvSuite.Infrastructure;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
@@ -63,6 +64,9 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             rollbackSourceDeletion = sourceDeletion;
             _playback = playback;
             _sourceDeletion = sourceDeletion;
+            _mainPage.ConfigureSourceDeletion(
+                RetryPendingSourceCleanupAsync,
+                DeleteSourceAsync);
             _mainPage.FullscreenToggleRequested += MainPage_FullscreenToggleRequested;
             AppWindow.Changed += AppWindow_Changed;
             AppWindow.Closing += AppWindow_Closing;
@@ -119,13 +123,20 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     internal Task<SourceDeletionReconciliationResult> RetryPendingSourceCleanupAsync() =>
         ReconcileThenLoadAsync(retryCompleted: true);
 
+    private ValueTask<SourceDeletionResult> DeleteSourceAsync(
+        SourceId sourceId,
+        CancellationToken cancellationToken) =>
+        _sourceDeletion.DeleteAsync(sourceId, cancellationToken);
+
     private Task<SourceDeletionReconciliationResult> ReconcileThenLoadAsync(
         bool retryCompleted)
     {
         lock (_lifetimeSync)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            if (_catalogInitialized && _initialSourceDeletionReconciliation is not null)
+            if (!retryCompleted &&
+                _catalogInitialized &&
+                _initialSourceDeletionReconciliation is not null)
             {
                 return Task.FromResult(_initialSourceDeletionReconciliation);
             }
@@ -159,10 +170,24 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
                     return;
                 }
 
-                await _mainPage.InitializeAsync(
-                    _catalogServices.Browser,
-                    _catalogServices.LogoCache,
-                    _playback);
+                bool catalogInitialized;
+                lock (_lifetimeSync)
+                {
+                    catalogInitialized = _catalogInitialized;
+                }
+
+                if (catalogInitialized)
+                {
+                    await _mainPage.RefreshSourcesAfterSourceCleanupAsync();
+                }
+                else
+                {
+                    await _mainPage.InitializeAsync(
+                        _catalogServices.Browser,
+                        _catalogServices.LogoCache,
+                        _playback);
+                }
+
                 catalogLoaded = true;
             });
             if (catalogLoaded)

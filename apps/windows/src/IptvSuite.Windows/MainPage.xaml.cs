@@ -24,12 +24,16 @@ public sealed partial class MainPage : Page, IDisposable
     private const int PageSize = 200;
     private const int VolumeStep = 5;
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly object _catalogOperationSync = new();
     private readonly object _operationSync = new();
     private readonly SemaphoreSlim _playbackControlGate = new(1, 1);
     private CatalogBrowseCoordinator? _coordinator;
     private ChannelLogoCache? _logoCache;
     private PlaybackSessionCoordinator? _playback;
+    private Func<Task<SourceDeletionReconciliationResult>>? _retryPendingSourceCleanup;
+    private Func<SourceId, CancellationToken, ValueTask<SourceDeletionResult>>? _deleteSource;
     private ChannelRow? _playbackChannel;
+    private ContentDialog? _sourceDeletionDialog;
     private CancellationTokenSource _logoPageCancellation = new();
     private int _offset;
     private bool _updatingSelectors;
@@ -40,8 +44,11 @@ public sealed partial class MainPage : Page, IDisposable
     private bool _fullscreenTransitionPending;
     private WeakReference<Control>? _focusBeforeFullscreen;
     private long _loadingGeneration;
+    private int _activeCatalogOperations;
     private int _activeAsyncOperations;
+    private TaskCompletionSource? _catalogOperationsDrained;
     private TaskCompletionSource? _operationsDrained;
+    private bool _sourceDeletionOperationPending;
     private bool _playbackControlGateDisposed;
 
     public MainPage()
@@ -109,6 +116,23 @@ public sealed partial class MainPage : Page, IDisposable
 
     internal MediaPlayerElement PlaybackSurfaceElement => PlaybackSurface;
 
+    internal void ConfigureSourceDeletion(
+        Func<Task<SourceDeletionReconciliationResult>> retryPendingSourceCleanup,
+        Func<SourceId, CancellationToken, ValueTask<SourceDeletionResult>> deleteSource)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(retryPendingSourceCleanup);
+        ArgumentNullException.ThrowIfNull(deleteSource);
+        if (_retryPendingSourceCleanup is not null || _deleteSource is not null)
+        {
+            throw new InvalidOperationException(
+                "The source-deletion route is already configured.");
+        }
+
+        _retryPendingSourceCleanup = retryPendingSourceCleanup;
+        _deleteSource = deleteSource;
+    }
+
     internal void SetFullscreenState(bool isFullscreen)
     {
         if (_disposed)
@@ -175,6 +199,9 @@ public sealed partial class MainPage : Page, IDisposable
         _logoCache = logoCache;
         _playback = playback;
         _catalogAdmissionReady = true;
+        ChannelList.IsEnabled = true;
+        RetryPendingDeletionButton.Visibility = Visibility.Collapsed;
+        RetryPendingDeletionButton.IsEnabled = false;
         _playback.StateChanged += Playback_StateChanged;
         ApplyPlaybackState(_playback.Current);
         await LoadSourcesAsync();
@@ -191,14 +218,43 @@ public sealed partial class MainPage : Page, IDisposable
         SourceSelector.IsEnabled = false;
         CategorySelector.IsEnabled = false;
         SearchBox.IsEnabled = false;
+        ChannelList.IsEnabled = false;
         PreviousButton.IsEnabled = false;
         NextButton.IsEnabled = false;
+        DeleteSourceButton.IsEnabled = false;
+        RetryPendingDeletionButton.Visibility = Visibility.Visible;
+        RetryPendingDeletionButton.IsEnabled = !_sourceDeletionOperationPending &&
+            _retryPendingSourceCleanup is not null;
+        LoadingIndicator.IsActive = false;
         StatusText.Text = "Pending source cleanup must finish before the catalog can be opened.";
+    }
+
+    internal async Task RefreshSourcesAfterSourceCleanupAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_coordinator is null || _logoCache is null || _playback is null)
+        {
+            throw new InvalidOperationException("The catalog page is not initialized.");
+        }
+
+        ResetLogoPageCancellation();
+        ClearCatalogView();
+        _catalogAdmissionReady = true;
+        ChannelList.IsEnabled = true;
+        RetryPendingDeletionButton.Visibility = Visibility.Collapsed;
+        RetryPendingDeletionButton.IsEnabled = false;
+        await LoadSourcesAsync();
+        UpdateSourceDeletionControls();
     }
 
     private async Task LoadSourcesAsync()
     {
         using AsyncOperationLease operation = BeginAsyncOperation();
+        using CatalogOperationLease catalogOperation = BeginCatalogOperation();
         CatalogBrowseCoordinator coordinator = _coordinator ?? throw new InvalidOperationException("The catalog page is not initialized.");
         long loadingGeneration = BeginLoading();
         try
@@ -222,13 +278,14 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async Task BrowseAsync(bool debounce)
     {
-        if (_disposed || _coordinator is null ||
+        if (_disposed || !_catalogAdmissionReady || _coordinator is null ||
             SourceSelector.SelectedItem is not CatalogSourceItem source)
         {
             return;
         }
 
         using AsyncOperationLease operation = BeginAsyncOperation();
+        using CatalogOperationLease catalogOperation = BeginCatalogOperation();
         long loadingGeneration = BeginLoading();
         try
         {
@@ -241,9 +298,7 @@ public sealed partial class MainPage : Page, IDisposable
             CategorySelector.ItemsSource = options;
             CategorySelector.SelectedItem = options.FirstOrDefault(item => item.CategoryId == result.SelectedCategoryId) ?? options[0];
             _updatingSelectors = false;
-            _logoPageCancellation.Cancel();
-            _logoPageCancellation.Dispose();
-            _logoPageCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            ResetLogoPageCancellation();
             Channels.Clear();
             foreach (CatalogChannelItem channel in result.Channels.Items)
             {
@@ -273,6 +328,7 @@ public sealed partial class MainPage : Page, IDisposable
         SourceSelector.IsEnabled = false;
         CategorySelector.IsEnabled = false;
         SearchBox.IsEnabled = false;
+        DeleteSourceButton.IsEnabled = false;
         return generation;
     }
 
@@ -289,6 +345,7 @@ public sealed partial class MainPage : Page, IDisposable
         SourceSelector.IsEnabled = true;
         CategorySelector.IsEnabled = true;
         SearchBox.IsEnabled = true;
+        UpdateSourceDeletionControls();
     }
 
     private void UpdatePaging(int totalCount)
@@ -297,7 +354,270 @@ public sealed partial class MainPage : Page, IDisposable
         NextButton.IsEnabled = _offset + PageSize < totalCount;
     }
 
-    private async void SourceSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_updatingSelectors) { _offset = 0; await BrowseAsync(false); } }
+    private async void DeleteSourceButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_disposed || !_catalogAdmissionReady ||
+            SourceSelector.SelectedItem is not CatalogSourceItem selectedSource ||
+            _logoCache is not { } logoCache ||
+            _deleteSource is not { } deleteSource)
+        {
+            return;
+        }
+
+        SourceId sourceId = selectedSource.SourceId;
+        if (sourceId.IsEmpty || !TryBeginSourceDeletionOperation())
+        {
+            return;
+        }
+
+        bool deletionInvoked = false;
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Delete source?",
+                Content = "This removes the selected source and its imported channels from this device.",
+                PrimaryButtonText = "Delete",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot,
+            };
+            _sourceDeletionDialog = dialog;
+            ContentDialogResult confirmation = await dialog.ShowAsync();
+            _sourceDeletionDialog = null;
+            if (confirmation != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            BeginCatalogRetirement();
+            await CancelAndWaitForCatalogOperationsAsync(sourceId);
+            if (_disposed)
+            {
+                return;
+            }
+
+            logoCache.EvictSource(sourceId);
+            deletionInvoked = true;
+            SourceDeletionResult deletion = await deleteSource(
+                sourceId,
+                _lifetime.Token);
+            if (!deletion.IsSuccess)
+            {
+                if (deletion.FailureStage == SourceDeletionFailureStage.MarkPending)
+                {
+                    await RestoreCatalogAfterUncommittedDeletionFailureAsync();
+                }
+                else
+                {
+                    ReportPendingSourceCleanup();
+                }
+
+                return;
+            }
+
+            await RefreshSourcesAfterSourceCleanupAsync();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            if (deletionInvoked)
+            {
+                ReportPendingSourceCleanup();
+            }
+            else
+            {
+                await RestoreCatalogAfterUncommittedDeletionFailureAsync();
+            }
+        }
+        finally
+        {
+            _sourceDeletionDialog = null;
+            EndSourceDeletionOperation();
+        }
+    }
+
+    private async Task RestoreCatalogAfterUncommittedDeletionFailureAsync()
+    {
+        try
+        {
+            await RefreshSourcesAfterSourceCleanupAsync();
+            if (!_disposed)
+            {
+                StatusText.Text = "The selected source could not be deleted.";
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            ReportCatalogUnavailable();
+        }
+    }
+
+    private void ReportCatalogUnavailable()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _catalogAdmissionReady = false;
+        SourceSelector.IsEnabled = false;
+        CategorySelector.IsEnabled = false;
+        SearchBox.IsEnabled = false;
+        ChannelList.IsEnabled = false;
+        PreviousButton.IsEnabled = false;
+        NextButton.IsEnabled = false;
+        DeleteSourceButton.IsEnabled = false;
+        RetryPendingDeletionButton.IsEnabled = false;
+        RetryPendingDeletionButton.Visibility = Visibility.Collapsed;
+        LoadingIndicator.IsActive = false;
+        StatusText.Text = "The catalog could not be reopened. Restart the application.";
+    }
+
+    private async void RetryPendingDeletionButton_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_disposed ||
+            _retryPendingSourceCleanup is not { } retryPendingSourceCleanup ||
+            !TryBeginSourceDeletionOperation())
+        {
+            return;
+        }
+
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        try
+        {
+            RetryPendingDeletionButton.IsEnabled = false;
+            StatusText.Text = "Retrying pending source cleanup.";
+            LoadingIndicator.IsActive = true;
+            SourceDeletionReconciliationResult reconciliation =
+                await retryPendingSourceCleanup();
+            if (!reconciliation.IsSuccess)
+            {
+                ReportPendingSourceCleanup();
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            ReportPendingSourceCleanup();
+        }
+        finally
+        {
+            EndSourceDeletionOperation();
+        }
+    }
+
+    private void BeginCatalogRetirement()
+    {
+        _catalogAdmissionReady = false;
+        Interlocked.Increment(ref _loadingGeneration);
+        LoadingIndicator.IsActive = true;
+        SourceSelector.IsEnabled = false;
+        CategorySelector.IsEnabled = false;
+        SearchBox.IsEnabled = false;
+        ChannelList.IsEnabled = false;
+        PreviousButton.IsEnabled = false;
+        NextButton.IsEnabled = false;
+        DeleteSourceButton.IsEnabled = false;
+        StatusText.Text = "Deleting the selected source.";
+    }
+
+    private async Task CancelAndWaitForCatalogOperationsAsync(SourceId sourceId)
+    {
+        CatalogBrowseCoordinator coordinator = _coordinator ??
+            throw new InvalidOperationException("The catalog page is not initialized.");
+        coordinator.CancelPending();
+        _logoPageCancellation.Cancel();
+        foreach (ChannelRow row in Channels.Where(row => row.SourceId == sourceId))
+        {
+            row.BeginLogoLoad();
+        }
+
+        await WaitForCatalogOperationsAsync();
+        if (_disposed)
+        {
+            return;
+        }
+
+        ResetLogoPageCancellation();
+        ClearCatalogView();
+    }
+
+    private bool TryBeginSourceDeletionOperation()
+    {
+        if (_sourceDeletionOperationPending)
+        {
+            return false;
+        }
+
+        _sourceDeletionOperationPending = true;
+        DeleteSourceButton.IsEnabled = false;
+        RetryPendingDeletionButton.IsEnabled = false;
+        return true;
+    }
+
+    private void EndSourceDeletionOperation()
+    {
+        _sourceDeletionOperationPending = false;
+        UpdateSourceDeletionControls();
+    }
+
+    private void UpdateSourceDeletionControls()
+    {
+        DeleteSourceButton.IsEnabled = !_disposed &&
+            !_sourceDeletionOperationPending &&
+            _catalogAdmissionReady &&
+            _deleteSource is not null &&
+            SourceSelector.SelectedItem is CatalogSourceItem;
+        RetryPendingDeletionButton.IsEnabled = !_disposed &&
+            !_sourceDeletionOperationPending &&
+            RetryPendingDeletionButton.Visibility == Visibility.Visible &&
+            _retryPendingSourceCleanup is not null;
+    }
+
+    private void ClearCatalogView()
+    {
+        _updatingSelectors = true;
+        SourceSelector.SelectedIndex = -1;
+        SourceSelector.ItemsSource = null;
+        CategorySelector.SelectedIndex = -1;
+        CategorySelector.ItemsSource = null;
+        _updatingSelectors = false;
+        SearchBox.Text = string.Empty;
+        Channels.Clear();
+        _offset = 0;
+        UpdatePaging(0);
+    }
+
+    private void ResetLogoPageCancellation()
+    {
+        _logoPageCancellation.Cancel();
+        _logoPageCancellation.Dispose();
+        _logoPageCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetime.Token);
+    }
+
+    private async void SourceSelector_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        UpdateSourceDeletionControls();
+        if (!_updatingSelectors)
+        {
+            _offset = 0;
+            await BrowseAsync(false);
+        }
+    }
     private async void CategorySelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_updatingSelectors) { _offset = 0; await BrowseAsync(false); } }
     private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { _offset = 0; await BrowseAsync(false); }
     private async void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) { if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput) { _offset = 0; await BrowseAsync(debounce: true); } }
@@ -381,7 +701,8 @@ public sealed partial class MainPage : Page, IDisposable
     private async void ChannelList_ItemClick(object sender, ItemClickEventArgs e)
     {
         PlaybackSessionCoordinator? playback = _playback;
-        if (_disposed || playback is null || e.ClickedItem is not ChannelRow channel)
+        if (_disposed || !_catalogAdmissionReady || playback is null ||
+            e.ClickedItem is not ChannelRow channel)
         {
             return;
         }
@@ -693,12 +1014,14 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async void ChannelList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
-        if (_disposed || args.InRecycleQueue || args.Item is not ChannelRow row ||
+        if (_disposed || !_catalogAdmissionReady || args.InRecycleQueue ||
+            args.Item is not ChannelRow row ||
             !row.HasLogo || row.LogoSource is not null || _logoCache is null)
         {
             return;
         }
         using AsyncOperationLease operation = BeginAsyncOperation();
+        using CatalogOperationLease catalogOperation = BeginCatalogOperation();
         long generation = row.BeginLogoLoad();
         try
         {
@@ -728,6 +1051,16 @@ public sealed partial class MainPage : Page, IDisposable
     public void Dispose()
     {
         if (_disposed) return;
+        try
+        {
+            _sourceDeletionDialog?.Hide();
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or COMException)
+        {
+        }
+
+        _sourceDeletionDialog = null;
         _disposed = true;
         _catalogAdmissionReady = false;
         if (_playback is not null)
@@ -739,11 +1072,54 @@ public sealed partial class MainPage : Page, IDisposable
         _lifetime.Cancel();
         _logoPageCancellation.Cancel();
         _coordinator?.Dispose();
+        _retryPendingSourceCleanup = null;
+        _deleteSource = null;
         FullscreenToggleRequested = null;
         _lifetime.Dispose();
         _logoPageCancellation.Dispose();
         DisposePlaybackControlGateIfDrained();
         GC.SuppressFinalize(this);
+    }
+
+    private ValueTask WaitForCatalogOperationsAsync()
+    {
+        lock (_catalogOperationSync)
+        {
+            if (_activeCatalogOperations == 0)
+            {
+                return ValueTask.CompletedTask;
+            }
+
+            _catalogOperationsDrained ??= new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            return new ValueTask(_catalogOperationsDrained.Task);
+        }
+    }
+
+    private CatalogOperationLease BeginCatalogOperation()
+    {
+        lock (_catalogOperationSync)
+        {
+            _activeCatalogOperations = checked(_activeCatalogOperations + 1);
+        }
+
+        return new CatalogOperationLease(this);
+    }
+
+    private void EndCatalogOperation()
+    {
+        TaskCompletionSource? completion = null;
+        lock (_catalogOperationSync)
+        {
+            _activeCatalogOperations--;
+            if (_activeCatalogOperations == 0)
+            {
+                completion = _catalogOperationsDrained;
+                _catalogOperationsDrained = null;
+            }
+        }
+
+        completion?.TrySetResult();
     }
 
     internal ValueTask WaitForPendingOperationsAsync()
@@ -816,6 +1192,17 @@ public sealed partial class MainPage : Page, IDisposable
     }
 
     private sealed record CategoryOption(string Name, CategoryId? CategoryId);
+
+    private sealed class CatalogOperationLease(MainPage owner) : IDisposable
+    {
+        private MainPage? _owner = owner;
+
+        public void Dispose()
+        {
+            MainPage? current = Interlocked.Exchange(ref _owner, null);
+            current?.EndCatalogOperation();
+        }
+    }
 
     private sealed class AsyncOperationLease(MainPage owner) : IDisposable
     {

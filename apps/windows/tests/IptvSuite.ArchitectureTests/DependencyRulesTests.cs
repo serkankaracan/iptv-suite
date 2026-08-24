@@ -4097,6 +4097,139 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M12SourceDeletionUiIsConfirmedQuiescentAndCoordinatorBound()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string window = File.ReadAllText(Path.Combine(windowsRoot, "MainWindow.xaml.cs"));
+        string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+        string pageMarkup = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
+
+        StringAssert.Contains(
+            pageMarkup,
+            "AutomationProperties.AutomationId=\"CatalogDeleteSourceButton\"");
+        StringAssert.Contains(
+            pageMarkup,
+            "AutomationProperties.AutomationId=\"CatalogRetryPendingDeletionButton\"");
+        StringAssert.Contains(pageMarkup, "AutomationProperties.LiveSetting=\"Polite\"");
+        StringAssert.Contains(
+            window,
+            "_mainPage.ConfigureSourceDeletion(\n                RetryPendingSourceCleanupAsync,\n                DeleteSourceAsync);");
+        StringAssert.Contains(
+            window,
+            "_sourceDeletion.DeleteAsync(sourceId, cancellationToken);");
+        StringAssert.Contains(
+            window,
+            "await _mainPage.RefreshSourcesAfterSourceCleanupAsync();");
+
+        int deleteStart = page.IndexOf(
+            "private async void DeleteSourceButton_Click",
+            StringComparison.Ordinal);
+        int retryStart = page.IndexOf(
+            "private async void RetryPendingDeletionButton_Click",
+            StringComparison.Ordinal);
+        Assert.IsTrue(deleteStart >= 0 && retryStart > deleteStart);
+        string deletion = page[deleteStart..retryStart];
+        int sourceCapture = deletion.IndexOf(
+            "SourceId sourceId = selectedSource.SourceId;",
+            StringComparison.Ordinal);
+        int showDialog = deletion.IndexOf("await dialog.ShowAsync();", StringComparison.Ordinal);
+        int confirm = deletion.IndexOf(
+            "if (confirmation != ContentDialogResult.Primary)",
+            StringComparison.Ordinal);
+        int quiesce = deletion.IndexOf(
+            "await CancelAndWaitForCatalogOperationsAsync(sourceId);",
+            StringComparison.Ordinal);
+        int evict = deletion.IndexOf("logoCache.EvictSource(sourceId);", StringComparison.Ordinal);
+        int delete = deletion.IndexOf("await deleteSource(", StringComparison.Ordinal);
+        int refresh = deletion.IndexOf(
+            "await RefreshSourcesAfterSourceCleanupAsync();",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            sourceCapture >= 0 &&
+            showDialog > sourceCapture &&
+            confirm > showDialog &&
+            quiesce > confirm &&
+            evict > quiesce &&
+            delete > evict &&
+            refresh > delete,
+            "Confirmed deletion must preserve the exact selected identity and quiesce page work before the coordinator route.");
+        StringAssert.Contains(deletion, "CloseButtonText = \"Cancel\"");
+        StringAssert.Contains(deletion, "DefaultButton = ContentDialogButton.Close");
+        StringAssert.Contains(deletion, "using AsyncOperationLease operation = BeginAsyncOperation();");
+        StringAssert.Contains(
+            deletion,
+            "if (sourceId.IsEmpty || !TryBeginSourceDeletionOperation())");
+        StringAssert.Contains(deletion, "bool deletionInvoked = false;");
+        StringAssert.Contains(deletion, "deletionInvoked = true;");
+        StringAssert.Contains(deletion, "if (deletionInvoked)");
+        StringAssert.Contains(
+            deletion,
+            "await RestoreCatalogAfterUncommittedDeletionFailureAsync();");
+        StringAssert.Contains(
+            deletion,
+            "deletion.FailureStage == SourceDeletionFailureStage.MarkPending");
+        StringAssert.Contains(
+            deletion,
+            "StatusText.Text = \"The selected source could not be deleted.\";");
+        Assert.IsFalse(deletion.Contains("WaitForPendingOperationsAsync", StringComparison.Ordinal));
+        Assert.IsFalse(
+            deletion.Contains("_playback.", StringComparison.Ordinal) ||
+            deletion.Contains("Sqlite", StringComparison.Ordinal) ||
+            deletion.Contains("Secret", StringComparison.Ordinal) ||
+            deletion.Contains("Endpoint", StringComparison.Ordinal),
+            "The UI deletion handler must not bypass the coordinator or expose sensitive storage detail.");
+
+        int restoreStart = page.IndexOf(
+            "private async Task RestoreCatalogAfterUncommittedDeletionFailureAsync()",
+            StringComparison.Ordinal);
+        int unavailableStart = page.IndexOf(
+            "private void ReportCatalogUnavailable()",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            restoreStart > deleteStart && unavailableStart > restoreStart && retryStart > unavailableStart);
+        string restore = page[restoreStart..unavailableStart];
+        StringAssert.Contains(restore, "await RefreshSourcesAfterSourceCleanupAsync();");
+        StringAssert.Contains(restore, "ReportCatalogUnavailable();");
+        Assert.IsFalse(restore.Contains("ReportPendingSourceCleanup", StringComparison.Ordinal));
+        string unavailable = page[unavailableStart..retryStart];
+        StringAssert.Contains(
+            unavailable,
+            "RetryPendingDeletionButton.Visibility = Visibility.Collapsed;");
+        StringAssert.Contains(
+            unavailable,
+            "The catalog could not be reopened. Restart the application.");
+
+        int cancelStart = page.IndexOf(
+            "private async Task CancelAndWaitForCatalogOperationsAsync",
+            StringComparison.Ordinal);
+        int beginSingleFlight = page.IndexOf(
+            "private bool TryBeginSourceDeletionOperation()",
+            StringComparison.Ordinal);
+        Assert.IsTrue(cancelStart >= 0 && beginSingleFlight > cancelStart);
+        string quiescence = page[cancelStart..beginSingleFlight];
+        StringAssert.Contains(quiescence, "coordinator.CancelPending();");
+        StringAssert.Contains(quiescence, "_logoPageCancellation.Cancel();");
+        StringAssert.Contains(quiescence, "row.BeginLogoLoad();");
+        StringAssert.Contains(quiescence, "await WaitForCatalogOperationsAsync();");
+        StringAssert.Contains(quiescence, "ResetLogoPageCancellation();");
+        StringAssert.Contains(quiescence, "ClearCatalogView();");
+        StringAssert.Contains(page, "_sourceDeletionDialog?.Hide();");
+
+        string retry = page[retryStart..cancelStart];
+        StringAssert.Contains(retry, "await retryPendingSourceCleanup();");
+        Assert.IsFalse(
+            retry.Contains("_sourceDeletion", StringComparison.Ordinal) ||
+            retry.Contains("Sqlite", StringComparison.Ordinal) ||
+            retry.Contains("Secret", StringComparison.Ordinal),
+            "Retry must use only the composition-owned single-flight delegate.");
+    }
+
+    [TestMethod]
     public void M11PlaybackCoreIsEngineNeutralSessionBoundAndLocatorFree()
     {
         string applicationRoot = Path.Combine(

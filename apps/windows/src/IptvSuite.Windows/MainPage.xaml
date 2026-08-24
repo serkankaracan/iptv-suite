@@ -21,10 +21,12 @@
                 <ColumnDefinition Width="2*" />
                 <ColumnDefinition Width="2*" />
                 <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <ComboBox x:Name="SourceSelector" TabIndex="0" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSourceSelector" AutomationProperties.Name="Playlist source" DisplayMemberPath="Name" SelectionChanged="SourceSelector_SelectionChanged" />
             <ComboBox x:Name="CategorySelector" Grid.Column="1" TabIndex="1" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogCategorySelector" AutomationProperties.Name="Channel category" DisplayMemberPath="Name" SelectionChanged="CategorySelector_SelectionChanged" />
             <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" TabIndex="2" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSearchBox" AutomationProperties.Name="Search channels" PlaceholderText="Search channels" QuerySubmitted="SearchBox_QuerySubmitted" TextChanged="SearchBox_TextChanged" />
+            <Button x:Name="DeleteSourceButton" Grid.Column="3" TabIndex="3" IsEnabled="False" AutomationProperties.AutomationId="CatalogDeleteSourceButton" AutomationProperties.Name="Delete selected playlist source" Click="DeleteSourceButton_Click" Content="Delete source" />
         </Grid>
         <Grid x:Name="ContentPanel" Grid.Row="2" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
@@ -86,8 +88,14 @@
             </Grid>
         </Grid>
         <Grid x:Name="CatalogStatusPanel" Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
             <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="CatalogStatusText" AutomationProperties.LiveSetting="Polite" VerticalAlignment="Center" />
-            <ProgressRing x:Name="LoadingIndicator" HorizontalAlignment="Right" AutomationProperties.Name="Loading catalog" IsActive="False" />
+            <Button x:Name="RetryPendingDeletionButton" Grid.Column="1" Margin="12,0" IsEnabled="False" Visibility="Collapsed" AutomationProperties.AutomationId="CatalogRetryPendingDeletionButton" AutomationProperties.Name="Retry pending source cleanup" Click="RetryPendingDeletionButton_Click" Content="Retry cleanup" />
+            <ProgressRing x:Name="LoadingIndicator" Grid.Column="2" HorizontalAlignment="Right" AutomationProperties.Name="Loading catalog" IsActive="False" />
         </Grid>
         <StackPanel x:Name="CatalogPagingPanel" Grid.Row="4" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
             <Button x:Name="PreviousButton" IsEnabled="False" AutomationProperties.AutomationId="CatalogPreviousPage" AutomationProperties.Name="Previous channel page" Click="PreviousButton_Click" Content="Previous" />
