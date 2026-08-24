@@ -34,6 +34,9 @@ public sealed partial class MainPage : Page, IDisposable
     private bool _updatingSelectors;
     private bool _disposed;
     private bool _movingTabFocus;
+    private bool _isFullscreen;
+    private bool _fullscreenTransitionPending;
+    private WeakReference<Control>? _focusBeforeFullscreen;
     private long _loadingGeneration;
     private int _activeAsyncOperations;
     private TaskCompletionSource? _operationsDrained;
@@ -82,6 +85,10 @@ public sealed partial class MainPage : Page, IDisposable
             VirtualKey.A,
             VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
             ToggleAspectModeAsync);
+        RegisterPlaybackAccelerator(
+            VirtualKey.F11,
+            VirtualKeyModifiers.None,
+            ToggleFullscreenAsync);
         Unloaded += MainPage_Unloaded;
         string assemblyVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 #if DEBUG
@@ -96,7 +103,57 @@ public sealed partial class MainPage : Page, IDisposable
 
     public ObservableCollection<ChannelRow> Channels { get; } = [];
 
+    internal event EventHandler? FullscreenToggleRequested;
+
     internal MediaPlayerElement PlaybackSurfaceElement => PlaybackSurface;
+
+    internal void SetFullscreenState(bool isFullscreen)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        bool restoreFocus = !isFullscreen &&
+            (_isFullscreen || _fullscreenTransitionPending);
+        _isFullscreen = isFullscreen;
+        _fullscreenTransitionPending = false;
+        Visibility catalogVisibility = isFullscreen
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        HeaderPanel.Visibility = catalogVisibility;
+        FilterPanel.Visibility = catalogVisibility;
+        ChannelList.Visibility = catalogVisibility;
+        CatalogStatusPanel.Visibility = catalogVisibility;
+        CatalogPagingPanel.Visibility = catalogVisibility;
+        PageRoot.Padding = isFullscreen ? new Thickness(0) : new Thickness(32);
+        Grid.SetColumn(PlaybackPanel, isFullscreen ? 0 : 1);
+        Grid.SetColumnSpan(PlaybackPanel, isFullscreen ? 2 : 1);
+        FullscreenButton.Content = isFullscreen ? "Exit fullscreen" : "Fullscreen";
+        AutomationProperties.SetName(
+            FullscreenButton,
+            isFullscreen ? "Exit fullscreen" : "Enter fullscreen");
+        PlaybackState state = _playback?.Current.State ?? PlaybackState.Closed;
+        FullscreenButton.IsEnabled = _isFullscreen || CanChangePlaybackControls(state);
+        if (restoreFocus)
+        {
+            DispatcherQueue.TryEnqueue(RestoreFocusAfterFullscreen);
+        }
+    }
+
+    internal void ReportFullscreenUnavailable()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _fullscreenTransitionPending = false;
+        PlaybackState state = _playback?.Current.State ?? PlaybackState.Closed;
+        FullscreenButton.IsEnabled = _isFullscreen || CanChangePlaybackControls(state);
+        PlaybackStatusText.Text = "Fullscreen is unavailable.";
+        DispatcherQueue.TryEnqueue(RestoreFocusAfterFullscreen);
+    }
 
     internal void Initialize(
         ICatalogBrowser catalogBrowser,
@@ -342,6 +399,9 @@ public sealed partial class MainPage : Page, IDisposable
     private async void AspectModeButton_Click(object sender, RoutedEventArgs e) =>
         await ToggleAspectModeAsync();
 
+    private async void FullscreenButton_Click(object sender, RoutedEventArgs e) =>
+        await ToggleFullscreenAsync();
+
     private Task ChangeVolumeAsync(int delta)
         => ExecutePlaybackControlAsync(
             (coordinator, sessionId, token) =>
@@ -371,6 +431,55 @@ public sealed partial class MainPage : Page, IDisposable
                     ? PlaybackAspectMode.Fill
                     : PlaybackAspectMode.Fit,
                 token));
+
+    private Task ToggleFullscreenAsync()
+    {
+        if (_disposed || _fullscreenTransitionPending)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!_isFullscreen &&
+            XamlRoot is { } xamlRoot &&
+            FocusManager.GetFocusedElement(xamlRoot) is Control focusedControl)
+        {
+            _focusBeforeFullscreen = new WeakReference<Control>(focusedControl);
+        }
+
+        EventHandler? request = FullscreenToggleRequested;
+        if (request is null)
+        {
+            ReportFullscreenUnavailable();
+            return Task.CompletedTask;
+        }
+
+        _fullscreenTransitionPending = true;
+        FullscreenButton.IsEnabled = false;
+        request.Invoke(this, EventArgs.Empty);
+        return Task.CompletedTask;
+    }
+
+    private void RestoreFocusAfterFullscreen()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_focusBeforeFullscreen is not null &&
+            _focusBeforeFullscreen.TryGetTarget(out Control? previousFocus) &&
+            previousFocus.XamlRoot == XamlRoot &&
+            previousFocus.Visibility == Visibility.Visible &&
+            previousFocus.IsEnabled &&
+            previousFocus.Focus(FocusState.Keyboard))
+        {
+            _focusBeforeFullscreen = null;
+            return;
+        }
+
+        _focusBeforeFullscreen = null;
+        FullscreenButton.Focus(FocusState.Keyboard);
+    }
 
     private async Task ExecutePlaybackControlAsync(
         Func<PlaybackSessionCoordinator, PlaybackSessionId, CancellationToken,
@@ -523,6 +632,8 @@ public sealed partial class MainPage : Page, IDisposable
         VolumeUpButton.IsEnabled = controlsEnabled && controls.Volume.Percent < 100;
         MuteButton.IsEnabled = controlsEnabled;
         AspectModeButton.IsEnabled = controlsEnabled;
+        FullscreenButton.IsEnabled = !_fullscreenTransitionPending &&
+            (_isFullscreen || controlsEnabled);
         PlaybackVolumeText.Text = $"Volume {controls.Volume.Percent}%";
         MuteButton.Content = controls.IsMuted ? "Unmute" : "Mute";
         AutomationProperties.SetName(
@@ -585,6 +696,7 @@ public sealed partial class MainPage : Page, IDisposable
         _lifetime.Cancel();
         _logoPageCancellation.Cancel();
         _coordinator?.Dispose();
+        FullscreenToggleRequested = null;
         _lifetime.Dispose();
         _logoPageCancellation.Dispose();
         DisposePlaybackControlGateIfDrained();

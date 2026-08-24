@@ -52,11 +52,18 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
                 _catalogServices.LogoCache,
                 playback);
             _playback = playback;
+            _mainPage.FullscreenToggleRequested += MainPage_FullscreenToggleRequested;
+            AppWindow.Changed += AppWindow_Changed;
             AppWindow.Closing += AppWindow_Closing;
+            _mainPage.SetFullscreenState(
+                AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen);
             rollbackOwner = null;
         }
         catch
         {
+            AppWindow.Changed -= AppWindow_Changed;
+            AppWindow.Closing -= AppWindow_Closing;
+            _mainPage.FullscreenToggleRequested -= MainPage_FullscreenToggleRequested;
             try
             {
                 _mainPage.Dispose();
@@ -72,6 +79,41 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
             throw;
         }
+    }
+
+    private void MainPage_FullscreenToggleRequested(object? sender, EventArgs args)
+    {
+        if (_closeStarted)
+        {
+            return;
+        }
+
+        try
+        {
+            AppWindow.SetPresenter(
+                AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen
+                    ? AppWindowPresenterKind.Default
+                    : AppWindowPresenterKind.FullScreen);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            _mainPage.ReportFullscreenUnavailable();
+        }
+    }
+
+    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (_closeStarted || !args.DidPresenterChange)
+        {
+            return;
+        }
+
+        bool isFullscreen =
+            sender.Presenter.Kind == AppWindowPresenterKind.FullScreen;
+        AppTitleBar.Visibility = isFullscreen
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        _mainPage.SetFullscreenState(isFullscreen);
     }
 
     private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
@@ -129,6 +171,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         {
             try
             {
+                await RunOnDispatcherAsync(DetachFullscreenEvents);
                 await RunOnDispatcherAsync(_mainPage.Dispose);
             }
             catch (Exception exception) when (IsRecoverable(exception))
@@ -178,6 +221,12 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         {
             completion.TrySetException(exception);
         }
+    }
+
+    private void DetachFullscreenEvents()
+    {
+        AppWindow.Changed -= AppWindow_Changed;
+        _mainPage.FullscreenToggleRequested -= MainPage_FullscreenToggleRequested;
     }
 
     private async Task RunOnDispatcherAsync(Action operation)

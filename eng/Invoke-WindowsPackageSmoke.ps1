@@ -513,6 +513,9 @@ $playbackUiAcceptanceVerified = $false
 $playbackVolumeControlVerified = $false
 $playbackMuteControlVerified = $false
 $playbackAspectControlVerified = $false
+$playbackFullscreenEnterVerified = $false
+$playbackFullscreenExitVerified = $false
+$playbackFullscreenFocusRestored = $false
 $playbackUiRequestCount = 0
 $playbackUiCompletedResponseCount = 0
 $playbackUiCompletedBodyBytes = 0L
@@ -1314,6 +1317,9 @@ function Assert-FocusedAutomationElement {
                     "CatalogChannelList")) {
                 $observedFocusTarget = $focusedAutomationId
             }
+            if ($focusedAutomationId -eq "PlaybackFullscreenButton") {
+                $observedFocusTarget = $focusedAutomationId
+            }
             if ([System.Windows.Automation.Automation]::Compare($focused, $ExpectedElement) -or
                 $focusedAutomationId -eq $ExpectedAutomationId) {
                 return
@@ -1426,6 +1432,48 @@ function Wait-PackagedAutomationName {
     } while ((Get-Date) -lt $deadline)
 
     throw "A packaged playback control did not reach the expected safe state."
+}
+
+function Wait-PackagedAutomationElementByName {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Root,
+
+        [Parameter(Mandatory)]
+        [string]$AutomationId,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.ControlType]$ControlType,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedName,
+
+        [int]$TimeoutSeconds = 10
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        try {
+            $element = Get-AutomationElementById `
+                -Root $Root `
+                -AutomationId $AutomationId
+            if ($null -ne $element -and
+                $element.Current.ControlType -eq $ControlType -and
+                $element.Current.Name -ceq $ExpectedName) {
+                return $element
+            }
+        }
+        catch [System.Windows.Automation.ElementNotAvailableException] {
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "A packaged playback automation element did not reach the expected safe state."
 }
 
 function Invoke-PackagedPlaybackControlButton {
@@ -2177,6 +2225,11 @@ try {
         "PlaybackAspectModeButton" `
         ([System.Windows.Automation.ControlType]::Button) `
         "Use fill aspect mode"
+    $fullscreenButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "PlaybackFullscreenButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Enter fullscreen"
     $volumeTextElement = Get-AutomationElementById `
         $playbackAutomationRoot `
         "PlaybackVolumeText"
@@ -2386,6 +2439,43 @@ try {
         -ExpectedName "Use fit aspect mode"
     $playbackAspectControlVerified = $true
 
+    Assert-FocusedAutomationElement `
+        $fullscreenButtonElement `
+        "PlaybackFullscreenButton" `
+        -RequestFocus
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $fullscreenButtonElement
+    $fullscreenButtonElement = Wait-PackagedAutomationElementByName `
+        -Process $launchedProcess `
+        -Root $playbackAutomationRoot `
+        -AutomationId "PlaybackFullscreenButton" `
+        -ControlType ([System.Windows.Automation.ControlType]::Button) `
+        -ExpectedName "Exit fullscreen"
+    Wait-PackagedPlaybackStatus `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Channel is playing."
+    $playbackFullscreenEnterVerified = $true
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $fullscreenButtonElement
+    $fullscreenButtonElement = Wait-PackagedAutomationElementByName `
+        -Process $launchedProcess `
+        -Root $playbackAutomationRoot `
+        -AutomationId "PlaybackFullscreenButton" `
+        -ControlType ([System.Windows.Automation.ControlType]::Button) `
+        -ExpectedName "Enter fullscreen"
+    Assert-FocusedAutomationElement `
+        $fullscreenButtonElement `
+        "PlaybackFullscreenButton"
+    Wait-PackagedPlaybackStatus `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Channel is playing."
+    $playbackFullscreenExitVerified = $true
+    $playbackFullscreenFocusRestored = $true
+
     Invoke-PackagedPlaybackButton `
         -Process $launchedProcess `
         -ButtonElement $pauseButtonElement `
@@ -2523,6 +2613,9 @@ try {
         PlaybackVolumeControlVerified = $playbackVolumeControlVerified
         PlaybackMuteControlVerified = $playbackMuteControlVerified
         PlaybackAspectControlVerified = $playbackAspectControlVerified
+        PlaybackFullscreenEnterVerified = $playbackFullscreenEnterVerified
+        PlaybackFullscreenExitVerified = $playbackFullscreenExitVerified
+        PlaybackFullscreenFocusRestored = $playbackFullscreenFocusRestored
         PlaybackUiRequestCount = $playbackUiRequestCount
         PlaybackUiCompletedResponseCount = $playbackUiCompletedResponseCount
         PlaybackUiCompletedBodyBytes = $playbackUiCompletedBodyBytes

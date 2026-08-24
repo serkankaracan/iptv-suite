@@ -4290,6 +4290,7 @@ public sealed class DependencyRulesTests
             "IptvSuite.Windows");
         string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
         string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+        string window = File.ReadAllText(Path.Combine(windowsRoot, "MainWindow.xaml.cs"));
         string packageSmoke = File.ReadAllText(Path.Combine(
             RepositoryRoot,
             "eng",
@@ -4301,15 +4302,18 @@ public sealed class DependencyRulesTests
             "PlaybackVolumeUpButton",
             "PlaybackMuteButton",
             "PlaybackAspectModeButton",
+            "PlaybackFullscreenButton",
             "PlaybackVolumeText",
             "Decrease playback volume",
             "Increase playback volume",
             "Mute playback",
             "Use fill aspect mode",
+            "Enter fullscreen",
             "Ctrl+Shift+Down",
             "Ctrl+Shift+Up",
             "Ctrl+Shift+M",
             "Ctrl+Shift+A",
+            "F11",
         ];
         foreach (string contract in automationContracts)
         {
@@ -4327,15 +4331,35 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "CanChangePlaybackControls(session.State)");
         StringAssert.Contains(codeBehind, "AutomationProperties.SetName(");
         StringAssert.Contains(codeBehind, "VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift");
+        StringAssert.Contains(codeBehind, "FocusManager.GetFocusedElement(xamlRoot)");
+        StringAssert.Contains(codeBehind, "WeakReference<Control>");
+        StringAssert.Contains(codeBehind, "previousFocus.Focus(FocusState.Keyboard)");
+        StringAssert.Contains(codeBehind, "DispatcherQueue.TryEnqueue(RestoreFocusAfterFullscreen)");
+        StringAssert.Contains(codeBehind, "Grid.SetColumnSpan(PlaybackPanel, isFullscreen ? 2 : 1)");
+        StringAssert.Contains(window, "AppWindowPresenterKind.FullScreen");
+        StringAssert.Contains(window, "AppWindowPresenterKind.Default");
+        StringAssert.Contains(window, "AppWindow.Changed += AppWindow_Changed");
+        StringAssert.Contains(window, "args.DidPresenterChange");
+        StringAssert.Contains(window, "sender.Presenter.Kind == AppWindowPresenterKind.FullScreen");
+        StringAssert.Contains(window, "_mainPage.SetFullscreenState(isFullscreen)");
+        StringAssert.Contains(window, "DetachFullscreenEvents");
         Assert.IsFalse(codeBehind.Contains("WindowsNativePlaybackEngine", StringComparison.Ordinal));
         Assert.IsFalse(Regex.IsMatch(codeBehind, @"\bMediaPlayer\b"));
+        Assert.IsFalse(codeBehind.Contains("Microsoft.UI.Windowing", StringComparison.Ordinal));
+        Assert.IsFalse(codeBehind.Contains("AppWindow", StringComparison.Ordinal));
 
         StringAssert.Contains(packageSmoke, "PlaybackVolumeControlVerified");
         StringAssert.Contains(packageSmoke, "PlaybackMuteControlVerified");
         StringAssert.Contains(packageSmoke, "PlaybackAspectControlVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackFullscreenEnterVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackFullscreenExitVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackFullscreenFocusRestored");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedAutomationElementByName");
+        StringAssert.Contains(packageSmoke, "ElementNotAvailableException");
         StringAssert.Contains(packageSmoke, "-ExpectedName \"Volume 95%\"");
         StringAssert.Contains(packageSmoke, "-ExpectedName \"Unmute playback\"");
         StringAssert.Contains(packageSmoke, "-ExpectedName \"Use fit aspect mode\"");
+        StringAssert.Contains(packageSmoke, "-ExpectedName \"Exit fullscreen\"");
     }
 
     [TestMethod]
