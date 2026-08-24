@@ -4652,6 +4652,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "PlaybackWindowStatePreserved");
         StringAssert.Contains(packageSmoke, "PlaybackResourceWarmupVerified");
         StringAssert.Contains(packageSmoke, "PlaybackResourceSnapshotVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackResourceBudgetVerified");
         StringAssert.Contains(packageSmoke, "PlaybackPrivateBytesDelta");
         StringAssert.Contains(packageSmoke, "PlaybackWorkingSetBytesDelta");
         StringAssert.Contains(packageSmoke, "PlaybackHandleCountDelta");
@@ -4668,6 +4669,45 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "RestoreWindow($WindowHandle)");
         StringAssert.Contains(packageSmoke, "$playbackWindowResizeCount -ne 2");
         StringAssert.Contains(packageSmoke, "$playbackResourceWarmupVerified = $true");
+        StringAssert.Contains(packageSmoke, "$playbackPrivateBytesDeltaBudget = 8MB");
+        StringAssert.Contains(packageSmoke, "$playbackWorkingSetBytesDeltaBudget = 16MB");
+        StringAssert.Contains(packageSmoke, "$playbackHandleCountDeltaBudget = 64");
+        StringAssert.Contains(packageSmoke, "$playbackThreadCountDeltaBudget = 0");
+        StringAssert.Contains(
+            packageSmoke,
+            "$playbackPrivateBytesDelta -gt $playbackPrivateBytesDeltaBudget");
+        StringAssert.Contains(
+            packageSmoke,
+            "$playbackWorkingSetBytesDelta -gt $playbackWorkingSetBytesDeltaBudget");
+        StringAssert.Contains(
+            packageSmoke,
+            "$playbackHandleCountDelta -gt $playbackHandleCountDeltaBudget");
+        StringAssert.Contains(
+            packageSmoke,
+            "$playbackThreadCountDelta -gt $playbackThreadCountDeltaBudget");
+        StringAssert.Contains(
+            packageSmoke,
+            "Packaged playback short-run resource diagnostic:");
+        StringAssert.Contains(packageSmoke, "$playbackResourceBudgetVerified = $true");
+        int resourceSnapshotIndex = packageSmoke.IndexOf(
+            "$playbackResourceFinal =",
+            StringComparison.Ordinal);
+        int resourceBudgetGuardIndex = packageSmoke.IndexOf(
+            "if ($playbackPrivateBytesDelta -gt $playbackPrivateBytesDeltaBudget -or",
+            StringComparison.Ordinal);
+        int resourceBudgetVerifiedIndex = packageSmoke.IndexOf(
+            "$playbackResourceBudgetVerified = $true",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            resourceSnapshotIndex >= 0 &&
+            resourceBudgetGuardIndex > resourceSnapshotIndex &&
+            resourceBudgetVerifiedIndex > resourceBudgetGuardIndex,
+            "The signed resource guard must run after the final warmed snapshot and before verification.");
+        string resourceBudgetGuard = packageSmoke[
+            resourceBudgetGuardIndex..resourceBudgetVerifiedIndex];
+        Assert.IsFalse(
+            resourceBudgetGuard.Contains("Abs", StringComparison.Ordinal),
+            "Signed resource deltas must not be converted to absolute values.");
         Assert.IsTrue(
             Regex.Count(
                 packageSmoke,

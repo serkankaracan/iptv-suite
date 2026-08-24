@@ -660,6 +660,11 @@ $playbackWindowRestoreVerified = $false
 $playbackWindowStatePreserved = $false
 $playbackResourceWarmupVerified = $false
 $playbackResourceSnapshotVerified = $false
+$playbackResourceBudgetVerified = $false
+$playbackPrivateBytesDeltaBudget = 8MB
+$playbackWorkingSetBytesDeltaBudget = 16MB
+$playbackHandleCountDeltaBudget = 64
+$playbackThreadCountDeltaBudget = 0
 $playbackBaselinePrivateBytes = 0L
 $playbackFinalPrivateBytes = 0L
 $playbackPrivateBytesDelta = 0L
@@ -3123,6 +3128,25 @@ try {
         $playbackFinalThreadCount - $playbackBaselineThreadCount
     $playbackResourceSnapshotVerified = $true
 
+    $playbackResourceDiagnostic = (
+        "Packaged playback short-run resource diagnostic: " +
+        "privateBytesDelta=$playbackPrivateBytesDelta, " +
+        "privateBytesBudget=$playbackPrivateBytesDeltaBudget, " +
+        "workingSetBytesDelta=$playbackWorkingSetBytesDelta, " +
+        "workingSetBytesBudget=$playbackWorkingSetBytesDeltaBudget, " +
+        "handleCountDelta=$playbackHandleCountDelta, " +
+        "handleCountBudget=$playbackHandleCountDeltaBudget, " +
+        "threadCountDelta=$playbackThreadCountDelta, " +
+        "threadCountBudget=$playbackThreadCountDeltaBudget.")
+    Write-Host $playbackResourceDiagnostic
+    if ($playbackPrivateBytesDelta -gt $playbackPrivateBytesDeltaBudget -or
+        $playbackWorkingSetBytesDelta -gt $playbackWorkingSetBytesDeltaBudget -or
+        $playbackHandleCountDelta -gt $playbackHandleCountDeltaBudget -or
+        $playbackThreadCountDelta -gt $playbackThreadCountDeltaBudget) {
+        throw "The packaged playback short-run resource budget was exceeded."
+    }
+    $playbackResourceBudgetVerified = $true
+
     Invoke-PackagedPlaybackChannelItem `
         -Process $launchedProcess `
         -ChannelItem $playbackChannelItemA `
@@ -3287,6 +3311,7 @@ try {
         PlaybackWindowStatePreserved = $playbackWindowStatePreserved
         PlaybackResourceWarmupVerified = $playbackResourceWarmupVerified
         PlaybackResourceSnapshotVerified = $playbackResourceSnapshotVerified
+        PlaybackResourceBudgetVerified = $playbackResourceBudgetVerified
         PlaybackBaselinePrivateBytes = $playbackBaselinePrivateBytes
         PlaybackFinalPrivateBytes = $playbackFinalPrivateBytes
         PlaybackPrivateBytesDelta = $playbackPrivateBytesDelta

@@ -1,6 +1,6 @@
 # M12 playback UX ve lifecycle kısmi kabul kanıtı
 
-**Durum:** `PARTIAL VERIFIED, 2026-08-24`
+**Durum:** `PARTIAL VERIFIED, 2026-08-25`
 
 ## Doğrulanan sınır
 
@@ -11,6 +11,7 @@ M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback ko
 - [GitHub Actions run `32764149667`](https://github.com/serkankaracan/iptv-suite/actions/runs/32764149667), commit `8d537010f64193f7bc9baf05bc3707fb31d5362f` için bütün zorunlu işleri ve Required Windows gate'i geçti.
 - İndirilen `windows-msix-smoke-evidence/last-success.json`, exact commit ve SDK `10.0.302` bağını; valid x64 package signature'ını, payload leak gate'ini, normal close'u ve exact package cleanup'ını doğrular.
 - `VERIFIED`: Bütün UI/control, fullscreen, resize, minimize/restore, state-preservation, resource-snapshot ve active-close Boolean alanları `true`dur.
+- [GitHub Actions run `32783701519`](https://github.com/serkankaracan/iptv-suite/actions/runs/32783701519), commit `b10b6ceb56eaba51668169dca904524808f4517b` için locked quality, signed package ve DPAPI boundary işlerini geçti. Bu checkpoint product source-delete UI route'unu build/architecture düzeyinde korur; product-level delete E2E kanıtı değildir.
 
 | Otomatik acceptance alanı | Sonuç |
 |---|---:|
@@ -34,7 +35,9 @@ M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback ko
 
 `VERIFIED`: Sayaçlar warmed playback sonrasındaki baseline ile 25 rapid switch ve explicit stop sonrasındaki final snapshot'tan alınmıştır; snapshot zinciri ve active-close doğrulaması geçmiştir.
 
-`INFERENCE`: Bu tek hosted ölçüm kısa-run davranışı için kalibrasyondur. Private-bytes düşüşü, gözlenen working-set/handle farkı ve thread düşüşü bu koşuda belirgin bir runaway kaynak artışı göstermemiştir; ancak tek örnekten sayısal bir M12 bütçesi veya leak-yokluğu sonucu türetilemez. Bu nedenle mevcut acceptance threshold'ları değiştirilmemiş, yeni threshold eklenmemiş ve resource-budget kriteri henüz `PASS` sayılmamıştır.
+`INFERENCE`: Bu tablo tek hosted ölçümdür ve tek başına leak-yokluğu sonucu üretmez. Takip eden temiz hosted cohort'un gözlenen dağılımı yalnız kısa-run regresyon zarfını kalibre etmek için kullanılmıştır.
+
+`IMPLEMENTED LOCALLY; HOSTED VERIFICATION PENDING`: Packaged smoke, warmed baseline'dan explicit stop sonrası final snapshot'a kadar signed delta için private bytes `≤ +8 MiB`, working set `≤ +16 MiB`, handle `≤ +64` ve thread `≤ 0` üst sınırlarını fail-closed uygular. Negatif delta büyüme sayılmaz; mevcut rapid-switch p95 `≤3000 ms` kapısı değişmez. Bu ayrı kısa-run guard, M10/M16 uzun-soak `%10 / 100 MiB / monotonic` kriterlerini değiştirmez ve leak-yokluğu ya da M12 completion kanıtı değildir. Commit-bound hosted package koşusu geçmeden resource-budget alanı `VERIFIED` sayılmaz.
 
 ## Açık acceptance matrisi
 
