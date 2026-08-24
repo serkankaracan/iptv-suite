@@ -12,6 +12,7 @@ M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback ko
 - İndirilen `windows-msix-smoke-evidence/last-success.json`, exact commit ve SDK `10.0.302` bağını; valid x64 package signature'ını, payload leak gate'ini, normal close'u ve exact package cleanup'ını doğrular.
 - `VERIFIED`: Bütün UI/control, fullscreen, resize, minimize/restore, state-preservation, resource-snapshot ve active-close Boolean alanları `true`dur.
 - [GitHub Actions run `32783701519`](https://github.com/serkankaracan/iptv-suite/actions/runs/32783701519), commit `b10b6ceb56eaba51668169dca904524808f4517b` için locked quality, signed package ve DPAPI boundary işlerini geçti. Bu checkpoint product source-delete UI route'unu build/architecture düzeyinde korur; product-level delete E2E kanıtı değildir.
+- [GitHub Actions run `32785306860`](https://github.com/serkankaracan/iptv-suite/actions/runs/32785306860), commit `33afcef741f518b439c9934b0f4035fd92662586` için yeni signed short-run resource guard'ını ve bütün required işleri geçti. İndirilen evidence `PlaybackResourceBudgetVerified=true` taşır.
 
 | Otomatik acceptance alanı | Sonuç |
 |---|---:|
@@ -37,7 +38,7 @@ M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback ko
 
 `INFERENCE`: Bu tablo tek hosted ölçümdür ve tek başına leak-yokluğu sonucu üretmez. Takip eden temiz hosted cohort'un gözlenen dağılımı yalnız kısa-run regresyon zarfını kalibre etmek için kullanılmıştır.
 
-`IMPLEMENTED LOCALLY; HOSTED VERIFICATION PENDING`: Packaged smoke, warmed baseline'dan explicit stop sonrası final snapshot'a kadar signed delta için private bytes `≤ +8 MiB`, working set `≤ +16 MiB`, handle `≤ +64` ve thread `≤ 0` üst sınırlarını fail-closed uygular. Negatif delta büyüme sayılmaz; mevcut rapid-switch p95 `≤3000 ms` kapısı değişmez. Bu ayrı kısa-run guard, M10/M16 uzun-soak `%10 / 100 MiB / monotonic` kriterlerini değiştirmez ve leak-yokluğu ya da M12 completion kanıtı değildir. Commit-bound hosted package koşusu geçmeden resource-budget alanı `VERIFIED` sayılmaz.
+`VERIFIED — run 32785306860`: Packaged smoke, warmed baseline'dan explicit stop sonrası final snapshot'a kadar signed delta için private bytes `≤ +8 MiB`, working set `≤ +16 MiB`, handle `≤ +64` ve thread `≤ 0` üst sınırlarını fail-closed uyguladı. Ölçülen değerler sırasıyla `-860.160 byte`, `+4.169.728 byte`, `-30` ve `-7`; 25/25 rapid switch p95 `2229,342 ms`, maksimum `2230,524 ms` oldu. Negatif delta büyüme sayılmaz. Bu ayrı kısa-run guard, M10/M16 uzun-soak `%10 / 100 MiB / monotonic` kriterlerini değiştirmez ve leak-yokluğu ya da M12 completion kanıtı değildir.
 
 ## Açık acceptance matrisi
 
