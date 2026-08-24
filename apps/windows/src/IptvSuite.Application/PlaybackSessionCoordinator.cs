@@ -354,6 +354,39 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             StopSessionAsync(expectedSession: null, requireCurrentSession: false));
     }
 
+    public ValueTask<PlaybackEngineOperationResult> ReleaseSourceAsync(
+        SourceId sourceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (sourceId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A playback source identifier is required.",
+                nameof(sourceId));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        PlaybackSessionId sessionId;
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_currentSelection?.SourceId != sourceId ||
+                _current.State is not (
+                    PlaybackState.Opening or
+                    PlaybackState.Buffering or
+                    PlaybackState.Playing or
+                    PlaybackState.Paused))
+            {
+                return ValueTask.FromResult(PlaybackEngineOperationResult.Succeeded());
+            }
+
+            sessionId = _current.SessionId;
+        }
+
+        return new ValueTask<PlaybackEngineOperationResult>(
+            StopSessionAsync(sessionId, requireCurrentSession: true));
+    }
+
     public ValueTask DisposeAsync()
     {
         TaskCompletionSource? completion = null;

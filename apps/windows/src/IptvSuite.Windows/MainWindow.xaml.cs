@@ -3,6 +3,7 @@ using IptvSuite.Infrastructure;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.Windows.System.Power;
 
 namespace IptvSuite.Windows;
 
@@ -13,8 +14,10 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly MainPage _mainPage;
     private readonly PlaybackSessionCoordinator _playback;
+    private readonly PlaybackPowerLifecycleCoordinator _powerLifecycle;
     private Task? _disposeTask;
     private bool _closeStarted;
+    private int _powerLifecycleSubscribed;
 
     internal MainWindow(
         WindowsCatalogServices catalogServices,
@@ -57,6 +60,9 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             AppWindow.Closing += AppWindow_Closing;
             _mainPage.SetFullscreenState(
                 AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen);
+            _powerLifecycle = new PlaybackPowerLifecycleCoordinator(playback.StopAsync);
+            PowerManager.SystemSuspendStatusChanged += PowerManager_SystemSuspendStatusChanged;
+            _powerLifecycleSubscribed = 1;
             rollbackOwner = null;
         }
         catch
@@ -78,6 +84,23 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             }
 
             throw;
+        }
+    }
+
+    private async void PowerManager_SystemSuspendStatusChanged(object? sender, object args)
+    {
+        try
+        {
+            if (PowerManager.SystemSuspendStatus != SystemSuspendStatus.Entering)
+            {
+                return;
+            }
+
+            await _powerLifecycle.StopForSuspendAsync();
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            // Closing or native teardown still owns the fail-closed cleanup path.
         }
     }
 
@@ -125,6 +148,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
 
         _closeStarted = true;
+        DetachPowerLifecycleEvent();
         try
         {
             await DisposeAsync();
@@ -145,6 +169,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        DetachPowerLifecycleEvent();
         TaskCompletionSource? completion = null;
         Task disposeTask;
         lock (_lifetimeSync)
@@ -181,7 +206,14 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
             try
             {
-                await _playback.DisposeAsync();
+                try
+                {
+                    await _powerLifecycle.DisposeAsync();
+                }
+                finally
+                {
+                    await _playback.DisposeAsync();
+                }
             }
             catch (Exception exception) when (IsRecoverable(exception))
             {
@@ -227,6 +259,14 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     {
         AppWindow.Changed -= AppWindow_Changed;
         _mainPage.FullscreenToggleRequested -= MainPage_FullscreenToggleRequested;
+    }
+
+    private void DetachPowerLifecycleEvent()
+    {
+        if (Interlocked.Exchange(ref _powerLifecycleSubscribed, 0) == 1)
+        {
+            PowerManager.SystemSuspendStatusChanged -= PowerManager_SystemSuspendStatusChanged;
+        }
     }
 
     private async Task RunOnDispatcherAsync(Action operation)

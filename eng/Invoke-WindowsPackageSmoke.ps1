@@ -117,6 +117,40 @@ namespace IptvSuite.PackageSmoke
 
     public static class WindowInspector
     {
+        private const uint NoMove = 0x0002;
+        private const uint NoZOrder = 0x0004;
+        private const uint NoActivate = 0x0010;
+        private const uint AsyncWindowPosition = 0x4000;
+        private const int ShowMinimized = 2;
+        private const int ShowRestore = 9;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WindowRectangle
+        {
+            internal int Left;
+            internal int Top;
+            internal int Right;
+            internal int Bottom;
+        }
+
+        public sealed class WindowBounds
+        {
+            internal WindowBounds(int left, int top, int right, int bottom)
+            {
+                Left = left;
+                Top = top;
+                Right = right;
+                Bottom = bottom;
+            }
+
+            public int Left { get; private set; }
+            public int Top { get; private set; }
+            public int Right { get; private set; }
+            public int Bottom { get; private set; }
+            public int Width { get { return checked(Right - Left); } }
+            public int Height { get { return checked(Bottom - Top); } }
+        }
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool IsWindowVisible(IntPtr windowHandle);
@@ -132,6 +166,102 @@ namespace IptvSuite.PackageSmoke
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowRect", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetWindowRectangle(
+            IntPtr windowHandle,
+            out WindowRectangle rectangle);
+
+        [DllImport("user32.dll", EntryPoint = "SetWindowPos", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetWindowPosition(
+            IntPtr windowHandle,
+            IntPtr insertAfter,
+            int x,
+            int y,
+            int width,
+            int height,
+            uint flags);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsIconic(IntPtr windowHandle);
+
+        [DllImport("user32.dll", EntryPoint = "ShowWindowAsync", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool RequestWindowState(IntPtr windowHandle, int command);
+
+        public static WindowBounds GetWindowBounds(IntPtr windowHandle)
+        {
+            ValidateWindowHandle(windowHandle);
+            WindowRectangle rectangle;
+            if (!GetWindowRectangle(windowHandle, out rectangle) ||
+                rectangle.Right <= rectangle.Left ||
+                rectangle.Bottom <= rectangle.Top)
+            {
+                throw new InvalidOperationException("The packaged window bounds are unavailable.");
+            }
+
+            return new WindowBounds(
+                rectangle.Left,
+                rectangle.Top,
+                rectangle.Right,
+                rectangle.Bottom);
+        }
+
+        public static void ResizeWindow(IntPtr windowHandle, int width, int height)
+        {
+            ValidateWindowHandle(windowHandle);
+            if (width < 640 || width > 1920 || height < 480 || height > 1080)
+            {
+                throw new ArgumentOutOfRangeException("The packaged window size is outside the bounded test range.");
+            }
+            if (!SetWindowPosition(
+                    windowHandle,
+                    IntPtr.Zero,
+                    0,
+                    0,
+                    width,
+                    height,
+                    NoMove | NoZOrder | NoActivate | AsyncWindowPosition))
+            {
+                throw new InvalidOperationException("The packaged window resize request failed.");
+            }
+        }
+
+        public static bool IsWindowMinimized(IntPtr windowHandle)
+        {
+            ValidateWindowHandle(windowHandle);
+            return IsIconic(windowHandle);
+        }
+
+        public static void MinimizeWindow(IntPtr windowHandle)
+        {
+            RequestWindowStateChange(windowHandle, ShowMinimized);
+        }
+
+        public static void RestoreWindow(IntPtr windowHandle)
+        {
+            RequestWindowStateChange(windowHandle, ShowRestore);
+        }
+
+        private static void RequestWindowStateChange(IntPtr windowHandle, int command)
+        {
+            ValidateWindowHandle(windowHandle);
+            if (!RequestWindowState(windowHandle, command))
+            {
+                throw new InvalidOperationException("The packaged window state request failed.");
+            }
+        }
+
+        private static void ValidateWindowHandle(IntPtr windowHandle)
+        {
+            if (windowHandle == IntPtr.Zero)
+            {
+                throw new ArgumentException("A packaged window handle is required.", "windowHandle");
+            }
+        }
     }
 
     public static class KeyboardInspector
@@ -522,6 +652,12 @@ $playbackRapidSwitchVerified = $false
 $playbackRapidSwitchCount = 0
 $playbackRapidSwitchP95Milliseconds = 0.0
 $playbackRapidSwitchMaximumMilliseconds = 0.0
+$playbackSurfaceBoundsVerified = $false
+$playbackWindowResizeVerified = $false
+$playbackWindowResizeCount = 0
+$playbackWindowMinimizeVerified = $false
+$playbackWindowRestoreVerified = $false
+$playbackWindowStatePreserved = $false
 $playbackActiveCloseVerified = $false
 $playbackUiRequestCount = 0
 $playbackUiCompletedResponseCount = 0
@@ -1277,6 +1413,29 @@ function Get-AutomationElementById {
     return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Test-AutomationElementContainsExactText {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Root,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedText
+    )
+
+    $controlTypeCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Text)
+    $nameCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        $ExpectedText)
+    $condition = [System.Windows.Automation.AndCondition]::new(
+        $controlTypeCondition,
+        $nameCondition)
+    return $null -ne $Root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $condition)
+}
+
 function Get-Percentile95 {
     param(
         [Parameter(Mandatory)]
@@ -1387,6 +1546,139 @@ function Assert-PackagedProcessAlive {
     catch {
         throw "The packaged playback application exited before acceptance completed."
     }
+}
+
+function Wait-PackagedPlaybackSurfaceBounds {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Element,
+
+        [Parameter(Mandatory)]
+        [IntPtr]$WindowHandle,
+
+        [double]$PreviousWidth = -1.0,
+
+        [double]$PreviousHeight = -1.0
+    )
+
+    $deadline = (Get-Date).AddSeconds(5)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        try {
+            $bounds = $Element.Current.BoundingRectangle
+            $windowBounds =
+                [IptvSuite.PackageSmoke.WindowInspector]::GetWindowBounds($WindowHandle)
+            $changedFromPrevious =
+                $PreviousWidth -lt 0.0 -or
+                [Math]::Abs($bounds.Width - $PreviousWidth) -gt 1.0 -or
+                [Math]::Abs($bounds.Height - $PreviousHeight) -gt 1.0
+            if (-not [double]::IsNaN($bounds.Width) -and
+                -not [double]::IsInfinity($bounds.Width) -and
+                -not [double]::IsNaN($bounds.Height) -and
+                -not [double]::IsInfinity($bounds.Height) -and
+                $bounds.Width -gt 0.0 -and
+                $bounds.Height -gt 0.0 -and
+                $bounds.Left -ge ($windowBounds.Left - 1) -and
+                $bounds.Top -ge ($windowBounds.Top - 1) -and
+                $bounds.Right -le ($windowBounds.Right + 1) -and
+                $bounds.Bottom -le ($windowBounds.Bottom + 1) -and
+                $changedFromPrevious) {
+                return $bounds
+            }
+        }
+        catch [System.Windows.Automation.ElementNotAvailableException] {
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged playback surface did not reach valid in-window bounds."
+}
+
+function Set-PackagedWindowSize {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [IntPtr]$WindowHandle,
+
+        [Parameter(Mandatory)]
+        [int]$Width,
+
+        [Parameter(Mandatory)]
+        [int]$Height
+    )
+
+    Assert-PackagedProcessAlive -Process $Process
+    [IptvSuite.PackageSmoke.WindowInspector]::ResizeWindow(
+        $WindowHandle,
+        $Width,
+        $Height)
+    $deadline = (Get-Date).AddSeconds(5)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        $bounds = [IptvSuite.PackageSmoke.WindowInspector]::GetWindowBounds($WindowHandle)
+        if ($bounds.Width -eq $Width -and $bounds.Height -eq $Height) {
+            return
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged playback window did not reach the requested bounded size."
+}
+
+function Invoke-PackagedWindowMinimize {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [IntPtr]$WindowHandle
+    )
+
+    Assert-PackagedProcessAlive -Process $Process
+    [IptvSuite.PackageSmoke.WindowInspector]::MinimizeWindow($WindowHandle)
+    $deadline = (Get-Date).AddSeconds(5)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        if ([IptvSuite.PackageSmoke.WindowInspector]::IsWindowMinimized($WindowHandle)) {
+            return
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged playback window did not minimize before the deadline."
+}
+
+function Invoke-PackagedWindowRestore {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [IntPtr]$WindowHandle
+    )
+
+    Assert-PackagedProcessAlive -Process $Process
+    [IptvSuite.PackageSmoke.WindowInspector]::RestoreWindow($WindowHandle)
+    $deadline = (Get-Date).AddSeconds(5)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        if (-not [IptvSuite.PackageSmoke.WindowInspector]::IsWindowMinimized($WindowHandle) -and
+            [IptvSuite.PackageSmoke.WindowInspector]::IsWindowVisible($WindowHandle)) {
+            return
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged playback window did not restore before the deadline."
 }
 
 function Wait-PackagedPlaybackStatus {
@@ -2467,13 +2759,17 @@ try {
         $channelItemIndex -lt $playbackChannelItems.Count;
         $channelItemIndex++) {
         $channelItem = $playbackChannelItems[$channelItemIndex]
-        if ($channelItem.Current.Name -ceq $expectedPlaybackChannelAName) {
+        if (Test-AutomationElementContainsExactText `
+                -Root $channelItem `
+                -ExpectedText $expectedPlaybackChannelAName) {
             if ($null -ne $playbackChannelItemA) {
                 throw "The packaged playback channel list contains a duplicate acceptance channel."
             }
             $playbackChannelItemA = $channelItem
         }
-        elseif ($channelItem.Current.Name -ceq $expectedPlaybackChannelBName) {
+        elseif (Test-AutomationElementContainsExactText `
+                -Root $channelItem `
+                -ExpectedText $expectedPlaybackChannelBName) {
             if ($null -ne $playbackChannelItemB) {
                 throw "The packaged playback channel list contains a duplicate acceptance channel."
             }
@@ -2621,6 +2917,93 @@ try {
     }
     $playbackRapidSwitchCount = $rapidSwitchSamples.Count
     $playbackRapidSwitchVerified = $playbackRapidSwitchCount -eq 25
+
+    $playbackSurfaceElement = Get-AutomationElementById `
+        $playbackAutomationRoot `
+        "PlaybackSurface"
+    if ($null -eq $playbackSurfaceElement -or
+        $playbackSurfaceElement.Current.Name -cne "Live TV playback surface") {
+        throw "The packaged playback surface automation element is invalid."
+    }
+    $playbackSurfaceBounds = Wait-PackagedPlaybackSurfaceBounds `
+        -Process $launchedProcess `
+        -Element $playbackSurfaceElement `
+        -WindowHandle $playbackWindowHandle
+
+    foreach ($windowSize in @(
+            @(1000, 700),
+            @(1200, 800))) {
+        Set-PackagedWindowSize `
+            -Process $launchedProcess `
+            -WindowHandle $playbackWindowHandle `
+            -Width $windowSize[0] `
+            -Height $windowSize[1]
+        $playbackWindowResizeCount++
+        $playbackSurfaceBounds = Wait-PackagedPlaybackSurfaceBounds `
+            -Process $launchedProcess `
+            -Element $playbackSurfaceElement `
+            -WindowHandle $playbackWindowHandle `
+            -PreviousWidth $playbackSurfaceBounds.Width `
+            -PreviousHeight $playbackSurfaceBounds.Height
+        Wait-PackagedPlaybackSelection `
+            -Process $launchedProcess `
+            -StatusElement $playbackStatusElement `
+            -ChannelElement $playbackCurrentChannelElement `
+            -ExpectedChannelName $expectedPlaybackChannelBName
+    }
+    if ($playbackWindowResizeCount -ne 2) {
+        throw "The packaged playback window resize count is invalid."
+    }
+    $playbackWindowResizeVerified = $true
+    $playbackSurfaceBoundsVerified = $true
+
+    Invoke-PackagedWindowMinimize `
+        -Process $launchedProcess `
+        -WindowHandle $playbackWindowHandle
+    Assert-PackagedProcessAlive -Process $launchedProcess
+    $playbackWindowMinimizeVerified = $true
+
+    Invoke-PackagedWindowRestore `
+        -Process $launchedProcess `
+        -WindowHandle $playbackWindowHandle
+    Assert-PackagedWindowForeground `
+        $playbackWindowHandle `
+        ([uint32]$playbackActivationProcessId)
+    $playbackAutomationRoot =
+        [System.Windows.Automation.AutomationElement]::FromHandle($playbackWindowHandle)
+    if ($null -eq $playbackAutomationRoot) {
+        throw "The restored packaged playback application has no UI Automation root."
+    }
+    $playbackStatusElement = Get-AutomationElementById `
+        $playbackAutomationRoot `
+        "PlaybackStatusText"
+    $playbackCurrentChannelElement = Get-AutomationElementById `
+        $playbackAutomationRoot `
+        "PlaybackChannelText"
+    $playbackSurfaceElement = Get-AutomationElementById `
+        $playbackAutomationRoot `
+        "PlaybackSurface"
+    if ($null -eq $playbackStatusElement -or
+        $playbackStatusElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Text -or
+        $null -eq $playbackCurrentChannelElement -or
+        $playbackCurrentChannelElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Text -or
+        $null -eq $playbackSurfaceElement -or
+        $playbackSurfaceElement.Current.Name -cne "Live TV playback surface") {
+        throw "The restored packaged playback UI Automation contract is invalid."
+    }
+    Wait-PackagedPlaybackSelection `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelBName
+    $null = Wait-PackagedPlaybackSurfaceBounds `
+        -Process $launchedProcess `
+        -Element $playbackSurfaceElement `
+        -WindowHandle $playbackWindowHandle
+    $playbackWindowRestoreVerified = $true
+    $playbackWindowStatePreserved = $true
 
     Invoke-PackagedPlaybackButton `
         -Process $launchedProcess `
@@ -2788,6 +3171,12 @@ try {
         PlaybackRapidSwitchMaximumMilliseconds = [Math]::Round(
             $playbackRapidSwitchMaximumMilliseconds,
             3)
+        PlaybackSurfaceBoundsVerified = $playbackSurfaceBoundsVerified
+        PlaybackWindowResizeVerified = $playbackWindowResizeVerified
+        PlaybackWindowResizeCount = $playbackWindowResizeCount
+        PlaybackWindowMinimizeVerified = $playbackWindowMinimizeVerified
+        PlaybackWindowRestoreVerified = $playbackWindowRestoreVerified
+        PlaybackWindowStatePreserved = $playbackWindowStatePreserved
         PlaybackActiveCloseVerified = $playbackActiveCloseVerified
         PlaybackUiRequestCount = $playbackUiRequestCount
         PlaybackUiCompletedResponseCount = $playbackUiCompletedResponseCount

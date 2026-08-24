@@ -4376,10 +4376,45 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "PlaybackRapidSwitchCount");
         StringAssert.Contains(packageSmoke, "PlaybackRapidSwitchP95Milliseconds");
         StringAssert.Contains(packageSmoke, "PlaybackRapidSwitchMaximumMilliseconds");
+        StringAssert.Contains(packageSmoke, "PlaybackSurfaceBoundsVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackWindowResizeVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackWindowResizeCount");
+        StringAssert.Contains(packageSmoke, "PlaybackWindowMinimizeVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackWindowRestoreVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackWindowStatePreserved");
         StringAssert.Contains(packageSmoke, "PlaybackActiveCloseVerified");
         StringAssert.Contains(packageSmoke, "$switchOrdinal -le 25");
         StringAssert.Contains(packageSmoke, "$playbackRapidSwitchP95Milliseconds -gt 3000.0");
         StringAssert.Contains(packageSmoke, "Wait-PackagedPlaybackSelection");
+        StringAssert.Contains(packageSmoke, "Test-AutomationElementContainsExactText");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedPlaybackSurfaceBounds");
+        StringAssert.Contains(packageSmoke, "-PreviousWidth $playbackSurfaceBounds.Width");
+        StringAssert.Contains(packageSmoke, "ResizeWindow(");
+        StringAssert.Contains(packageSmoke, "MinimizeWindow($WindowHandle)");
+        StringAssert.Contains(packageSmoke, "RestoreWindow($WindowHandle)");
+        StringAssert.Contains(packageSmoke, "$playbackWindowResizeCount -ne 2");
+        Assert.IsTrue(
+            Regex.Count(
+                packageSmoke,
+                @"AutomationElement\]\:\:FromHandle\(\$playbackWindowHandle\)",
+                RegexOptions.CultureInvariant) >= 2,
+            "The signed-package smoke must reacquire UI Automation after window restore.");
+        int rapidSwitchIndex = packageSmoke.IndexOf(
+            "$playbackRapidSwitchVerified = $playbackRapidSwitchCount -eq 25",
+            StringComparison.Ordinal);
+        int windowLifecycleIndex = packageSmoke.IndexOf(
+            "Invoke-PackagedWindowMinimize",
+            rapidSwitchIndex,
+            StringComparison.Ordinal);
+        int playbackStopIndex = packageSmoke.IndexOf(
+            "-ExpectedStatus \"Playback stopped.\"",
+            windowLifecycleIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            rapidSwitchIndex >= 0 &&
+            windowLifecycleIndex > rapidSwitchIndex &&
+            playbackStopIndex > windowLifecycleIndex,
+            "Window lifecycle verification must run while rapid-switch playback remains active.");
         StringAssert.Contains(packageSmoke, "$launchedProcess.CloseMainWindow()");
         StringAssert.Contains(playbackHarness, "PlaybackChannelAName");
         StringAssert.Contains(playbackHarness, "PlaybackChannelBName");
