@@ -658,6 +658,19 @@ $playbackWindowResizeCount = 0
 $playbackWindowMinimizeVerified = $false
 $playbackWindowRestoreVerified = $false
 $playbackWindowStatePreserved = $false
+$playbackResourceSnapshotVerified = $false
+$playbackBaselinePrivateBytes = 0L
+$playbackFinalPrivateBytes = 0L
+$playbackPrivateBytesDelta = 0L
+$playbackBaselineWorkingSetBytes = 0L
+$playbackFinalWorkingSetBytes = 0L
+$playbackWorkingSetBytesDelta = 0L
+$playbackBaselineHandleCount = 0
+$playbackFinalHandleCount = 0
+$playbackHandleCountDelta = 0
+$playbackBaselineThreadCount = 0
+$playbackFinalThreadCount = 0
+$playbackThreadCountDelta = 0
 $playbackActiveCloseVerified = $false
 $playbackUiRequestCount = 0
 $playbackUiCompletedResponseCount = 0
@@ -1548,6 +1561,27 @@ function Assert-PackagedProcessAlive {
     }
 }
 
+function Get-PackagedProcessResourceSnapshot {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process
+    )
+
+    Assert-PackagedProcessAlive -Process $Process
+    try {
+        $Process.Refresh()
+        return [pscustomobject][ordered]@{
+            PrivateBytes = [long]$Process.PrivateMemorySize64
+            WorkingSetBytes = [long]$Process.WorkingSet64
+            HandleCount = [int]$Process.HandleCount
+            ThreadCount = [int]$Process.Threads.Count
+        }
+    }
+    catch {
+        throw "The packaged playback process resource snapshot is unavailable."
+    }
+}
+
 function Wait-PackagedPlaybackSurfaceBounds {
     param(
         [Parameter(Mandatory)]
@@ -1614,11 +1648,26 @@ function Set-PackagedWindowSize {
     )
 
     Assert-PackagedProcessAlive -Process $Process
+    [IptvSuite.PackageSmoke.WindowInspector]::RestoreWindow($WindowHandle)
+    $restoreDeadline = (Get-Date).AddSeconds(5)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        if (-not [IptvSuite.PackageSmoke.WindowInspector]::IsWindowMinimized($WindowHandle)) {
+            break
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $restoreDeadline)
+    if ([IptvSuite.PackageSmoke.WindowInspector]::IsWindowMinimized($WindowHandle)) {
+        throw "The packaged playback window did not restore before resize."
+    }
+
     [IptvSuite.PackageSmoke.WindowInspector]::ResizeWindow(
         $WindowHandle,
         $Width,
         $Height)
     $deadline = (Get-Date).AddSeconds(5)
+    $bounds = $null
     do {
         Assert-PackagedProcessAlive -Process $Process
         $bounds = [IptvSuite.PackageSmoke.WindowInspector]::GetWindowBounds($WindowHandle)
@@ -1629,7 +1678,13 @@ function Set-PackagedWindowSize {
         Start-Sleep -Milliseconds 50
     } while ((Get-Date) -lt $deadline)
 
-    throw "The packaged playback window did not reach the requested bounded size."
+    $observedSize = if ($null -eq $bounds) {
+        "unavailable"
+    }
+    else {
+        "$($bounds.Width)x$($bounds.Height)"
+    }
+    throw "The packaged playback window did not reach requested size $($Width)x$Height (observed $observedSize)."
 }
 
 function Invoke-PackagedWindowMinimize {
@@ -2879,6 +2934,8 @@ try {
         -StatusElement $playbackStatusElement `
         -ExpectedStatus "Channel is playing."
 
+    $playbackResourceBaseline =
+        Get-PackagedProcessResourceSnapshot -Process $launchedProcess
     $rapidSwitchSamples = [System.Collections.Generic.List[double]]::new(25)
     for ($switchOrdinal = 1; $switchOrdinal -le 25; $switchOrdinal++) {
         $targetChannelItem = if (($switchOrdinal % 2) -eq 1) {
@@ -3014,6 +3071,25 @@ try {
         -Process $launchedProcess `
         -Element $playbackCurrentChannelElement `
         -ExpectedName "No channel selected."
+    $playbackResourceFinal =
+        Get-PackagedProcessResourceSnapshot -Process $launchedProcess
+    $playbackBaselinePrivateBytes = $playbackResourceBaseline.PrivateBytes
+    $playbackFinalPrivateBytes = $playbackResourceFinal.PrivateBytes
+    $playbackPrivateBytesDelta =
+        $playbackFinalPrivateBytes - $playbackBaselinePrivateBytes
+    $playbackBaselineWorkingSetBytes = $playbackResourceBaseline.WorkingSetBytes
+    $playbackFinalWorkingSetBytes = $playbackResourceFinal.WorkingSetBytes
+    $playbackWorkingSetBytesDelta =
+        $playbackFinalWorkingSetBytes - $playbackBaselineWorkingSetBytes
+    $playbackBaselineHandleCount = $playbackResourceBaseline.HandleCount
+    $playbackFinalHandleCount = $playbackResourceFinal.HandleCount
+    $playbackHandleCountDelta =
+        $playbackFinalHandleCount - $playbackBaselineHandleCount
+    $playbackBaselineThreadCount = $playbackResourceBaseline.ThreadCount
+    $playbackFinalThreadCount = $playbackResourceFinal.ThreadCount
+    $playbackThreadCountDelta =
+        $playbackFinalThreadCount - $playbackBaselineThreadCount
+    $playbackResourceSnapshotVerified = $true
 
     Invoke-PackagedPlaybackChannelItem `
         -Process $launchedProcess `
@@ -3177,6 +3253,19 @@ try {
         PlaybackWindowMinimizeVerified = $playbackWindowMinimizeVerified
         PlaybackWindowRestoreVerified = $playbackWindowRestoreVerified
         PlaybackWindowStatePreserved = $playbackWindowStatePreserved
+        PlaybackResourceSnapshotVerified = $playbackResourceSnapshotVerified
+        PlaybackBaselinePrivateBytes = $playbackBaselinePrivateBytes
+        PlaybackFinalPrivateBytes = $playbackFinalPrivateBytes
+        PlaybackPrivateBytesDelta = $playbackPrivateBytesDelta
+        PlaybackBaselineWorkingSetBytes = $playbackBaselineWorkingSetBytes
+        PlaybackFinalWorkingSetBytes = $playbackFinalWorkingSetBytes
+        PlaybackWorkingSetBytesDelta = $playbackWorkingSetBytesDelta
+        PlaybackBaselineHandleCount = $playbackBaselineHandleCount
+        PlaybackFinalHandleCount = $playbackFinalHandleCount
+        PlaybackHandleCountDelta = $playbackHandleCountDelta
+        PlaybackBaselineThreadCount = $playbackBaselineThreadCount
+        PlaybackFinalThreadCount = $playbackFinalThreadCount
+        PlaybackThreadCountDelta = $playbackThreadCountDelta
         PlaybackActiveCloseVerified = $playbackActiveCloseVerified
         PlaybackUiRequestCount = $playbackUiRequestCount
         PlaybackUiCompletedResponseCount = $playbackUiCompletedResponseCount

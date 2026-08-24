@@ -4382,6 +4382,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "PlaybackWindowMinimizeVerified");
         StringAssert.Contains(packageSmoke, "PlaybackWindowRestoreVerified");
         StringAssert.Contains(packageSmoke, "PlaybackWindowStatePreserved");
+        StringAssert.Contains(packageSmoke, "PlaybackResourceSnapshotVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackPrivateBytesDelta");
+        StringAssert.Contains(packageSmoke, "PlaybackWorkingSetBytesDelta");
+        StringAssert.Contains(packageSmoke, "PlaybackHandleCountDelta");
+        StringAssert.Contains(packageSmoke, "PlaybackThreadCountDelta");
         StringAssert.Contains(packageSmoke, "PlaybackActiveCloseVerified");
         StringAssert.Contains(packageSmoke, "$switchOrdinal -le 25");
         StringAssert.Contains(packageSmoke, "$playbackRapidSwitchP95Milliseconds -gt 3000.0");
