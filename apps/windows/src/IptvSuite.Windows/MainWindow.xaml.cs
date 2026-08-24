@@ -14,9 +14,13 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly MainPage _mainPage;
     private readonly PlaybackSessionCoordinator _playback;
+    private readonly SourceDeletionCoordinator _sourceDeletion;
     private readonly PlaybackPowerLifecycleCoordinator _powerLifecycle;
     private Task? _disposeTask;
-    private bool _closeStarted;
+    private Task<SourceDeletionReconciliationResult>? _sourceDeletionStartupTask;
+    private SourceDeletionReconciliationResult? _initialSourceDeletionReconciliation;
+    private bool _catalogInitialized;
+    private volatile bool _closeStarted;
     private int _powerLifecycleSubscribed;
 
     internal MainWindow(
@@ -39,6 +43,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         _dispatcherQueue = mainPage.DispatcherQueue ??
             throw new InvalidOperationException("The application dispatcher is unavailable.");
         IAsyncDisposable? rollbackOwner = null;
+        SourceDeletionCoordinator? rollbackSourceDeletion = null;
         try
         {
             var resolver = new SqlitePlaybackSourceResolver(
@@ -50,11 +55,14 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             rollbackOwner = engine;
             var playback = new PlaybackSessionCoordinator(engine);
             rollbackOwner = playback;
-            _mainPage.Initialize(
-                _catalogServices.Browser,
-                _catalogServices.LogoCache,
+            var sourceDeletion = new SourceDeletionCoordinator(
+                new SqliteSourceDeletionLifecycle(
+                    _catalogServices.DatabasePath,
+                    secretStore),
                 playback);
+            rollbackSourceDeletion = sourceDeletion;
             _playback = playback;
+            _sourceDeletion = sourceDeletion;
             _mainPage.FullscreenToggleRequested += MainPage_FullscreenToggleRequested;
             AppWindow.Changed += AppWindow_Changed;
             AppWindow.Closing += AppWindow_Closing;
@@ -63,6 +71,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             _powerLifecycle = new PlaybackPowerLifecycleCoordinator(playback.StopAsync);
             PowerManager.SystemSuspendStatusChanged += PowerManager_SystemSuspendStatusChanged;
             _powerLifecycleSubscribed = 1;
+            rollbackSourceDeletion = null;
             rollbackOwner = null;
         }
         catch
@@ -78,13 +87,98 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             {
             }
 
-            if (rollbackOwner is not null)
+            if (rollbackSourceDeletion is not null)
+            {
+                BeginRollback(rollbackSourceDeletion, rollbackOwner);
+            }
+            else if (rollbackOwner is not null)
             {
                 BeginRollback(rollbackOwner);
             }
 
             throw;
         }
+    }
+
+    internal SourceDeletionReconciliationResult? InitialSourceDeletionReconciliation
+    {
+        get
+        {
+            lock (_lifetimeSync)
+            {
+                return _initialSourceDeletionReconciliation;
+            }
+        }
+    }
+
+    internal async Task InitializeAsync()
+    {
+        await ReconcileThenLoadAsync(retryCompleted: false);
+    }
+
+    internal Task<SourceDeletionReconciliationResult> RetryPendingSourceCleanupAsync() =>
+        ReconcileThenLoadAsync(retryCompleted: true);
+
+    private Task<SourceDeletionReconciliationResult> ReconcileThenLoadAsync(
+        bool retryCompleted)
+    {
+        lock (_lifetimeSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if (_catalogInitialized && _initialSourceDeletionReconciliation is not null)
+            {
+                return Task.FromResult(_initialSourceDeletionReconciliation);
+            }
+
+            if (_sourceDeletionStartupTask is null ||
+                (retryCompleted && _sourceDeletionStartupTask.IsCompleted))
+            {
+                _sourceDeletionStartupTask = ReconcileThenLoadCoreAsync();
+            }
+
+            return _sourceDeletionStartupTask;
+        }
+    }
+
+    private async Task<SourceDeletionReconciliationResult> ReconcileThenLoadCoreAsync()
+    {
+        SourceDeletionReconciliationResult reconciliation =
+            await _sourceDeletion.ReconcilePendingAsync();
+        lock (_lifetimeSync)
+        {
+            _initialSourceDeletionReconciliation = reconciliation;
+        }
+
+        if (reconciliation.IsSuccess)
+        {
+            bool catalogLoaded = false;
+            await RunOnDispatcherAsync(async () =>
+            {
+                if (_closeStarted)
+                {
+                    return;
+                }
+
+                await _mainPage.InitializeAsync(
+                    _catalogServices.Browser,
+                    _catalogServices.LogoCache,
+                    _playback);
+                catalogLoaded = true;
+            });
+            if (catalogLoaded)
+            {
+                lock (_lifetimeSync)
+                {
+                    _catalogInitialized = true;
+                }
+            }
+        }
+        else
+        {
+            await RunOnDispatcherAsync(_mainPage.ReportPendingSourceCleanup);
+        }
+
+        return reconciliation;
     }
 
     private async void PowerManager_SystemSuspendStatusChanged(object? sender, object args)
@@ -169,6 +263,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        _closeStarted = true;
         DetachPowerLifecycleEvent();
         TaskCompletionSource? completion = null;
         Task disposeTask;
@@ -206,14 +301,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
             try
             {
-                try
-                {
-                    await _powerLifecycle.DisposeAsync();
-                }
-                finally
-                {
-                    await _playback.DisposeAsync();
-                }
+                await _mainPage.WaitForPendingOperationsAsync();
             }
             catch (Exception exception) when (IsRecoverable(exception))
             {
@@ -222,7 +310,23 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
             try
             {
-                await _mainPage.WaitForPendingOperationsAsync();
+                await _sourceDeletion.DisposeAsync();
+            }
+            catch (Exception exception) when (IsRecoverable(exception))
+            {
+                cleanupFailed = true;
+            }
+
+            try
+            {
+                try
+                {
+                    await _powerLifecycle.DisposeAsync();
+                }
+                finally
+                {
+                    await _playback.DisposeAsync();
+                }
             }
             catch (Exception exception) when (IsRecoverable(exception))
             {
@@ -299,6 +403,36 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         await completion.Task.ConfigureAwait(false);
     }
 
+    private async Task RunOnDispatcherAsync(Func<Task> operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        if (_dispatcherQueue.HasThreadAccess)
+        {
+            await operation();
+            return;
+        }
+
+        var completion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_dispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    await operation();
+                    completion.TrySetResult();
+                }
+                catch (Exception exception)
+                {
+                    completion.TrySetException(exception);
+                }
+            }))
+        {
+            throw new InvalidOperationException("The application dispatcher is unavailable.");
+        }
+
+        await completion.Task.ConfigureAwait(false);
+    }
+
     private static void BeginRollback(IAsyncDisposable owner)
     {
         try
@@ -314,11 +448,44 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
+    private static void BeginRollback(
+        IAsyncDisposable first,
+        IAsyncDisposable? second)
+    {
+        _ = ObserveRollbackAsync(first, second);
+    }
+
     private static async Task ObserveRollbackAsync(ValueTask rollback)
     {
         try
         {
             await rollback.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+        }
+    }
+
+    private static async Task ObserveRollbackAsync(
+        IAsyncDisposable first,
+        IAsyncDisposable? second)
+    {
+        try
+        {
+            await first.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+        }
+
+        if (second is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await second.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception exception) when (IsRecoverable(exception))
         {

@@ -34,6 +34,7 @@ public sealed partial class MainPage : Page, IDisposable
     private int _offset;
     private bool _updatingSelectors;
     private bool _disposed;
+    private bool _catalogAdmissionReady;
     private bool _movingTabFocus;
     private bool _isFullscreen;
     private bool _fullscreenTransitionPending;
@@ -156,11 +157,12 @@ public sealed partial class MainPage : Page, IDisposable
         DispatcherQueue.TryEnqueue(RestoreFocusAfterFullscreen);
     }
 
-    internal void Initialize(
+    internal async Task InitializeAsync(
         ICatalogBrowser catalogBrowser,
         ChannelLogoCache logoCache,
         PlaybackSessionCoordinator playback)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(catalogBrowser);
         ArgumentNullException.ThrowIfNull(logoCache);
         ArgumentNullException.ThrowIfNull(playback);
@@ -172,9 +174,26 @@ public sealed partial class MainPage : Page, IDisposable
         _coordinator = new CatalogBrowseCoordinator(catalogBrowser);
         _logoCache = logoCache;
         _playback = playback;
+        _catalogAdmissionReady = true;
         _playback.StateChanged += Playback_StateChanged;
         ApplyPlaybackState(_playback.Current);
-        _ = LoadSourcesAsync();
+        await LoadSourcesAsync();
+    }
+
+    internal void ReportPendingSourceCleanup()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _catalogAdmissionReady = false;
+        SourceSelector.IsEnabled = false;
+        CategorySelector.IsEnabled = false;
+        SearchBox.IsEnabled = false;
+        PreviousButton.IsEnabled = false;
+        NextButton.IsEnabled = false;
+        StatusText.Text = "Pending source cleanup must finish before the catalog can be opened.";
     }
 
     private async Task LoadSourcesAsync()
@@ -253,15 +272,23 @@ public sealed partial class MainPage : Page, IDisposable
         LoadingIndicator.IsActive = true;
         SourceSelector.IsEnabled = false;
         CategorySelector.IsEnabled = false;
+        SearchBox.IsEnabled = false;
         return generation;
     }
 
     private void EndLoading(long generation)
     {
-        if (generation != Volatile.Read(ref _loadingGeneration)) return;
+        if (generation != Volatile.Read(ref _loadingGeneration) ||
+            _disposed ||
+            !_catalogAdmissionReady)
+        {
+            return;
+        }
+
         LoadingIndicator.IsActive = false;
         SourceSelector.IsEnabled = true;
         CategorySelector.IsEnabled = true;
+        SearchBox.IsEnabled = true;
     }
 
     private void UpdatePaging(int totalCount)
@@ -702,6 +729,7 @@ public sealed partial class MainPage : Page, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _catalogAdmissionReady = false;
         if (_playback is not null)
         {
             _playback.StateChanged -= Playback_StateChanged;

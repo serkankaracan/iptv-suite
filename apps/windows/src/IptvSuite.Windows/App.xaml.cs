@@ -13,7 +13,7 @@ public partial class App : Microsoft.UI.Xaml.Application
         InitializeComponent();
     }
 
-    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
         SecretStoreInitializationResult secretStoreInitialization =
             WindowsSecretStoreFactory.Create();
@@ -21,18 +21,34 @@ public partial class App : Microsoft.UI.Xaml.Application
             throw new InvalidOperationException("Protected storage is unavailable.");
         _secretStore = secretStore;
         WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create();
+        MainWindow? window = null;
         try
         {
-            _window = new MainWindow(catalogServices, secretStore);
+            window = new MainWindow(catalogServices, secretStore);
+            _window = window;
+            await window.InitializeAsync();
         }
         catch
         {
-            try
+            if (window is not null)
             {
-                catalogServices.Dispose();
+                try
+                {
+                    await window.DisposeAsync();
+                }
+                catch (Exception exception) when (IsRecoverable(exception))
+                {
+                }
             }
-            catch (Exception exception) when (IsRecoverable(exception))
+            else
             {
+                try
+                {
+                    catalogServices.Dispose();
+                }
+                catch (Exception exception) when (IsRecoverable(exception))
+                {
+                }
             }
 
             throw;

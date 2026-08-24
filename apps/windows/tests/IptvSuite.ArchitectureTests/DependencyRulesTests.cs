@@ -582,7 +582,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             app,
             "WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create();");
-        StringAssert.Contains(app, "_window = new MainWindow(catalogServices, secretStore);");
+        StringAssert.Contains(app, "window = new MainWindow(catalogServices, secretStore);");
+        StringAssert.Contains(app, "_window = window;");
         StringAssert.Contains(app, "catalogServices.Dispose();");
         Assert.AreEqual(
             1,
@@ -4016,6 +4017,86 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M12StartupReconcilesPendingDeletionBeforeCatalogAdmission()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string app = File.ReadAllText(Path.Combine(windowsRoot, "App.xaml.cs"));
+        string window = File.ReadAllText(Path.Combine(windowsRoot, "MainWindow.xaml.cs"));
+        string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+        string pageMarkup = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
+
+        int initializeLaunch = app.IndexOf(
+            "await window.InitializeAsync();",
+            StringComparison.Ordinal);
+        int activateLaunch = app.IndexOf("_window.Activate();", StringComparison.Ordinal);
+        Assert.IsTrue(initializeLaunch >= 0 && activateLaunch > initializeLaunch);
+
+        StringAssert.Contains(window, "new SourceDeletionCoordinator(");
+        StringAssert.Contains(window, "new SqliteSourceDeletionLifecycle(");
+        StringAssert.Contains(
+            window,
+            "internal SourceDeletionReconciliationResult? InitialSourceDeletionReconciliation");
+        StringAssert.Contains(
+            window,
+            "private Task<SourceDeletionReconciliationResult>? _sourceDeletionStartupTask;");
+        StringAssert.Contains(
+            window,
+            "internal Task<SourceDeletionReconciliationResult> RetryPendingSourceCleanupAsync()");
+        int initializeStart = window.IndexOf(
+            "private async Task<SourceDeletionReconciliationResult> ReconcileThenLoadCoreAsync()",
+            StringComparison.Ordinal);
+        int powerHandlerStart = window.IndexOf(
+            "private async void PowerManager_SystemSuspendStatusChanged",
+            StringComparison.Ordinal);
+        Assert.IsTrue(initializeStart >= 0 && powerHandlerStart > initializeStart);
+        string startup = window[initializeStart..powerHandlerStart];
+        int reconcile = startup.IndexOf(
+            "await _sourceDeletion.ReconcilePendingAsync();",
+            StringComparison.Ordinal);
+        int catalogInitialize = startup.IndexOf("_mainPage.InitializeAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(reconcile >= 0 && catalogInitialize > reconcile);
+        StringAssert.Contains(startup, "if (reconciliation.IsSuccess)");
+        StringAssert.Contains(startup, "await RunOnDispatcherAsync(_mainPage.ReportPendingSourceCleanup);");
+        Assert.AreEqual(
+            1,
+            Regex.Count(window, @"_mainPage\.InitializeAsync\(", RegexOptions.CultureInvariant),
+            "Catalog loading must have only the post-reconciliation admission path.");
+
+        StringAssert.Contains(page, "internal void ReportPendingSourceCleanup()");
+        StringAssert.Contains(page, "internal async Task InitializeAsync(");
+        StringAssert.Contains(page, "await LoadSourcesAsync();");
+        Assert.IsFalse(page.Contains("_ = LoadSourcesAsync();", StringComparison.Ordinal));
+        StringAssert.Contains(page, "_catalogAdmissionReady = true;");
+        StringAssert.Contains(page, "!_catalogAdmissionReady");
+        StringAssert.Contains(page, "SourceSelector.IsEnabled = false;");
+        StringAssert.Contains(page, "CategorySelector.IsEnabled = false;");
+        StringAssert.Contains(page, "SearchBox.IsEnabled = false;");
+        StringAssert.Contains(
+            page,
+            "Pending source cleanup must finish before the catalog can be opened.");
+        StringAssert.Contains(
+            pageMarkup,
+            "x:Name=\"SourceSelector\" TabIndex=\"0\" IsTabStop=\"True\" IsEnabled=\"False\"");
+        StringAssert.Contains(
+            pageMarkup,
+            "x:Name=\"CategorySelector\" Grid.Column=\"1\" TabIndex=\"1\" IsTabStop=\"True\" IsEnabled=\"False\"");
+        StringAssert.Contains(
+            pageMarkup,
+            "x:Name=\"SearchBox\" Grid.Column=\"2\" TabIndex=\"2\" IsTabStop=\"True\" IsEnabled=\"False\"");
+        StringAssert.Contains(pageMarkup, "x:Name=\"PreviousButton\" IsEnabled=\"False\"");
+        StringAssert.Contains(pageMarkup, "x:Name=\"NextButton\" IsEnabled=\"False\"");
+        Assert.IsFalse(
+            startup.Contains("FirstError", StringComparison.Ordinal) ||
+            startup.Contains("SourceIds", StringComparison.Ordinal),
+            "Startup composition must not surface source identity or storage detail.");
+    }
+
+    [TestMethod]
     public void M11PlaybackCoreIsEngineNeutralSessionBoundAndLocatorFree()
     {
         string applicationRoot = Path.Combine(
@@ -4250,6 +4331,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "AppWindow.Closing -= AppWindow_Closing;");
         StringAssert.Contains(window, "await RunOnDispatcherAsync(_mainPage.Dispose);");
         StringAssert.Contains(window, "await _mainPage.WaitForPendingOperationsAsync();");
+        StringAssert.Contains(window, "await _sourceDeletion.DisposeAsync();");
         StringAssert.Contains(window, "BeginRollback(rollbackOwner);");
         StringAssert.Contains(catalogFactory, "internal string DatabasePath { get; } = databasePath;");
 
@@ -4267,20 +4349,23 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(close, "_catalogServices.Dispose();");
         Assert.IsTrue(
             close.IndexOf("await RunOnDispatcherAsync(_mainPage.Dispose);", StringComparison.Ordinal) <
-            close.IndexOf("await _playback.DisposeAsync();", StringComparison.Ordinal));
-        Assert.IsTrue(
-            close.IndexOf("await _playback.DisposeAsync();", StringComparison.Ordinal) <
             close.IndexOf("await _mainPage.WaitForPendingOperationsAsync();", StringComparison.Ordinal));
         Assert.IsTrue(
             close.IndexOf("await _mainPage.WaitForPendingOperationsAsync();", StringComparison.Ordinal) <
+            close.IndexOf("await _sourceDeletion.DisposeAsync();", StringComparison.Ordinal));
+        Assert.IsTrue(
+            close.IndexOf("await _sourceDeletion.DisposeAsync();", StringComparison.Ordinal) <
+            close.IndexOf("await _playback.DisposeAsync();", StringComparison.Ordinal));
+        Assert.IsTrue(
+            close.IndexOf("await _playback.DisposeAsync();", StringComparison.Ordinal) <
             close.IndexOf("_catalogServices.Dispose();", StringComparison.Ordinal));
         Assert.AreEqual(
-            4,
+            5,
             Regex.Count(
                 close,
                 @"catch \(Exception exception\) when \(IsRecoverable\(exception\)\)",
                 RegexOptions.CultureInvariant),
-            "Page, playback, operation drain, and catalog cleanup must fail independently.");
+            "Page, operation drain, deletion, playback, and catalog cleanup must fail independently.");
         Assert.IsFalse(
             Regex.IsMatch(window, @"\.Wait\s*\(|\.Result\b|GetAwaiter\s*\(\)\.GetResult"),
             "Window close must not block the UI thread while native playback is released.");
