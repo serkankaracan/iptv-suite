@@ -4766,8 +4766,17 @@ public sealed class DependencyRulesTests
             "shell: powershell\n        run: >-\n          .\\eng\\Invoke-WindowsNativePlaybackSmoke.ps1\n          -Configuration Release");
         StringAssert.Contains(
             workflow,
-            "  native-playback:\n    name: Native Tier A packaged playback smoke\n" +
-            "    needs:\n      - quality\n      - package-smoke\n      - dpapi-user-boundary\n");
+            "  native-playback:\n    name: Native Tier A packaged playback smoke (Windows Client)\n" +
+            "    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_native_client }}\n" +
+            "    needs:\n      - quality\n      - package-smoke\n      - dpapi-user-boundary\n" +
+            "    runs-on:\n      - self-hosted\n      - Windows\n      - X64\n" +
+            "      - iptv-windows-client\n");
+        StringAssert.Contains(workflow, "Verify x64 Windows Client runner");
+        StringAssert.Contains(workflow, "$installationType -cne \"Client\"");
+        StringAssert.Contains(workflow, "$env:PROCESSOR_ARCHITECTURE -cne \"AMD64\"");
+        StringAssert.Contains(
+            workflow,
+            "run_native_client:\n        description: Run the native Tier A smoke on an approved x64 Windows Client runner");
         StringAssert.Contains(workflow, "name: windows-native-playback-evidence");
         StringAssert.Contains(workflow, ".artifacts/native-playback-smoke/last-success.json");
         StringAssert.Contains(workflow, "timeout-minutes: 30");
@@ -4787,6 +4796,10 @@ public sealed class DependencyRulesTests
             "scan-artifacts .\\.artifacts\\native-playback-smoke M10 NATIVE_PLAYBACK_EVIDENCE");
         StringAssert.Contains(workflow, "name: Required Windows gate");
         StringAssert.Contains(workflow, "if: ${{ always() }}");
+        StringAssert.Contains(
+            workflow,
+            "NATIVE_PLAYBACK_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.run_native_client }}");
+        StringAssert.Contains(workflow, "test \"$NATIVE_PLAYBACK_RESULT\" = \"skipped\"");
         StringAssert.Contains(workflow, "scan-artifacts .\\.artifacts\\msix-smoke CI PACKAGE_EVIDENCE");
         StringAssert.Contains(workflow, "fixtures/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt");
         Assert.IsFalse(workflow.Contains("test-results/**/*.trx", StringComparison.Ordinal));

@@ -104,6 +104,8 @@ Hosted `windows-quality.yml` bütün pull request, `merge_group`, `main` push ve
 
 2026-08-21 güncellemesi: özel `windows-2025-vs2026` label'ında üç ardışık iş sıfır step ve `runner_id=0` ile tahsis edilemedi. Workflow bu nedenle, 2026-06 sonrasında aynı Windows Server 2025 + VS2026 image ailesine yönlenen GA `windows-2025` label'ına taşındı [S114]. Exact .NET SDK setup ve runtime verification, dört required job, fail-closed coordinator ve bütün security/package gate'leri değişmeden kalır.
 
+2026-08-24 native-runner düzeltmesi: Standart GitHub-hosted x64 Windows label'ları Windows Server'dır; mevcut Windows Client label'ı ARM64 olduğundan x64 Client-only Media Foundation kabulü standart hosted runner'da temsil edilemez [S114]. Run `32752547781`de package job'u production MSIX içindeki sentetik HLS `play → pause → resume → stop` zincirini geçerken, sonradan tek başına çalışan M10 spike job'u aynı committe `InstallationType=Server` üzerinde transport/source-open tamamlandıktan sonra `MediaOpenTimeout` vermiştir. Bu nedenle native M10 smoke kaldırılmadan yalnız explicit manual dispatch + `self-hosted/Windows/X64/iptv-windows-client` label'larına bağlanır ve registry/architecture preflight yanlış runner'ı fail-closed reddeder. Normal push/PR required gate'i quality, production package playback ve DPAPI işlerini zorunlu tutar; native job'un yalnız talep edilmediğinde `skipped`, talep edildiğinde ise `success` olmasını exact kontrol eder. Startup/resource/security eşikleri ve script değiştirilmemiştir.
+
 ## 3. Feature test planı
 
 ### 3.1 Validation ve endpoint construction

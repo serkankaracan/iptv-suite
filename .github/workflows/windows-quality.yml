@@ -7,6 +7,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      run_native_client:
+        description: Run the native Tier A smoke on an approved x64 Windows Client runner
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -150,12 +156,17 @@ jobs:
 
 
   native-playback:
-    name: Native Tier A packaged playback smoke
+    name: Native Tier A packaged playback smoke (Windows Client)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_native_client }}
     needs:
       - quality
       - package-smoke
       - dpapi-user-boundary
-    runs-on: windows-2025
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+      - iptv-windows-client
     timeout-minutes: 30
 
     steps:
@@ -163,6 +174,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Verify x64 Windows Client runner
+        shell: powershell
+        run: |
+          $installationType = (Get-ItemProperty `
+            -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" `
+            -Name InstallationType).InstallationType
+          if ($installationType -cne "Client" -or
+              -not [Environment]::Is64BitOperatingSystem -or
+              $env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
+            throw "Native Tier A smoke requires an x64 Windows Client runner."
+          }
 
       - name: Install exact .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -298,15 +321,20 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Require every Windows job to pass
+      - name: Require every applicable Windows job to pass
         shell: bash
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
           PACKAGE_SMOKE_RESULT: ${{ needs.package-smoke.result }}
           NATIVE_PLAYBACK_RESULT: ${{ needs.native-playback.result }}
+          NATIVE_PLAYBACK_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.run_native_client }}
           DPAPI_USER_BOUNDARY_RESULT: ${{ needs.dpapi-user-boundary.result }}
         run: |
           test "$QUALITY_RESULT" = "success"
           test "$PACKAGE_SMOKE_RESULT" = "success"
-          test "$NATIVE_PLAYBACK_RESULT" = "success"
           test "$DPAPI_USER_BOUNDARY_RESULT" = "success"
+          if [ "$NATIVE_PLAYBACK_REQUESTED" = "true" ]; then
+            test "$NATIVE_PLAYBACK_RESULT" = "success"
+          else
+            test "$NATIVE_PLAYBACK_RESULT" = "skipped"
+          fi
