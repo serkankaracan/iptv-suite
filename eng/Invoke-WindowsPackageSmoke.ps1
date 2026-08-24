@@ -2213,19 +2213,20 @@ try {
 
     $expectedPlaybackCatalogStatus =
         "Showing 1$([char]0x2013)1 of 1 channels."
-    $catalogStatusElement = Get-AutomationElementById `
-        $playbackAutomationRoot `
-        "CatalogStatusText"
-    if ($null -eq $catalogStatusElement) {
-        throw "The packaged playback catalog status automation element is missing."
-    }
+    $catalogStatusElement = $null
     $playbackCatalogDeadline = (Get-Date).AddSeconds(15)
     $playbackCatalogReady = $false
     do {
         Assert-PackagedProcessAlive -Process $launchedProcess
+        if ($null -eq $catalogStatusElement) {
+            $catalogStatusElement = Get-AutomationElementById `
+                $playbackAutomationRoot `
+                "CatalogStatusText"
+        }
         $selectedSources = @($sourceSelectionPattern.Current.GetSelection())
         if ($selectedSources.Count -eq 1 -and
             $selectedSources[0].Current.Name -ceq $expectedPlaybackSourceName -and
+            $null -ne $catalogStatusElement -and
             $catalogStatusElement.Current.Name -ceq $expectedPlaybackCatalogStatus) {
             $playbackCatalogReady = $true
             break
@@ -2234,6 +2235,9 @@ try {
         Start-Sleep -Milliseconds 100
     } while ((Get-Date) -lt $playbackCatalogDeadline)
     if (-not $playbackCatalogReady) {
+        if ($null -eq $catalogStatusElement) {
+            throw "The packaged playback catalog status automation element is missing."
+        }
         throw "The packaged playback catalog did not expose the seeded acceptance channel."
     }
 

@@ -4363,6 +4363,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "-ExpectedStatus \"Playback stopped.\"");
         StringAssert.Contains(packageSmoke, "[int]$resultTicket.FailureCount -ne 0");
         StringAssert.Contains(packageSmoke, "$sourceSelectionPattern.Current.GetSelection()");
+        StringAssert.Contains(packageSmoke, "$catalogStatusElement = $null");
+        StringAssert.Contains(packageSmoke, "$null -ne $catalogStatusElement -and");
         Assert.IsFalse(packageSmoke.Contains(".GetCurrentSelection()", StringComparison.Ordinal));
         Assert.IsFalse(packageSmoke.Contains("SkipCertificateCheck", StringComparison.Ordinal));
         Assert.IsFalse(packageSmoke.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase));
