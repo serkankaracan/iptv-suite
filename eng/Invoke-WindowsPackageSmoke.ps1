@@ -658,6 +658,7 @@ $playbackWindowResizeCount = 0
 $playbackWindowMinimizeVerified = $false
 $playbackWindowRestoreVerified = $false
 $playbackWindowStatePreserved = $false
+$playbackResourceWarmupVerified = $false
 $playbackResourceSnapshotVerified = $false
 $playbackBaselinePrivateBytes = 0L
 $playbackFinalPrivateBytes = 0L
@@ -2934,6 +2935,37 @@ try {
         -StatusElement $playbackStatusElement `
         -ExpectedStatus "Channel is playing."
 
+    Invoke-PackagedPlaybackChannelItem `
+        -Process $launchedProcess `
+        -ChannelItem $playbackChannelItemB `
+        -WindowHandle $playbackWindowHandle `
+        -ExpectedProcessId ([uint32]$playbackActivationProcessId)
+    Wait-PackagedPlaybackSelection `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelBName
+    Invoke-PackagedPlaybackButton `
+        -Process $launchedProcess `
+        -ButtonElement $stopButtonElement `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Playback stopped."
+    Wait-PackagedAutomationName `
+        -Process $launchedProcess `
+        -Element $playbackCurrentChannelElement `
+        -ExpectedName "No channel selected."
+    Invoke-PackagedPlaybackChannelItem `
+        -Process $launchedProcess `
+        -ChannelItem $playbackChannelItemA `
+        -WindowHandle $playbackWindowHandle `
+        -ExpectedProcessId ([uint32]$playbackActivationProcessId)
+    Wait-PackagedPlaybackSelection `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelAName
+    $playbackResourceWarmupVerified = $true
+
     $playbackResourceBaseline =
         Get-PackagedProcessResourceSnapshot -Process $launchedProcess
     $rapidSwitchSamples = [System.Collections.Generic.List[double]]::new(25)
@@ -3253,6 +3285,7 @@ try {
         PlaybackWindowMinimizeVerified = $playbackWindowMinimizeVerified
         PlaybackWindowRestoreVerified = $playbackWindowRestoreVerified
         PlaybackWindowStatePreserved = $playbackWindowStatePreserved
+        PlaybackResourceWarmupVerified = $playbackResourceWarmupVerified
         PlaybackResourceSnapshotVerified = $playbackResourceSnapshotVerified
         PlaybackBaselinePrivateBytes = $playbackBaselinePrivateBytes
         PlaybackFinalPrivateBytes = $playbackFinalPrivateBytes

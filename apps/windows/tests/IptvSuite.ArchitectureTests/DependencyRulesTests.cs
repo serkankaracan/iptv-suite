@@ -4382,6 +4382,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "PlaybackWindowMinimizeVerified");
         StringAssert.Contains(packageSmoke, "PlaybackWindowRestoreVerified");
         StringAssert.Contains(packageSmoke, "PlaybackWindowStatePreserved");
+        StringAssert.Contains(packageSmoke, "PlaybackResourceWarmupVerified");
         StringAssert.Contains(packageSmoke, "PlaybackResourceSnapshotVerified");
         StringAssert.Contains(packageSmoke, "PlaybackPrivateBytesDelta");
         StringAssert.Contains(packageSmoke, "PlaybackWorkingSetBytesDelta");
@@ -4398,6 +4399,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "MinimizeWindow($WindowHandle)");
         StringAssert.Contains(packageSmoke, "RestoreWindow($WindowHandle)");
         StringAssert.Contains(packageSmoke, "$playbackWindowResizeCount -ne 2");
+        StringAssert.Contains(packageSmoke, "$playbackResourceWarmupVerified = $true");
         Assert.IsTrue(
             Regex.Count(
                 packageSmoke,
