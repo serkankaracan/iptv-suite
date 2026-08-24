@@ -113,9 +113,11 @@ internal static class Program
                 endpoint_host, endpoint_port, configuration_reference, status, active_snapshot_id,
                 created_utc, updated_utc, last_error_code)
             VALUES ($source, $configuration, 1, 'Synthetic 50k source', 'https', 'synthetic.invalid', 443,
-                $reference, 4, $snapshot, $now, $now, NULL);
+                $reference, $ready, $snapshot, $now, $now, NULL);
             """, ("$source", source), ("$configuration", StableId("configuration", 0)),
-            ("$reference", $"secret-ref-v1:{StableId("reference", 0)}"), ("$snapshot", snapshot), ("$now", now));
+            ("$reference", $"secret-ref-v1:{StableId("reference", 0)}"),
+            ("$ready", (int)IptvSuite.Domain.ContentSourceStatus.Ready),
+            ("$snapshot", snapshot), ("$now", now));
         await ExecuteAsync(connection, transaction, """
             INSERT INTO snapshots(snapshot_id, source_id, retrieved_utc, content_hash, http_etag,
                 http_last_modified_utc, parser_version, normalization_version, schema_version,
