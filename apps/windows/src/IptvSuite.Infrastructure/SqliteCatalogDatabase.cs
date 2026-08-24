@@ -5,7 +5,7 @@ namespace IptvSuite.Infrastructure;
 
 internal sealed class SqliteCatalogDatabase
 {
-    internal const int SchemaVersion = 4;
+    internal const int SchemaVersion = 5;
 
     private static readonly string[] LegacyRequiredTables =
     [
@@ -20,10 +20,16 @@ internal sealed class SqliteCatalogDatabase
         "sync_runs",
     ];
 
-    private static readonly string[] RequiredTables =
+    private static readonly string[] VersionFourRequiredTables =
     [
         .. LegacyRequiredTables,
         "source_deletion_tombstones",
+    ];
+
+    private static readonly string[] RequiredTables =
+    [
+        .. VersionFourRequiredTables,
+        "source_deletion_reconciliation_state",
     ];
 
     private static readonly string[] RequiredTriggers =
@@ -88,6 +94,12 @@ internal sealed class SqliteCatalogDatabase
             return;
         }
 
+        if (version == 4)
+        {
+            await MigrateVersionFourAsync(connection, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (version != SchemaVersion)
         {
             throw new InvalidDataException("Catalog schema version is unsupported.");
@@ -144,6 +156,27 @@ internal sealed class SqliteCatalogDatabase
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
         await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
+            .ConfigureAwait(false);
+        await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task MigrateVersionFourAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await ValidateSchemaAsync(
+            connection,
+            VersionFourRequiredTables,
+            RequiredTriggers,
+            cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await CreateSourceDeletionReconciliationStateAsync(
+            connection,
+            transaction,
+            cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
         await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -220,6 +253,12 @@ internal sealed class SqliteCatalogDatabase
         SqliteTransaction transaction,
         CancellationToken cancellationToken) =>
         ExecuteAsync(connection, SourceDeletionBoundarySql, cancellationToken, transaction);
+
+    private static Task CreateSourceDeletionReconciliationStateAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(connection, SourceDeletionReconciliationStateSql, cancellationToken, transaction);
 
     private static async Task<long> ReadSchemaVersionAsync(
         SqliteConnection connection,
@@ -300,6 +339,8 @@ internal sealed class SqliteCatalogDatabase
             protected_delete_completed INTEGER NOT NULL CHECK (protected_delete_completed IN (0, 1)),
             marked_utc TEXT NOT NULL
         ) WITHOUT ROWID, STRICT;
+
+        {{SourceDeletionReconciliationStateSql}}
 
         INSERT INTO source_deletion_tombstones(
             source_id, configuration_id, source_kind, configuration_reference,
@@ -443,6 +484,24 @@ internal sealed class SqliteCatalogDatabase
         BEGIN
             SELECT RAISE(IGNORE);
         END;
+        """;
+
+    private const string SourceDeletionReconciliationStateSql = """
+        CREATE TABLE source_deletion_reconciliation_state (
+            singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+            after_source_id TEXT NULL
+                REFERENCES source_deletion_tombstones(source_id)
+                CHECK (
+                    after_source_id IS NULL
+                    OR (
+                        length(after_source_id) = 32
+                        AND after_source_id = lower(after_source_id)
+                        AND after_source_id NOT GLOB '*[^0-9a-f]*'
+                    )
+                )
+        ) STRICT;
+        INSERT INTO source_deletion_reconciliation_state(singleton, after_source_id)
+        VALUES (1, NULL);
         """;
 
     private const string SchemaSql = """

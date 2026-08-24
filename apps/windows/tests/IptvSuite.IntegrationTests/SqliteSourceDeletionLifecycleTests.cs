@@ -498,6 +498,7 @@ public sealed class SqliteSourceDeletionLifecycleTests
                 DROP TRIGGER tr_sources_reject_tombstoned_insert;
                 DROP TRIGGER tr_sources_reject_tombstoned_update;
                 DROP TRIGGER tr_sources_require_completed_delete;
+                DROP TABLE source_deletion_reconciliation_state;
                 DROP TABLE source_deletion_tombstones;
                 UPDATE sources
                 SET status = $pending, configuration_reference = $malformed
@@ -679,6 +680,213 @@ public sealed class SqliteSourceDeletionLifecycleTests
             ("$source", Id(source.SourceId.Value))));
     }
 
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task PendingDiscoveryReturnsOnlyActionableJournalStatesInStableOrder()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "m12-source-delete-discovery-matrix");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new M4InMemorySecretStore();
+        PersistedSource phaseZeroWithSource =
+            await CreatePersistedRemoteSourceAsync(databasePath, store);
+        PersistedSource phaseZeroWithoutSource =
+            await CreatePersistedRemoteSourceAsync(databasePath, store);
+        PersistedSource phaseOneWithSource =
+            await CreatePersistedRemoteSourceAsync(databasePath, store);
+        PersistedSource phaseOneWithoutSource =
+            await CreatePersistedRemoteSourceAsync(databasePath, store);
+        ISourceDeletionLifecycle lifecycle = CreateLifecycle(databasePath, store);
+        Assert.IsTrue((await lifecycle.MarkPendingAsync(phaseZeroWithSource.SourceId)).IsSuccess);
+        Assert.IsTrue((await lifecycle.MarkPendingAsync(phaseZeroWithoutSource.SourceId)).IsSuccess);
+        Assert.IsTrue((await lifecycle.MarkPendingAsync(phaseOneWithSource.SourceId)).IsSuccess);
+        Assert.IsTrue((await lifecycle.MarkPendingAsync(phaseOneWithoutSource.SourceId)).IsSuccess);
+        AdvancePhaseSynchronously(databasePath, phaseOneWithSource);
+        Assert.IsTrue((await lifecycle.CompletePendingAsync(phaseOneWithoutSource.SourceId)).IsSuccess);
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await using SqliteCommand triggerDefinition = connection.CreateCommand();
+            triggerDefinition.CommandText = """
+                SELECT sql
+                FROM sqlite_master
+                WHERE type = 'trigger' AND name = 'tr_sources_require_completed_delete';
+                """;
+            string deleteTriggerSql = (string)(await triggerDefinition.ExecuteScalarAsync())!;
+            await ExecuteAsync(connection, "DROP TRIGGER tr_sources_require_completed_delete;");
+            Assert.AreEqual(1, await ExecuteAffectedAsync(
+                connection,
+                "DELETE FROM sources WHERE source_id = $source;",
+                ("$source", Id(phaseZeroWithoutSource.SourceId.Value))));
+            await ExecuteAsync(connection, deleteTriggerSql);
+        }
+
+        SourceDeletionPendingBatchReadResult result =
+            await lifecycle.ReadPendingBatchAsync();
+
+        SourceId[] expected =
+        [
+            phaseZeroWithSource.SourceId,
+            phaseZeroWithoutSource.SourceId,
+            phaseOneWithSource.SourceId,
+        ];
+        expected = expected
+            .OrderBy(static sourceId => sourceId.Value.ToString("N"), StringComparer.Ordinal)
+            .ToArray();
+        Assert.IsTrue(result.IsSuccess, result.ToString());
+        CollectionAssert.AreEqual(expected, result.SourceIds.ToArray());
+        Assert.IsNull(result.NextAfterExclusive);
+        CollectionAssert.DoesNotContain(
+            result.SourceIds.ToArray(),
+            phaseOneWithoutSource.SourceId);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task PendingDiscoveryUsesBoundedSourceIdKeysetPagination()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "m12-source-delete-discovery-pages");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new M4InMemorySecretStore();
+        _ = await new SqliteCatalogQuery(databasePath).ReadSourcesAsync();
+        SourceId[] expected = Enumerable.Range(1, 35)
+            .Select(SourceIdAt)
+            .ToArray();
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            foreach (SourceId sourceId in expected.Reverse())
+            {
+                await InsertPendingSourceAsync(connection, Id(sourceId.Value));
+            }
+        }
+
+        ISourceDeletionLifecycle lifecycle = CreateLifecycle(databasePath, store);
+        SourceDeletionPendingBatchReadResult first =
+            await lifecycle.ReadPendingBatchAsync();
+        SourceDeletionPendingBatchReadResult second =
+            await lifecycle.ReadPendingBatchAsync(first.NextAfterExclusive);
+
+        Assert.IsTrue(first.IsSuccess);
+        Assert.AreEqual(SourceDeletionPendingBatchReadResult.MaximumSourceCount, first.SourceIds.Count);
+        Assert.AreEqual(expected[31], first.NextAfterExclusive);
+        Assert.IsTrue(second.IsSuccess);
+        Assert.AreEqual(3, second.SourceIds.Count);
+        Assert.IsNull(second.NextAfterExclusive);
+        CollectionAssert.AreEqual(
+            expected,
+            first.SourceIds.Concat(second.SourceIds).ToArray());
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task PendingCursorPersistsAcrossLifecycleRecreationAndResumesAfterExactEntry()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "m12-source-delete-durable-cursor");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new M4InMemorySecretStore();
+        _ = await new SqliteCatalogQuery(databasePath).ReadSourcesAsync();
+        SourceId first = SourceIdAt(1);
+        SourceId second = SourceIdAt(2);
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await InsertPendingSourceAsync(connection, Id(first.Value));
+            await InsertPendingSourceAsync(connection, Id(second.Value));
+        }
+
+        ISourceDeletionLifecycle initial = CreateLifecycle(databasePath, store);
+        SourceDeletionPendingCursorReadResult empty =
+            await initial.ReadPendingCursorAsync();
+        SourceDeletionLifecycleOperationResult advanced =
+            await initial.AdvancePendingCursorAsync(first);
+
+        Assert.IsTrue(empty.IsSuccess);
+        Assert.IsNull(empty.AfterExclusive);
+        Assert.IsTrue(advanced.IsSuccess);
+
+        ISourceDeletionLifecycle restarted = CreateLifecycle(databasePath, store);
+        SourceDeletionPendingCursorReadResult cursor =
+            await restarted.ReadPendingCursorAsync();
+        SourceDeletionPendingBatchReadResult remaining =
+            await restarted.ReadPendingBatchAsync(cursor.AfterExclusive);
+
+        Assert.IsTrue(cursor.IsSuccess, cursor.ToString());
+        Assert.AreEqual(first, cursor.AfterExclusive);
+        Assert.IsFalse(cursor.ToString().Contains(first.ToString(), StringComparison.Ordinal));
+        Assert.IsTrue(remaining.IsSuccess, remaining.ToString());
+        CollectionAssert.AreEqual(new[] { second }, remaining.SourceIds.ToArray());
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task PendingCursorRejectsIdentifierWithoutExactDeletionJournal()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "m12-source-delete-cursor-binding");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new M4InMemorySecretStore();
+        _ = await new SqliteCatalogQuery(databasePath).ReadSourcesAsync();
+        ISourceDeletionLifecycle lifecycle = CreateLifecycle(databasePath, store);
+
+        SourceDeletionLifecycleOperationResult result =
+            await lifecycle.AdvancePendingCursorAsync(SourceIdAt(1));
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.DomainInvariantViolation, result.Error?.Code);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task PendingCursorFailsClosedWhenSingletonStateRowIsMissing()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "m12-source-delete-cursor-state-integrity");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new M4InMemorySecretStore();
+        _ = await new SqliteCatalogQuery(databasePath).ReadSourcesAsync();
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            Assert.AreEqual(1, await ExecuteAffectedAsync(
+                connection,
+                "DELETE FROM source_deletion_reconciliation_state WHERE singleton = 1;"));
+        }
+
+        ISourceDeletionLifecycle lifecycle = CreateLifecycle(databasePath, store);
+        SourceDeletionPendingCursorReadResult read =
+            await lifecycle.ReadPendingCursorAsync();
+        SourceDeletionLifecycleOperationResult advance =
+            await lifecycle.AdvancePendingCursorAsync(SourceIdAt(1));
+
+        Assert.IsFalse(read.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.DomainInvariantViolation, read.Error?.Code);
+        Assert.IsFalse(advance.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.DomainInvariantViolation, advance.Error?.Code);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task PendingDiscoveryFailsClosedOnMalformedPersistedSourceIdentifier()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "m12-source-delete-discovery-malformed");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new M4InMemorySecretStore();
+        _ = await new SqliteCatalogQuery(databasePath).ReadSourcesAsync();
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await InsertPendingSourceAsync(connection, new string('x', 32));
+        }
+
+        ISourceDeletionLifecycle lifecycle = CreateLifecycle(databasePath, store);
+        SourceDeletionPendingBatchReadResult result =
+            await lifecycle.ReadPendingBatchAsync();
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.DomainInvariantViolation, result.Error?.Code);
+        Assert.IsEmpty(result.SourceIds);
+        Assert.IsNull(result.NextAfterExclusive);
+    }
+
     private static async Task<PersistedSource> CreatePersistedRemoteSourceAsync(
         string databasePath,
         ISecretStore store)
@@ -805,6 +1013,38 @@ public sealed class SqliteSourceDeletionLifecycleTests
             """;
         AddSourceParameters(command, source, status);
         return await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task InsertPendingSourceAsync(
+        SqliteConnection connection,
+        string sourceId)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO sources(
+                source_id, configuration_id, source_kind, display_name, endpoint_scheme,
+                endpoint_host, endpoint_port, configuration_reference, status, active_snapshot_id,
+                created_utc, updated_utc, last_error_code)
+            VALUES ($source, $configuration, $kind, 'Synthetic pending source', NULL,
+                NULL, NULL, $reference, $ready, NULL,
+                '2026-08-24T00:00:00.0000000+00:00',
+                '2026-08-24T00:00:00.0000000+00:00', NULL);
+            INSERT INTO source_deletion_tombstones(
+                source_id, configuration_id, source_kind, configuration_reference,
+                protected_delete_completed, marked_utc)
+            VALUES ($source, $configuration, $kind, $reference, 0,
+                '2026-08-24T00:00:00.0000000+00:00');
+            UPDATE sources
+            SET status = $pending
+            WHERE source_id = $source;
+            """;
+        command.Parameters.AddWithValue("$source", sourceId);
+        command.Parameters.AddWithValue("$configuration", Guid.NewGuid().ToString("N"));
+        command.Parameters.AddWithValue("$kind", (int)SourceKind.RemotePlaylist);
+        command.Parameters.AddWithValue("$reference", new string('r', 46));
+        command.Parameters.AddWithValue("$ready", (int)ContentSourceStatus.Ready);
+        command.Parameters.AddWithValue("$pending", (int)ContentSourceStatus.DeletionPending);
+        Assert.AreEqual(3, await command.ExecuteNonQueryAsync());
     }
 
     private static void AdvancePhaseSynchronously(
@@ -1015,6 +1255,15 @@ public sealed class SqliteSourceDeletionLifecycleTests
     }
 
     private static string Id(Guid value) => value.ToString("N");
+
+    private static SourceId SourceIdAt(int ordinal)
+    {
+        DomainResult<SourceId> sourceId = SourceId.Create(Guid.ParseExact(
+            ordinal.ToString("x32", System.Globalization.CultureInfo.InvariantCulture),
+            "N"));
+        Assert.IsTrue(sourceId.IsSuccess);
+        return sourceId.Value;
+    }
 
     private sealed record PersistedSource(
         SourceId SourceId,

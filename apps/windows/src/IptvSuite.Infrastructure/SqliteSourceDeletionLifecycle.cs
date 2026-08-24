@@ -20,6 +20,193 @@ internal sealed class SqliteSourceDeletionLifecycle : ISourceDeletionLifecycle
         _secretStore = secretStore;
     }
 
+    public async ValueTask<SourceDeletionPendingCursorReadResult> ReadPendingCursorAsync(
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            await _database.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await using SqliteConnection connection = await OpenWriteConnectionAsync(cancellationToken)
+                .ConfigureAwait(false);
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT after_source_id
+                FROM source_deletion_reconciliation_state
+                WHERE singleton = 1;
+                """;
+            object persisted;
+            await using (SqliteDataReader reader = await command
+                .ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return SourceDeletionPendingCursorReadResult.Failed(
+                        DomainErrorCode.DomainInvariantViolation);
+                }
+
+                persisted = reader.GetValue(0);
+                if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return SourceDeletionPendingCursorReadResult.Failed(
+                        DomainErrorCode.DomainInvariantViolation);
+                }
+            }
+
+            if (persisted is DBNull)
+            {
+                return SourceDeletionPendingCursorReadResult.Succeeded();
+            }
+
+            if (persisted is not string text ||
+                !TryParseSourceId(text, out SourceId sourceId) ||
+                !await CursorReferencesJournalAsync(
+                    connection,
+                    text,
+                    cancellationToken).ConfigureAwait(false))
+            {
+                return SourceDeletionPendingCursorReadResult.Failed(
+                    DomainErrorCode.DomainInvariantViolation);
+            }
+
+            return SourceDeletionPendingCursorReadResult.Succeeded(sourceId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            return SourceDeletionPendingCursorReadResult.Failed(
+                DomainErrorCode.StorageUnavailable);
+        }
+    }
+
+    public async ValueTask<SourceDeletionLifecycleOperationResult> AdvancePendingCursorAsync(
+        SourceId sourceId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateSourceId(sourceId);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            await _database.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await using SqliteConnection connection = await OpenWriteConnectionAsync(cancellationToken)
+                .ConfigureAwait(false);
+            await using var transaction = (SqliteTransaction)await connection
+                .BeginTransactionAsync(cancellationToken)
+                .ConfigureAwait(false);
+            int updated = await ExecuteAffectedAsync(
+                connection,
+                transaction,
+                """
+                UPDATE source_deletion_reconciliation_state
+                SET after_source_id = $source
+                WHERE singleton = 1
+                  AND EXISTS (
+                      SELECT 1
+                      FROM source_deletion_tombstones
+                      WHERE source_id = $source
+                  );
+                """,
+                Id(sourceId),
+                cancellationToken).ConfigureAwait(false);
+            if (updated != 1)
+            {
+                return InvariantFailure();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+            return SourceDeletionLifecycleOperationResult.Succeeded();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            return StorageFailure();
+        }
+    }
+
+    public async ValueTask<SourceDeletionPendingBatchReadResult> ReadPendingBatchAsync(
+        SourceId? afterExclusive = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (afterExclusive.HasValue)
+        {
+            ValidateSourceId(afterExclusive.Value);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            await _database.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await using SqliteConnection connection = await OpenWriteConnectionAsync(cancellationToken)
+                .ConfigureAwait(false);
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT tombstone.source_id
+                FROM source_deletion_tombstones AS tombstone
+                LEFT JOIN sources AS source ON source.source_id = tombstone.source_id
+                WHERE (tombstone.protected_delete_completed = 0 OR source.source_id IS NOT NULL)
+                  AND ($after IS NULL OR tombstone.source_id > $after)
+                ORDER BY tombstone.source_id
+                LIMIT $limit;
+                """;
+            command.Parameters.AddWithValue(
+                "$after",
+                afterExclusive.HasValue ? Id(afterExclusive.Value) : DBNull.Value);
+            command.Parameters.AddWithValue(
+                "$limit",
+                SourceDeletionPendingBatchReadResult.MaximumSourceCount + 1);
+
+            var sourceIds = new List<SourceId>(
+                SourceDeletionPendingBatchReadResult.MaximumSourceCount + 1);
+            await using SqliteDataReader reader = await command
+                .ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                string persisted = reader.GetString(0);
+                if (!Guid.TryParseExact(persisted, "N", out Guid value) ||
+                    !string.Equals(persisted, value.ToString("N"), StringComparison.Ordinal))
+                {
+                    return SourceDeletionPendingBatchReadResult.Failed(
+                        DomainErrorCode.DomainInvariantViolation);
+                }
+
+                DomainResult<SourceId> sourceId = SourceId.Create(value);
+                if (!sourceId.IsSuccess)
+                {
+                    return SourceDeletionPendingBatchReadResult.Failed(
+                        DomainErrorCode.DomainInvariantViolation);
+                }
+
+                sourceIds.Add(sourceId.Value);
+            }
+
+            bool hasMore =
+                sourceIds.Count > SourceDeletionPendingBatchReadResult.MaximumSourceCount;
+            if (hasMore)
+            {
+                sourceIds.RemoveAt(SourceDeletionPendingBatchReadResult.MaximumSourceCount);
+            }
+
+            SourceId? nextAfter = hasMore ? sourceIds[^1] : null;
+            return SourceDeletionPendingBatchReadResult.Succeeded(sourceIds, nextAfter);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            return SourceDeletionPendingBatchReadResult.Failed(
+                DomainErrorCode.StorageUnavailable);
+        }
+    }
+
     public async ValueTask<SourceDeletionLifecycleOperationResult> MarkPendingAsync(
         SourceId sourceId,
         CancellationToken cancellationToken = default)
@@ -425,6 +612,22 @@ internal sealed class SqliteSourceDeletionLifecycle : ISourceDeletionLifecycle
             reader.GetInt64(3) == 1);
     }
 
+    private static async ValueTask<bool> CursorReferencesJournalAsync(
+        SqliteConnection connection,
+        string sourceId,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT count(*)
+            FROM source_deletion_tombstones
+            WHERE source_id = $source;
+            """;
+        command.Parameters.AddWithValue("$source", sourceId);
+        object? value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture) == 1;
+    }
+
     private async ValueTask<SqliteConnection> OpenWriteConnectionAsync(
         CancellationToken cancellationToken)
     {
@@ -533,6 +736,25 @@ internal sealed class SqliteSourceDeletionLifecycle : ISourceDeletionLifecycle
     }
 
     private static string Id(SourceId sourceId) => sourceId.Value.ToString("N");
+
+    private static bool TryParseSourceId(string persisted, out SourceId sourceId)
+    {
+        sourceId = default;
+        if (!Guid.TryParseExact(persisted, "N", out Guid value) ||
+            !string.Equals(persisted, value.ToString("N"), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        DomainResult<SourceId> parsed = SourceId.Create(value);
+        if (!parsed.IsSuccess)
+        {
+            return false;
+        }
+
+        sourceId = parsed.Value;
+        return true;
+    }
 
     private static bool IsRecoverable(Exception exception) =>
         exception is not OutOfMemoryException and
