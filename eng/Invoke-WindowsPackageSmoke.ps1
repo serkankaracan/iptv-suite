@@ -611,6 +611,10 @@ $playbackControlDirectory = Join-Path $playbackControlRoot $runId
 $playbackReadyPath = Join-Path $playbackControlDirectory "ready.json"
 $playbackResultPath = Join-Path $playbackControlDirectory "result.json"
 $playbackStopSignalPath = Join-Path $playbackControlDirectory "stop.signal"
+$playbackCancelVerificationSignalPath = Join-Path $playbackControlDirectory "verify-cancel.signal"
+$playbackCancelVerificationTicketPath = Join-Path $playbackControlDirectory "cancel-result.json"
+$playbackDialogCloseVerificationSignalPath = Join-Path $playbackControlDirectory "verify-dialog-close.signal"
+$playbackDialogCloseVerificationTicketPath = Join-Path $playbackControlDirectory "dialog-close-result.json"
 $playbackPublicCertificatePath = Join-Path $playbackControlDirectory "loopback.cer"
 $publicCertificatePath = Join-Path $artifactRoot "$runId.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
@@ -678,6 +682,14 @@ $playbackBaselineThreadCount = 0
 $playbackFinalThreadCount = 0
 $playbackThreadCountDelta = 0
 $playbackActiveCloseVerified = $false
+$sourceDeletionCancelNoMutationVerified = $false
+$sourceDeletionDialogCloseNoMutationVerified = $false
+$sourceDeletionActivePlaybackDrainVerified = $false
+$sourceDeletionRestartNonAdmissionVerified = $false
+$sourceDeletionTargetCatalogDeleted = $false
+$sourceDeletionProtectedRecordsDeleted = $false
+$sourceDeletionTombstoneBindingCompleted = $false
+$sourceDeletionSiblingCatalogRetained = $false
 $playbackUiRequestCount = 0
 $playbackUiCompletedResponseCount = 0
 $playbackUiCompletedBodyBytes = 0L
@@ -1259,7 +1271,9 @@ function Read-StrictPlaybackJsonTicket {
     $resolvedPath = [System.IO.Path]::GetFullPath($Path)
     $allowedPaths = @(
         [System.IO.Path]::GetFullPath($playbackReadyPath),
-        [System.IO.Path]::GetFullPath($playbackResultPath)
+        [System.IO.Path]::GetFullPath($playbackResultPath),
+        [System.IO.Path]::GetFullPath($playbackCancelVerificationTicketPath),
+        [System.IO.Path]::GetFullPath($playbackDialogCloseVerificationTicketPath)
     )
     if ($allowedPaths -notcontains $resolvedPath -or
         -not [System.IO.Directory]::GetParent($resolvedPath).FullName.Equals(
@@ -1946,6 +1960,439 @@ function Invoke-PackagedPlaybackButton {
         -Process $Process `
         -StatusElement $StatusElement `
         -ExpectedStatus $ExpectedStatus
+}
+
+function New-ExactPlaybackControlSignal {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $allowedPaths = @(
+        [System.IO.Path]::GetFullPath($playbackCancelVerificationSignalPath),
+        [System.IO.Path]::GetFullPath($playbackDialogCloseVerificationSignalPath),
+        [System.IO.Path]::GetFullPath($playbackStopSignalPath)
+    )
+    if ($allowedPaths -notcontains $resolvedPath -or
+        -not [System.IO.Directory]::GetParent($resolvedPath).FullName.Equals(
+            [System.IO.Path]::GetFullPath($playbackControlDirectory),
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The playback acceptance signal path is invalid."
+    }
+
+    $signalStream = [System.IO.File]::Open(
+        $resolvedPath,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None)
+    $signalStream.Dispose()
+}
+
+function Wait-PlaybackPreservationTicket {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$HarnessProcess,
+
+        [Parameter(Mandatory)]
+        [string]$TicketPath,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedControlNames
+    )
+
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $HarnessProcess.Refresh()
+        if ($HarnessProcess.HasExited) {
+            throw "The playback acceptance harness exited during preservation verification."
+        }
+        if (Test-Path -LiteralPath $TicketPath -PathType Leaf) {
+            Assert-ExactPlaybackControlEntries -AllowedNames $AllowedControlNames
+            $ticket = Read-StrictPlaybackJsonTicket `
+                -Path $TicketPath `
+                -AllowedProperties @(
+                    "IsVerified",
+                    "TargetCatalogPreserved",
+                    "ConfigurationRecordPreserved",
+                    "NoDeletionTombstone",
+                    "SiblingCatalogRetained")
+            foreach ($propertyName in @(
+                    "IsVerified",
+                    "TargetCatalogPreserved",
+                    "ConfigurationRecordPreserved",
+                    "NoDeletionTombstone",
+                    "SiblingCatalogRetained")) {
+                if ($ticket.$propertyName -isnot [bool] -or -not $ticket.$propertyName) {
+                    throw "The playback preservation result is invalid."
+                }
+            }
+
+            return
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The playback preservation result was not published before the deadline."
+}
+
+function Start-PackagedPlaybackApplicationInstance {
+    $existingProcesses = @(Get-Process -Name "IptvSuite.Windows" -ErrorAction SilentlyContinue)
+    if ($existingProcesses.Count -ne 0) {
+        throw "IptvSuite.Windows is already running; refusing an ambiguous playback launch."
+    }
+
+    $processId = [IptvSuite.PackageSmoke.PackagedApplicationActivator]::Activate($aumid)
+    $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+    if ($null -eq $process) {
+        throw "The packaged playback application exited before its process could be observed."
+    }
+    $ownershipTransferred = $false
+    try {
+        try {
+            $null = $process.Handle
+        }
+        catch {
+            throw "The packaged playback application exited before its process handle could be retained."
+        }
+
+        Assert-PackagedProcessAlive -Process $process
+        if ($process.ProcessName -ne "IptvSuite.Windows") {
+            throw "Playback package activation returned an unexpected process."
+        }
+
+        $deadline = (Get-Date).AddSeconds(30)
+        $windowHandle = [IntPtr]::Zero
+        do {
+            Assert-PackagedProcessAlive -Process $process
+            $windowHandle = $process.MainWindowHandle
+            if ($windowHandle -ne [IntPtr]::Zero -and
+                [IptvSuite.PackageSmoke.WindowInspector]::IsWindowVisible($windowHandle)) {
+                [uint32]$ownerProcessId = 0
+                [void][IptvSuite.PackageSmoke.WindowInspector]::GetWindowThreadProcessId(
+                    $windowHandle,
+                    [ref]$ownerProcessId)
+                if ($ownerProcessId -eq [uint32]$processId) {
+                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
+                    if ($null -eq $root) {
+                        throw "The packaged playback application has no UI Automation root."
+                    }
+
+                    $instance = [pscustomobject]@{
+                        Process = $process
+                        ProcessId = [uint32]$processId
+                        WindowHandle = $windowHandle
+                        Root = $root
+                    }
+                    $ownershipTransferred = $true
+                    return $instance
+                }
+            }
+
+            Start-Sleep -Milliseconds 250
+        } while ((Get-Date) -lt $deadline)
+
+        throw "The packaged playback application did not create a visible window."
+    }
+    finally {
+        if (-not $ownershipTransferred) {
+            try {
+                $process.Refresh()
+                if (-not $process.HasExited) {
+                    $process.Kill()
+                    if (-not $process.WaitForExit(10000)) {
+                        throw "The packaged playback application did not stop after activation failed."
+                    }
+                }
+            }
+            catch {
+                throw "The packaged playback application could not be stopped after activation failed."
+            }
+            finally {
+                $process.Dispose()
+            }
+        }
+    }
+}
+
+function Get-PackagedPlaybackTargetContext {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Instance
+    )
+
+    $process = $Instance.Process
+    $root = $Instance.Root
+    $sourceElement = Get-RequiredAutomationElement `
+        $root `
+        "CatalogSourceSelector" `
+        ([System.Windows.Automation.ControlType]::ComboBox) `
+        "Playlist source"
+    $channelListElement = Get-RequiredAutomationElement `
+        $root `
+        "CatalogChannelList" `
+        ([System.Windows.Automation.ControlType]::List) `
+        "Channels"
+    $statusElement = Get-AutomationElementById $root "PlaybackStatusText"
+    $currentChannelElement = Get-AutomationElementById $root "PlaybackChannelText"
+    if ($null -eq $statusElement -or
+        $statusElement.Current.ControlType -ne [System.Windows.Automation.ControlType]::Text -or
+        $null -eq $currentChannelElement -or
+        $currentChannelElement.Current.ControlType -ne [System.Windows.Automation.ControlType]::Text) {
+        throw "The packaged playback state automation contract is invalid."
+    }
+
+    $selectionObject = $null
+    $expandObject = $null
+    if (-not $sourceElement.TryGetCurrentPattern(
+            [System.Windows.Automation.SelectionPattern]::Pattern,
+            [ref]$selectionObject) -or
+        -not $sourceElement.TryGetCurrentPattern(
+            [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+            [ref]$expandObject)) {
+        throw "The packaged playback source selector pattern contract is invalid."
+    }
+    $selection = [System.Windows.Automation.SelectionPattern]$selectionObject
+    $expand = [System.Windows.Automation.ExpandCollapsePattern]$expandObject
+    $expand.Expand()
+    $listItemCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        Assert-PackagedProcessAlive -Process $process
+        $sourceItems = $sourceElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $listItemCondition)
+        if ($sourceItems.Count -eq 2) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+    if ($sourceItems.Count -ne 2) {
+        throw "The packaged playback catalog did not expose exactly two sources."
+    }
+
+    $targetItem = $null
+    $siblingItem = $null
+    for ($index = 0; $index -lt $sourceItems.Count; $index++) {
+        if ($sourceItems[$index].Current.Name -ceq $expectedPlaybackSourceName) {
+            $targetItem = $sourceItems[$index]
+        }
+        elseif ($sourceItems[$index].Current.Name -ceq $expectedCatalogSourceName) {
+            $siblingItem = $sourceItems[$index]
+        }
+        else {
+            throw "The packaged playback source list contains an unexpected source."
+        }
+    }
+    if ($null -eq $targetItem -or $null -eq $siblingItem) {
+        throw "The packaged playback source list is incomplete."
+    }
+
+    $selected = @($selection.Current.GetSelection())
+    if ($selected.Count -ne 1 -or $selected[0].Current.Name -cne $expectedPlaybackSourceName) {
+        $selectionItemObject = $null
+        if (-not $targetItem.TryGetCurrentPattern(
+                [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                [ref]$selectionItemObject)) {
+            throw "The packaged playback target source has no SelectionItemPattern."
+        }
+        ([System.Windows.Automation.SelectionItemPattern]$selectionItemObject).Select()
+    }
+    if ($expand.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) {
+        $expand.Collapse()
+    }
+
+    $catalogStatusElement = Get-AutomationElementById $root "CatalogStatusText"
+    $expectedStatus = "Showing 1$([char]0x2013)2 of 2 channels."
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        Assert-PackagedProcessAlive -Process $process
+        $selected = @($selection.Current.GetSelection())
+        if ($selected.Count -eq 1 -and
+            $selected[0].Current.Name -ceq $expectedPlaybackSourceName -and
+            $null -ne $catalogStatusElement -and
+            $catalogStatusElement.Current.Name -ceq $expectedStatus) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+    if ((Get-Date) -ge $deadline) {
+        throw "The packaged playback target source did not become ready."
+    }
+
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        Assert-PackagedProcessAlive -Process $process
+        $channels = $channelListElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $listItemCondition)
+        if ($channels.Count -eq 2) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+    if ($channels.Count -ne 2) {
+        throw "The packaged playback target channel list is invalid."
+    }
+
+    $channelA = $null
+    $channelB = $null
+    for ($index = 0; $index -lt $channels.Count; $index++) {
+        if (Test-AutomationElementContainsExactText -Root $channels[$index] -ExpectedText $expectedPlaybackChannelAName) {
+            $channelA = $channels[$index]
+        }
+        elseif (Test-AutomationElementContainsExactText -Root $channels[$index] -ExpectedText $expectedPlaybackChannelBName) {
+            $channelB = $channels[$index]
+        }
+        else {
+            throw "The packaged playback target channel list contains an unexpected channel."
+        }
+    }
+    if ($null -eq $channelA -or $null -eq $channelB) {
+        throw "The packaged playback target channel list is incomplete."
+    }
+
+    Invoke-PackagedPlaybackChannelItem `
+        -Process $process `
+        -ChannelItem $channelA `
+        -WindowHandle $Instance.WindowHandle `
+        -ExpectedProcessId $Instance.ProcessId
+    Wait-PackagedPlaybackSelection `
+        -Process $process `
+        -StatusElement $statusElement `
+        -ChannelElement $currentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelAName
+
+    $deleteButton = Get-RequiredAutomationElement `
+        $root `
+        "CatalogDeleteSourceButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Delete selected playlist source"
+    return [pscustomobject]@{
+        StatusElement = $statusElement
+        CurrentChannelElement = $currentChannelElement
+        DeleteButton = $deleteButton
+    }
+}
+
+function Wait-PackagedSourceDeletionDialogButton {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Root,
+
+        [Parameter(Mandatory)]
+        [ValidateSet("Cancel", "Delete")]
+        [string]$ExpectedButtonName
+    )
+
+    $textCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Text)
+    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button)
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        $titles = @($Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textCondition) |
+            Where-Object { $_.Current.Name -ceq "Delete source?" })
+        $buttons = @($Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition) |
+            Where-Object { $_.Current.Name -ceq $ExpectedButtonName })
+        if ($titles.Count -eq 1 -and $buttons.Count -eq 1) {
+            return $buttons[0]
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged source-deletion confirmation dialog is invalid."
+}
+
+function Wait-PackagedSourceDeletionDialogDismissed {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Root,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$DeleteButton
+    )
+
+    $textCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Text)
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        try {
+            $titles = @($Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textCondition) |
+                Where-Object { $_.Current.Name -ceq "Delete source?" })
+            if ($titles.Count -eq 0 -and $DeleteButton.Current.IsEnabled) {
+                return
+            }
+        }
+        catch [System.Windows.Automation.ElementNotAvailableException] {
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged source-deletion confirmation dialog did not close before the deadline."
+}
+
+function Wait-PackagedDeletedSourceState {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Instance
+    )
+
+    $deadline = (Get-Date).AddSeconds(30)
+    $listItemCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    do {
+        Assert-PackagedProcessAlive -Process $Instance.Process
+        try {
+            $sourceElement = Get-AutomationElementById $Instance.Root "CatalogSourceSelector"
+            $statusElement = Get-AutomationElementById $Instance.Root "PlaybackStatusText"
+            $channelElement = Get-AutomationElementById $Instance.Root "PlaybackChannelText"
+            if ($null -ne $sourceElement -and $null -ne $statusElement -and $null -ne $channelElement) {
+                $expandObject = $null
+                if ($sourceElement.TryGetCurrentPattern(
+                        [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+                        [ref]$expandObject)) {
+                    $expand = [System.Windows.Automation.ExpandCollapsePattern]$expandObject
+                    $expand.Expand()
+                    $items = $sourceElement.FindAll(
+                        [System.Windows.Automation.TreeScope]::Descendants,
+                        $listItemCondition)
+                    $verified = $items.Count -eq 1 -and
+                        $items[0].Current.Name -ceq $expectedCatalogSourceName -and
+                        $statusElement.Current.Name -ceq "Playback stopped." -and
+                        $channelElement.Current.Name -ceq "No channel selected."
+                    if ($expand.Current.ExpandCollapseState -eq
+                        [System.Windows.Automation.ExpandCollapseState]::Expanded) {
+                        $expand.Collapse()
+                    }
+                    if ($verified) {
+                        return
+                    }
+                }
+            }
+        }
+        catch [System.Windows.Automation.ElementNotAvailableException] {
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The deleted source remained admitted to the packaged catalog."
 }
 
 try {
@@ -3158,6 +3605,49 @@ try {
         -ChannelElement $playbackCurrentChannelElement `
         -ExpectedChannelName $expectedPlaybackChannelAName
 
+    $deleteSourceButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "CatalogDeleteSourceButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Delete selected playlist source"
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $deleteSourceButtonElement
+    $cancelDeleteButtonElement = Wait-PackagedSourceDeletionDialogButton `
+        -Process $launchedProcess `
+        -Root $playbackAutomationRoot `
+        -ExpectedButtonName "Cancel"
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $cancelDeleteButtonElement
+    Wait-PackagedSourceDeletionDialogDismissed `
+        -Process $launchedProcess `
+        -Root $playbackAutomationRoot `
+        -DeleteButton $deleteSourceButtonElement
+    Wait-PackagedPlaybackSelection `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelAName
+
+    New-ExactPlaybackControlSignal -Path $playbackCancelVerificationSignalPath
+    Wait-PlaybackPreservationTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -TicketPath $playbackCancelVerificationTicketPath `
+        -AllowedControlNames @(
+            "loopback.cer",
+            "ready.json",
+            "verify-cancel.signal",
+            "cancel-result.json")
+    $sourceDeletionCancelNoMutationVerified = $true
+
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $deleteSourceButtonElement
+    $null = Wait-PackagedSourceDeletionDialogButton `
+        -Process $launchedProcess `
+        -Root $playbackAutomationRoot `
+        -ExpectedButtonName "Delete"
     Assert-PackagedProcessAlive -Process $launchedProcess
     if (-not $launchedProcess.CloseMainWindow()) {
         throw "The packaged playback application rejected a normal window-close request."
@@ -3172,12 +3662,89 @@ try {
     }
     $playbackActiveCloseVerified = $true
 
-    $stopSignalStream = [System.IO.File]::Open(
-        $playbackStopSignalPath,
-        [System.IO.FileMode]::CreateNew,
-        [System.IO.FileAccess]::Write,
-        [System.IO.FileShare]::None)
-    $stopSignalStream.Dispose()
+    $launchedProcess.Dispose()
+    $launchedProcess = $null
+    $playbackWindowHandle = [IntPtr]::Zero
+    $playbackAutomationRoot = $null
+    $playbackSourceElement = $null
+    $playbackChannelListElement = $null
+    $playbackStatusElement = $null
+    $playbackCurrentChannelElement = $null
+    $playbackChannelItemA = $null
+    $playbackChannelItemB = $null
+    $deleteSourceButtonElement = $null
+    $cancelDeleteButtonElement = $null
+
+    New-ExactPlaybackControlSignal -Path $playbackDialogCloseVerificationSignalPath
+    Wait-PlaybackPreservationTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -TicketPath $playbackDialogCloseVerificationTicketPath `
+        -AllowedControlNames @(
+            "loopback.cer",
+            "ready.json",
+            "verify-cancel.signal",
+            "cancel-result.json",
+            "verify-dialog-close.signal",
+            "dialog-close-result.json")
+    $sourceDeletionDialogCloseNoMutationVerified = $true
+
+    $deleteInstance = Start-PackagedPlaybackApplicationInstance
+    $launchedProcess = $deleteInstance.Process
+    $playbackActivationProcessId = $deleteInstance.ProcessId
+    $playbackWindowHandle = $deleteInstance.WindowHandle
+    $playbackAutomationRoot = $deleteInstance.Root
+    $deleteContext = Get-PackagedPlaybackTargetContext -Instance $deleteInstance
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $deleteContext.DeleteButton
+    $confirmDeleteButtonElement = Wait-PackagedSourceDeletionDialogButton `
+        -Process $launchedProcess `
+        -Root $playbackAutomationRoot `
+        -ExpectedButtonName "Delete"
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $confirmDeleteButtonElement
+    Wait-PackagedDeletedSourceState -Instance $deleteInstance
+    $sourceDeletionActivePlaybackDrainVerified = $true
+
+    if (-not $launchedProcess.CloseMainWindow() -or
+        -not $launchedProcess.WaitForExit(10000)) {
+        throw "The packaged playback application did not close after source deletion."
+    }
+    $launchedProcess.Refresh()
+    if ($null -eq $launchedProcess.ExitCode -or [int]$launchedProcess.ExitCode -ne 0) {
+        throw "The packaged playback application returned a failure after source deletion."
+    }
+    $launchedProcess.Dispose()
+    $launchedProcess = $null
+    $deleteContext = $null
+    $confirmDeleteButtonElement = $null
+    $deleteInstance = $null
+    $playbackWindowHandle = [IntPtr]::Zero
+    $playbackAutomationRoot = $null
+
+    $restartInstance = Start-PackagedPlaybackApplicationInstance
+    $launchedProcess = $restartInstance.Process
+    $playbackActivationProcessId = $restartInstance.ProcessId
+    $playbackWindowHandle = $restartInstance.WindowHandle
+    $playbackAutomationRoot = $restartInstance.Root
+    Wait-PackagedDeletedSourceState -Instance $restartInstance
+    $sourceDeletionRestartNonAdmissionVerified = $true
+    if (-not $launchedProcess.CloseMainWindow() -or
+        -not $launchedProcess.WaitForExit(10000)) {
+        throw "The restarted packaged playback application did not close normally."
+    }
+    $launchedProcess.Refresh()
+    if ($null -eq $launchedProcess.ExitCode -or [int]$launchedProcess.ExitCode -ne 0) {
+        throw "The restarted packaged playback application returned a failure."
+    }
+    $launchedProcess.Dispose()
+    $launchedProcess = $null
+    $restartInstance = $null
+    $playbackWindowHandle = [IntPtr]::Zero
+    $playbackAutomationRoot = $null
+
+    New-ExactPlaybackControlSignal -Path $playbackStopSignalPath
     $playbackStopSignalCreated = $true
     if (-not $playbackHarnessProcess.WaitForExit(15000)) {
         throw "The playback acceptance harness did not stop before the deadline."
@@ -3188,7 +3755,15 @@ try {
     }
 
     Assert-ExactPlaybackControlEntries `
-        -AllowedNames @("loopback.cer", "ready.json", "result.json", "stop.signal")
+        -AllowedNames @(
+            "loopback.cer",
+            "ready.json",
+            "verify-cancel.signal",
+            "cancel-result.json",
+            "verify-dialog-close.signal",
+            "dialog-close-result.json",
+            "result.json",
+            "stop.signal")
     $resultTicket = Read-StrictPlaybackJsonTicket `
         -Path $playbackResultPath `
         -AllowedProperties @(
@@ -3202,7 +3777,13 @@ try {
             "CompletedBodyBytes",
             "FailureCount",
             "ChannelARequestCount",
-            "ChannelBRequestCount")
+            "ChannelBRequestCount",
+            "CancelNoMutationVerified",
+            "DialogCloseNoMutationVerified",
+            "TargetCatalogDeleted",
+            "TargetProtectedRecordsDeleted",
+            "TombstoneBindingCompleted",
+            "SiblingCatalogRetained")
     if ($resultTicket.ReadyPublished -isnot [bool] -or
         $resultTicket.SeedCompleted -isnot [bool] -or
         $resultTicket.StopObserved -isnot [bool] -or
@@ -3215,6 +3796,12 @@ try {
         $resultTicket.FailureCount -isnot [int] -or
         $resultTicket.ChannelARequestCount -isnot [int] -or
         $resultTicket.ChannelBRequestCount -isnot [int] -or
+        $resultTicket.CancelNoMutationVerified -isnot [bool] -or
+        $resultTicket.DialogCloseNoMutationVerified -isnot [bool] -or
+        $resultTicket.TargetCatalogDeleted -isnot [bool] -or
+        $resultTicket.TargetProtectedRecordsDeleted -isnot [bool] -or
+        $resultTicket.TombstoneBindingCompleted -isnot [bool] -or
+        $resultTicket.SiblingCatalogRetained -isnot [bool] -or
         -not $resultTicket.ReadyPublished -or
         -not $resultTicket.SeedCompleted -or
         -not $resultTicket.StopObserved -or
@@ -3228,6 +3815,12 @@ try {
         [int]$resultTicket.FailureCount -ne 0 -or
         [int]$resultTicket.ChannelARequestCount -le 0 -or
         [int]$resultTicket.ChannelBRequestCount -le 0 -or
+        -not $resultTicket.CancelNoMutationVerified -or
+        -not $resultTicket.DialogCloseNoMutationVerified -or
+        -not $resultTicket.TargetCatalogDeleted -or
+        -not $resultTicket.TargetProtectedRecordsDeleted -or
+        -not $resultTicket.TombstoneBindingCompleted -or
+        -not $resultTicket.SiblingCatalogRetained -or
         ([int]$resultTicket.ChannelARequestCount +
             [int]$resultTicket.ChannelBRequestCount) -ne
             [int]$resultTicket.RequestCount) {
@@ -3239,6 +3832,10 @@ try {
     $playbackUiCompletedBodyBytes = [long]$resultTicket.CompletedBodyBytes
     $playbackChannelARequestCount = [int]$resultTicket.ChannelARequestCount
     $playbackChannelBRequestCount = [int]$resultTicket.ChannelBRequestCount
+    $sourceDeletionTargetCatalogDeleted = $resultTicket.TargetCatalogDeleted
+    $sourceDeletionProtectedRecordsDeleted = $resultTicket.TargetProtectedRecordsDeleted
+    $sourceDeletionTombstoneBindingCompleted = $resultTicket.TombstoneBindingCompleted
+    $sourceDeletionSiblingCatalogRetained = $resultTicket.SiblingCatalogRetained
     $playbackUiAcceptanceVerified = $true
 
     $packageFileName = $packages[0].Name
@@ -3325,6 +3922,14 @@ try {
         PlaybackFinalThreadCount = $playbackFinalThreadCount
         PlaybackThreadCountDelta = $playbackThreadCountDelta
         PlaybackActiveCloseVerified = $playbackActiveCloseVerified
+        SourceDeletionCancelNoMutationVerified = $sourceDeletionCancelNoMutationVerified
+        SourceDeletionDialogCloseNoMutationVerified = $sourceDeletionDialogCloseNoMutationVerified
+        SourceDeletionActivePlaybackDrainVerified = $sourceDeletionActivePlaybackDrainVerified
+        SourceDeletionRestartNonAdmissionVerified = $sourceDeletionRestartNonAdmissionVerified
+        SourceDeletionTargetCatalogDeleted = $sourceDeletionTargetCatalogDeleted
+        SourceDeletionProtectedRecordsDeleted = $sourceDeletionProtectedRecordsDeleted
+        SourceDeletionTombstoneBindingCompleted = $sourceDeletionTombstoneBindingCompleted
+        SourceDeletionSiblingCatalogRetained = $sourceDeletionSiblingCatalogRetained
         PlaybackUiRequestCount = $playbackUiRequestCount
         PlaybackUiCompletedResponseCount = $playbackUiCompletedResponseCount
         PlaybackUiCompletedBodyBytes = $playbackUiCompletedBodyBytes

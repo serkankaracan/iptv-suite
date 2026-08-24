@@ -4230,6 +4230,169 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M12PackagedSourceDeletionAcceptanceIsExactReadOnlyAndPayloadFree()
+    {
+        string harness = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.PlaybackUiAcceptanceHarness",
+            "Program.cs"));
+        string packageSmoke = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1"));
+
+        foreach (string protocolName in new[]
+                 {
+                     "verify-cancel.signal",
+                     "cancel-result.json",
+                     "verify-dialog-close.signal",
+                     "dialog-close-result.json",
+                 })
+        {
+            StringAssert.Contains(harness, protocolName);
+            StringAssert.Contains(packageSmoke, protocolName);
+        }
+
+        int preservedStart = harness.IndexOf(
+            "private static async Task<PreservationOracleResult> VerifyPreservedStateAsync(",
+            StringComparison.Ordinal);
+        int deletedStart = harness.IndexOf(
+            "private static async Task<DeletionOracleResult> VerifyDeletedStateAsync(",
+            StringComparison.Ordinal);
+        int connectionStart = harness.IndexOf(
+            "private static async Task<SqliteConnection> OpenReadOnlyConnectionAsync(",
+            StringComparison.Ordinal);
+        Assert.IsTrue(preservedStart >= 0 && deletedStart > preservedStart && connectionStart > deletedStart);
+        string liveOracles = harness[preservedStart..connectionStart];
+        Assert.IsFalse(liveOracles.Contains("SqliteCatalogQuery", StringComparison.Ordinal));
+        Assert.IsFalse(liveOracles.Contains("SqlitePlaybackSourceResolver", StringComparison.Ordinal));
+        StringAssert.Contains(harness, "Mode = SqliteOpenMode.ReadOnly");
+        StringAssert.Contains(harness, "Cache = SqliteCacheMode.Private");
+        StringAssert.Contains(harness, "Pooling = false");
+        StringAssert.Contains(harness, "PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;");
+        Assert.IsTrue(
+            Regex.Count(
+                liveOracles,
+                @"\.BeginTransactionAsync\(cancellationToken\)",
+                RegexOptions.CultureInvariant) == 2,
+            "Each live state oracle must use exactly one read-only transaction.");
+
+        foreach (string exactGraphOracle in new[]
+                 {
+                     "SELECT count(*) FROM sources WHERE source_id = $source;",
+                     "SELECT count(*) FROM snapshots WHERE source_id = $source;",
+                     "SELECT count(*) FROM snapshot_keys WHERE snapshot_id = $snapshot;",
+                     "SELECT count(*) FROM categories WHERE snapshot_id = $snapshot;",
+                     "SELECT count(*) FROM channels WHERE snapshot_id = $snapshot;",
+                     "SELECT count(*) FROM protected_locators WHERE snapshot_id = $snapshot;",
+                     "SELECT count(*) FROM favorites WHERE source_id = $source;",
+                     "SELECT count(*) FROM sync_runs WHERE source_id = $source;",
+                     "FROM source_deletion_tombstones",
+                     "reader.GetInt64(3) == 1",
+                 })
+        {
+            StringAssert.Contains(harness, exactGraphOracle);
+        }
+        StringAssert.Contains(harness, "graph == context.TargetGraph");
+        StringAssert.Contains(harness, "exactChannels == 2");
+        StringAssert.Contains(harness, "== 50_000");
+        StringAssert.Contains(harness, "SHA256.HashData(lease.Value.Span)");
+        StringAssert.Contains(harness, "CryptographicOperations.FixedTimeEquals(");
+        StringAssert.Contains(harness, "CryptographicOperations.ZeroMemory(actualDigest);");
+        StringAssert.Contains(
+            harness,
+            "public void Dispose() => CryptographicOperations.ZeroMemory(ExpectedConfigurationDigest);");
+        StringAssert.Contains(harness, "SecretStoreFailure.ProtectedRecordUnavailable");
+
+        int phaseWaitStart = harness.IndexOf(
+            "private static async Task<bool> WaitForPhaseSignalAsync(",
+            StringComparison.Ordinal);
+        int finalWaitStart = harness.IndexOf(
+            "private static async Task WaitForFinalStopSignalAsync(",
+            StringComparison.Ordinal);
+        Assert.IsTrue(phaseWaitStart >= 0 && finalWaitStart > phaseWaitStart);
+        string phaseWait = harness[phaseWaitStart..finalWaitStart];
+        int stopProbe = phaseWait.IndexOf("TryValidateSignal(paths.StopSignalPath)", StringComparison.Ordinal);
+        int phaseProbe = phaseWait.IndexOf("TryValidateSignal(phaseSignalPath)", StringComparison.Ordinal);
+        Assert.IsTrue(stopProbe >= 0 && phaseProbe > stopProbe);
+        StringAssert.Contains(harness, "private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(5);");
+        StringAssert.Contains(harness, "AssertAllowedControlEntries(paths.ControlDirectory, allowedNames);");
+
+        int ticketStart = harness.IndexOf("private sealed record ReadyTicket(", StringComparison.Ordinal);
+        Assert.IsTrue(ticketStart >= 0);
+        string ticketContract = harness[ticketStart..];
+        Assert.IsFalse(ticketContract.Contains("SourceId", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("SnapshotId", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("ChannelId", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("ConfigurationId", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("Reference", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("Path", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("Uri", StringComparison.Ordinal));
+
+        int resourceGuard = packageSmoke.IndexOf(
+            "$playbackResourceBudgetVerified = $true",
+            StringComparison.Ordinal);
+        int cancelInvoke = packageSmoke.IndexOf(
+            "-ExpectedButtonName \"Cancel\"",
+            resourceGuard,
+            StringComparison.Ordinal);
+        int dialogCloseSignal = packageSmoke.IndexOf(
+            "New-ExactPlaybackControlSignal -Path $playbackDialogCloseVerificationSignalPath",
+            cancelInvoke,
+            StringComparison.Ordinal);
+        int confirmedDelete = packageSmoke.IndexOf(
+            "$confirmDeleteButtonElement = Wait-PackagedSourceDeletionDialogButton",
+            dialogCloseSignal,
+            StringComparison.Ordinal);
+        int restartNonAdmission = packageSmoke.IndexOf(
+            "$sourceDeletionRestartNonAdmissionVerified = $true",
+            confirmedDelete,
+            StringComparison.Ordinal);
+        int finalStop = packageSmoke.IndexOf(
+            "New-ExactPlaybackControlSignal -Path $playbackStopSignalPath",
+            restartNonAdmission,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            resourceGuard >= 0 &&
+            cancelInvoke > resourceGuard &&
+            dialogCloseSignal > cancelInvoke &&
+            confirmedDelete > dialogCloseSignal &&
+            restartNonAdmission > confirmedDelete &&
+            finalStop > restartNonAdmission,
+            "Packaged deletion must run after the resource guard and preserve the exact bounded phase order.");
+        StringAssert.Contains(packageSmoke, "\"CatalogDeleteSourceButton\"");
+        StringAssert.Contains(packageSmoke, "\"Delete selected playlist source\"");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedSourceDeletionDialogDismissed");
+        StringAssert.Contains(packageSmoke, "Start-PackagedPlaybackApplicationInstance");
+        StringAssert.Contains(packageSmoke, "$ownershipTransferred = $true");
+        StringAssert.Contains(packageSmoke, "if (-not $ownershipTransferred)");
+        StringAssert.Contains(packageSmoke, "$process.Kill()");
+        StringAssert.Contains(packageSmoke, "$process.WaitForExit(10000)");
+        StringAssert.Contains(packageSmoke, "$launchedProcess.Dispose()");
+        StringAssert.Contains(packageSmoke, "$launchedProcess = $null");
+        StringAssert.Contains(packageSmoke, "$playbackWindowHandle = [IntPtr]::Zero");
+        StringAssert.Contains(packageSmoke, "$playbackAutomationRoot = $null");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedDeletedSourceState -Instance $deleteInstance");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedDeletedSourceState -Instance $restartInstance");
+        StringAssert.Contains(packageSmoke, "SourceDeletionCancelNoMutationVerified");
+        StringAssert.Contains(packageSmoke, "SourceDeletionDialogCloseNoMutationVerified");
+        StringAssert.Contains(packageSmoke, "SourceDeletionTargetCatalogDeleted");
+        StringAssert.Contains(packageSmoke, "SourceDeletionProtectedRecordsDeleted");
+        StringAssert.Contains(packageSmoke, "SourceDeletionTombstoneBindingCompleted");
+        StringAssert.Contains(packageSmoke, "SourceDeletionSiblingCatalogRetained");
+
+        string deletionFlow = packageSmoke[resourceGuard..finalStop];
+        Assert.IsFalse(deletionFlow.Contains("Sqlite", StringComparison.Ordinal));
+        Assert.IsFalse(deletionFlow.Contains("Dpapi", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(deletionFlow.Contains("ProtectedStore", StringComparison.Ordinal));
+        Assert.IsFalse(deletionFlow.Contains("SourceId", StringComparison.Ordinal));
+        Assert.IsFalse(packageSmoke.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
     public void M11PlaybackCoreIsEngineNeutralSessionBoundAndLocatorFree()
     {
         string applicationRoot = Path.Combine(

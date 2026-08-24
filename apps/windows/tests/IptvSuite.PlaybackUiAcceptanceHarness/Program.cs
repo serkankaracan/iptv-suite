@@ -7,6 +7,7 @@ using IptvSuite.Application;
 using IptvSuite.Domain;
 using IptvSuite.Infrastructure;
 using IptvSuite.Testing;
+using Microsoft.Data.Sqlite;
 
 namespace IptvSuite.PlaybackUiAcceptanceHarness;
 
@@ -27,7 +28,12 @@ internal static class Program
     private const string ReadyTicketName = "ready.json";
     private const string ResultTicketName = "result.json";
     private const string StopSignalName = "stop.signal";
+    private const string CancelVerificationSignalName = "verify-cancel.signal";
+    private const string CancelVerificationTicketName = "cancel-result.json";
+    private const string DialogCloseVerificationSignalName = "verify-dialog-close.signal";
+    private const string DialogCloseVerificationTicketName = "dialog-close-result.json";
     private const string PublicCertificateName = "loopback.cer";
+    private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(5);
     private static readonly JsonSerializerOptions TicketJsonOptions = new()
     {
         PropertyNamingPolicy = null,
@@ -92,6 +98,13 @@ internal static class Program
         bool readyPublished = false;
         bool stopObserved = false;
         bool stoppedGracefully = false;
+        bool cancelNoMutationVerified = false;
+        bool dialogCloseNoMutationVerified = false;
+        bool targetCatalogDeleted = false;
+        bool targetProtectedRecordsDeleted = false;
+        bool tombstoneBindingCompleted = false;
+        bool siblingCatalogRetained = false;
+        SeedContext? seedContext = null;
         int exitCode = 0;
 
         try
@@ -125,7 +138,7 @@ internal static class Program
             certificateThumbprint = NormalizeThumbprint(certificate.Thumbprint);
             WritePublicCertificate(certificate, paths.PublicCertificatePath);
 
-            await SeedAndVerifyAsync(
+            seedContext = await SeedAndVerifyAsync(
                 paths.CatalogDatabasePath,
                 paths.ProtectedStorePath,
                 server.BaseAddress,
@@ -140,9 +153,89 @@ internal static class Program
                 paths.ReadyTicketPath);
             readyPublished = true;
 
-            await WaitForStopSignalAsync(paths.StopSignalPath, cancellationToken)
-                .ConfigureAwait(false);
+            bool cancelSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.CancelVerificationSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    CancelVerificationSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!cancelSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before cancel verification.");
+            }
+
+            PreservationOracleResult cancelOracle = await VerifyPreservedStateAsync(
+                paths,
+                seedContext,
+                cancellationToken).ConfigureAwait(false);
+            WriteJsonAtomically(cancelOracle, paths.CancelVerificationTicketPath);
+            cancelNoMutationVerified = cancelOracle.IsVerified;
+            if (!cancelOracle.IsVerified)
+            {
+                throw new InvalidDataException("The cancel preservation oracle failed.");
+            }
+
+            bool closeSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.DialogCloseVerificationSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    CancelVerificationSignalName,
+                    CancelVerificationTicketName,
+                    DialogCloseVerificationSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!closeSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before dialog-close verification.");
+            }
+
+            PreservationOracleResult closeOracle = await VerifyPreservedStateAsync(
+                paths,
+                seedContext,
+                cancellationToken).ConfigureAwait(false);
+            WriteJsonAtomically(closeOracle, paths.DialogCloseVerificationTicketPath);
+            dialogCloseNoMutationVerified = closeOracle.IsVerified;
+            if (!closeOracle.IsVerified)
+            {
+                throw new InvalidDataException("The dialog-close preservation oracle failed.");
+            }
+
+            await WaitForFinalStopSignalAsync(
+                paths,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    CancelVerificationSignalName,
+                    CancelVerificationTicketName,
+                    DialogCloseVerificationSignalName,
+                    DialogCloseVerificationTicketName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
             stopObserved = true;
+
+            DeletionOracleResult deletionOracle = await VerifyDeletedStateAsync(
+                paths,
+                seedContext,
+                cancellationToken).ConfigureAwait(false);
+            targetCatalogDeleted = deletionOracle.TargetCatalogDeleted;
+            targetProtectedRecordsDeleted = deletionOracle.TargetProtectedRecordsDeleted;
+            tombstoneBindingCompleted = deletionOracle.TombstoneBindingCompleted;
+            siblingCatalogRetained = deletionOracle.SiblingCatalogRetained;
+            if (!deletionOracle.IsVerified)
+            {
+                throw new InvalidDataException("The source-deletion oracle failed.");
+            }
+
             await server.DisposeAsync().ConfigureAwait(false);
             stoppedGracefully = true;
         }
@@ -182,19 +275,27 @@ internal static class Program
                         ChannelARequestCount: requests.Count(request =>
                             string.Equals(request.Path, MediaRouteA, StringComparison.Ordinal)),
                         ChannelBRequestCount: requests.Count(request =>
-                            string.Equals(request.Path, MediaRouteB, StringComparison.Ordinal))),
+                            string.Equals(request.Path, MediaRouteB, StringComparison.Ordinal)),
+                        CancelNoMutationVerified: cancelNoMutationVerified,
+                        DialogCloseNoMutationVerified: dialogCloseNoMutationVerified,
+                        TargetCatalogDeleted: targetCatalogDeleted,
+                        TargetProtectedRecordsDeleted: targetProtectedRecordsDeleted,
+                        TombstoneBindingCompleted: tombstoneBindingCompleted,
+                        SiblingCatalogRetained: siblingCatalogRetained),
                     paths.ResultTicketPath);
             }
             catch
             {
                 exitCode = 1;
             }
+
+            seedContext?.Dispose();
         }
 
         return exitCode;
     }
 
-    private static async Task SeedAndVerifyAsync(
+    private static async Task<SeedContext> SeedAndVerifyAsync(
         string catalogDatabasePath,
         string protectedStorePath,
         Uri baseAddress,
@@ -349,6 +450,427 @@ internal static class Program
                 CryptographicOperations.ZeroMemory(expectedLocator);
             }
         }
+
+        if (draft.Value!.Configuration is not RemotePlaylistSourceConfiguration configuration)
+        {
+            throw new InvalidDataException("The protected source configuration is invalid.");
+        }
+
+        SeedBaseline baseline = await ReadSeedBaselineAsync(
+            catalogDatabasePath,
+            playbackSource.SourceId,
+            existingSources[0].SourceId,
+            configuration.ConfigurationId,
+            playbackPage.Items.Select(item => item.ChannelId).ToArray(),
+            cancellationToken).ConfigureAwait(false);
+        SecretStoreReadResult configurationRead = await secretStore.ReadLocatorAsync(
+            playbackSource.SourceId,
+            ProtectedValuePurpose.RemotePlaylistLocator,
+            ProtectedRecordOwner.ForSourceConfiguration(configuration.ConfigurationId),
+            configuration.LocatorReference,
+            cancellationToken).ConfigureAwait(false);
+        if (!configurationRead.IsSuccess)
+        {
+            configurationRead.Lease?.Dispose();
+            throw new InvalidDataException("The protected source configuration is unavailable.");
+        }
+
+        byte[] expectedConfigurationDigest;
+        using (SecretLease lease = configurationRead.Lease!)
+        {
+            expectedConfigurationDigest = SHA256.HashData(lease.Value.Span);
+        }
+
+        return new SeedContext(
+            playbackSource.SourceId,
+            existingSources[0].SourceId,
+            configuration.ConfigurationId,
+            configuration.LocatorReference,
+            baseline.ConfigurationReference,
+            baseline.SnapshotId,
+            playbackPage.Items.Select(item => item.ChannelId).ToArray(),
+            baseline.TargetGraph,
+            secretStore,
+            expectedConfigurationDigest);
+    }
+
+    private static async Task<SeedBaseline> ReadSeedBaselineAsync(
+        string catalogDatabasePath,
+        SourceId targetSourceId,
+        SourceId siblingSourceId,
+        SourceConfigurationId configurationId,
+        ChannelId[] channelIds,
+        CancellationToken cancellationToken)
+    {
+        if (channelIds.Length != 2 || channelIds.Any(channelId => channelId.IsEmpty))
+        {
+            throw new InvalidDataException("The protected channel baseline is invalid.");
+        }
+
+        await using SqliteConnection connection = await OpenReadOnlyConnectionAsync(
+            catalogDatabasePath,
+            cancellationToken).ConfigureAwait(false);
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        SourceBindingRow? target = await ReadSourceBindingAsync(
+            connection,
+            transaction,
+            targetSourceId,
+            cancellationToken).ConfigureAwait(false);
+        if (target is null ||
+            target.Status != ContentSourceStatus.Ready ||
+            target.ConfigurationId != configurationId.Value.ToString("N") ||
+            target.SourceKind != (long)SourceKind.RemotePlaylist ||
+            target.SnapshotId is null)
+        {
+            throw new InvalidDataException("The protected source baseline is invalid.");
+        }
+
+        TargetGraphCounts graph = await ReadTargetGraphAsync(
+            connection,
+            transaction,
+            targetSourceId,
+            target.SnapshotId.Value,
+            cancellationToken).ConfigureAwait(false);
+        long exactChannels = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM channels WHERE snapshot_id = $snapshot AND channel_id IN ($channelA, $channelB);",
+            cancellationToken,
+            ("$snapshot", target.SnapshotId.Value.Value.ToString("N")),
+            ("$channelA", channelIds[0].Value.ToString("N")),
+            ("$channelB", channelIds[1].Value.ToString("N"))).ConfigureAwait(false);
+        bool siblingRetained = await VerifySiblingCatalogAsync(
+            connection,
+            transaction,
+            siblingSourceId,
+            cancellationToken).ConfigureAwait(false);
+        long tombstones = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM source_deletion_tombstones WHERE source_id = $source;",
+            cancellationToken,
+            ("$source", targetSourceId.Value.ToString("N"))).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        if (graph is not
+            {
+                Snapshots: 1,
+                SnapshotKeys: 1,
+                Categories: 1,
+                Channels: 2,
+                ProtectedLocators: 2,
+                Favorites: 0,
+                SyncRuns: 1,
+            } || exactChannels != 2 || !siblingRetained || tombstones != 0)
+        {
+            throw new InvalidDataException("The protected catalog baseline is invalid.");
+        }
+
+        return new SeedBaseline(target.ConfigurationReference, target.SnapshotId.Value, graph);
+    }
+
+    private static async Task<PreservationOracleResult> VerifyPreservedStateAsync(
+        HarnessPaths paths,
+        SeedContext context,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = await OpenReadOnlyConnectionAsync(
+            paths.CatalogDatabasePath,
+            cancellationToken).ConfigureAwait(false);
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        SourceBindingRow? target = await ReadSourceBindingAsync(
+            connection,
+            transaction,
+            context.TargetSourceId,
+            cancellationToken).ConfigureAwait(false);
+        TargetGraphCounts graph = await ReadTargetGraphAsync(
+            connection,
+            transaction,
+            context.TargetSourceId,
+            context.TargetSnapshotId,
+            cancellationToken).ConfigureAwait(false);
+        long exactChannels = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM channels WHERE snapshot_id = $snapshot AND channel_id IN ($channelA, $channelB);",
+            cancellationToken,
+            ("$snapshot", context.TargetSnapshotId.Value.ToString("N")),
+            ("$channelA", context.TargetChannelIds[0].Value.ToString("N")),
+            ("$channelB", context.TargetChannelIds[1].Value.ToString("N"))).ConfigureAwait(false);
+        long tombstones = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM source_deletion_tombstones WHERE source_id = $source;",
+            cancellationToken,
+            ("$source", context.TargetSourceId.Value.ToString("N"))).ConfigureAwait(false);
+        bool siblingRetained = await VerifySiblingCatalogAsync(
+            connection,
+            transaction,
+            context.SiblingSourceId,
+            cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        bool targetPreserved = target is not null &&
+            target.Status == ContentSourceStatus.Ready &&
+            target.ConfigurationId == context.ConfigurationId.Value.ToString("N") &&
+            target.SourceKind == (long)SourceKind.RemotePlaylist &&
+            target.ConfigurationReference == context.ConfigurationReference &&
+            target.SnapshotId == context.TargetSnapshotId &&
+            graph == context.TargetGraph &&
+            exactChannels == 2;
+        bool configurationPreserved = await VerifyConfigurationRecordAsync(
+            context,
+            expectPresent: true,
+            cancellationToken).ConfigureAwait(false);
+        return new PreservationOracleResult(
+            IsVerified: targetPreserved && configurationPreserved && tombstones == 0 && siblingRetained,
+            TargetCatalogPreserved: targetPreserved,
+            ConfigurationRecordPreserved: configurationPreserved,
+            NoDeletionTombstone: tombstones == 0,
+            SiblingCatalogRetained: siblingRetained);
+    }
+
+    private static async Task<DeletionOracleResult> VerifyDeletedStateAsync(
+        HarnessPaths paths,
+        SeedContext context,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = await OpenReadOnlyConnectionAsync(
+            paths.CatalogDatabasePath,
+            cancellationToken).ConfigureAwait(false);
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        string source = context.TargetSourceId.Value.ToString("N");
+        string snapshot = context.TargetSnapshotId.Value.ToString("N");
+        bool targetCatalogDeleted =
+            await CountAsync(connection, transaction, "SELECT count(*) FROM sources WHERE source_id = $source;", cancellationToken, ("$source", source)).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM snapshots WHERE source_id = $source;", cancellationToken, ("$source", source)).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM snapshots WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM snapshot_keys WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM categories WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM channels WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM channels WHERE channel_id IN ($channelA, $channelB);", cancellationToken,
+                ("$channelA", context.TargetChannelIds[0].Value.ToString("N")),
+                ("$channelB", context.TargetChannelIds[1].Value.ToString("N"))).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM protected_locators WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM favorites WHERE source_id = $source;", cancellationToken, ("$source", source)).ConfigureAwait(false) == 0 &&
+            await CountAsync(connection, transaction, "SELECT count(*) FROM sync_runs WHERE source_id = $source;", cancellationToken, ("$source", source)).ConfigureAwait(false) == 0;
+
+        bool tombstoneBindingCompleted = await VerifyCompletedTombstoneAsync(
+            connection,
+            transaction,
+            context,
+            cancellationToken).ConfigureAwait(false);
+        bool siblingRetained = await VerifySiblingCatalogAsync(
+            connection,
+            transaction,
+            context.SiblingSourceId,
+            cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        bool configurationDeleted = await VerifyConfigurationRecordAsync(
+            context,
+            expectPresent: false,
+            cancellationToken).ConfigureAwait(false);
+        return new DeletionOracleResult(
+            IsVerified: targetCatalogDeleted && configurationDeleted &&
+                tombstoneBindingCompleted && siblingRetained,
+            TargetCatalogDeleted: targetCatalogDeleted,
+            TargetProtectedRecordsDeleted: configurationDeleted,
+            TombstoneBindingCompleted: tombstoneBindingCompleted,
+            SiblingCatalogRetained: siblingRetained);
+    }
+
+    private static async Task<SqliteConnection> OpenReadOnlyConnectionAsync(
+        string databasePath,
+        CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false,
+        }.ToString());
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;";
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task<SourceBindingRow?> ReadSourceBindingAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SourceId sourceId,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT configuration_id, source_kind, configuration_reference, status, active_snapshot_id
+            FROM sources
+            WHERE source_id = $source;
+            """;
+        command.Parameters.AddWithValue("$source", sourceId.Value.ToString("N"));
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        string? snapshotValue = reader.IsDBNull(4) ? null : reader.GetString(4);
+        SnapshotId? snapshotId = snapshotValue is null
+            ? null
+            : SnapshotId.Create(Guid.ParseExact(snapshotValue, "N")).Value;
+        var row = new SourceBindingRow(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            reader.GetString(2),
+            (ContentSourceStatus)reader.GetInt64(3),
+            snapshotId);
+        if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidDataException("The source binding is not unique.");
+        }
+
+        return row;
+    }
+
+    private static async Task<TargetGraphCounts> ReadTargetGraphAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SourceId sourceId,
+        SnapshotId snapshotId,
+        CancellationToken cancellationToken)
+    {
+        string source = sourceId.Value.ToString("N");
+        string snapshot = snapshotId.Value.ToString("N");
+        return new TargetGraphCounts(
+            Snapshots: await CountAsync(connection, transaction, "SELECT count(*) FROM snapshots WHERE source_id = $source;", cancellationToken, ("$source", source)).ConfigureAwait(false),
+            SnapshotKeys: await CountAsync(connection, transaction, "SELECT count(*) FROM snapshot_keys WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false),
+            Categories: await CountAsync(connection, transaction, "SELECT count(*) FROM categories WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false),
+            Channels: await CountAsync(connection, transaction, "SELECT count(*) FROM channels WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false),
+            ProtectedLocators: await CountAsync(connection, transaction, "SELECT count(*) FROM protected_locators WHERE snapshot_id = $snapshot;", cancellationToken, ("$snapshot", snapshot)).ConfigureAwait(false),
+            Favorites: await CountAsync(connection, transaction, "SELECT count(*) FROM favorites WHERE source_id = $source;", cancellationToken, ("$source", source)).ConfigureAwait(false),
+            SyncRuns: await CountAsync(connection, transaction, "SELECT count(*) FROM sync_runs WHERE source_id = $source;", cancellationToken, ("$source", source)).ConfigureAwait(false));
+    }
+
+    private static async Task<bool> VerifySiblingCatalogAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SourceId siblingSourceId,
+        CancellationToken cancellationToken)
+    {
+        SourceBindingRow? sibling = await ReadSourceBindingAsync(
+            connection,
+            transaction,
+            siblingSourceId,
+            cancellationToken).ConfigureAwait(false);
+        if (sibling is null || sibling.Status != ContentSourceStatus.Ready || sibling.SnapshotId is null)
+        {
+            return false;
+        }
+
+        return await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM channels WHERE snapshot_id = $snapshot;",
+            cancellationToken,
+            ("$snapshot", sibling.SnapshotId.Value.Value.ToString("N"))).ConfigureAwait(false) == 50_000;
+    }
+
+    private static async Task<bool> VerifyCompletedTombstoneAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SeedContext context,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT configuration_id, source_kind, configuration_reference, protected_delete_completed
+            FROM source_deletion_tombstones
+            WHERE source_id = $source;
+            """;
+        command.Parameters.AddWithValue("$source", context.TargetSourceId.Value.ToString("N"));
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        bool matches = await reader.ReadAsync(cancellationToken).ConfigureAwait(false) &&
+            reader.GetString(0) == context.ConfigurationId.Value.ToString("N") &&
+            reader.GetInt64(1) == (long)SourceKind.RemotePlaylist &&
+            reader.GetString(2) == context.ConfigurationReference &&
+            reader.GetInt64(3) == 1;
+        return matches && !await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> VerifyConfigurationRecordAsync(
+        SeedContext context,
+        bool expectPresent,
+        CancellationToken cancellationToken)
+    {
+        SecretStoreReadResult read = await context.SecretStore.ReadLocatorAsync(
+            context.TargetSourceId,
+            ProtectedValuePurpose.RemotePlaylistLocator,
+            ProtectedRecordOwner.ForSourceConfiguration(context.ConfigurationId),
+            context.ConfigurationLocatorReference,
+            cancellationToken).ConfigureAwait(false);
+        if (!expectPresent)
+        {
+            read.Lease?.Dispose();
+            return !read.IsSuccess &&
+                read.Lease is null &&
+                read.Failure == SecretStoreFailure.ProtectedRecordUnavailable;
+        }
+
+        if (!read.IsSuccess)
+        {
+            read.Lease?.Dispose();
+            return false;
+        }
+
+        using SecretLease lease = read.Lease!;
+        byte[] actualDigest = SHA256.HashData(lease.Value.Span);
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                context.ExpectedConfigurationDigest,
+                actualDigest);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(actualDigest);
+        }
+    }
+
+    private static async Task<long> CountAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string commandText,
+        CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = commandText;
+        foreach ((string name, object value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
+
+        object? count = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(count, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static byte[] BuildPlaylist(Uri mediaUriA, Uri mediaUriB) => Encoding.UTF8.GetBytes(
@@ -486,6 +1008,10 @@ internal static class Program
             Path.Combine(controlPath, ReadyTicketName),
             Path.Combine(controlPath, ResultTicketName),
             Path.Combine(controlPath, StopSignalName),
+            Path.Combine(controlPath, CancelVerificationSignalName),
+            Path.Combine(controlPath, CancelVerificationTicketName),
+            Path.Combine(controlPath, DialogCloseVerificationSignalName),
+            Path.Combine(controlPath, DialogCloseVerificationTicketName),
             Path.Combine(controlPath, PublicCertificateName));
     }
 
@@ -550,32 +1076,93 @@ internal static class Program
         }
     }
 
-    private static async Task WaitForStopSignalAsync(
-        string stopSignalPath,
+    private static async Task<bool> WaitForPhaseSignalAsync(
+        HarnessPaths paths,
+        string phaseSignalPath,
+        IReadOnlyCollection<string> allowedNames,
         CancellationToken cancellationToken)
     {
-        while (true)
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + PhaseTimeout;
+        while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Directory.Exists(stopSignalPath))
+            AssertAllowedControlEntries(paths.ControlDirectory, allowedNames);
+            if (TryValidateSignal(paths.StopSignalPath))
             {
-                throw new IOException("The acceptance stop signal is invalid.");
+                return false;
             }
 
-            if (File.Exists(stopSignalPath))
+            if (TryValidateSignal(phaseSignalPath))
             {
-                var signal = new FileInfo(stopSignalPath);
-                signal.Refresh();
-                if ((signal.Attributes & FileAttributes.ReparsePoint) != 0 || signal.Length != 0)
-                {
-                    throw new IOException("The acceptance stop signal is invalid.");
-                }
+                return true;
+            }
 
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        throw new TimeoutException("The bounded acceptance phase timed out.");
+    }
+
+    private static async Task WaitForFinalStopSignalAsync(
+        HarnessPaths paths,
+        IReadOnlyCollection<string> allowedNames,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + PhaseTimeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AssertAllowedControlEntries(paths.ControlDirectory, allowedNames);
+            if (TryValidateSignal(paths.StopSignalPath))
+            {
                 return;
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken)
                 .ConfigureAwait(false);
+        }
+
+        throw new TimeoutException("The bounded acceptance stop phase timed out.");
+    }
+
+    private static bool TryValidateSignal(string signalPath)
+    {
+        if (Directory.Exists(signalPath))
+        {
+            throw new IOException("The acceptance signal is invalid.");
+        }
+
+        if (!File.Exists(signalPath))
+        {
+            return false;
+        }
+
+        var signal = new FileInfo(signalPath);
+        signal.Refresh();
+        if ((signal.Attributes & FileAttributes.ReparsePoint) != 0 || signal.Length != 0)
+        {
+            throw new IOException("The acceptance signal is invalid.");
+        }
+
+        return true;
+    }
+
+    private static void AssertAllowedControlEntries(
+        string controlDirectory,
+        IReadOnlyCollection<string> allowedNames)
+    {
+        var allowed = new HashSet<string>(allowedNames, StringComparer.Ordinal);
+        foreach (string entryPath in Directory.EnumerateFileSystemEntries(controlDirectory))
+        {
+            var entry = new FileInfo(entryPath);
+            entry.Refresh();
+            if (!entry.Exists ||
+                (entry.Attributes & FileAttributes.ReparsePoint) != 0 ||
+                !allowed.Contains(entry.Name))
+            {
+                throw new IOException("The acceptance control directory is invalid.");
+            }
         }
     }
 
@@ -623,7 +1210,81 @@ internal static class Program
         string ReadyTicketPath,
         string ResultTicketPath,
         string StopSignalPath,
+        string CancelVerificationSignalPath,
+        string CancelVerificationTicketPath,
+        string DialogCloseVerificationSignalPath,
+        string DialogCloseVerificationTicketPath,
         string PublicCertificatePath);
+
+    private sealed record SeedBaseline(
+        string ConfigurationReference,
+        SnapshotId SnapshotId,
+        TargetGraphCounts TargetGraph);
+
+    private sealed record SourceBindingRow(
+        string ConfigurationId,
+        long SourceKind,
+        string ConfigurationReference,
+        ContentSourceStatus Status,
+        SnapshotId? SnapshotId);
+
+    private sealed record TargetGraphCounts(
+        long Snapshots,
+        long SnapshotKeys,
+        long Categories,
+        long Channels,
+        long ProtectedLocators,
+        long Favorites,
+        long SyncRuns);
+
+    private sealed class SeedContext : IDisposable
+    {
+        public SeedContext(
+            SourceId targetSourceId,
+            SourceId siblingSourceId,
+            SourceConfigurationId configurationId,
+            ProtectedLocatorReference configurationLocatorReference,
+            string configurationReference,
+            SnapshotId targetSnapshotId,
+            ChannelId[] targetChannelIds,
+            TargetGraphCounts targetGraph,
+            ISecretStore secretStore,
+            byte[] expectedConfigurationDigest)
+        {
+            TargetSourceId = targetSourceId;
+            SiblingSourceId = siblingSourceId;
+            ConfigurationId = configurationId;
+            ConfigurationLocatorReference = configurationLocatorReference;
+            ConfigurationReference = configurationReference;
+            TargetSnapshotId = targetSnapshotId;
+            TargetChannelIds = targetChannelIds;
+            TargetGraph = targetGraph;
+            SecretStore = secretStore;
+            ExpectedConfigurationDigest = expectedConfigurationDigest;
+        }
+
+        public SourceId TargetSourceId { get; }
+
+        public SourceId SiblingSourceId { get; }
+
+        public SourceConfigurationId ConfigurationId { get; }
+
+        public ProtectedLocatorReference ConfigurationLocatorReference { get; }
+
+        public string ConfigurationReference { get; }
+
+        public SnapshotId TargetSnapshotId { get; }
+
+        public ChannelId[] TargetChannelIds { get; }
+
+        public TargetGraphCounts TargetGraph { get; }
+
+        public ISecretStore SecretStore { get; }
+
+        public byte[] ExpectedConfigurationDigest { get; }
+
+        public void Dispose() => CryptographicOperations.ZeroMemory(ExpectedConfigurationDigest);
+    }
 
     private sealed record ReadyTicket(
         bool IsReady,
@@ -641,5 +1302,25 @@ internal static class Program
         long CompletedBodyBytes,
         int FailureCount,
         int ChannelARequestCount,
-        int ChannelBRequestCount);
+        int ChannelBRequestCount,
+        bool CancelNoMutationVerified,
+        bool DialogCloseNoMutationVerified,
+        bool TargetCatalogDeleted,
+        bool TargetProtectedRecordsDeleted,
+        bool TombstoneBindingCompleted,
+        bool SiblingCatalogRetained);
+
+    private sealed record PreservationOracleResult(
+        bool IsVerified,
+        bool TargetCatalogPreserved,
+        bool ConfigurationRecordPreserved,
+        bool NoDeletionTombstone,
+        bool SiblingCatalogRetained);
+
+    private sealed record DeletionOracleResult(
+        bool IsVerified,
+        bool TargetCatalogDeleted,
+        bool TargetProtectedRecordsDeleted,
+        bool TombstoneBindingCompleted,
+        bool SiblingCatalogRetained);
 }
