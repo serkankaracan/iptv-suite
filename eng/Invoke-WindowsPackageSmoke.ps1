@@ -510,6 +510,9 @@ $catalogFrameMaximumMilliseconds = 0.0
 $catalogDroppedFramePercent = 0.0
 $catalogFrameIntervalCount = 0
 $playbackUiAcceptanceVerified = $false
+$playbackVolumeControlVerified = $false
+$playbackMuteControlVerified = $false
+$playbackAspectControlVerified = $false
 $playbackUiRequestCount = 0
 $playbackUiCompletedResponseCount = 0
 $playbackUiCompletedBodyBytes = 0L
@@ -1398,19 +1401,40 @@ function Wait-PackagedPlaybackStatus {
     throw "The packaged playback UI did not reach the expected safe state."
 }
 
-function Invoke-PackagedPlaybackButton {
+function Wait-PackagedAutomationName {
     param(
         [Parameter(Mandatory)]
         [System.Diagnostics.Process]$Process,
 
         [Parameter(Mandatory)]
-        [System.Windows.Automation.AutomationElement]$ButtonElement,
+        [System.Windows.Automation.AutomationElement]$Element,
 
         [Parameter(Mandatory)]
-        [System.Windows.Automation.AutomationElement]$StatusElement,
+        [string]$ExpectedName,
+
+        [int]$TimeoutSeconds = 10
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        if ($Element.Current.Name -ceq $ExpectedName) {
+            return
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "A packaged playback control did not reach the expected safe state."
+}
+
+function Invoke-PackagedPlaybackControlButton {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
 
         [Parameter(Mandatory)]
-        [string]$ExpectedStatus
+        [System.Windows.Automation.AutomationElement]$ButtonElement
     )
 
     Assert-PackagedProcessAlive -Process $Process
@@ -1428,6 +1452,26 @@ function Invoke-PackagedPlaybackButton {
     }
 
     ([System.Windows.Automation.InvokePattern]$invokePatternObject).Invoke()
+}
+
+function Invoke-PackagedPlaybackButton {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$ButtonElement,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$StatusElement,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedStatus
+    )
+
+    Invoke-PackagedPlaybackControlButton `
+        -Process $Process `
+        -ButtonElement $ButtonElement
     Wait-PackagedPlaybackStatus `
         -Process $Process `
         -StatusElement $StatusElement `
@@ -2113,6 +2157,35 @@ try {
         "PlaybackStopButton" `
         ([System.Windows.Automation.ControlType]::Button) `
         "Stop channel"
+    $volumeDownButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "PlaybackVolumeDownButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Decrease playback volume"
+    $volumeUpButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "PlaybackVolumeUpButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Increase playback volume"
+    $muteButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "PlaybackMuteButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Mute playback"
+    $aspectModeButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "PlaybackAspectModeButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Use fill aspect mode"
+    $volumeTextElement = Get-AutomationElementById `
+        $playbackAutomationRoot `
+        "PlaybackVolumeText"
+    if ($null -eq $volumeTextElement -or
+        $volumeTextElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Text -or
+        $volumeTextElement.Current.Name -cne "Volume 100%") {
+        throw "The packaged playback volume status automation element is invalid."
+    }
 
     $sourceSelectionPatternObject = $null
     if (-not $playbackSourceElement.TryGetCurrentPattern(
@@ -2279,6 +2352,40 @@ try {
         -StatusElement $playbackStatusElement `
         -ExpectedStatus "Channel is playing."
 
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $volumeDownButtonElement
+    Wait-PackagedAutomationName `
+        -Process $launchedProcess `
+        -Element $volumeTextElement `
+        -ExpectedName "Volume 95%"
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $volumeUpButtonElement
+    Wait-PackagedAutomationName `
+        -Process $launchedProcess `
+        -Element $volumeTextElement `
+        -ExpectedName "Volume 100%"
+    $playbackVolumeControlVerified = $true
+
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $muteButtonElement
+    Wait-PackagedAutomationName `
+        -Process $launchedProcess `
+        -Element $muteButtonElement `
+        -ExpectedName "Unmute playback"
+    $playbackMuteControlVerified = $true
+
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $aspectModeButtonElement
+    Wait-PackagedAutomationName `
+        -Process $launchedProcess `
+        -Element $aspectModeButtonElement `
+        -ExpectedName "Use fit aspect mode"
+    $playbackAspectControlVerified = $true
+
     Invoke-PackagedPlaybackButton `
         -Process $launchedProcess `
         -ButtonElement $pauseButtonElement `
@@ -2413,6 +2520,9 @@ try {
         CatalogDwmDroppedFramePercent = [Math]::Round($catalogDroppedFramePercent, 3)
         CatalogDwmFrameIntervalCount = $catalogFrameIntervalCount
         PlaybackUiAcceptanceVerified = $playbackUiAcceptanceVerified
+        PlaybackVolumeControlVerified = $playbackVolumeControlVerified
+        PlaybackMuteControlVerified = $playbackMuteControlVerified
+        PlaybackAspectControlVerified = $playbackAspectControlVerified
         PlaybackUiRequestCount = $playbackUiRequestCount
         PlaybackUiCompletedResponseCount = $playbackUiCompletedResponseCount
         PlaybackUiCompletedBodyBytes = $playbackUiCompletedBodyBytes

@@ -56,7 +56,11 @@
                 <Border Background="Black" CornerRadius="8">
                     <MediaPlayerElement x:Name="PlaybackSurface" AutomationProperties.AutomationId="PlaybackSurface" AutomationProperties.Name="Live TV playback surface" AreTransportControlsEnabled="False" Stretch="Uniform" />
                 </Border>
-                <Grid Grid.Row="1" ColumnSpacing="8">
+                <Grid Grid.Row="1" ColumnSpacing="8" RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
@@ -67,6 +71,13 @@
                     <Button x:Name="PauseButton" Grid.Column="1" AutomationProperties.AutomationId="PlaybackPauseButton" AutomationProperties.Name="Pause channel" Click="PauseButton_Click" Content="Pause" IsEnabled="False" />
                     <Button x:Name="StopButton" Grid.Column="2" AutomationProperties.AutomationId="PlaybackStopButton" AutomationProperties.Name="Stop channel" Click="StopButton_Click" Content="Stop" IsEnabled="False" />
                     <TextBlock x:Name="PlaybackStatusText" Grid.Column="3" AutomationProperties.AutomationId="PlaybackStatusText" AutomationProperties.LiveSetting="Polite" HorizontalAlignment="Right" VerticalAlignment="Center" Text="Playback stopped." />
+                    <StackPanel Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="VolumeDownButton" AutomationProperties.AcceleratorKey="Ctrl+Shift+Down" AutomationProperties.AutomationId="PlaybackVolumeDownButton" AutomationProperties.Name="Decrease playback volume" Click="VolumeDownButton_Click" Content="Volume −" IsEnabled="False" />
+                        <Button x:Name="VolumeUpButton" AutomationProperties.AcceleratorKey="Ctrl+Shift+Up" AutomationProperties.AutomationId="PlaybackVolumeUpButton" AutomationProperties.Name="Increase playback volume" Click="VolumeUpButton_Click" Content="Volume +" IsEnabled="False" />
+                        <Button x:Name="MuteButton" AutomationProperties.AcceleratorKey="Ctrl+Shift+M" AutomationProperties.AutomationId="PlaybackMuteButton" AutomationProperties.Name="Mute playback" Click="MuteButton_Click" Content="Mute" IsEnabled="False" />
+                        <Button x:Name="AspectModeButton" AutomationProperties.AcceleratorKey="Ctrl+Shift+A" AutomationProperties.AutomationId="PlaybackAspectModeButton" AutomationProperties.Name="Use fill aspect mode" Click="AspectModeButton_Click" Content="Fill" IsEnabled="False" />
+                        <TextBlock x:Name="PlaybackVolumeText" AutomationProperties.AutomationId="PlaybackVolumeText" VerticalAlignment="Center" Text="Volume 100%" />
+                    </StackPanel>
                 </Grid>
             </Grid>
         </Grid>

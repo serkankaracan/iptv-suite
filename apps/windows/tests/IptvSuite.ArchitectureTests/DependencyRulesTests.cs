@@ -4280,6 +4280,65 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M12PlaybackControlsAreAccessibleSessionBoundAndPackagedVerified()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
+        string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+        string packageSmoke = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1"));
+
+        string[] automationContracts =
+        [
+            "PlaybackVolumeDownButton",
+            "PlaybackVolumeUpButton",
+            "PlaybackMuteButton",
+            "PlaybackAspectModeButton",
+            "PlaybackVolumeText",
+            "Decrease playback volume",
+            "Increase playback volume",
+            "Mute playback",
+            "Use fill aspect mode",
+            "Ctrl+Shift+Down",
+            "Ctrl+Shift+Up",
+            "Ctrl+Shift+M",
+            "Ctrl+Shift+A",
+        ];
+        foreach (string contract in automationContracts)
+        {
+            StringAssert.Contains(page, contract);
+        }
+
+        StringAssert.Contains(codeBehind, "private const int VolumeStep = 5;");
+        StringAssert.Contains(codeBehind, "PlaybackSessionSnapshot session = playback.Current;");
+        StringAssert.Contains(codeBehind, "session.SessionId,");
+        StringAssert.Contains(codeBehind, "coordinator.SetVolumeAsync(");
+        StringAssert.Contains(codeBehind, "coordinator.SetMutedAsync(");
+        StringAssert.Contains(codeBehind, "coordinator.SetAspectModeAsync(");
+        StringAssert.Contains(codeBehind, "coordinator.CurrentControls.Volume.Percent + delta");
+        StringAssert.Contains(codeBehind, "_playbackControlGate.WaitAsync(_lifetime.Token)");
+        StringAssert.Contains(codeBehind, "CanChangePlaybackControls(session.State)");
+        StringAssert.Contains(codeBehind, "AutomationProperties.SetName(");
+        StringAssert.Contains(codeBehind, "VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift");
+        Assert.IsFalse(codeBehind.Contains("WindowsNativePlaybackEngine", StringComparison.Ordinal));
+        Assert.IsFalse(Regex.IsMatch(codeBehind, @"\bMediaPlayer\b"));
+
+        StringAssert.Contains(packageSmoke, "PlaybackVolumeControlVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackMuteControlVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackAspectControlVerified");
+        StringAssert.Contains(packageSmoke, "-ExpectedName \"Volume 95%\"");
+        StringAssert.Contains(packageSmoke, "-ExpectedName \"Unmute playback\"");
+        StringAssert.Contains(packageSmoke, "-ExpectedName \"Use fit aspect mode\"");
+    }
+
+    [TestMethod]
     public void M11PackagedPlaybackAcceptanceIsSyntheticProtectedAndPayloadIsolated()
     {
         const string harnessProjectPath =

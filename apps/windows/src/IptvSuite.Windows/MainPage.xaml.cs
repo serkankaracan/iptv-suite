@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using IptvSuite.Application;
 using IptvSuite.Domain;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -21,8 +22,10 @@ namespace IptvSuite.Windows;
 public sealed partial class MainPage : Page, IDisposable
 {
     private const int PageSize = 200;
+    private const int VolumeStep = 5;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _operationSync = new();
+    private readonly SemaphoreSlim _playbackControlGate = new(1, 1);
     private CatalogBrowseCoordinator? _coordinator;
     private ChannelLogoCache? _logoCache;
     private PlaybackSessionCoordinator? _playback;
@@ -34,6 +37,7 @@ public sealed partial class MainPage : Page, IDisposable
     private long _loadingGeneration;
     private int _activeAsyncOperations;
     private TaskCompletionSource? _operationsDrained;
+    private bool _playbackControlGateDisposed;
 
     public MainPage()
     {
@@ -62,6 +66,22 @@ public sealed partial class MainPage : Page, IDisposable
             UIElement.PreviewKeyDownEvent,
             new KeyEventHandler(CatalogFilter_PreviewKeyDown),
             handledEventsToo: true);
+        RegisterPlaybackAccelerator(
+            VirtualKey.Down,
+            VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
+            () => ChangeVolumeAsync(-VolumeStep));
+        RegisterPlaybackAccelerator(
+            VirtualKey.Up,
+            VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
+            () => ChangeVolumeAsync(VolumeStep));
+        RegisterPlaybackAccelerator(
+            VirtualKey.M,
+            VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
+            ToggleMutedAsync);
+        RegisterPlaybackAccelerator(
+            VirtualKey.A,
+            VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
+            ToggleAspectModeAsync);
         Unloaded += MainPage_Unloaded;
         string assemblyVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 #if DEBUG
@@ -310,6 +330,116 @@ public sealed partial class MainPage : Page, IDisposable
         await ExecutePlaybackCommandAsync(
             static (playback, token) => playback.StopAsync(token));
 
+    private async void VolumeDownButton_Click(object sender, RoutedEventArgs e) =>
+        await ChangeVolumeAsync(-VolumeStep);
+
+    private async void VolumeUpButton_Click(object sender, RoutedEventArgs e) =>
+        await ChangeVolumeAsync(VolumeStep);
+
+    private async void MuteButton_Click(object sender, RoutedEventArgs e) =>
+        await ToggleMutedAsync();
+
+    private async void AspectModeButton_Click(object sender, RoutedEventArgs e) =>
+        await ToggleAspectModeAsync();
+
+    private Task ChangeVolumeAsync(int delta)
+        => ExecutePlaybackControlAsync(
+            (coordinator, sessionId, token) =>
+            {
+                int target = Math.Clamp(
+                    coordinator.CurrentControls.Volume.Percent + delta,
+                    0,
+                    100);
+                return coordinator.SetVolumeAsync(
+                    sessionId,
+                    PlaybackVolume.FromPercent(target),
+                    token);
+            });
+
+    private Task ToggleMutedAsync()
+        => ExecutePlaybackControlAsync(
+            (coordinator, sessionId, token) => coordinator.SetMutedAsync(
+                sessionId,
+                !coordinator.CurrentControls.IsMuted,
+                token));
+
+    private Task ToggleAspectModeAsync()
+        => ExecutePlaybackControlAsync(
+            (coordinator, sessionId, token) => coordinator.SetAspectModeAsync(
+                sessionId,
+                coordinator.CurrentControls.AspectMode == PlaybackAspectMode.Fit
+                    ? PlaybackAspectMode.Fill
+                    : PlaybackAspectMode.Fit,
+                token));
+
+    private async Task ExecutePlaybackControlAsync(
+        Func<PlaybackSessionCoordinator, PlaybackSessionId, CancellationToken,
+            ValueTask<PlaybackEngineOperationResult>> command)
+    {
+        PlaybackSessionCoordinator? playback = _playback;
+        if (_disposed || playback is null)
+        {
+            return;
+        }
+
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        bool gateEntered = false;
+        try
+        {
+            await _playbackControlGate.WaitAsync(_lifetime.Token);
+            gateEntered = true;
+            if (_disposed || _playback != playback)
+            {
+                return;
+            }
+
+            PlaybackSessionSnapshot session = playback.Current;
+            if (!CanChangePlaybackControls(session.State))
+            {
+                ApplyPlaybackState(session);
+                return;
+            }
+
+            await command(
+                playback,
+                session.SessionId,
+                _lifetime.Token);
+            ApplyPlaybackState(playback.Current);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            ApplyPlaybackState(playback.Current);
+        }
+        finally
+        {
+            if (gateEntered)
+            {
+                _playbackControlGate.Release();
+            }
+        }
+    }
+
+    private void RegisterPlaybackAccelerator(
+        VirtualKey key,
+        VirtualKeyModifiers modifiers,
+        Func<Task> operation)
+    {
+        var accelerator = new KeyboardAccelerator
+        {
+            Key = key,
+            Modifiers = modifiers,
+        };
+        accelerator.Invoked += async (_, args) =>
+        {
+            args.Handled = true;
+            await operation();
+        };
+        KeyboardAccelerators.Add(accelerator);
+    }
+
     private async Task ExecutePlaybackCommandAsync(
         Func<PlaybackSessionCoordinator, CancellationToken,
             ValueTask<PlaybackEngineOperationResult>> command)
@@ -386,7 +516,27 @@ public sealed partial class MainPage : Page, IDisposable
             PlaybackState.Playing or
             PlaybackState.Paused or
             PlaybackState.Failed;
+
+        PlaybackControlSnapshot controls = playback.CurrentControls;
+        bool controlsEnabled = CanChangePlaybackControls(snapshot.State);
+        VolumeDownButton.IsEnabled = controlsEnabled && controls.Volume.Percent > 0;
+        VolumeUpButton.IsEnabled = controlsEnabled && controls.Volume.Percent < 100;
+        MuteButton.IsEnabled = controlsEnabled;
+        AspectModeButton.IsEnabled = controlsEnabled;
+        PlaybackVolumeText.Text = $"Volume {controls.Volume.Percent}%";
+        MuteButton.Content = controls.IsMuted ? "Unmute" : "Mute";
+        AutomationProperties.SetName(
+            MuteButton,
+            controls.IsMuted ? "Unmute playback" : "Mute playback");
+        bool isFit = controls.AspectMode == PlaybackAspectMode.Fit;
+        AspectModeButton.Content = isFit ? "Fill" : "Fit";
+        AutomationProperties.SetName(
+            AspectModeButton,
+            isFit ? "Use fill aspect mode" : "Use fit aspect mode");
     }
+
+    private static bool CanChangePlaybackControls(PlaybackState state) =>
+        state is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused;
 
     private async void ChannelList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
@@ -437,6 +587,7 @@ public sealed partial class MainPage : Page, IDisposable
         _coordinator?.Dispose();
         _lifetime.Dispose();
         _logoPageCancellation.Dispose();
+        DisposePlaybackControlGateIfDrained();
         GC.SuppressFinalize(this);
     }
 
@@ -468,6 +619,7 @@ public sealed partial class MainPage : Page, IDisposable
     private void EndAsyncOperation()
     {
         TaskCompletionSource? completion = null;
+        bool disposePlaybackControlGate = false;
         lock (_operationSync)
         {
             _activeAsyncOperations--;
@@ -475,10 +627,37 @@ public sealed partial class MainPage : Page, IDisposable
             {
                 completion = _operationsDrained;
                 _operationsDrained = null;
+                if (_disposed && !_playbackControlGateDisposed)
+                {
+                    _playbackControlGateDisposed = true;
+                    disposePlaybackControlGate = true;
+                }
             }
         }
 
         completion?.TrySetResult();
+        if (disposePlaybackControlGate)
+        {
+            _playbackControlGate.Dispose();
+        }
+    }
+
+    private void DisposePlaybackControlGateIfDrained()
+    {
+        bool disposePlaybackControlGate = false;
+        lock (_operationSync)
+        {
+            if (_activeAsyncOperations == 0 && !_playbackControlGateDisposed)
+            {
+                _playbackControlGateDisposed = true;
+                disposePlaybackControlGate = true;
+            }
+        }
+
+        if (disposePlaybackControlGate)
+        {
+            _playbackControlGate.Dispose();
+        }
     }
 
     private sealed record CategoryOption(string Name, CategoryId? CategoryId);
