@@ -1,6 +1,6 @@
-# Windows development ve M1–M11 foundations
+# Windows development ve M1–M12
 
-M5–M9 network/provider/parser/persistence/catalog UI foundation'ları ve M11 production player/temel playback `COMPLETED`; M10 Windows-native Tier A fallback `ACCEPTED WITH KNOWN DEVIATION`; M12 playback UX/window-device lifecycle sıradaki aktif milestone'dur. M11 clean head `5a07cae8138642d669f272eaee1340e87edcb47b` için hosted quality, signed packaged playback/lifecycle, DPAPI real-user boundary ve required gate geçmiştir. Ayrıntı: [M11 completion evidence](../../docs/quality/M11_COMPLETION_EVIDENCE.md).
+M5–M9 network/provider/parser/persistence/catalog UI foundation'ları ve M11 production player/temel playback `COMPLETED`; M10 Windows-native Tier A fallback `ACCEPTED WITH KNOWN DEVIATION`; M12 playback UX/window-device lifecycle `PARTIAL VERIFIED` durumundadır. Commit `8d537010f64193f7bc9baf05bc3707fb31d5362f` için run `32764149667`, 25 rapid switch ile fullscreen/resize/minimize/state/active-close otomasyonunu geçti. Tek hosted resource snapshot'ı yalnız kalibrasyondur; numeric budget PASS değildir. Fiziksel DPI/multi-monitor/sleep/audio/Narrator ve product source-delete E2E `NOT RUN` kalır. Ayrıntı: [M12 kısmi kabul kanıtı](../../docs/quality/M12_COMPLETION_EVIDENCE.md).
 
 Aşağıdaki uzun foundation zaman çizelgesindeki “güncel worktree”, “development shell” ve açık milestone ifadeleri kendi tarihsel checkpoint'lerine aittir; bu üstteki M11 completion durumunu geçersiz kılmaz.
 

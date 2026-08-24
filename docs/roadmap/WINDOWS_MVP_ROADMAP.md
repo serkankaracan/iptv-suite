@@ -632,6 +632,8 @@ Channel list'ten seçilen sentetik Tier A yayının app-owned adapter üzerinden
 
 ## M12 — Playback UX, fullscreen, volume, channel switch ve lifecycle
 
+**Implementation/acceptance status — `PARTIAL VERIFIED, 2026-08-24`:** Commit `8d537010f64193f7bc9baf05bc3707fb31d5362f` için [run `32764149667`](https://github.com/serkankaracan/iptv-suite/actions/runs/32764149667) tam yeşildir. Signed production package 25 rapid switch'i p95 `2231,596 ms`/maksimum `2232,186 ms` ile; fullscreen/focus, iki resize, minimize/restore state, kontroller ve active-close zincirini geçti. Tek resource snapshot kalibrasyonu private bytes `-3.178.496`, working set `+7.278.592`, handle `+54`, thread `-2` verdi; bu ölçüm numeric budget `PASS` değildir. Fiziksel DPI/mixed-DPI multi-monitor, gerçek sleep/wake, audio endpoint, Narrator ve product source-delete E2E `NOT RUN` kaldığından milestone tamamlanmış sayılmaz. [Kısmi kabul kanıtı](../quality/M12_COMPLETION_EVIDENCE.md).
+
 ### Amaç
 
 Canlı TV için erişilebilir temel kontrolleri ve Windows window/device lifecycle'ını kararlı hale getirmek.

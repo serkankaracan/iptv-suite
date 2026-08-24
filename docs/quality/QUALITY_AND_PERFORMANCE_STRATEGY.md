@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M2 quality infrastructure ile M3–M9 foundation/adapter/parser/persistence/query/UI gate'leri `COMPLETED`; M10 `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION`; M11 production player adapter `COMPLETED`; M12 playback UX/lifecycle aktif
+**Durum:** M2 quality infrastructure ile M3–M9 foundation/adapter/parser/persistence/query/UI gate'leri `COMPLETED`; M10 `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION`; M11 production player adapter `COMPLETED`; M12 playback UX/lifecycle `PARTIAL VERIFIED`
 
 M8 completion kaydı, aşağıdaki tarihsel M4 comparative paragraflarındaki “M8 Proposed/uygulanmamış/açık” ifadelerini supersede eder. Güncel acceptance bağı [M8 completion evidence](M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
@@ -394,6 +394,10 @@ Envelope-v3 commit `c299410` için [run `32543488245`](https://github.com/serkan
 
 `IMPLEMENTED LOCALLY; HOSTED ATTRIBUTION PENDING`: Davranış-korumalı envelope-v8, first-HLS QPC transport window'una ek olarak en çok `128` process resource sample'ını ordinal/elapsed/private-bytes/handle/phase/switch alanlarıyla ve en çok `7` injection/recovery olayını aynı `Stopwatch.GetTimestamp()` tabanında bağlar. Controller aggregate resource değerlerini seriden yeniden türetir; her sample için recovery phase/ordinal ve post-warm minimum/maximum/peak/final özetini bounded loglar. Raw QPC kalıcı schema-10 success artifact'ına girmez. Server/player davranışı, 30 dakika warm-up, `%10/100 MiB/monotonic` threshold'ları, timer, HLS-first, retry ve cleanup aynıdır; sonuç gelmeden retention root cause'u iddia edilmez.
 
+### M12 playback UX ve lifecycle
+
+`PARTIAL VERIFIED, 2026-08-24`: Commit `8d537010f64193f7bc9baf05bc3707fb31d5362f` için run `32764149667` tam yeşildir. Signed production package 25 rapid switch'i p95 `2231,596 ms`/maksimum `2232,186 ms` ile ve fullscreen/focus, iki resize, minimize/restore state, controls ile active-close Boolean'larını `true` üreterek geçti. Warmed baseline→final resource kalibrasyonu private bytes `76.722.176→73.543.680`, working set `190.877.696→198.156.288`, handle `1.851→1.905`, thread `51→49` ölçtü. Bu tek hosted örnek numeric resource-budget `PASS` değildir ve eşik üretmez. Fiziksel DPI/mixed-DPI multi-monitor, gerçek sleep/wake, audio endpoint, Narrator ve product source-delete E2E `NOT RUN` kalır. [Exact sınır](M12_COMPLETION_EVIDENCE.md).
+
 ### M16 RC
 
 - Packaged private-flight build ile 24 saat.
@@ -419,7 +423,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M9 | `COMPLETED, 2026-08-21`: bounded query/UI/logo local `292/292 × 2` ve clean query Decision PASS; run `32443355378` commit-bound packaged 50k UIA/Tab/virtualization/input/DWM acceptance PASS. Realized item `8`, input p95 `16,284 ms`, compositor p95 `31,25 ms`, max `171,875 ms`, late/drop proxy `%0`, interval `404`. [Kanıt](M9_COMPLETION_EVIDENCE.md) |
 | M10 | `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION, 2026-08-23`: LibVLC candidate GPL-zero hard gate'te reddedildi; Windows-native Tier A fallback temiz `1f15888` sekiz saat koşusunda bütün temel playback/lifecycle/startup/recovery kontrollerini geçti. Tek sapma relative memory `%11,1944255 > %10` (`~1,85 MiB` aşım); absolute `~17,32 MiB ≤100 MiB`, monotonic `false`, handle delta `-21`. Gate değişmedi; R15/M16 hardening borcu açık, M11 başladı. [Acceptance](M10_NATIVE_TIER_A_ACCEPTANCE_SOAK_ATTEMPT.md), [candidate](M10_PLAYBACK_CANDIDATE_DECISION.md), [surface](M10_NATIVE_TIER_A_SURFACE_EVIDENCE.md), [network](M10_NATIVE_TIER_A_NETWORK_RECOVERY_EVIDENCE.md), [session lifecycle](M10_NATIVE_TIER_A_SESSION_LIFECYCLE_EVIDENCE.md) |
 | M11 | `COMPLETED, 2026-08-24`: engine-neutral lifecycle/control, protected Remote-M3U ve Xtream JIT resolution, Windows-native adapter ve packaged WinUI playback tamamlandı. Local architecture `35/35`, unit `171/171`, integration `116/116`; run `32754184474` quality `354/354 ×2`, signed package playback/lifecycle, DPAPI ve required gate PASS. [Kanıt](M11_COMPLETION_EVIDENCE.md) |
-| M12 | Lifecycle/rapid-switch/UI automation |
+| M12 | `PARTIAL VERIFIED, 2026-08-24`: run `32764149667`/commit `8d53701`; 25 rapid switch p95 `2231,596 ms`, fullscreen/focus/resize/minimize/state/active-close PASS. Resource tek-run calibration, numeric budget PASS değil; fiziksel DPI/multi-monitor/sleep/audio/Narrator ve product source-delete E2E `NOT RUN`. [Kanıt](M12_COMPLETION_EVIDENCE.md) |
 | M13 | Retry/reconnect deterministic fault suite |
 | M14 | Dedicated 50k budgets and traces |
 | M15 | WACK/private Store/install-update-uninstall/SBOM |
