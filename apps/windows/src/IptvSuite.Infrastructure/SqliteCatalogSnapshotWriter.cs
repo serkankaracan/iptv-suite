@@ -72,7 +72,11 @@ internal sealed class SqliteCatalogSnapshotWriter
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            await UpsertSourceAsync(connection, transaction, batch.Source, cancellationToken).ConfigureAwait(false);
+            if (!await TryUpsertSourceAsync(connection, transaction, batch.Source, cancellationToken).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Catalog source is pending deletion.");
+            }
+
             await InsertSnapshotAsync(connection, transaction, batch.Snapshot, cancellationToken).ConfigureAwait(false);
             Guid keyGenerationId = Guid.NewGuid();
             await InsertSnapshotKeyAsync(
@@ -102,12 +106,16 @@ internal sealed class SqliteCatalogSnapshotWriter
                 transaction,
                 batch.Source.Id,
                 cancellationToken).ConfigureAwait(false);
-            await SetActiveSnapshotAsync(
+            if (!await TrySetActiveSnapshotAsync(
                 connection,
                 transaction,
                 batch.Source.Id,
                 batch.Snapshot.Id,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Catalog source is pending deletion.");
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -123,7 +131,8 @@ internal sealed class SqliteCatalogSnapshotWriter
 
     private static void ValidateBatch(CatalogSnapshotBatch batch)
     {
-        if (batch.Source.Id.IsEmpty || batch.Snapshot.SourceId != batch.Source.Id ||
+        if (batch.Source.Id.IsEmpty || batch.Source.Status == ContentSourceStatus.DeletionPending ||
+            batch.Snapshot.SourceId != batch.Source.Id ||
             batch.Snapshot.State != PlaylistSnapshotState.Complete ||
             batch.Snapshot.ItemCount != batch.Channels.Count ||
             batch.Categories.Any(category => category.SnapshotId != batch.Snapshot.Id) ||
@@ -176,7 +185,7 @@ internal sealed class SqliteCatalogSnapshotWriter
         await ExecuteAsync(connection, null, "PRAGMA busy_timeout = 5000;", cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task UpsertSourceAsync(
+    private static async Task<bool> TryUpsertSourceAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         ContentSource source,
@@ -212,9 +221,10 @@ internal sealed class SqliteCatalogSnapshotWriter
                 configuration_reference = excluded.configuration_reference,
                 status = excluded.status,
                 updated_utc = excluded.updated_utc,
-                last_error_code = excluded.last_error_code;
+                last_error_code = excluded.last_error_code
+            WHERE sources.status <> $deletionPending;
             """;
-        await ExecuteAsync(connection, transaction, sql, cancellationToken,
+        int affected = await ExecuteAffectedAsync(connection, transaction, sql, cancellationToken,
             ("$source", Id(source.Id.Value)),
             ("$configuration", Id(source.Configuration.ConfigurationId.Value)),
             ("$kind", (int)source.Kind),
@@ -224,10 +234,12 @@ internal sealed class SqliteCatalogSnapshotWriter
             ("$port", source.SafeEndpoint.Port),
             ("$reference", $"{(configurationKey.ReferenceKind == ProtectedReferenceKind.Secret ? "secret-ref-v1:" : "locator-ref-v1:")}{configurationKey.RecordIdentifier:N}"),
             ("$status", (int)source.Status),
+            ("$deletionPending", (int)ContentSourceStatus.DeletionPending),
             ("$created", Timestamp(source.CreatedAt)),
             ("$updated", Timestamp(source.UpdatedAt)),
             ("$error", source.LastErrorCode.HasValue ? (int)source.LastErrorCode.Value : DBNull.Value))
             .ConfigureAwait(false);
+        return affected == 1;
     }
 
     private static Task InsertSnapshotAsync(
@@ -386,18 +398,28 @@ internal sealed class SqliteCatalogSnapshotWriter
         }
     }
 
-    private static Task SetActiveSnapshotAsync(
+    private static async Task<bool> TrySetActiveSnapshotAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         SourceId sourceId,
         SnapshotId snapshotId,
-        CancellationToken cancellationToken) => ExecuteAsync(
+        CancellationToken cancellationToken)
+    {
+        int affected = await ExecuteAffectedAsync(
             connection,
             transaction,
-            "UPDATE sources SET active_snapshot_id = $snapshot, status = $ready WHERE source_id = $source;",
+            """
+            UPDATE sources
+            SET active_snapshot_id = $snapshot, status = $ready
+            WHERE source_id = $source AND status <> $deletionPending;
+            """,
             cancellationToken,
-            ("$snapshot", Id(snapshotId.Value)), ("$ready", (int)ContentSourceStatus.Ready),
-            ("$source", Id(sourceId.Value)));
+            ("$snapshot", Id(snapshotId.Value)),
+            ("$ready", (int)ContentSourceStatus.Ready),
+            ("$source", Id(sourceId.Value)),
+            ("$deletionPending", (int)ContentSourceStatus.DeletionPending)).ConfigureAwait(false);
+        return affected == 1;
+    }
 
     private static Task RetirePreviousSnapshotKeyAsync(
         SqliteConnection connection,
@@ -501,6 +523,17 @@ internal sealed class SqliteCatalogSnapshotWriter
         CancellationToken cancellationToken,
         params (string Name, object Value)[] parameters)
     {
+        _ = await ExecuteAffectedAsync(connection, transaction, sql, cancellationToken, parameters)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<int> ExecuteAffectedAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
+    {
         await using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = sql;
@@ -509,7 +542,7 @@ internal sealed class SqliteCatalogSnapshotWriter
             command.Parameters.AddWithValue(name, value);
         }
 
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static string Id(Guid value) => value.ToString("N", CultureInfo.InvariantCulture);

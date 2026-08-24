@@ -212,6 +212,74 @@ public sealed class SqliteCatalogSnapshotWriterTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task PersistedDeletionPendingSourceRejectsStaleActivationAndPreservesCatalog()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-delete-activation-guard");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(databasePath);
+        TestBatch pending = await CreateBatchAsync(itemSuffix: "pending-original");
+        TestBatch sibling = await CreateBatchAsync(itemSuffix: "sibling");
+        await ActivateAsync(databasePath, pending.Batch);
+        await ActivateAsync(databasePath, sibling.Batch);
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await ExecuteAsync(
+                connection,
+                "UPDATE sources SET status = $pending WHERE source_id = $source;",
+                ("$pending", (int)ContentSourceStatus.DeletionPending),
+                ("$source", Id(pending.Source.Id.Value)));
+        }
+
+        TestBatch staleReplacement = await CreateBatchAsync(pending.Source, itemSuffix: "stale-replacement");
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await ActivateAsync(databasePath, staleReplacement.Batch));
+
+        await using SqliteConnection reopened = await OpenAsync(databasePath);
+        Assert.AreEqual((long)ContentSourceStatus.DeletionPending, await ScalarInt64Async(
+            reopened,
+            "SELECT status FROM sources WHERE source_id = $source;",
+            ("$source", Id(pending.Source.Id.Value))));
+        Assert.AreEqual(Id(pending.Snapshot.Id.Value), await ScalarStringAsync(
+            reopened,
+            "SELECT active_snapshot_id FROM sources WHERE source_id = $source;",
+            ("$source", Id(pending.Source.Id.Value))));
+        Assert.AreEqual((long)ContentSourceStatus.Ready, await ScalarInt64Async(
+            reopened,
+            "SELECT status FROM sources WHERE source_id = $source;",
+            ("$source", Id(sibling.Source.Id.Value))));
+        Assert.AreEqual(Id(sibling.Snapshot.Id.Value), await ScalarStringAsync(
+            reopened,
+            "SELECT active_snapshot_id FROM sources WHERE source_id = $source;",
+            ("$source", Id(sibling.Source.Id.Value))));
+        Assert.AreEqual(1L, await ScalarInt64Async(
+            reopened,
+            "SELECT count(*) FROM snapshots WHERE source_id = $source;",
+            ("$source", Id(pending.Source.Id.Value))));
+        Assert.AreEqual(1L, await ScalarInt64Async(
+            reopened,
+            "SELECT count(*) FROM channels WHERE snapshot_id = $snapshot;",
+            ("$snapshot", Id(pending.Snapshot.Id.Value))));
+        Assert.AreEqual(2L, await ScalarInt64Async(
+            reopened,
+            "SELECT count(*) FROM protected_locators WHERE snapshot_id = $snapshot;",
+            ("$snapshot", Id(pending.Snapshot.Id.Value))));
+        Assert.AreEqual(0L, await ScalarInt64Async(
+            reopened,
+            "SELECT count(*) FROM snapshots WHERE snapshot_id = $snapshot;",
+            ("$snapshot", Id(staleReplacement.Snapshot.Id.Value))));
+        Assert.AreEqual(2L, await ScalarInt64Async(reopened, "SELECT count(*) FROM sources;"));
+        Assert.AreEqual(2L, await ScalarInt64Async(reopened, "SELECT count(*) FROM channels;"));
+        Assert.AreEqual(4L, await ScalarInt64Async(reopened, "SELECT count(*) FROM protected_locators;"));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task PreCancelledActivationDoesNotMutateDatabase()
     {
         if (!OperatingSystem.IsWindows())

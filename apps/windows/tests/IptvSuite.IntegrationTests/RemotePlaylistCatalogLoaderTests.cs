@@ -138,6 +138,92 @@ public sealed class RemotePlaylistCatalogLoaderTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task PersistedDeletionPendingSourceRejectsStaleStreamingImportAndPreservesCatalog()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-streaming-delete-guard");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        var store = new M4InMemorySecretStore();
+        ContentSource pending = await CreateSourceAsync(store);
+        ContentSource sibling = await CreateSourceAsync(store);
+        DomainResultSnapshot pendingInitial = await InvokeSqliteLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                "#EXTM3U\n#EXTINF:-1 tvg-id=\"pending-original\",Pending original\nhttps://fixtures.invalid/pending-original.m3u8\n"),
+            pending,
+            databasePath);
+        DomainResultSnapshot siblingInitial = await InvokeSqliteLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                "#EXTM3U\n#EXTINF:-1 tvg-id=\"sibling\",Sibling\nhttps://fixtures.invalid/sibling.m3u8\n"),
+            sibling,
+            databasePath);
+        Assert.IsTrue(pendingInitial.IsSuccess);
+        Assert.IsTrue(siblingInitial.IsSuccess);
+
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "UPDATE sources SET status = $pending WHERE source_id = $source;";
+            command.Parameters.AddWithValue("$pending", (int)ContentSourceStatus.DeletionPending);
+            command.Parameters.AddWithValue("$source", pending.Id.Value.ToString("N"));
+            Assert.AreEqual(1, await command.ExecuteNonQueryAsync());
+        }
+
+        DomainResultSnapshot rejected = await InvokeSqliteLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                "#EXTM3U\n#EXTINF:-1 tvg-id=\"stale\",Stale replacement\nhttps://fixtures.invalid/stale.m3u8\n"),
+            pending,
+            databasePath);
+
+        Assert.IsFalse(rejected.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.DomainInvariantViolation, rejected.ErrorCode);
+        await using var reopened = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Pooling=False");
+        await reopened.OpenAsync();
+        await using Microsoft.Data.Sqlite.SqliteCommand state = reopened.CreateCommand();
+        state.CommandText = """
+            SELECT
+                (SELECT status FROM sources WHERE source_id = $pendingSource),
+                (SELECT active_snapshot_id FROM sources WHERE source_id = $pendingSource),
+                (SELECT status FROM sources WHERE source_id = $siblingSource),
+                (SELECT active_snapshot_id FROM sources WHERE source_id = $siblingSource),
+                (SELECT count(*) FROM snapshots WHERE source_id = $pendingSource),
+                (SELECT count(*) FROM channels c JOIN snapshots s ON s.snapshot_id = c.snapshot_id
+                    WHERE s.source_id = $pendingSource),
+                (SELECT count(*) FROM protected_locators l JOIN snapshots s ON s.snapshot_id = l.snapshot_id
+                    WHERE s.source_id = $pendingSource),
+                (SELECT count(*) FROM sources),
+                (SELECT count(*) FROM snapshots),
+                (SELECT count(*) FROM channels),
+                (SELECT count(*) FROM sync_runs),
+                (SELECT count(*) FROM channels WHERE display_name = 'Stale replacement');
+            """;
+        state.Parameters.AddWithValue("$pendingSource", pending.Id.Value.ToString("N"));
+        state.Parameters.AddWithValue("$siblingSource", sibling.Id.Value.ToString("N"));
+        await using Microsoft.Data.Sqlite.SqliteDataReader reader = await state.ExecuteReaderAsync();
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual((long)ContentSourceStatus.DeletionPending, reader.GetInt64(0));
+        Assert.IsFalse(reader.IsDBNull(1));
+        Assert.AreEqual((long)ContentSourceStatus.Ready, reader.GetInt64(2));
+        Assert.IsFalse(reader.IsDBNull(3));
+        Assert.AreEqual(1L, reader.GetInt64(4));
+        Assert.AreEqual(1L, reader.GetInt64(5));
+        Assert.AreEqual(1L, reader.GetInt64(6));
+        Assert.AreEqual(2L, reader.GetInt64(7));
+        Assert.AreEqual(2L, reader.GetInt64(8));
+        Assert.AreEqual(2L, reader.GetInt64(9));
+        Assert.AreEqual(2L, reader.GetInt64(10));
+        Assert.AreEqual(0L, reader.GetInt64(11));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task ParserFailureAfterStreamingWritePreservesPreviousActiveSnapshot()
     {
         if (!OperatingSystem.IsWindows())
@@ -362,7 +448,14 @@ public sealed class RemotePlaylistCatalogLoaderTests
         await task;
         object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
         bool success = (bool)result.GetType().GetProperty("IsSuccess")!.GetValue(result)!;
-        return new(success);
+        DomainErrorCode? errorCode = null;
+        if (!success)
+        {
+            object error = result.GetType().GetProperty("Error")!.GetValue(result)!;
+            errorCode = (DomainErrorCode)error.GetType().GetProperty("Code")!.GetValue(error)!;
+        }
+
+        return new(success, errorCode);
     }
 
     private static async Task InvokeDomainValueTaskAsync(
@@ -410,7 +503,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
         int EntryCount,
         string? FirstLocator);
 
-    private sealed record DomainResultSnapshot(bool IsSuccess);
+    private sealed record DomainResultSnapshot(bool IsSuccess, DomainErrorCode? ErrorCode);
 
     public class RemoteM3uSinkProxy : DispatchProxy
     {

@@ -115,7 +115,12 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 .ConfigureAwait(false);
             _aes = new AesGcm(_dek, 16);
             InitializePreparedCommands();
-            await UpsertSourceAsync(source, cancellationToken).ConfigureAwait(false);
+            if (!await TryUpsertSourceAsync(source, cancellationToken).ConfigureAwait(false))
+            {
+                await AbortAsync(CancellationToken.None).ConfigureAwait(false);
+                return DomainResult.Failure<bool>(DomainErrorCode.DomainInvariantViolation);
+            }
+
             await ExecuteAsync("""
                 INSERT INTO snapshots(snapshot_id, source_id, retrieved_utc, content_hash, http_etag,
                     http_last_modified_utc, parser_version, normalization_version, schema_version,
@@ -322,15 +327,22 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     UPDATE snapshot_keys SET key_state = 1 WHERE snapshot_id = $snapshot;
                     UPDATE snapshot_keys SET wrapped_dek = NULL, key_state = 2
                     WHERE snapshot_id = (SELECT active_snapshot_id FROM sources WHERE source_id = $source);
-                    UPDATE sources SET active_snapshot_id = $snapshot, status = $ready WHERE source_id = $source;
+                    """, cancellationToken,
+                    ("$hash", hash), ("$cache", cache), ("$items", _written), ("$warnings", _warnings),
+                    ("$snapshot", _snapshotText!), ("$source", _sourceText!)).ConfigureAwait(false);
+                if (!await TryActivateSourceAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    await AbortAsync(CancellationToken.None).ConfigureAwait(false);
+                    return DomainResult.Failure<bool>(DomainErrorCode.DomainInvariantViolation);
+                }
+
+                await ExecuteAsync("""
                     UPDATE sync_runs
                     SET completed_utc = $completed, result_code = 0, parsed_count = $items,
                         persisted_count = $items, warning_count = $warnings, failure_code = NULL
                     WHERE sync_run_id = $run;
                     """, cancellationToken,
-                    ("$hash", hash), ("$cache", cache), ("$items", _written), ("$warnings", _warnings),
-                    ("$snapshot", _snapshotText!), ("$source", _sourceText!),
-                    ("$ready", (int)ContentSourceStatus.Ready), ("$run", Id(_syncRunId)),
+                    ("$items", _written), ("$warnings", _warnings), ("$run", Id(_syncRunId)),
                     ("$completed", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))).ConfigureAwait(false);
                 await _transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 await DisposeSessionAsync().ConfigureAwait(false);
@@ -371,7 +383,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
 
     public async ValueTask DisposeAsync() => await AbortAsync(CancellationToken.None).ConfigureAwait(false);
 
-    private async Task UpsertSourceAsync(ContentSource source, CancellationToken cancellationToken)
+    private async Task<bool> TryUpsertSourceAsync(ContentSource source, CancellationToken cancellationToken)
     {
         SecretStoreKey configurationKey = source.Configuration switch
         {
@@ -382,7 +394,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 remote.LocatorReference),
             _ => throw new ArgumentException("Remote source configuration is required.", nameof(source)),
         };
-        await ExecuteAsync("""
+        int affected = await ExecuteAffectedAsync("""
             INSERT INTO sources(source_id, configuration_id, source_kind, display_name, endpoint_scheme,
                 endpoint_host, endpoint_port, configuration_reference, status, active_snapshot_id,
                 created_utc, updated_utc, last_error_code)
@@ -390,16 +402,35 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 $status, NULL, $created, $updated, $error)
             ON CONFLICT(source_id) DO UPDATE SET display_name=excluded.display_name,
                 endpoint_scheme=excluded.endpoint_scheme, endpoint_host=excluded.endpoint_host,
-                endpoint_port=excluded.endpoint_port, status=excluded.status, updated_utc=excluded.updated_utc;
+                endpoint_port=excluded.endpoint_port, status=excluded.status, updated_utc=excluded.updated_utc
+            WHERE sources.status <> $deletionPending;
             """, cancellationToken,
             ("$source", Id(source.Id.Value)), ("$configuration", Id(source.Configuration.ConfigurationId.Value)),
             ("$kind", (int)source.Kind), ("$name", source.DisplayName), ("$scheme", source.SafeEndpoint.Scheme),
             ("$host", source.SafeEndpoint.Host), ("$port", source.SafeEndpoint.Port),
             ("$reference", $"locator-ref-v1:{configurationKey.RecordIdentifier:N}"),
             ("$status", (int)source.Status),
+            ("$deletionPending", (int)ContentSourceStatus.DeletionPending),
             ("$created", source.CreatedAt.ToString("O", CultureInfo.InvariantCulture)),
             ("$updated", source.UpdatedAt.ToString("O", CultureInfo.InvariantCulture)),
             ("$error", source.LastErrorCode.HasValue ? (int)source.LastErrorCode.Value : DBNull.Value)).ConfigureAwait(false);
+        return affected == 1;
+    }
+
+    private async Task<bool> TryActivateSourceAsync(CancellationToken cancellationToken)
+    {
+        int affected = await ExecuteAffectedAsync(
+            """
+            UPDATE sources
+            SET active_snapshot_id = $snapshot, status = $ready
+            WHERE source_id = $source AND status <> $deletionPending;
+            """,
+            cancellationToken,
+            ("$snapshot", _snapshotText!),
+            ("$ready", (int)ContentSourceStatus.Ready),
+            ("$source", _sourceText!),
+            ("$deletionPending", (int)ContentSourceStatus.DeletionPending)).ConfigureAwait(false);
+        return affected == 1;
     }
 
     private DomainResult<ChannelStableKey> BuildStableKey(
@@ -550,6 +581,14 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         CancellationToken cancellationToken,
         params (string Name, object Value)[] parameters)
     {
+        _ = await ExecuteAffectedAsync(sql, cancellationToken, parameters).ConfigureAwait(false);
+    }
+
+    private async Task<int> ExecuteAffectedAsync(
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
+    {
         await using SqliteCommand command = _connection!.CreateCommand();
         command.Transaction = _transaction;
         command.CommandText = sql;
@@ -558,7 +597,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
             command.Parameters.AddWithValue(name, value);
         }
 
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private void InitializePreparedCommands()
