@@ -16,8 +16,10 @@ internal static class Program
     private const string Command = "serve-and-seed";
     private const string ExistingCatalogSourceName = "Synthetic 50k source";
     private const string PlaybackSourceName = "00 Synthetic protected playback source";
-    private const string PlaybackChannelName = "Synthetic protected Tier A channel";
-    private const string MediaRoute = "/direct-h264-aac.ts";
+    private const string PlaybackChannelAName = "Synthetic protected Tier A channel A";
+    private const string PlaybackChannelBName = "Synthetic protected Tier A channel B";
+    private const string MediaRouteA = "/direct-h264-aac-a.ts";
+    private const string MediaRouteB = "/direct-h264-aac-b.ts";
     private const string FixtureId = "iptvsuite-tier-a-synthetic-v1";
     private const string FixtureLicense = "CC0-1.0";
     private const string FixtureFileName = "direct-h264-aac.ts";
@@ -100,7 +102,12 @@ internal static class Program
                 server = await LocalHttpFixtureServer.StartHttpsAsync(
                     new Dictionary<string, FixtureHttpResponse>(StringComparer.Ordinal)
                     {
-                        [MediaRoute] = new FixtureHttpResponse(
+                        [MediaRouteA] = new FixtureHttpResponse(
+                            200,
+                            "video/mp2t",
+                            fixture,
+                            SupportsByteRanges: true),
+                        [MediaRouteB] = new FixtureHttpResponse(
                             200,
                             "video/mp2t",
                             fixture,
@@ -160,6 +167,7 @@ internal static class Program
 
             try
             {
+                IReadOnlyList<FixtureHttpRequest> requests = server?.Requests ?? [];
                 WriteJsonAtomically(
                     new ResultTicket(
                         ReadyPublished: readyPublished,
@@ -170,7 +178,11 @@ internal static class Program
                         RequestCount: server?.RequestCount ?? 0,
                         CompletedResponseCount: server?.CompletedResponseCount ?? 0,
                         CompletedBodyBytes: server?.CompletedBodyBytes ?? 0,
-                        FailureCount: server?.FailureCount ?? 0),
+                        FailureCount: server?.FailureCount ?? 0,
+                        ChannelARequestCount: requests.Count(request =>
+                            string.Equals(request.Path, MediaRouteA, StringComparison.Ordinal)),
+                        ChannelBRequestCount: requests.Count(request =>
+                            string.Equals(request.Path, MediaRouteB, StringComparison.Ordinal))),
                     paths.ResultTicketPath);
             }
             catch
@@ -211,7 +223,8 @@ internal static class Program
         }
 
         Uri playlistUri = new(baseAddress, "/synthetic-playlist.m3u");
-        Uri mediaUri = new(baseAddress, MediaRoute);
+        Uri mediaUriA = new(baseAddress, MediaRouteA);
+        Uri mediaUriB = new(baseAddress, MediaRouteB);
         var secretStore = new DpapiCurrentUserSecretStore(
             protectedStorePath,
             cancellationToken);
@@ -239,7 +252,7 @@ internal static class Program
             throw new InvalidDataException("The synthetic content source is invalid.");
         }
 
-        byte[] playlist = BuildPlaylist(mediaUri);
+        byte[] playlist = BuildPlaylist(mediaUriA, mediaUriB);
         await using var sink = new SqliteRemoteM3uImportSink(catalogDatabasePath);
         try
         {
@@ -257,7 +270,7 @@ internal static class Program
             DomainResult<RemoteM3uParseResult> parsed = await RemoteM3uPlaylistParser
                 .ParseToSinkAsync(content, playlistUri, sink, cancellationToken)
                 .ConfigureAwait(false);
-            if (!parsed.IsSuccess || parsed.Value?.ProcessedEntryCount != 1)
+            if (!parsed.IsSuccess || parsed.Value?.ProcessedEntryCount != 2)
             {
                 throw new InvalidDataException("The synthetic playlist could not be parsed.");
             }
@@ -293,44 +306,63 @@ internal static class Program
             offset: 0,
             limit: 2,
             cancellationToken).ConfigureAwait(false);
-        if (playbackPage.TotalCount != 1 || playbackPage.Items.Count != 1 ||
-            !string.Equals(playbackPage.Items[0].Name, PlaybackChannelName, StringComparison.Ordinal))
+        if (playbackPage.TotalCount != 2 || playbackPage.Items.Count != 2)
         {
             throw new InvalidDataException("The synthetic playback channel is invalid.");
         }
 
         var resolver = new SqlitePlaybackSourceResolver(catalogDatabasePath, secretStore);
-        PlaybackSourceResolutionResult resolved = await resolver.ResolveAsync(
-            new PlaybackSelection(playbackSource.SourceId, playbackPage.Items[0].ChannelId),
-            cancellationToken).ConfigureAwait(false);
-        if (!resolved.IsSuccess)
+        (string Name, Uri Locator)[] expectedChannels =
+        [
+            (PlaybackChannelAName, mediaUriA),
+            (PlaybackChannelBName, mediaUriB),
+        ];
+        foreach ((string expectedName, Uri expectedUri) in expectedChannels)
         {
-            resolved.Lease?.Dispose();
-            throw new InvalidDataException("The protected playback binding is unavailable.");
-        }
-
-        byte[] expectedLocator = Encoding.UTF8.GetBytes(mediaUri.AbsoluteUri);
-        try
-        {
-            using SecretLease lease = resolved.Lease!;
-            if (!CryptographicOperations.FixedTimeEquals(expectedLocator, lease.Value.Span))
+            CatalogChannelItem? channel = playbackPage.Items.SingleOrDefault(item =>
+                string.Equals(item.Name, expectedName, StringComparison.Ordinal));
+            if (channel is null)
             {
-                throw new InvalidDataException("The protected playback binding is inconsistent.");
+                throw new InvalidDataException("The synthetic playback channel is invalid.");
             }
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(expectedLocator);
+
+            PlaybackSourceResolutionResult resolved = await resolver.ResolveAsync(
+                new PlaybackSelection(playbackSource.SourceId, channel.ChannelId),
+                cancellationToken).ConfigureAwait(false);
+            if (!resolved.IsSuccess)
+            {
+                resolved.Lease?.Dispose();
+                throw new InvalidDataException("The protected playback binding is unavailable.");
+            }
+
+            byte[] expectedLocator = Encoding.UTF8.GetBytes(expectedUri.AbsoluteUri);
+            try
+            {
+                using SecretLease lease = resolved.Lease!;
+                if (!CryptographicOperations.FixedTimeEquals(expectedLocator, lease.Value.Span))
+                {
+                    throw new InvalidDataException("The protected playback binding is inconsistent.");
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(expectedLocator);
+            }
         }
     }
 
-    private static byte[] BuildPlaylist(Uri mediaUri) => Encoding.UTF8.GetBytes(
+    private static byte[] BuildPlaylist(Uri mediaUriA, Uri mediaUriB) => Encoding.UTF8.GetBytes(
         string.Concat(
             "#EXTM3U\n",
-            "#EXTINF:-1 tvg-id=\"m11-protected\" group-title=\"Synthetic\",",
-            PlaybackChannelName,
+            "#EXTINF:-1 tvg-id=\"m12-protected-a\" group-title=\"Synthetic\",",
+            PlaybackChannelAName,
             "\n",
-            mediaUri.AbsoluteUri,
+            mediaUriA.AbsoluteUri,
+            "\n",
+            "#EXTINF:-1 tvg-id=\"m12-protected-b\" group-title=\"Synthetic\",",
+            PlaybackChannelBName,
+            "\n",
+            mediaUriB.AbsoluteUri,
             "\n"));
 
     private static byte[] LoadValidatedFixture(string fixtureRoot)
@@ -607,5 +639,7 @@ internal static class Program
         int RequestCount,
         int CompletedResponseCount,
         long CompletedBodyBytes,
-        int FailureCount);
+        int FailureCount,
+        int ChannelARequestCount,
+        int ChannelBRequestCount);
 }

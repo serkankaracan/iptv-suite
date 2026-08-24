@@ -29,6 +29,7 @@ public sealed partial class MainPage : Page, IDisposable
     private CatalogBrowseCoordinator? _coordinator;
     private ChannelLogoCache? _logoCache;
     private PlaybackSessionCoordinator? _playback;
+    private ChannelRow? _playbackChannel;
     private CancellationTokenSource _logoPageCancellation = new();
     private int _offset;
     private bool _updatingSelectors;
@@ -358,6 +359,7 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
 
+        _playbackChannel = channel;
         using AsyncOperationLease operation = BeginAsyncOperation();
         try
         {
@@ -605,6 +607,19 @@ public sealed partial class MainPage : Page, IDisposable
         if (current.SessionId != snapshot.SessionId || current.State != snapshot.State)
         {
             return;
+        }
+
+        if (snapshot.SourceId is SourceId sourceId &&
+            snapshot.ChannelId is ChannelId channelId &&
+            _playbackChannel is { } playbackChannel &&
+            playbackChannel.SourceId.Equals(sourceId) &&
+            playbackChannel.ChannelId.Equals(channelId))
+        {
+            PlaybackChannelText.Text = playbackChannel.Name;
+        }
+        else if (snapshot.State == PlaybackState.Closed)
+        {
+            PlaybackChannelText.Text = "No channel selected.";
         }
 
         PlaybackStatusText.Text = snapshot.State switch

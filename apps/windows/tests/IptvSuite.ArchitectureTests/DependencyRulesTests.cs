@@ -4295,6 +4295,20 @@ public sealed class DependencyRulesTests
             RepositoryRoot,
             "eng",
             "Invoke-WindowsPackageSmoke.ps1"));
+        string playbackHarness = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.PlaybackUiAcceptanceHarness",
+            "Program.cs"));
+        string coordinatorTests = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.UnitTests",
+            "PlaybackSessionCoordinatorTests.cs"));
 
         string[] automationContracts =
         [
@@ -4304,6 +4318,7 @@ public sealed class DependencyRulesTests
             "PlaybackAspectModeButton",
             "PlaybackFullscreenButton",
             "PlaybackVolumeText",
+            "PlaybackChannelText",
             "Decrease playback volume",
             "Increase playback volume",
             "Mute playback",
@@ -4336,6 +4351,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "previousFocus.Focus(FocusState.Keyboard)");
         StringAssert.Contains(codeBehind, "DispatcherQueue.TryEnqueue(RestoreFocusAfterFullscreen)");
         StringAssert.Contains(codeBehind, "Grid.SetColumnSpan(PlaybackPanel, isFullscreen ? 2 : 1)");
+        StringAssert.Contains(codeBehind, "_playbackChannel = channel;");
+        StringAssert.Contains(codeBehind, "playbackChannel.SourceId.Equals(sourceId)");
+        StringAssert.Contains(codeBehind, "playbackChannel.ChannelId.Equals(channelId)");
         StringAssert.Contains(window, "AppWindowPresenterKind.FullScreen");
         StringAssert.Contains(window, "AppWindowPresenterKind.Default");
         StringAssert.Contains(window, "AppWindow.Changed += AppWindow_Changed");
@@ -4354,6 +4372,24 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "PlaybackFullscreenEnterVerified");
         StringAssert.Contains(packageSmoke, "PlaybackFullscreenExitVerified");
         StringAssert.Contains(packageSmoke, "PlaybackFullscreenFocusRestored");
+        StringAssert.Contains(packageSmoke, "PlaybackRapidSwitchVerified");
+        StringAssert.Contains(packageSmoke, "PlaybackRapidSwitchCount");
+        StringAssert.Contains(packageSmoke, "PlaybackRapidSwitchP95Milliseconds");
+        StringAssert.Contains(packageSmoke, "PlaybackRapidSwitchMaximumMilliseconds");
+        StringAssert.Contains(packageSmoke, "PlaybackActiveCloseVerified");
+        StringAssert.Contains(packageSmoke, "$switchOrdinal -le 25");
+        StringAssert.Contains(packageSmoke, "$playbackRapidSwitchP95Milliseconds -gt 3000.0");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedPlaybackSelection");
+        StringAssert.Contains(packageSmoke, "$launchedProcess.CloseMainWindow()");
+        StringAssert.Contains(playbackHarness, "PlaybackChannelAName");
+        StringAssert.Contains(playbackHarness, "PlaybackChannelBName");
+        StringAssert.Contains(playbackHarness, "ChannelARequestCount");
+        StringAssert.Contains(playbackHarness, "ChannelBRequestCount");
+        StringAssert.Contains(
+            coordinatorTests,
+            "TwentyFiveReplacementSwitchesStopEveryPreviousSessionBeforeOpeningNext");
+        StringAssert.Contains(coordinatorTests, "Assert.HasCount(26, engine.OpenSessions)");
+        StringAssert.Contains(coordinatorTests, "Assert.HasCount(25, engine.StopSessions)");
         StringAssert.Contains(packageSmoke, "Wait-PackagedAutomationElementByName");
         StringAssert.Contains(packageSmoke, "ElementNotAvailableException");
         StringAssert.Contains(packageSmoke, "-ExpectedName \"Volume 95%\"");

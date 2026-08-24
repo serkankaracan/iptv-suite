@@ -462,6 +462,8 @@ $expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
 $expectedRuntimeDependencyVersion = "2.4.0.0"
 $expectedCatalogSourceName = "Synthetic 50k source"
 $expectedPlaybackSourceName = "00 Synthetic protected playback source"
+$expectedPlaybackChannelAName = "Synthetic protected Tier A channel A"
+$expectedPlaybackChannelBName = "Synthetic protected Tier A channel B"
 $expectedPlaybackCertificateSubject = "CN=IPTVSuite Synthetic Loopback"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"
@@ -516,9 +518,16 @@ $playbackAspectControlVerified = $false
 $playbackFullscreenEnterVerified = $false
 $playbackFullscreenExitVerified = $false
 $playbackFullscreenFocusRestored = $false
+$playbackRapidSwitchVerified = $false
+$playbackRapidSwitchCount = 0
+$playbackRapidSwitchP95Milliseconds = 0.0
+$playbackRapidSwitchMaximumMilliseconds = 0.0
+$playbackActiveCloseVerified = $false
 $playbackUiRequestCount = 0
 $playbackUiCompletedResponseCount = 0
 $playbackUiCompletedBodyBytes = 0L
+$playbackChannelARequestCount = 0
+$playbackChannelBRequestCount = 0
 $windowsAppRuntimeDisposition = "NotStarted"
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
@@ -1407,6 +1416,66 @@ function Wait-PackagedPlaybackStatus {
     throw "The packaged playback UI did not reach the expected safe state."
 }
 
+function Wait-PackagedPlaybackSelection {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$StatusElement,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$ChannelElement,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedChannelName,
+
+        [int]$TimeoutMilliseconds = 5000
+    )
+
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        if ($StatusElement.Current.Name -ceq "Channel is playing." -and
+            $ChannelElement.Current.Name -ceq $ExpectedChannelName) {
+            return
+        }
+
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "The packaged playback switch did not reach the expected channel-bound state."
+}
+
+function Invoke-PackagedPlaybackChannelItem {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$ChannelItem,
+
+        [Parameter(Mandatory)]
+        [IntPtr]$WindowHandle,
+
+        [Parameter(Mandatory)]
+        [uint32]$ExpectedProcessId
+    )
+
+    Assert-PackagedProcessAlive -Process $Process
+    $invokePatternObject = $null
+    if ($ChannelItem.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern,
+            [ref]$invokePatternObject)) {
+        ([System.Windows.Automation.InvokePattern]$invokePatternObject).Invoke()
+        return
+    }
+
+    Assert-PackagedWindowForeground -WindowHandle $WindowHandle -ExpectedProcessId $ExpectedProcessId
+    Assert-FocusedAutomationElement $ChannelItem "CatalogChannelList" -RequestFocus
+    [IptvSuite.PackageSmoke.KeyboardInspector]::PressEnter()
+}
+
 function Wait-PackagedAutomationName {
     param(
         [Parameter(Mandatory)]
@@ -2190,6 +2259,15 @@ try {
             [System.Windows.Automation.ControlType]::Text) {
         throw "The packaged playback status automation element is invalid."
     }
+    $playbackCurrentChannelElement = Get-AutomationElementById `
+        $playbackAutomationRoot `
+        "PlaybackChannelText"
+    if ($null -eq $playbackCurrentChannelElement -or
+        $playbackCurrentChannelElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Text -or
+        $playbackCurrentChannelElement.Current.Name -cne "No channel selected.") {
+        throw "The packaged current playback channel automation element is invalid."
+    }
     $playButtonElement = Get-RequiredAutomationElement `
         $playbackAutomationRoot `
         "PlaybackPlayButton" `
@@ -2338,7 +2416,7 @@ try {
     }
 
     $expectedPlaybackCatalogStatus =
-        "Showing 1$([char]0x2013)1 of 1 channels."
+        "Showing 1$([char]0x2013)2 of 2 channels."
     $catalogStatusElement = $null
     $playbackCatalogDeadline = (Get-Date).AddSeconds(15)
     $playbackCatalogReady = $false
@@ -2373,37 +2451,55 @@ try {
         $playbackChannelItems = $playbackChannelListElement.FindAll(
             [System.Windows.Automation.TreeScope]::Descendants,
             $playbackListItemCondition)
-        if ($playbackChannelItems.Count -eq 1) {
+        if ($playbackChannelItems.Count -eq 2) {
             break
         }
 
         Start-Sleep -Milliseconds 100
     } while ((Get-Date) -lt $playbackChannelDeadline)
-    if ($playbackChannelItems.Count -ne 1) {
-        throw "The packaged playback catalog did not expose exactly one channel item."
+    if ($playbackChannelItems.Count -ne 2) {
+        throw "The packaged playback catalog did not expose exactly two channel items."
     }
 
-    $playbackChannelItem = $playbackChannelItems[0]
+    $playbackChannelItemA = $null
+    $playbackChannelItemB = $null
+    for ($channelItemIndex = 0;
+        $channelItemIndex -lt $playbackChannelItems.Count;
+        $channelItemIndex++) {
+        $channelItem = $playbackChannelItems[$channelItemIndex]
+        if ($channelItem.Current.Name -ceq $expectedPlaybackChannelAName) {
+            if ($null -ne $playbackChannelItemA) {
+                throw "The packaged playback channel list contains a duplicate acceptance channel."
+            }
+            $playbackChannelItemA = $channelItem
+        }
+        elseif ($channelItem.Current.Name -ceq $expectedPlaybackChannelBName) {
+            if ($null -ne $playbackChannelItemB) {
+                throw "The packaged playback channel list contains a duplicate acceptance channel."
+            }
+            $playbackChannelItemB = $channelItem
+        }
+        else {
+            throw "The packaged playback channel list contains an unexpected channel."
+        }
+    }
+    if ($null -eq $playbackChannelItemA -or $null -eq $playbackChannelItemB) {
+        throw "The packaged playback channel list is incomplete."
+    }
+
     Assert-PackagedWindowForeground `
         $playbackWindowHandle `
         ([uint32]$playbackActivationProcessId)
-    Assert-FocusedAutomationElement `
-        $playbackChannelItem `
-        "CatalogChannelList" `
-        -RequestFocus
-    $channelInvokePatternObject = $null
-    if ($playbackChannelItem.TryGetCurrentPattern(
-            [System.Windows.Automation.InvokePattern]::Pattern,
-            [ref]$channelInvokePatternObject)) {
-        ([System.Windows.Automation.InvokePattern]$channelInvokePatternObject).Invoke()
-    }
-    else {
-        [IptvSuite.PackageSmoke.KeyboardInspector]::PressEnter()
-    }
-    Wait-PackagedPlaybackStatus `
+    Invoke-PackagedPlaybackChannelItem `
+        -Process $launchedProcess `
+        -ChannelItem $playbackChannelItemA `
+        -WindowHandle $playbackWindowHandle `
+        -ExpectedProcessId ([uint32]$playbackActivationProcessId)
+    Wait-PackagedPlaybackSelection `
         -Process $launchedProcess `
         -StatusElement $playbackStatusElement `
-        -ExpectedStatus "Channel is playing."
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelAName
 
     Invoke-PackagedPlaybackControlButton `
         -Process $launchedProcess `
@@ -2486,11 +2582,66 @@ try {
         -ButtonElement $playButtonElement `
         -StatusElement $playbackStatusElement `
         -ExpectedStatus "Channel is playing."
+
+    $rapidSwitchSamples = [System.Collections.Generic.List[double]]::new(25)
+    for ($switchOrdinal = 1; $switchOrdinal -le 25; $switchOrdinal++) {
+        $targetChannelItem = if (($switchOrdinal % 2) -eq 1) {
+            $playbackChannelItemB
+        }
+        else {
+            $playbackChannelItemA
+        }
+        $targetChannelName = if (($switchOrdinal % 2) -eq 1) {
+            $expectedPlaybackChannelBName
+        }
+        else {
+            $expectedPlaybackChannelAName
+        }
+
+        $switchTimer = [System.Diagnostics.Stopwatch]::StartNew()
+        Invoke-PackagedPlaybackChannelItem `
+            -Process $launchedProcess `
+            -ChannelItem $targetChannelItem `
+            -WindowHandle $playbackWindowHandle `
+            -ExpectedProcessId ([uint32]$playbackActivationProcessId)
+        Wait-PackagedPlaybackSelection `
+            -Process $launchedProcess `
+            -StatusElement $playbackStatusElement `
+            -ChannelElement $playbackCurrentChannelElement `
+            -ExpectedChannelName $targetChannelName
+        $switchTimer.Stop()
+        $rapidSwitchSamples.Add($switchTimer.Elapsed.TotalMilliseconds)
+    }
+
+    $playbackRapidSwitchP95Milliseconds = Get-Percentile95 $rapidSwitchSamples.ToArray()
+    $playbackRapidSwitchMaximumMilliseconds = [double](
+        ($rapidSwitchSamples | Measure-Object -Maximum).Maximum)
+    if ($playbackRapidSwitchP95Milliseconds -gt 3000.0) {
+        throw "The packaged playback rapid-switch p95 budget was exceeded."
+    }
+    $playbackRapidSwitchCount = $rapidSwitchSamples.Count
+    $playbackRapidSwitchVerified = $playbackRapidSwitchCount -eq 25
+
     Invoke-PackagedPlaybackButton `
         -Process $launchedProcess `
         -ButtonElement $stopButtonElement `
         -StatusElement $playbackStatusElement `
         -ExpectedStatus "Playback stopped."
+    Wait-PackagedAutomationName `
+        -Process $launchedProcess `
+        -Element $playbackCurrentChannelElement `
+        -ExpectedName "No channel selected."
+
+    Invoke-PackagedPlaybackChannelItem `
+        -Process $launchedProcess `
+        -ChannelItem $playbackChannelItemA `
+        -WindowHandle $playbackWindowHandle `
+        -ExpectedProcessId ([uint32]$playbackActivationProcessId)
+    Wait-PackagedPlaybackSelection `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelAName
 
     Assert-PackagedProcessAlive -Process $launchedProcess
     if (-not $launchedProcess.CloseMainWindow()) {
@@ -2504,6 +2655,7 @@ try {
     if ($null -eq $playbackExitCode -or [int]$playbackExitCode -ne 0) {
         throw "The packaged playback application did not return a successful normal-close result."
     }
+    $playbackActiveCloseVerified = $true
 
     $stopSignalStream = [System.IO.File]::Open(
         $playbackStopSignalPath,
@@ -2533,7 +2685,9 @@ try {
             "RequestCount",
             "CompletedResponseCount",
             "CompletedBodyBytes",
-            "FailureCount")
+            "FailureCount",
+            "ChannelARequestCount",
+            "ChannelBRequestCount")
     if ($resultTicket.ReadyPublished -isnot [bool] -or
         $resultTicket.SeedCompleted -isnot [bool] -or
         $resultTicket.StopObserved -isnot [bool] -or
@@ -2544,22 +2698,32 @@ try {
         ($resultTicket.CompletedBodyBytes -isnot [int] -and
             $resultTicket.CompletedBodyBytes -isnot [long]) -or
         $resultTicket.FailureCount -isnot [int] -or
+        $resultTicket.ChannelARequestCount -isnot [int] -or
+        $resultTicket.ChannelBRequestCount -isnot [int] -or
         -not $resultTicket.ReadyPublished -or
         -not $resultTicket.SeedCompleted -or
         -not $resultTicket.StopObserved -or
         -not $resultTicket.StoppedGracefully -or
         $resultTicket.CertificateThumbprint -cne
             $playbackLoopbackCertificateThumbprint -or
-        [int]$resultTicket.RequestCount -le 0 -or
-        [int]$resultTicket.CompletedResponseCount -le 0 -or
+        [int]$resultTicket.RequestCount -lt 27 -or
+        [int]$resultTicket.CompletedResponseCount -ne
+            [int]$resultTicket.RequestCount -or
         [long]$resultTicket.CompletedBodyBytes -le 0 -or
-        [int]$resultTicket.FailureCount -ne 0) {
+        [int]$resultTicket.FailureCount -ne 0 -or
+        [int]$resultTicket.ChannelARequestCount -le 0 -or
+        [int]$resultTicket.ChannelBRequestCount -le 0 -or
+        ([int]$resultTicket.ChannelARequestCount +
+            [int]$resultTicket.ChannelBRequestCount) -ne
+            [int]$resultTicket.RequestCount) {
         throw "The playback acceptance result ticket is invalid."
     }
 
     $playbackUiRequestCount = [int]$resultTicket.RequestCount
     $playbackUiCompletedResponseCount = [int]$resultTicket.CompletedResponseCount
     $playbackUiCompletedBodyBytes = [long]$resultTicket.CompletedBodyBytes
+    $playbackChannelARequestCount = [int]$resultTicket.ChannelARequestCount
+    $playbackChannelBRequestCount = [int]$resultTicket.ChannelBRequestCount
     $playbackUiAcceptanceVerified = $true
 
     $packageFileName = $packages[0].Name
@@ -2616,9 +2780,20 @@ try {
         PlaybackFullscreenEnterVerified = $playbackFullscreenEnterVerified
         PlaybackFullscreenExitVerified = $playbackFullscreenExitVerified
         PlaybackFullscreenFocusRestored = $playbackFullscreenFocusRestored
+        PlaybackRapidSwitchVerified = $playbackRapidSwitchVerified
+        PlaybackRapidSwitchCount = $playbackRapidSwitchCount
+        PlaybackRapidSwitchP95Milliseconds = [Math]::Round(
+            $playbackRapidSwitchP95Milliseconds,
+            3)
+        PlaybackRapidSwitchMaximumMilliseconds = [Math]::Round(
+            $playbackRapidSwitchMaximumMilliseconds,
+            3)
+        PlaybackActiveCloseVerified = $playbackActiveCloseVerified
         PlaybackUiRequestCount = $playbackUiRequestCount
         PlaybackUiCompletedResponseCount = $playbackUiCompletedResponseCount
         PlaybackUiCompletedBodyBytes = $playbackUiCompletedBodyBytes
+        PlaybackChannelARequestCount = $playbackChannelARequestCount
+        PlaybackChannelBRequestCount = $playbackChannelBRequestCount
         NormalClose       = $true
         PackageRemoved    = $true
     }

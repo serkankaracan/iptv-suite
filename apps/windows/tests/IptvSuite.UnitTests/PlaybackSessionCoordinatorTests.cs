@@ -39,6 +39,46 @@ public sealed class PlaybackSessionCoordinatorTests
     }
 
     [TestMethod]
+    public async Task TwentyFiveReplacementSwitchesStopEveryPreviousSessionBeforeOpeningNext()
+    {
+        var engine = new ControlledPlaybackEngine();
+        var coordinator = new PlaybackSessionCoordinator(engine);
+        var sessions = new List<PlaybackSessionId>(26);
+
+        for (int activationOrdinal = 0; activationOrdinal < 26; activationOrdinal++)
+        {
+            PlaybackSessionSnapshot? snapshot = await coordinator.StartAsync(
+                SourceId.Generate(),
+                ChannelId.Generate());
+            Assert.IsNotNull(snapshot);
+            Assert.AreEqual(PlaybackState.Playing, snapshot.State);
+            sessions.Add(snapshot.SessionId);
+        }
+
+        Assert.HasCount(26, engine.OpenSessions);
+        Assert.HasCount(25, engine.StopSessions);
+        Assert.HasCount(26, sessions.Distinct().ToArray());
+        Assert.AreEqual(sessions[^1], coordinator.Current.SessionId);
+        for (int index = 0; index < sessions.Count - 1; index++)
+        {
+            PlaybackSessionId current = sessions[index];
+            PlaybackSessionId next = sessions[index + 1];
+            Assert.IsTrue(next.Value > current.Value);
+            Assert.IsTrue(
+                engine.Journal.IndexOf($"Stop:{current.Value}") <
+                engine.Journal.IndexOf($"Open:{next.Value}"));
+            Assert.AreEqual(1, engine.StopSessions.Count(session => session == current));
+        }
+
+        Assert.IsFalse(engine.StopSessions.Contains(sessions[^1]));
+        await coordinator.DisposeAsync();
+        await coordinator.DisposeAsync();
+
+        CollectionAssert.AreEqual(sessions.ToArray(), engine.StopSessions.ToArray());
+        Assert.AreEqual(1, engine.DisposeCount);
+    }
+
+    [TestMethod]
     public async Task RapidSecondStartCancelsAndStopsTheFirstBeforeOpeningTheSecond()
     {
         var engine = new ControlledPlaybackEngine { BlockFirstOpen = true };
