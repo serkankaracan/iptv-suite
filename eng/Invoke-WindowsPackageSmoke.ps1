@@ -2988,8 +2988,8 @@ try {
         -WindowHandle $playbackWindowHandle
 
     foreach ($windowSize in @(
-            @(1000, 700),
-            @(1200, 800))) {
+            @(800, 600),
+            @(1000, 700))) {
         Set-PackagedWindowSize `
             -Process $launchedProcess `
             -WindowHandle $playbackWindowHandle `
