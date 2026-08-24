@@ -1,6 +1,8 @@
-# Windows development ve M1–M7 foundations
+# Windows development ve M1–M11 foundations
 
-M5 network/transport foundation, M6 Xtream-compatible Live TV adapter, M7 remote M3U/M3U8 streaming parser ve M8 local persistence/cache/indexing `COMPLETED, 2026-08-21`; M9 categories/channels query ve virtualized UI sıradaki aktif milestone'dur. Streaming loader production same-SQLite-transaction sink'e yazar; protected locator, atomik active snapshot, query/cache, prune ve reconciliation uygulanmıştır. Clean 5k–50k ×20 Decision koşusunda 50k import p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB` ve cancellation p95 `12,390 ms` ölçülmüştür. Ayrı process crash harness'ı açık refresh transaction'ı öldürüldükten sonra önceki complete snapshot'ı ve inert/no-sidecar recovery sonucunu doğrular. Ayrıntı: [M8 completion evidence](../../docs/quality/M8_COMPLETION_EVIDENCE.md).
+M5–M9 network/provider/parser/persistence/catalog UI foundation'ları ve M11 production player/temel playback `COMPLETED`; M10 Windows-native Tier A fallback `ACCEPTED WITH KNOWN DEVIATION`; M12 playback UX/window-device lifecycle sıradaki aktif milestone'dur. M11 clean head `5a07cae8138642d669f272eaee1340e87edcb47b` için hosted quality, signed packaged playback/lifecycle, DPAPI real-user boundary ve required gate geçmiştir. Ayrıntı: [M11 completion evidence](../../docs/quality/M11_COMPLETION_EVIDENCE.md).
+
+Aşağıdaki uzun foundation zaman çizelgesindeki “güncel worktree”, “development shell” ve açık milestone ifadeleri kendi tarihsel checkpoint'lerine aittir; bu üstteki M11 completion durumunu geçersiz kılmaz.
 
 Aşağıdaki M4 comparative zaman çizelgesindeki M8 `Proposed`/unimplemented/açık ifadeleri tarihsel karar anını anlatır; güncel M8 `COMPLETED` ve ADR-003 `Accepted` kaydını geçersiz kılmaz.
 

@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M2 quality infrastructure ile M3–M9 foundation/adapter/parser/persistence/query/UI gate'leri `COMPLETED`; M10 `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION`; M11 production player adapter aktif
+**Durum:** M2 quality infrastructure ile M3–M9 foundation/adapter/parser/persistence/query/UI gate'leri `COMPLETED`; M10 `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION`; M11 production player adapter `COMPLETED`; M12 playback UX/lifecycle aktif
 
 M8 completion kaydı, aşağıdaki tarihsel M4 comparative paragraflarındaki “M8 Proposed/uygulanmamış/açık” ifadelerini supersede eder. Güncel acceptance bağı [M8 completion evidence](M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
@@ -105,6 +105,8 @@ Hosted `windows-quality.yml` bütün pull request, `merge_group`, `main` push ve
 2026-08-21 güncellemesi: özel `windows-2025-vs2026` label'ında üç ardışık iş sıfır step ve `runner_id=0` ile tahsis edilemedi. Workflow bu nedenle, 2026-06 sonrasında aynı Windows Server 2025 + VS2026 image ailesine yönlenen GA `windows-2025` label'ına taşındı [S114]. Exact .NET SDK setup ve runtime verification, dört required job, fail-closed coordinator ve bütün security/package gate'leri değişmeden kalır.
 
 2026-08-24 native-runner düzeltmesi: Standart GitHub-hosted x64 Windows label'ları Windows Server'dır; mevcut Windows Client label'ı ARM64 olduğundan x64 Client-only Media Foundation kabulü standart hosted runner'da temsil edilemez [S114]. Run `32752547781`de package job'u production MSIX içindeki sentetik HLS `play → pause → resume → stop` zincirini geçerken, sonradan tek başına çalışan M10 spike job'u aynı committe `InstallationType=Server` üzerinde transport/source-open tamamlandıktan sonra `MediaOpenTimeout` vermiştir. Bu nedenle native M10 smoke kaldırılmadan yalnız explicit manual dispatch + `self-hosted/Windows/X64/iptv-windows-client` label'larına bağlanır ve registry/architecture preflight yanlış runner'ı fail-closed reddeder. Normal push/PR required gate'i quality, production package playback ve DPAPI işlerini zorunlu tutar; native job'un yalnız talep edilmediğinde `skipped`, talep edildiğinde ise `success` olmasını exact kontrol eder. Startup/resource/security eşikleri ve script değiştirilmemiştir.
+
+2026-08-24 M11 completion: Clean head `5a07cae8138642d669f272eaee1340e87edcb47b` için [run `32754184474`](https://github.com/serkankaracan/iptv-suite/actions/runs/32754184474), quality `354/354 × 2`, signed production-package `play → pause → resume → stop`, protected-store lifecycle, DPAPI real-user boundary ve Required Windows gate işlerini geçti. İndirilen commit-bound package evidence `PlaybackUiAcceptanceVerified=true`, request/completed `1/1`, `1.002.980` completed body byte, normal close ve exact package removal kaydetti. Native Client-only iş normal push'ta policy gereği `skipped` kaldı; bu M10 testini veya eşiklerini değiştirmez. Exact artifact ID/digest ve kapsam sınırı [M11 completion evidence](M11_COMPLETION_EVIDENCE.md) belgesindedir.
 
 ## 3. Feature test planı
 
@@ -416,7 +418,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M8 | `COMPLETED`: same-SQLite-transaction persistence, clean 5k–50k ×20 Decision ve gerçek ayrı-process kill/recovery tamamlandı; 50k duration p95 `2,739 s`, allocation p95 `116,330 MiB`, working-set delta p95 `6,164 MiB`, cancellation p95 `12,390 ms`; migration/fault/crash, canary, source lifecycle ve query/cache acceptance PASS. [Kanıt](M8_COMPLETION_EVIDENCE.md) |
 | M9 | `COMPLETED, 2026-08-21`: bounded query/UI/logo local `292/292 × 2` ve clean query Decision PASS; run `32443355378` commit-bound packaged 50k UIA/Tab/virtualization/input/DWM acceptance PASS. Realized item `8`, input p95 `16,284 ms`, compositor p95 `31,25 ms`, max `171,875 ms`, late/drop proxy `%0`, interval `404`. [Kanıt](M9_COMPLETION_EVIDENCE.md) |
 | M10 | `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION, 2026-08-23`: LibVLC candidate GPL-zero hard gate'te reddedildi; Windows-native Tier A fallback temiz `1f15888` sekiz saat koşusunda bütün temel playback/lifecycle/startup/recovery kontrollerini geçti. Tek sapma relative memory `%11,1944255 > %10` (`~1,85 MiB` aşım); absolute `~17,32 MiB ≤100 MiB`, monotonic `false`, handle delta `-21`. Gate değişmedi; R15/M16 hardening borcu açık, M11 başladı. [Acceptance](M10_NATIVE_TIER_A_ACCEPTANCE_SOAK_ATTEMPT.md), [candidate](M10_PLAYBACK_CANDIDATE_DECISION.md), [surface](M10_NATIVE_TIER_A_SURFACE_EVIDENCE.md), [network](M10_NATIVE_TIER_A_NETWORK_RECOVERY_EVIDENCE.md), [session lifecycle](M10_NATIVE_TIER_A_SESSION_LIFECYCLE_EVIDENCE.md) |
-| M11 | Fake+real player adapter contract |
+| M11 | `COMPLETED, 2026-08-24`: engine-neutral lifecycle/control, protected Remote-M3U ve Xtream JIT resolution, Windows-native adapter ve packaged WinUI playback tamamlandı. Local architecture `35/35`, unit `171/171`, integration `116/116`; run `32754184474` quality `354/354 ×2`, signed package playback/lifecycle, DPAPI ve required gate PASS. [Kanıt](M11_COMPLETION_EVIDENCE.md) |
 | M12 | Lifecycle/rapid-switch/UI automation |
 | M13 | Retry/reconnect deterministic fault suite |
 | M14 | Dedicated 50k budgets and traces |
