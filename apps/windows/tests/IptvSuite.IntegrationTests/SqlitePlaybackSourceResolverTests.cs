@@ -47,6 +47,77 @@ public sealed class SqlitePlaybackSourceResolverTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task ActiveXtreamChannelBuildsOnlyTheBoundedLiveRouteAndDisposesCredentials()
+    {
+        (ChannelContainerHint Hint, string Extension, string ProviderItem, string EscapedItem)[] containers =
+        [
+            (
+                ChannelContainerHint.Hls,
+                "m3u8",
+                "stream/hls?reserved#item",
+                "stream%2Fhls%3Freserved%23item"),
+            (ChannelContainerHint.MpegTs, "ts", "stream-ts", "stream-ts"),
+        ];
+
+        foreach ((
+            ChannelContainerHint hint,
+            string extension,
+            string providerItem,
+            string escapedItem) in containers)
+        {
+            using TemporaryDirectory temporary = TemporaryDirectory.Create(
+                $"m11-playback-xtream-{extension}");
+            using var store = new TrackingSecretStore();
+            string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+            await InitializeDatabaseAsync(databasePath);
+            ContentSource source = await CreateXtreamSourceAsync(
+                store,
+                extension,
+                "https://fixtures.invalid/provider?discarded=query-canary",
+                "synthetic user",
+                "p/ass?word#credential-canary");
+            ResolverBatch batch = await CreateBatchAsync(
+                locator: null,
+                suffix: extension,
+                existingSource: source,
+                providerItem: true,
+                containerHint: hint,
+                providerItemValue: providerItem);
+            await ActivateAsync(databasePath, batch.Batch);
+
+            ResolvedSource resolved = await ResolveAsync(
+                databasePath,
+                new PlaybackSelection(source.Id, batch.ChannelId),
+                secretStore: store);
+
+            Assert.AreEqual("None", resolved.Failure);
+            Assert.AreEqual(1, store.CredentialsReadCount);
+            Assert.IsNotNull(store.LastCredentialsLease);
+            Assert.ThrowsExactly<ObjectDisposedException>(
+                () => _ = store.LastCredentialsLease.Value);
+            Assert.AreEqual("[PLAYBACK-SOURCE-RESOLUTION:SUCCESS]", resolved.RawResult.ToString());
+            string serialized = JsonSerializer.Serialize(
+                resolved.RawResult,
+                resolved.RawResult.GetType());
+            Assert.DoesNotContain("fixtures.invalid", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("synthetic user", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("credential-canary", serialized, StringComparison.Ordinal);
+
+            SecretLease locatorLease = resolved.Lease!;
+            using (locatorLease)
+            {
+                Assert.AreEqual(
+                    $"https://fixtures.invalid/provider/live/synthetic%20user/" +
+                    $"p%2Fass%3Fword%23credential-canary/{escapedItem}.{extension}",
+                    Encoding.UTF8.GetString(locatorLease.Value.Span));
+            }
+
+            Assert.ThrowsExactly<ObjectDisposedException>(() => _ = locatorLease.Value);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task WrongAndRetiredBindingsAreUnavailable()
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m11-playback-binding");
@@ -89,7 +160,7 @@ public sealed class SqlitePlaybackSourceResolverTests
 
     [TestMethod]
     [Timeout(30_000)]
-    public async Task ProviderItemBranchIsExplicitlyUnsupportedWithoutProducingALease()
+    public async Task ProviderItemOnRemoteSourceIsExplicitlyUnsupportedWithoutProducingALease()
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m11-playback-provider");
         string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
@@ -108,6 +179,145 @@ public sealed class SqlitePlaybackSourceResolverTests
             Convert.ToInt64(
                 await ScalarAsync(connection, "SELECT count(*) FROM protected_locators;"),
                 System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task XtreamProviderKindContainerAndCanonicalItemAreExact()
+    {
+        (string Mutation, string ExpectedFailure)[] cases =
+        [
+            ("provider_item_kind = 2", "UnsupportedSource"),
+            ("container_hint = NULL", "UnsupportedSource"),
+            ("container_hint = 'Mp4'", "UnsupportedSource"),
+            ("provider_item_id = '  stream-contract  '", "InvalidLocator"),
+        ];
+
+        for (int index = 0; index < cases.Length; index++)
+        {
+            using TemporaryDirectory temporary = TemporaryDirectory.Create(
+                $"m11-playback-xtream-contract-{index}");
+            using var store = new TrackingSecretStore();
+            string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+            await InitializeDatabaseAsync(databasePath);
+            ContentSource source = await CreateXtreamSourceAsync(
+                store,
+                $"contract-{index}",
+                "https://fixtures.invalid/provider",
+                "synthetic-user",
+                "synthetic-password");
+            ResolverBatch batch = await CreateBatchAsync(
+                locator: null,
+                suffix: "contract",
+                existingSource: source,
+                providerItem: true);
+            await ActivateAsync(databasePath, batch.Batch);
+            await ExecuteAsync(
+                databasePath,
+                $"UPDATE channels SET {cases[index].Mutation} WHERE channel_id = $channel;",
+                batch.ChannelId);
+
+            await AssertFailureAsync(
+                databasePath,
+                new PlaybackSelection(source.Id, batch.ChannelId),
+                cases[index].ExpectedFailure,
+                store);
+            Assert.AreEqual(
+                0,
+                store.CredentialsReadCount,
+                "An invalid provider-item contract must be rejected before protected credentials are read.");
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task XtreamCredentialsRequireExactOwnerReferenceEndpointAndPayload()
+    {
+        (string SourceMutation, string ExpectedFailure, int ExpectedReadCount)[] cases =
+        [
+            ($"source_kind = {(int)SourceKind.RemotePlaylist}", "UnsupportedSource", 0),
+            ($"configuration_id = '{Guid.NewGuid():N}'", "Unavailable", 1),
+            ($"configuration_reference = 'locator-ref-v1:{Guid.NewGuid():N}'", "InvalidLocator", 0),
+            ($"configuration_reference = 'secret-ref-v1:{Guid.NewGuid():N}'", "Unavailable", 1),
+            ("endpoint_scheme = 'http'", "InvalidLocator", 1),
+            ("endpoint_host = 'other.invalid'", "InvalidLocator", 1),
+            ("endpoint_port = 444", "InvalidLocator", 1),
+        ];
+
+        for (int index = 0; index < cases.Length; index++)
+        {
+            using TemporaryDirectory temporary = TemporaryDirectory.Create(
+                $"m11-playback-xtream-binding-{index}");
+            using var store = new TrackingSecretStore();
+            string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+            await InitializeDatabaseAsync(databasePath);
+            ContentSource source = await CreateXtreamSourceAsync(
+                store,
+                $"binding-{index}",
+                "https://fixtures.invalid/provider",
+                "binding-user",
+                "binding-password");
+            ResolverBatch batch = await CreateBatchAsync(
+                locator: null,
+                suffix: $"binding-{index}",
+                existingSource: source,
+                providerItem: true);
+            await ActivateAsync(databasePath, batch.Batch);
+            await ExecuteSourceAsync(
+                databasePath,
+                $"UPDATE sources SET {cases[index].SourceMutation} WHERE source_id = $source;",
+                source.Id);
+
+            await AssertFailureAsync(
+                databasePath,
+                new PlaybackSelection(source.Id, batch.ChannelId),
+                cases[index].ExpectedFailure,
+                store);
+            Assert.AreEqual(cases[index].ExpectedReadCount, store.CredentialsReadCount);
+            if (cases[index].ExpectedFailure == "Unavailable")
+            {
+                Assert.IsNull(store.LastCredentialsLease);
+            }
+            if (store.LastCredentialsLease is not null)
+            {
+                Assert.ThrowsExactly<ObjectDisposedException>(
+                    () => _ = store.LastCredentialsLease.Value);
+            }
+        }
+
+        using TemporaryDirectory malformed = TemporaryDirectory.Create(
+            "m11-playback-xtream-payload");
+        using var malformedStore = new TrackingSecretStore();
+        string malformedDatabase = Path.Combine(malformed.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(malformedDatabase);
+        ContentSource malformedSource = await CreateXtreamSourceAsync(
+            malformedStore,
+            "malformed",
+            "https://fixtures.invalid/provider",
+            "payload-user",
+            "payload-password");
+        ResolverBatch malformedBatch = await CreateBatchAsync(
+            locator: null,
+            suffix: "malformed",
+            existingSource: malformedSource,
+            providerItem: true);
+        await ActivateAsync(malformedDatabase, malformedBatch.Batch);
+        var configuration = (XtreamSourceConfiguration)malformedSource.Configuration;
+        SecretStoreOperationResult updated = await malformedStore.UpdateCredentialsAsync(
+            malformedSource.Id,
+            ProtectedRecordOwner.ForSourceConfiguration(configuration.ConfigurationId),
+            configuration.CredentialsReference,
+            "malformed-credential-payload"u8.ToArray());
+        Assert.IsTrue(updated.IsSuccess);
+
+        await AssertFailureAsync(
+            malformedDatabase,
+            new PlaybackSelection(malformedSource.Id, malformedBatch.ChannelId),
+            "InvalidLocator",
+            malformedStore);
+        Assert.IsNotNull(malformedStore.LastCredentialsLease);
+        Assert.ThrowsExactly<ObjectDisposedException>(
+            () => _ = malformedStore.LastCredentialsLease.Value);
     }
 
     [TestMethod]
@@ -214,7 +424,7 @@ public sealed class SqlitePlaybackSourceResolverTests
             await ResolveAsync(
                 databasePath,
                 new PlaybackSelection(SourceId.Generate(), ChannelId.Generate()),
-                cancellation.Token));
+                cancellationToken: cancellation.Token));
 
         Assert.IsFalse(File.Exists(databasePath));
     }
@@ -222,9 +432,13 @@ public sealed class SqlitePlaybackSourceResolverTests
     private static async Task AssertFailureAsync(
         string databasePath,
         PlaybackSelection selection,
-        string expectedFailure)
+        string expectedFailure,
+        ISecretStore? secretStore = null)
     {
-        ResolvedSource result = await ResolveAsync(databasePath, selection);
+        ResolvedSource result = await ResolveAsync(
+            databasePath,
+            selection,
+            secretStore: secretStore);
         try
         {
             Assert.AreEqual(expectedFailure, result.Failure);
@@ -242,39 +456,54 @@ public sealed class SqlitePlaybackSourceResolverTests
     private static async Task<ResolvedSource> ResolveAsync(
         string databasePath,
         PlaybackSelection selection,
+        ISecretStore? secretStore = null,
         CancellationToken cancellationToken = default)
     {
+        bool ownsSecretStore = secretStore is null;
+        secretStore ??= new M4InMemorySecretStore();
         Assembly assembly = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly;
         Type resolverType = assembly.GetType(
             "IptvSuite.Infrastructure.SqlitePlaybackSourceResolver",
             throwOnError: true)!;
-        object resolver = Activator.CreateInstance(
-            resolverType,
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            [databasePath],
-            culture: null)!;
-        MethodInfo method = resolverType.GetMethod(
-            "ResolveAsync",
-            BindingFlags.Instance | BindingFlags.NonPublic)!;
-        object valueTask = method.Invoke(
-            resolver,
-            [selection, cancellationToken])!;
-        Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
-        await task;
-        object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
-        SecretLease? lease = (SecretLease?)result.GetType().GetProperty("Lease")!.GetValue(result);
-        string failure = result.GetType().GetProperty("Failure")!.GetValue(result)!.ToString()!;
-        return new ResolvedSource(result, lease, failure);
+        try
+        {
+            object resolver = Activator.CreateInstance(
+                resolverType,
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                [databasePath, secretStore],
+                culture: null)!;
+            MethodInfo method = resolverType.GetMethod(
+                "ResolveAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+            object valueTask = method.Invoke(
+                resolver,
+                [selection, cancellationToken])!;
+            Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
+            await task;
+            object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
+            SecretLease? lease = (SecretLease?)result.GetType().GetProperty("Lease")!.GetValue(result);
+            string failure = result.GetType().GetProperty("Failure")!.GetValue(result)!.ToString()!;
+            return new ResolvedSource(result, lease, failure);
+        }
+        finally
+        {
+            if (ownsSecretStore && secretStore is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
     }
 
     private static async Task<ResolverBatch> CreateBatchAsync(
         byte[]? locator,
         string suffix,
         ContentSource? existingSource = null,
-        bool providerItem = false)
+        bool providerItem = false,
+        ChannelContainerHint? containerHint = ChannelContainerHint.Hls,
+        string? providerItemValue = null)
     {
-        var store = new M4InMemorySecretStore();
+        using var store = new M4InMemorySecretStore();
         ContentSource source = existingSource ?? await CreateSourceAsync(store, suffix);
         SnapshotId snapshotId = SnapshotId.Generate();
         DomainResult<PlaylistSnapshot> snapshot = PlaylistSnapshot.Create(
@@ -304,13 +533,14 @@ public sealed class SqlitePlaybackSourceResolverTests
         DomainResult<ChannelStableKey> stableKey;
         if (providerItem)
         {
-            DomainResult<ProviderItemKey> providerKey = ProviderItemKey.Create($"stream-{suffix}");
+            string providerItemIdentifier = providerItemValue ?? $"stream-{suffix}";
+            DomainResult<ProviderItemKey> providerKey = ProviderItemKey.Create(providerItemIdentifier);
             Assert.IsTrue(providerKey.IsSuccess);
             providerPlaybackKey = providerKey.Value;
             stableKey = ChannelStableKeyBuilder.FromProviderStreamId(
                 source.Id,
                 "xtream",
-                $"stream-{suffix}");
+                providerItemIdentifier);
         }
         else
         {
@@ -337,7 +567,7 @@ public sealed class SqlitePlaybackSourceResolverTests
             number: 1,
             logoReference: null,
             streamReference,
-            ChannelContainerHint.Hls,
+            containerHint,
             isAdultHint: false,
             ChannelNormalizationWarnings.None);
         Assert.IsTrue(channel.IsSuccess);
@@ -378,6 +608,31 @@ public sealed class SqlitePlaybackSourceResolverTests
                 SourceId.Generate(),
                 $"Synthetic {suffix}",
                 $"https://fixtures.invalid/catalog/{suffix}.m3u");
+        Assert.IsTrue(draft.IsSuccess);
+        DateTimeOffset now = new(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
+        DomainResult<ContentSource> source = ContentSource.Create(
+            draft.Value,
+            ContentSourceStatus.Testing,
+            now,
+            now);
+        Assert.IsTrue(source.IsSuccess);
+        return source.Value!;
+    }
+
+    private static async Task<ContentSource> CreateXtreamSourceAsync(
+        ISecretStore store,
+        string suffix,
+        string locator,
+        string username,
+        string password)
+    {
+        DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(store)
+            .ProtectXtreamAsync(
+                SourceId.Generate(),
+                $"Synthetic {suffix}",
+                locator,
+                username,
+                password);
         Assert.IsTrue(draft.IsSuccess);
         DateTimeOffset now = new(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
         DomainResult<ContentSource> source = ContentSource.Create(
@@ -473,6 +728,20 @@ public sealed class SqlitePlaybackSourceResolverTests
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async Task ExecuteSourceAsync(
+        string databasePath,
+        string sql,
+        SourceId sourceId)
+    {
+        await using SqliteConnection connection = await OpenAsync(databasePath);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue(
+            "$source",
+            sourceId.Value.ToString("N"));
+        await command.ExecuteNonQueryAsync();
+    }
+
     private sealed record ResolverBatch(
         object Batch,
         ContentSource Source,
@@ -482,4 +751,94 @@ public sealed class SqlitePlaybackSourceResolverTests
         object RawResult,
         SecretLease? Lease,
         string Failure);
+
+    private sealed class TrackingSecretStore : ISecretStore, IDisposable
+    {
+        private readonly M4InMemorySecretStore _inner = new();
+
+        internal int CredentialsReadCount { get; private set; }
+
+        internal SecretLease? LastCredentialsLease { get; private set; }
+
+        public ValueTask<SecretReferenceCreationResult> CreateCredentialsAsync(
+            SourceId sourceId,
+            ProtectedRecordOwner owner,
+            ReadOnlyMemory<byte> value,
+            CancellationToken cancellationToken = default) =>
+            _inner.CreateCredentialsAsync(sourceId, owner, value, cancellationToken);
+
+        public ValueTask<ProtectedLocatorReferenceCreationResult> CreateLocatorAsync(
+            SourceId sourceId,
+            ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
+            ReadOnlyMemory<byte> value,
+            CancellationToken cancellationToken = default) =>
+            _inner.CreateLocatorAsync(sourceId, purpose, owner, value, cancellationToken);
+
+        public async ValueTask<SecretStoreReadResult> ReadCredentialsAsync(
+            SourceId sourceId,
+            ProtectedRecordOwner owner,
+            SecretReference reference,
+            CancellationToken cancellationToken = default)
+        {
+            SecretStoreReadResult result = await _inner.ReadCredentialsAsync(
+                sourceId,
+                owner,
+                reference,
+                cancellationToken);
+            CredentialsReadCount++;
+            LastCredentialsLease = result.Lease;
+            return result;
+        }
+
+        public ValueTask<SecretStoreReadResult> ReadLocatorAsync(
+            SourceId sourceId,
+            ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
+            ProtectedLocatorReference reference,
+            CancellationToken cancellationToken = default) =>
+            _inner.ReadLocatorAsync(sourceId, purpose, owner, reference, cancellationToken);
+
+        public ValueTask<SecretStoreOperationResult> UpdateCredentialsAsync(
+            SourceId sourceId,
+            ProtectedRecordOwner owner,
+            SecretReference reference,
+            ReadOnlyMemory<byte> value,
+            CancellationToken cancellationToken = default) =>
+            _inner.UpdateCredentialsAsync(sourceId, owner, reference, value, cancellationToken);
+
+        public ValueTask<SecretStoreOperationResult> UpdateLocatorAsync(
+            SourceId sourceId,
+            ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
+            ProtectedLocatorReference reference,
+            ReadOnlyMemory<byte> value,
+            CancellationToken cancellationToken = default) =>
+            _inner.UpdateLocatorAsync(
+                sourceId,
+                purpose,
+                owner,
+                reference,
+                value,
+                cancellationToken);
+
+        public ValueTask<SecretStoreOperationResult> DeleteCredentialsAsync(
+            SourceId sourceId,
+            ProtectedRecordOwner owner,
+            SecretReference reference,
+            CancellationToken cancellationToken = default) =>
+            _inner.DeleteCredentialsAsync(sourceId, owner, reference, cancellationToken);
+
+        public ValueTask<SecretStoreOperationResult> DeleteLocatorAsync(
+            SourceId sourceId,
+            ProtectedValuePurpose purpose,
+            ProtectedRecordOwner owner,
+            ProtectedLocatorReference reference,
+            CancellationToken cancellationToken = default) =>
+            _inner.DeleteLocatorAsync(sourceId, purpose, owner, reference, cancellationToken);
+
+        public void Dispose() => _inner.Dispose();
+
+        public override string ToString() => "[TRACKING-SECRET-STORE]";
+    }
 }

@@ -35,6 +35,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.CatalogCrashHarne
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.CatalogUiAcceptanceHarness", "tests\IptvSuite.CatalogUiAcceptanceHarness\IptvSuite.CatalogUiAcceptanceHarness.csproj", "{B70AA8A6-304A-4922-8365-EAA421A02726}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.PlaybackUiAcceptanceHarness", "tests\IptvSuite.PlaybackUiAcceptanceHarness\IptvSuite.PlaybackUiAcceptanceHarness.csproj", "{D85AEF83-C192-445C-A532-5B2955E3756B}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IptvSuite.NativePlaybackCompatibilitySpike", "tests\IptvSuite.NativePlaybackCompatibilitySpike\IptvSuite.NativePlaybackCompatibilitySpike.csproj", "{A47D1387-72F4-4DA2-8D48-41EED9C74130}"
 EndProject
 Global
@@ -101,6 +103,10 @@ Global
 		{B70AA8A6-304A-4922-8365-EAA421A02726}.Debug|x64.Build.0 = Debug|x64
 		{B70AA8A6-304A-4922-8365-EAA421A02726}.Release|x64.ActiveCfg = Release|x64
 		{B70AA8A6-304A-4922-8365-EAA421A02726}.Release|x64.Build.0 = Release|x64
+		{D85AEF83-C192-445C-A532-5B2955E3756B}.Debug|x64.ActiveCfg = Debug|x64
+		{D85AEF83-C192-445C-A532-5B2955E3756B}.Debug|x64.Build.0 = Debug|x64
+		{D85AEF83-C192-445C-A532-5B2955E3756B}.Release|x64.ActiveCfg = Release|x64
+		{D85AEF83-C192-445C-A532-5B2955E3756B}.Release|x64.Build.0 = Release|x64
 		{A47D1387-72F4-4DA2-8D48-41EED9C74130}.Debug|x64.ActiveCfg = Debug|x64
 		{A47D1387-72F4-4DA2-8D48-41EED9C74130}.Debug|x64.Build.0 = Debug|x64
 		{A47D1387-72F4-4DA2-8D48-41EED9C74130}.Release|x64.ActiveCfg = Release|x64
@@ -124,6 +130,7 @@ Global
 		{9E610CDF-2461-4D7B-A289-84B41BB4F55A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{A1C743E8-9472-45B9-9A34-8B73FCA4D120} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{B70AA8A6-304A-4922-8365-EAA421A02726} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{D85AEF83-C192-445C-A532-5B2955E3756B} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{A47D1387-72F4-4DA2-8D48-41EED9C74130} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

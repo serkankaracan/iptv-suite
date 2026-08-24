@@ -16,10 +16,13 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     private Task? _disposeTask;
     private bool _closeStarted;
 
-    internal MainWindow(WindowsCatalogServices catalogServices)
+    internal MainWindow(
+        WindowsCatalogServices catalogServices,
+        ISecretStore secretStore)
     {
         _catalogServices = catalogServices ??
             throw new ArgumentNullException(nameof(catalogServices));
+        ArgumentNullException.ThrowIfNull(secretStore);
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -35,7 +38,9 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         IAsyncDisposable? rollbackOwner = null;
         try
         {
-            var resolver = new SqlitePlaybackSourceResolver(_catalogServices.DatabasePath);
+            var resolver = new SqlitePlaybackSourceResolver(
+                _catalogServices.DatabasePath,
+                secretStore);
             var engine = new WindowsNativePlaybackEngine(
                 resolver,
                 _mainPage.PlaybackSurfaceElement);

@@ -1,6 +1,9 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Http;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace IptvSuite.IntegrationTests;
@@ -50,6 +53,65 @@ public sealed class LocalHttpFixtureServerTests
         {
             listener.Stop();
         }
+    }
+
+    [TestMethod]
+    [Timeout(15_000)]
+    public async Task HttpsMediaRouteSupportsHeadAndOneByteRangeWithoutDisablingTlsValidation()
+    {
+        byte[] body = Enumerable.Range(0, 64).Select(value => (byte)value).ToArray();
+        Dictionary<string, FixtureHttpResponse> routes = new(StringComparer.Ordinal)
+        {
+            ["/media.ts"] = new FixtureHttpResponse(
+                StatusCodes.Status200OK,
+                "video/mp2t",
+                body,
+                SupportsByteRanges: true),
+        };
+
+        await using LocalHttpFixtureServer server = await LocalHttpFixtureServer.StartHttpsAsync(routes);
+        Assert.IsNotNull(server.Certificate);
+        using var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (_, certificate, _, _) =>
+                certificate is not null &&
+                CryptographicOperations.FixedTimeEquals(
+                    certificate.RawData,
+                    server.Certificate.RawData),
+        };
+        using HttpClient client = new(handler)
+        {
+            BaseAddress = server.BaseAddress,
+            Timeout = TimeSpan.FromSeconds(5),
+        };
+
+        using var headRequest = new HttpRequestMessage(HttpMethod.Head, "media.ts");
+        using HttpResponseMessage headResponse = await client.SendAsync(headRequest);
+        Assert.AreEqual(HttpStatusCode.OK, headResponse.StatusCode);
+        Assert.AreEqual(body.Length, headResponse.Content.Headers.ContentLength);
+        Assert.AreEqual("bytes", headResponse.Headers.AcceptRanges.Single());
+        Assert.HasCount(0, await headResponse.Content.ReadAsByteArrayAsync());
+
+        using var rangeRequest = new HttpRequestMessage(HttpMethod.Get, "media.ts");
+        rangeRequest.Headers.Range = new RangeHeaderValue(10, 19);
+        using HttpResponseMessage rangeResponse = await client.SendAsync(rangeRequest);
+        byte[] selected = await rangeResponse.Content.ReadAsByteArrayAsync();
+        Assert.AreEqual(HttpStatusCode.PartialContent, rangeResponse.StatusCode);
+        Assert.AreEqual("bytes", rangeResponse.Content.Headers.ContentRange?.Unit);
+        Assert.AreEqual(10, rangeResponse.Content.Headers.ContentRange?.From);
+        Assert.AreEqual(19, rangeResponse.Content.Headers.ContentRange?.To);
+        Assert.AreEqual(body.Length, rangeResponse.Content.Headers.ContentRange?.Length);
+        CollectionAssert.AreEqual(body[10..20], selected);
+
+        using var multipleRangeRequest = new HttpRequestMessage(HttpMethod.Get, "media.ts");
+        multipleRangeRequest.Headers.TryAddWithoutValidation("Range", "bytes=0-1,4-5");
+        using HttpResponseMessage multipleRangeResponse = await client.SendAsync(multipleRangeRequest);
+        Assert.AreEqual(HttpStatusCode.RequestedRangeNotSatisfiable, multipleRangeResponse.StatusCode);
+
+        Assert.AreEqual(3, server.RequestCount);
+        Assert.AreEqual(2, server.CompletedResponseCount);
+        Assert.AreEqual(10L, server.CompletedBodyBytes);
+        Assert.AreEqual(1, server.FailureCount);
     }
 
     [TestMethod]

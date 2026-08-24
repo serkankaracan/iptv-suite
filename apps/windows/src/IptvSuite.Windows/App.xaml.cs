@@ -23,7 +23,7 @@ public partial class App : Microsoft.UI.Xaml.Application
         WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create();
         try
         {
-            _window = new MainWindow(catalogServices);
+            _window = new MainWindow(catalogServices, secretStore);
         }
         catch
         {

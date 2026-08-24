@@ -82,6 +82,12 @@ public sealed class DependencyRulesTests
             [],
             ["Microsoft.Data.Sqlite"]),
         new(
+            "IptvSuite.PlaybackUiAcceptanceHarness",
+            "apps/windows/tests/IptvSuite.PlaybackUiAcceptanceHarness/IptvSuite.PlaybackUiAcceptanceHarness.csproj",
+            ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
+            [],
+            []),
+        new(
             "IptvSuite.SecretStoreSpike",
             "apps/windows/tests/IptvSuite.SecretStoreSpike/IptvSuite.SecretStoreSpike.csproj",
             ["IptvSuite.Application", "IptvSuite.Domain", "IptvSuite.Infrastructure", "IptvSuite.Testing"],
@@ -159,6 +165,7 @@ public sealed class DependencyRulesTests
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.DpapiUserBoundaryHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.CatalogCrashHarness");
         AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.CatalogUiAcceptanceHarness");
+        AssertNoPath(graph, "IptvSuite.Windows", "IptvSuite.PlaybackUiAcceptanceHarness");
     }
 
     [TestMethod]
@@ -566,7 +573,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             app,
             "WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create();");
-        StringAssert.Contains(app, "_window = new MainWindow(catalogServices);");
+        StringAssert.Contains(app, "_window = new MainWindow(catalogServices, secretStore);");
         StringAssert.Contains(app, "catalogServices.Dispose();");
         Assert.AreEqual(
             1,
@@ -4048,11 +4055,21 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(resolver, "internal sealed class SqlitePlaybackSourceResolver");
         StringAssert.Contains(resolver, "internal sealed record PlaybackSourceResolutionResult(");
         StringAssert.Contains(resolver, "JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id");
-        StringAssert.Contains(resolver, "WHERE s.source_id = $source AND c.channel_id = $channel;");
-        StringAssert.Contains(resolver, "c.stream_reference, c.provider_item_kind, c.provider_item_id");
+        StringAssert.Contains(
+            resolver,
+            "WHERE s.source_id = $source AND c.channel_id = $channel AND s.status = $ready;");
+        StringAssert.Contains(
+            resolver,
+            "s.configuration_reference, c.stream_reference,");
         StringAssert.Contains(resolver, "PlaybackSourceResolutionFailure.UnsupportedSource");
         StringAssert.Contains(resolver, "new SqliteCatalogLocatorReader(_databasePath)");
         StringAssert.Contains(resolver, "ProtectedValuePurpose.ChannelStreamLocator");
+        StringAssert.Contains(resolver, "ProtectedRecordOwner.ForSourceConfiguration(binding.ConfigurationId)");
+        StringAssert.Contains(resolver, "ProtectedSourcePayloadDecoder.TryDecodeXtream(");
+        StringAssert.Contains(resolver, "Uri.EscapeDataString(username)");
+        StringAssert.Contains(resolver, "Uri.EscapeDataString(password)");
+        StringAssert.Contains(resolver, "Uri.EscapeDataString(providerItem.Value)");
+        StringAssert.Contains(resolver, "CryptographicOperations.ZeroMemory(locatorBytes)");
         StringAssert.Contains(resolver, "StrictUtf8.GetString(locatorBytes)");
         StringAssert.Contains(resolver, "SourceConfigurationValidator.PrepareRemotePlaylist(");
         StringAssert.Contains(resolver, "lease?.Dispose();");
@@ -4170,7 +4187,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "current.State != snapshot.State");
         StringAssert.Contains(codeBehind, "_playback.StateChanged -= Playback_StateChanged;");
         StringAssert.Contains(codeBehind, "PlaybackState.Failed => \"Playback is unavailable.\"");
-        StringAssert.Contains(window, "new SqlitePlaybackSourceResolver(_catalogServices.DatabasePath)");
+        StringAssert.Contains(
+            window,
+            "new SqlitePlaybackSourceResolver(\n                _catalogServices.DatabasePath,\n                secretStore)");
         StringAssert.Contains(window, "var engine = new WindowsNativePlaybackEngine(");
         StringAssert.Contains(window, "_mainPage.PlaybackSurfaceElement);");
         StringAssert.Contains(window, "var playback = new PlaybackSessionCoordinator(engine);");
@@ -4258,6 +4277,93 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             closingHandler.IndexOf("AppWindow.Closing -= AppWindow_Closing;", StringComparison.Ordinal) <
             closingHandler.IndexOf("Close();", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void M11PackagedPlaybackAcceptanceIsSyntheticProtectedAndPayloadIsolated()
+    {
+        const string harnessProjectPath =
+            "apps/windows/tests/IptvSuite.PlaybackUiAcceptanceHarness/" +
+            "IptvSuite.PlaybackUiAcceptanceHarness.csproj";
+        XDocument harnessProject = LoadXml(harnessProjectPath);
+        string harness = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.PlaybackUiAcceptanceHarness",
+            "Program.cs"));
+        string fixtureServer = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.Testing",
+            "LocalHttpFixtureServer.cs"));
+        string infrastructureAssembly = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "Properties",
+            "AssemblyInfo.cs"));
+        string packageSmoke = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1"));
+
+        Assert.AreEqual("Exe", GetProperty(harnessProject, "OutputType"));
+        Assert.AreEqual("false", GetProperty(harnessProject, "UseAppHost"));
+        Assert.AreEqual("false", GetProperty(harnessProject, "IsTestProject"));
+        Assert.AreEqual("false", GetProperty(harnessProject, "IsPackable"));
+        Assert.AreEqual("false", GetProperty(harnessProject, "IsPublishable"));
+        Assert.AreEqual("x64", GetProperty(harnessProject, "Platforms"));
+        Assert.AreEqual("x64", GetProperty(harnessProject, "PlatformTarget"));
+        StringAssert.Contains(harness, "private const string Command = \"serve-and-seed\";");
+        StringAssert.Contains(harness, "LocalHttpFixtureServer.StartHttpsAsync(");
+        StringAssert.Contains(harness, "new DpapiCurrentUserSecretStore(");
+        StringAssert.Contains(harness, "new SqliteRemoteM3uImportSink(catalogDatabasePath)");
+        StringAssert.Contains(harness, "RemoteM3uPlaylistParser");
+        StringAssert.Contains(harness, "new SqlitePlaybackSourceResolver(catalogDatabasePath, secretStore)");
+        StringAssert.Contains(harness, "CryptographicOperations.FixedTimeEquals(");
+        StringAssert.Contains(harness, "private sealed record ReadyTicket(");
+        StringAssert.Contains(harness, "private sealed record ResultTicket(");
+        Assert.IsFalse(harness.Contains("Console.Write", StringComparison.Ordinal));
+        Assert.IsFalse(harness.Contains("DangerousAcceptAnyServerCertificateValidator", StringComparison.Ordinal));
+
+        string ticketContract = harness[harness.IndexOf(
+            "private sealed record ReadyTicket(",
+            StringComparison.Ordinal)..];
+        Assert.IsFalse(ticketContract.Contains("Uri", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("Path", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("SourceId", StringComparison.Ordinal));
+        Assert.IsFalse(ticketContract.Contains("ChannelId", StringComparison.Ordinal));
+        StringAssert.Contains(
+            infrastructureAssembly,
+            "[assembly: InternalsVisibleTo(\"IptvSuite.PlaybackUiAcceptanceHarness\")]");
+
+        StringAssert.Contains(fixtureServer, "IPAddress.Loopback");
+        StringAssert.Contains(fixtureServer, "SupportsByteRanges");
+        StringAssert.Contains(fixtureServer, "X509CertificateLoader.LoadPkcs12(");
+        StringAssert.Contains(fixtureServer, "CryptographicOperations.ZeroMemory(pkcs12)");
+        Assert.IsFalse(fixtureServer.Contains("PersistKeySet", StringComparison.Ordinal));
+        Assert.IsFalse(fixtureServer.Contains("DangerousAcceptAnyServerCertificateValidator", StringComparison.Ordinal));
+
+        StringAssert.Contains(
+            packageSmoke,
+            "$entry.Name -match '^(?i:IptvSuite\\.PlaybackUiAcceptanceHarness(?:\\..*)?)$'");
+        StringAssert.Contains(
+            packageSmoke,
+            "$entry.Name -match '^(?i:IptvSuite\\.Testing(?:\\..*)?)$'");
+        StringAssert.Contains(packageSmoke, "Cert:\\LocalMachine\\Root");
+        StringAssert.Contains(packageSmoke, "PlaybackUiAcceptanceVerified");
+        StringAssert.Contains(packageSmoke, "-ExpectedStatus \"Channel is playing.\"");
+        StringAssert.Contains(packageSmoke, "-ExpectedStatus \"Playback paused.\"");
+        StringAssert.Contains(packageSmoke, "-ExpectedStatus \"Playback stopped.\"");
+        StringAssert.Contains(packageSmoke, "[int]$resultTicket.FailureCount -ne 0");
+        Assert.IsFalse(packageSmoke.Contains("SkipCertificateCheck", StringComparison.Ordinal));
+        Assert.IsFalse(packageSmoke.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]

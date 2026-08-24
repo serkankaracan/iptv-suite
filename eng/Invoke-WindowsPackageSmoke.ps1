@@ -137,8 +137,10 @@ namespace IptvSuite.PackageSmoke
     public static class KeyboardInspector
     {
         private const ushort VirtualKeyTab = 0x09;
+        private const ushort VirtualKeyEnter = 0x0D;
         private const ushort VirtualKeyPageUp = 0x21;
         private const ushort VirtualKeyPageDown = 0x22;
+        private const ushort VirtualKeyHome = 0x24;
         private const uint InputKeyboard = 1;
         private const uint KeyEventKeyUp = 0x0002;
 
@@ -175,6 +177,16 @@ namespace IptvSuite.PackageSmoke
         public static void PressTab()
         {
             Press(VirtualKeyTab);
+        }
+
+        public static void PressEnter()
+        {
+            Press(VirtualKeyEnter);
+        }
+
+        public static void PressHome()
+        {
+            Press(VirtualKeyHome);
         }
 
         public static void PressPageUp()
@@ -448,14 +460,26 @@ $expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
 $expectedRuntimeDependencyPublisher = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
 $expectedRuntimeDependencyPublisherId = "8wekyb3d8bbwe"
 $expectedRuntimeDependencyVersion = "2.4.0.0"
+$expectedCatalogSourceName = "Synthetic 50k source"
+$expectedPlaybackSourceName = "00 Synthetic protected playback source"
+$expectedPlaybackCertificateSubject = "CN=IPTVSuite Synthetic Loopback"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"
 $catalogUiHarnessProjectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.CatalogUiAcceptanceHarness\IptvSuite.CatalogUiAcceptanceHarness.csproj"
 $catalogUiHarnessAssemblyPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.CatalogUiAcceptanceHarness\bin\x64\$Configuration\net10.0\IptvSuite.CatalogUiAcceptanceHarness.dll"
+$playbackUiHarnessProjectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.PlaybackUiAcceptanceHarness\IptvSuite.PlaybackUiAcceptanceHarness.csproj"
+$playbackUiHarnessAssemblyPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.PlaybackUiAcceptanceHarness\bin\x64\$Configuration\net10.0\IptvSuite.PlaybackUiAcceptanceHarness.dll"
+$playbackFixtureRoot = Join-Path $repositoryRoot "apps\windows\tests\fixtures\playback\tier-a"
 $sourceManifestPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\Package.appxmanifest"
 $artifactRoot = Join-Path $repositoryRoot ".artifacts\msix-smoke"
 $runId = [Guid]::NewGuid().ToString("N")
 $packageOutput = Join-Path $artifactRoot "packages\$runId"
+$playbackControlRoot = Join-Path $artifactRoot "playback-ui"
+$playbackControlDirectory = Join-Path $playbackControlRoot $runId
+$playbackReadyPath = Join-Path $playbackControlDirectory "ready.json"
+$playbackResultPath = Join-Path $playbackControlDirectory "result.json"
+$playbackStopSignalPath = Join-Path $playbackControlDirectory "stop.signal"
+$playbackPublicCertificatePath = Join-Path $playbackControlDirectory "loopback.cer"
 $publicCertificatePath = Join-Path $artifactRoot "$runId.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
 $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
@@ -463,6 +487,12 @@ $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
 $certificate = $null
 $installedPackage = $null
 $launchedProcess = $null
+$playbackHarnessProcess = $null
+$playbackLoopbackCertificate = $null
+$playbackLoopbackCertificateThumbprint = $null
+$playbackLoopbackCertificateImported = $false
+$playbackHarnessReady = $false
+$playbackStopSignalCreated = $false
 $installAttempted = $false
 $environmentBackup = @{}
 $primaryFailure = $null
@@ -479,6 +509,10 @@ $catalogFrameP95Milliseconds = 0.0
 $catalogFrameMaximumMilliseconds = 0.0
 $catalogDroppedFramePercent = 0.0
 $catalogFrameIntervalCount = 0
+$playbackUiAcceptanceVerified = $false
+$playbackUiRequestCount = 0
+$playbackUiCompletedResponseCount = 0
+$playbackUiCompletedBodyBytes = 0L
 $windowsAppRuntimeDisposition = "NotStarted"
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
@@ -861,6 +895,14 @@ function Assert-ProductionPackagePayload {
                 throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
             }
 
+            if ($entry.Name -match '^(?i:IptvSuite\.PlaybackUiAcceptanceHarness(?:\..*)?)$') {
+                throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
+            }
+
+            if ($entry.Name -match '^(?i:IptvSuite\.Testing(?:\..*)?)$') {
+                throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
+            }
+
             if ($entry.Name -match '^(?i:IptvSuite\.PlaybackCompatibilitySpike(?:\..*)?)$') {
                 throw "Forbidden test infrastructure in production payload: $relativeEntryPath"
             }
@@ -961,6 +1003,139 @@ function Remove-ExactPackageOutput {
     }
 
     Remove-Item -LiteralPath $resolvedPackageOutput -Recurse -Force -ErrorAction Stop
+}
+
+function Remove-ExactPlaybackControlDirectory {
+    if (-not [System.Text.RegularExpressions.Regex]::IsMatch($runId, '\A[0-9a-f]{32}\z')) {
+        throw "Refusing playback-control cleanup because the run id is invalid."
+    }
+
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($artifactRoot)
+    $resolvedControlRoot = [System.IO.Path]::GetFullPath($playbackControlRoot)
+    $resolvedControlDirectory = [System.IO.Path]::GetFullPath($playbackControlDirectory)
+    $expectedControlRoot = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($resolvedArtifactRoot, 'playback-ui'))
+    $expectedControlDirectory = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($expectedControlRoot, $runId))
+    $controlParent = [System.IO.Directory]::GetParent($resolvedControlDirectory)
+    if (-not $resolvedControlRoot.Equals(
+            $expectedControlRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not $resolvedControlDirectory.Equals(
+            $expectedControlDirectory,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        $null -eq $controlParent -or
+        -not $controlParent.FullName.Equals(
+            $resolvedControlRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        [System.IO.Path]::GetFileName($resolvedControlDirectory) -ne $runId) {
+        throw "Refusing cleanup of an unexpected playback-control directory."
+    }
+
+    if (-not (Test-Path -LiteralPath $resolvedControlDirectory)) {
+        return
+    }
+
+    foreach ($protectedPath in @(
+            $resolvedArtifactRoot,
+            $resolvedControlRoot,
+            $resolvedControlDirectory)) {
+        if (-not (Test-Path -LiteralPath $protectedPath -PathType Container) -or
+            ([System.IO.File]::GetAttributes($protectedPath) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing playback-control cleanup through an unsafe directory."
+        }
+    }
+
+    Remove-Item -LiteralPath $resolvedControlDirectory -Recurse -Force -ErrorAction Stop
+}
+
+function Assert-ExactPlaybackControlEntries {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$AllowedNames
+    )
+
+    if (-not (Test-Path -LiteralPath $playbackControlDirectory -PathType Container) -or
+        ([System.IO.File]::GetAttributes($playbackControlDirectory) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The playback acceptance control directory is invalid."
+    }
+
+    $entries = @(Get-ChildItem -LiteralPath $playbackControlDirectory -Force)
+    if ($entries.Count -ne $AllowedNames.Count) {
+        throw "The playback acceptance control directory has an invalid schema."
+    }
+
+    foreach ($entry in $entries) {
+        if ($entry.PSIsContainer -or
+            ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $AllowedNames -cnotcontains $entry.Name) {
+            throw "The playback acceptance control directory has an invalid schema."
+        }
+    }
+}
+
+function Read-StrictPlaybackJsonTicket {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedProperties
+    )
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $allowedPaths = @(
+        [System.IO.Path]::GetFullPath($playbackReadyPath),
+        [System.IO.Path]::GetFullPath($playbackResultPath)
+    )
+    if ($allowedPaths -notcontains $resolvedPath -or
+        -not [System.IO.Directory]::GetParent($resolvedPath).FullName.Equals(
+            [System.IO.Path]::GetFullPath($playbackControlDirectory),
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        throw "The playback acceptance ticket path is invalid."
+    }
+
+    $ticketFile = Get-Item -LiteralPath $resolvedPath -Force
+    if (($ticketFile.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $ticketFile.Length -le 0 -or
+        $ticketFile.Length -gt 4096) {
+        throw "The playback acceptance ticket is invalid."
+    }
+
+    try {
+        $ticket = [System.IO.File]::ReadAllText(
+            $resolvedPath,
+            [System.Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "The playback acceptance ticket is not valid JSON."
+    }
+
+    if ($ticket -isnot [pscustomobject]) {
+        throw "The playback acceptance ticket root is invalid."
+    }
+
+    $properties = @($ticket.PSObject.Properties)
+    if ($properties.Count -ne $AllowedProperties.Count) {
+        throw "The playback acceptance ticket schema is invalid."
+    }
+
+    foreach ($property in $properties) {
+        if ($AllowedProperties -cnotcontains $property.Name) {
+            throw "The playback acceptance ticket schema is invalid."
+        }
+    }
+    foreach ($allowedProperty in $AllowedProperties) {
+        if (@($properties.Name) -cnotcontains $allowedProperty) {
+            throw "The playback acceptance ticket schema is invalid."
+        }
+    }
+
+    return $ticket
 }
 
 function Write-JsonAtomically {
@@ -1179,6 +1354,86 @@ function Assert-PackagedWindowForeground {
     throw "The packaged catalog window did not own foreground keyboard input."
 }
 
+function Assert-PackagedProcessAlive {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process
+    )
+
+    try {
+        $Process.Refresh()
+        if ($Process.HasExited) {
+            throw "The packaged playback application exited before acceptance completed."
+        }
+    }
+    catch {
+        throw "The packaged playback application exited before acceptance completed."
+    }
+}
+
+function Wait-PackagedPlaybackStatus {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$StatusElement,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedStatus,
+
+        [int]$TimeoutSeconds = 30
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        if ($StatusElement.Current.Name -ceq $ExpectedStatus) {
+            return
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged playback UI did not reach the expected safe state."
+}
+
+function Invoke-PackagedPlaybackButton {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$ButtonElement,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$StatusElement,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedStatus
+    )
+
+    Assert-PackagedProcessAlive -Process $Process
+    if (-not $ButtonElement.Current.IsEnabled -or
+        $ButtonElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Button) {
+        throw "A packaged playback command is unavailable."
+    }
+
+    $invokePatternObject = $null
+    if (-not $ButtonElement.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern,
+            [ref]$invokePatternObject)) {
+        throw "A packaged playback command has no InvokePattern."
+    }
+
+    ([System.Windows.Automation.InvokePattern]$invokePatternObject).Invoke()
+    Wait-PackagedPlaybackStatus `
+        -Process $Process `
+        -StatusElement $StatusElement `
+        -ExpectedStatus $ExpectedStatus
+}
+
 try {
     foreach ($staleEvidencePath in @($evidencePath, $failureEvidencePath)) {
         if (Test-Path -LiteralPath $staleEvidencePath) {
@@ -1262,6 +1517,13 @@ try {
         --no-restore --nologo -m:1 -nr:false
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $catalogUiHarnessAssemblyPath -PathType Leaf)) {
         throw "The catalog UI acceptance harness build failed."
+    }
+
+    & $DotNetPath build $playbackUiHarnessProjectPath -c $Configuration -p:Platform=x64 `
+        --no-restore --nologo -m:1 -nr:false
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path -LiteralPath $playbackUiHarnessAssemblyPath -PathType Leaf)) {
+        throw "The playback UI acceptance harness build failed."
     }
 
     $packages = @(
@@ -1597,6 +1859,508 @@ try {
         throw ("The application returned a non-zero exit code after the normal window-close request (exit code 0x{0:X8})." -f [int]$exitCode)
     }
 
+    $launchedProcess.Dispose()
+    $launchedProcess = $null
+
+    if (-not (Test-Path -LiteralPath $playbackFixtureRoot -PathType Container) -or
+        ([System.IO.File]::GetAttributes($playbackFixtureRoot) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The committed playback acceptance fixture root is invalid."
+    }
+    if (Test-Path -LiteralPath $playbackControlDirectory) {
+        throw "The playback acceptance control directory already exists."
+    }
+
+    New-Item -ItemType Directory -Path $playbackControlRoot -Force | Out-Null
+    if (([System.IO.File]::GetAttributes($artifactRoot) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        ([System.IO.File]::GetAttributes($playbackControlRoot) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The playback acceptance control root is invalid."
+    }
+    New-Item -ItemType Directory -Path $playbackControlDirectory | Out-Null
+    Assert-ExactPlaybackControlEntries -AllowedNames @()
+
+    $playbackHarnessArgumentValues = @(
+        $playbackUiHarnessAssemblyPath,
+        "serve-and-seed",
+        $catalogDatabasePath,
+        $protectedStorePath,
+        $playbackFixtureRoot,
+        $playbackControlDirectory
+    )
+    foreach ($argumentValue in $playbackHarnessArgumentValues) {
+        if ([string]::IsNullOrWhiteSpace($argumentValue) -or $argumentValue.Contains('"')) {
+            throw "A playback acceptance harness argument is invalid."
+        }
+    }
+    $playbackHarnessArguments = ($playbackHarnessArgumentValues |
+        ForEach-Object { '"' + $_ + '"' }) -join ' '
+    try {
+        $playbackHarnessProcess = Start-Process `
+            -FilePath $DotNetPath `
+            -ArgumentList $playbackHarnessArguments `
+            -WorkingDirectory $repositoryRoot `
+            -WindowStyle Hidden `
+            -PassThru
+    }
+    catch {
+        throw "The playback acceptance harness could not be started."
+    }
+    try {
+        $null = $playbackHarnessProcess.Handle
+    }
+    catch {
+        throw "The playback acceptance harness exited before its process handle could be retained."
+    }
+
+    $playbackReadyDeadline = (Get-Date).AddSeconds(60)
+    do {
+        $playbackHarnessProcess.Refresh()
+        if ($playbackHarnessProcess.HasExited) {
+            throw "The playback acceptance harness exited before publishing readiness."
+        }
+        if ((Test-Path -LiteralPath $playbackReadyPath -PathType Leaf) -and
+            (Test-Path -LiteralPath $playbackPublicCertificatePath -PathType Leaf)) {
+            $playbackHarnessReady = $true
+            break
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $playbackReadyDeadline)
+    if (-not $playbackHarnessReady) {
+        throw "The playback acceptance harness did not publish readiness before the deadline."
+    }
+
+    Assert-ExactPlaybackControlEntries -AllowedNames @("loopback.cer", "ready.json")
+    $readyTicket = Read-StrictPlaybackJsonTicket `
+        -Path $playbackReadyPath `
+        -AllowedProperties @("IsReady", "SeedCompleted", "CertificateThumbprint")
+    if ($readyTicket.IsReady -isnot [bool] -or
+        $readyTicket.SeedCompleted -isnot [bool] -or
+        $readyTicket.CertificateThumbprint -isnot [string] -or
+        -not $readyTicket.IsReady -or
+        -not $readyTicket.SeedCompleted -or
+        -not [System.Text.RegularExpressions.Regex]::IsMatch(
+            $readyTicket.CertificateThumbprint,
+            '\A[0-9A-F]{40}\z')) {
+        throw "The playback acceptance readiness ticket is invalid."
+    }
+
+    $playbackLoopbackCertificateThumbprint = $readyTicket.CertificateThumbprint
+    try {
+        $playbackLoopbackCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $playbackPublicCertificatePath)
+    }
+    catch {
+        throw "The playback acceptance public certificate is invalid."
+    }
+    $now = Get-Date
+    if ($playbackLoopbackCertificate.HasPrivateKey -or
+        $playbackLoopbackCertificate.Subject -cne $expectedPlaybackCertificateSubject -or
+        $playbackLoopbackCertificate.Issuer -cne $expectedPlaybackCertificateSubject -or
+        $playbackLoopbackCertificate.Thumbprint -cne $playbackLoopbackCertificateThumbprint -or
+        $playbackLoopbackCertificate.NotBefore -gt $now -or
+        $playbackLoopbackCertificate.NotAfter -le $now) {
+        throw "The playback acceptance public certificate does not match readiness."
+    }
+
+    $serverAuthenticationExtensions = @(
+        $playbackLoopbackCertificate.Extensions |
+            Where-Object { $_.Oid.Value -eq "2.5.29.37" }
+    )
+    if ($serverAuthenticationExtensions.Count -ne 1) {
+        throw "The playback acceptance public certificate usage is invalid."
+    }
+    $serverAuthenticationExtension =
+        [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]$serverAuthenticationExtensions[0]
+    $serverAuthenticationUsages = @(
+        $serverAuthenticationExtension.EnhancedKeyUsages |
+            ForEach-Object { $_.Value }
+    )
+    if (-not $serverAuthenticationExtension.Critical -or
+        $serverAuthenticationUsages.Count -ne 1 -or
+        $serverAuthenticationUsages[0] -cne "1.3.6.1.5.5.7.3.1") {
+        throw "The playback acceptance public certificate usage is invalid."
+    }
+
+    $basicConstraintExtensions = @(
+        $playbackLoopbackCertificate.Extensions |
+            Where-Object { $_.Oid.Value -eq "2.5.29.19" }
+    )
+    $keyUsageExtensions = @(
+        $playbackLoopbackCertificate.Extensions |
+            Where-Object { $_.Oid.Value -eq "2.5.29.15" }
+    )
+    if ($basicConstraintExtensions.Count -ne 1 -or
+        $keyUsageExtensions.Count -ne 1) {
+        throw "The playback acceptance public certificate constraints are invalid."
+    }
+    $basicConstraintExtension =
+        [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]$basicConstraintExtensions[0]
+    $keyUsageExtension =
+        [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]$keyUsageExtensions[0]
+    if (-not $basicConstraintExtension.Critical -or
+        $basicConstraintExtension.CertificateAuthority -or
+        -not $keyUsageExtension.Critical -or
+        $keyUsageExtension.KeyUsages -ne
+            [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature) {
+        throw "The playback acceptance public certificate constraints are invalid."
+    }
+
+    $playbackRootCertificatePath =
+        "Cert:\LocalMachine\Root\$playbackLoopbackCertificateThumbprint"
+    if (Test-Path -LiteralPath $playbackRootCertificatePath) {
+        throw "The exact playback acceptance certificate is already trusted."
+    }
+    $playbackLoopbackCertificateImported = $true
+    try {
+        $importedPlaybackCertificates = @(
+            Import-Certificate `
+                -FilePath $playbackPublicCertificatePath `
+                -CertStoreLocation "Cert:\LocalMachine\Root"
+        )
+    }
+    catch {
+        throw "The playback acceptance public certificate could not be trusted."
+    }
+    if ($importedPlaybackCertificates.Count -ne 1 -or
+        $importedPlaybackCertificates[0].Thumbprint -cne
+            $playbackLoopbackCertificateThumbprint) {
+        throw "The playback acceptance public certificate import is invalid."
+    }
+
+    $existingProcesses = @(Get-Process -Name "IptvSuite.Windows" -ErrorAction SilentlyContinue)
+    if ($existingProcesses.Count -ne 0) {
+        throw "IptvSuite.Windows is already running; refusing an ambiguous playback launch."
+    }
+
+    $playbackActivationProcessId =
+        [IptvSuite.PackageSmoke.PackagedApplicationActivator]::Activate($aumid)
+    $launchedProcess = Get-Process -Id $playbackActivationProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $launchedProcess) {
+        throw "The packaged playback application exited before its process could be observed."
+    }
+    try {
+        $null = $launchedProcess.Handle
+    }
+    catch {
+        throw "The packaged playback application exited before its process handle could be retained."
+    }
+    Assert-PackagedProcessAlive -Process $launchedProcess
+    if ($launchedProcess.ProcessName -ne "IptvSuite.Windows") {
+        throw "Playback package activation returned an unexpected process."
+    }
+
+    $playbackLaunchDeadline = (Get-Date).AddSeconds(30)
+    $playbackWindowVisible = $false
+    do {
+        Assert-PackagedProcessAlive -Process $launchedProcess
+        $playbackWindowHandle = $launchedProcess.MainWindowHandle
+        if ($playbackWindowHandle -ne [IntPtr]::Zero -and
+            [IptvSuite.PackageSmoke.WindowInspector]::IsWindowVisible($playbackWindowHandle)) {
+            [uint32]$playbackWindowOwnerProcessId = 0
+            [void][IptvSuite.PackageSmoke.WindowInspector]::GetWindowThreadProcessId(
+                $playbackWindowHandle,
+                [ref]$playbackWindowOwnerProcessId)
+            if ($playbackWindowOwnerProcessId -eq [uint32]$playbackActivationProcessId) {
+                $playbackWindowVisible = $true
+                break
+            }
+        }
+
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $playbackLaunchDeadline)
+    if (-not $playbackWindowVisible) {
+        throw "The packaged playback application did not create a visible window."
+    }
+
+    $playbackAutomationRoot =
+        [System.Windows.Automation.AutomationElement]::FromHandle($playbackWindowHandle)
+    if ($null -eq $playbackAutomationRoot) {
+        throw "The packaged playback application has no UI Automation root."
+    }
+    $playbackSourceElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "CatalogSourceSelector" `
+        ([System.Windows.Automation.ControlType]::ComboBox) `
+        "Playlist source"
+    $playbackChannelListElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "CatalogChannelList" `
+        ([System.Windows.Automation.ControlType]::List) `
+        "Channels"
+    $playbackStatusElement = Get-AutomationElementById `
+        $playbackAutomationRoot `
+        "PlaybackStatusText"
+    if ($null -eq $playbackStatusElement -or
+        $playbackStatusElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Text) {
+        throw "The packaged playback status automation element is invalid."
+    }
+    $playButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "PlaybackPlayButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Play channel"
+    $pauseButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "PlaybackPauseButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Pause channel"
+    $stopButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "PlaybackStopButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Stop channel"
+
+    $sourceSelectionPatternObject = $null
+    if (-not $playbackSourceElement.TryGetCurrentPattern(
+            [System.Windows.Automation.SelectionPattern]::Pattern,
+            [ref]$sourceSelectionPatternObject)) {
+        throw "The packaged playback source selector has no SelectionPattern."
+    }
+    $sourceSelectionPattern =
+        [System.Windows.Automation.SelectionPattern]$sourceSelectionPatternObject
+    $sourceExpandPatternObject = $null
+    if (-not $playbackSourceElement.TryGetCurrentPattern(
+            [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+            [ref]$sourceExpandPatternObject)) {
+        throw "The packaged playback source selector has no ExpandCollapsePattern."
+    }
+    $sourceExpandPattern =
+        [System.Windows.Automation.ExpandCollapsePattern]$sourceExpandPatternObject
+    $sourceExpandPattern.Expand()
+
+    $playbackListItemCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    $sourceItemsDeadline = (Get-Date).AddSeconds(10)
+    do {
+        Assert-PackagedProcessAlive -Process $launchedProcess
+        $sourceItems = $playbackSourceElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $playbackListItemCondition)
+        if ($sourceItems.Count -eq 2) {
+            break
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $sourceItemsDeadline)
+    if ($sourceItems.Count -ne 2) {
+        throw "The packaged playback catalog did not expose exactly two sources."
+    }
+
+    $playbackSourceItem = $null
+    $catalogSourceItem = $null
+    for ($sourceItemIndex = 0; $sourceItemIndex -lt $sourceItems.Count; $sourceItemIndex++) {
+        $sourceItem = $sourceItems[$sourceItemIndex]
+        if ($sourceItem.Current.Name -ceq $expectedPlaybackSourceName) {
+            if ($null -ne $playbackSourceItem) {
+                throw "The packaged playback source list contains a duplicate acceptance source."
+            }
+            $playbackSourceItem = $sourceItem
+        }
+        elseif ($sourceItem.Current.Name -ceq $expectedCatalogSourceName) {
+            if ($null -ne $catalogSourceItem) {
+                throw "The packaged playback source list contains a duplicate catalog source."
+            }
+            $catalogSourceItem = $sourceItem
+        }
+        else {
+            throw "The packaged playback source list contains an unexpected source."
+        }
+    }
+    if ($null -eq $playbackSourceItem -or $null -eq $catalogSourceItem) {
+        throw "The packaged playback source list is incomplete."
+    }
+
+    $selectedSources = @($sourceSelectionPattern.GetCurrentSelection())
+    $playbackSourceSelected =
+        $selectedSources.Count -eq 1 -and
+        $selectedSources[0].Current.Name -ceq $expectedPlaybackSourceName
+    if (-not $playbackSourceSelected) {
+        $sourceSelectionItemPatternObject = $null
+        $selectedWithUia = $false
+        try {
+            if ($playbackSourceItem.TryGetCurrentPattern(
+                    [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                    [ref]$sourceSelectionItemPatternObject)) {
+                ([System.Windows.Automation.SelectionItemPattern]$sourceSelectionItemPatternObject).Select()
+                $selectedWithUia = $true
+            }
+        }
+        catch {
+            $selectedWithUia = $false
+        }
+
+        if (-not $selectedWithUia) {
+            Assert-PackagedWindowForeground `
+                $playbackWindowHandle `
+                ([uint32]$playbackActivationProcessId)
+            Assert-FocusedAutomationElement `
+                $playbackSourceElement `
+                "CatalogSourceSelector" `
+                -RequestFocus
+            [IptvSuite.PackageSmoke.KeyboardInspector]::PressHome()
+            [IptvSuite.PackageSmoke.KeyboardInspector]::PressEnter()
+        }
+    }
+    if ($sourceExpandPattern.Current.ExpandCollapseState -eq
+        [System.Windows.Automation.ExpandCollapseState]::Expanded) {
+        $sourceExpandPattern.Collapse()
+    }
+
+    $expectedPlaybackCatalogStatus =
+        "Showing 1$([char]0x2013)1 of 1 channels."
+    $catalogStatusElement = Get-AutomationElementById `
+        $playbackAutomationRoot `
+        "CatalogStatusText"
+    if ($null -eq $catalogStatusElement) {
+        throw "The packaged playback catalog status automation element is missing."
+    }
+    $playbackCatalogDeadline = (Get-Date).AddSeconds(15)
+    $playbackCatalogReady = $false
+    do {
+        Assert-PackagedProcessAlive -Process $launchedProcess
+        $selectedSources = @($sourceSelectionPattern.GetCurrentSelection())
+        if ($selectedSources.Count -eq 1 -and
+            $selectedSources[0].Current.Name -ceq $expectedPlaybackSourceName -and
+            $catalogStatusElement.Current.Name -ceq $expectedPlaybackCatalogStatus) {
+            $playbackCatalogReady = $true
+            break
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $playbackCatalogDeadline)
+    if (-not $playbackCatalogReady) {
+        throw "The packaged playback catalog did not expose the seeded acceptance channel."
+    }
+
+    $playbackChannelDeadline = (Get-Date).AddSeconds(10)
+    do {
+        Assert-PackagedProcessAlive -Process $launchedProcess
+        $playbackChannelItems = $playbackChannelListElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $playbackListItemCondition)
+        if ($playbackChannelItems.Count -eq 1) {
+            break
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $playbackChannelDeadline)
+    if ($playbackChannelItems.Count -ne 1) {
+        throw "The packaged playback catalog did not expose exactly one channel item."
+    }
+
+    $playbackChannelItem = $playbackChannelItems[0]
+    Assert-PackagedWindowForeground `
+        $playbackWindowHandle `
+        ([uint32]$playbackActivationProcessId)
+    Assert-FocusedAutomationElement `
+        $playbackChannelItem `
+        "CatalogChannelList" `
+        -RequestFocus
+    $channelInvokePatternObject = $null
+    if ($playbackChannelItem.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern,
+            [ref]$channelInvokePatternObject)) {
+        ([System.Windows.Automation.InvokePattern]$channelInvokePatternObject).Invoke()
+    }
+    else {
+        [IptvSuite.PackageSmoke.KeyboardInspector]::PressEnter()
+    }
+    Wait-PackagedPlaybackStatus `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Channel is playing."
+
+    Invoke-PackagedPlaybackButton `
+        -Process $launchedProcess `
+        -ButtonElement $pauseButtonElement `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Playback paused."
+    Invoke-PackagedPlaybackButton `
+        -Process $launchedProcess `
+        -ButtonElement $playButtonElement `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Channel is playing."
+    Invoke-PackagedPlaybackButton `
+        -Process $launchedProcess `
+        -ButtonElement $stopButtonElement `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Playback stopped."
+
+    Assert-PackagedProcessAlive -Process $launchedProcess
+    if (-not $launchedProcess.CloseMainWindow()) {
+        throw "The packaged playback application rejected a normal window-close request."
+    }
+    if (-not $launchedProcess.WaitForExit(10000)) {
+        throw "The packaged playback application did not exit after a normal close request."
+    }
+    $launchedProcess.Refresh()
+    $playbackExitCode = $launchedProcess.ExitCode
+    if ($null -eq $playbackExitCode -or [int]$playbackExitCode -ne 0) {
+        throw "The packaged playback application did not return a successful normal-close result."
+    }
+
+    $stopSignalStream = [System.IO.File]::Open(
+        $playbackStopSignalPath,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None)
+    $stopSignalStream.Dispose()
+    $playbackStopSignalCreated = $true
+    if (-not $playbackHarnessProcess.WaitForExit(15000)) {
+        throw "The playback acceptance harness did not stop before the deadline."
+    }
+    $playbackHarnessProcess.Refresh()
+    if ([int]$playbackHarnessProcess.ExitCode -ne 0) {
+        throw "The playback acceptance harness returned a failure result."
+    }
+
+    Assert-ExactPlaybackControlEntries `
+        -AllowedNames @("loopback.cer", "ready.json", "result.json", "stop.signal")
+    $resultTicket = Read-StrictPlaybackJsonTicket `
+        -Path $playbackResultPath `
+        -AllowedProperties @(
+            "ReadyPublished",
+            "SeedCompleted",
+            "StopObserved",
+            "StoppedGracefully",
+            "CertificateThumbprint",
+            "RequestCount",
+            "CompletedResponseCount",
+            "CompletedBodyBytes",
+            "FailureCount")
+    if ($resultTicket.ReadyPublished -isnot [bool] -or
+        $resultTicket.SeedCompleted -isnot [bool] -or
+        $resultTicket.StopObserved -isnot [bool] -or
+        $resultTicket.StoppedGracefully -isnot [bool] -or
+        $resultTicket.CertificateThumbprint -isnot [string] -or
+        $resultTicket.RequestCount -isnot [int] -or
+        $resultTicket.CompletedResponseCount -isnot [int] -or
+        ($resultTicket.CompletedBodyBytes -isnot [int] -and
+            $resultTicket.CompletedBodyBytes -isnot [long]) -or
+        $resultTicket.FailureCount -isnot [int] -or
+        -not $resultTicket.ReadyPublished -or
+        -not $resultTicket.SeedCompleted -or
+        -not $resultTicket.StopObserved -or
+        -not $resultTicket.StoppedGracefully -or
+        $resultTicket.CertificateThumbprint -cne
+            $playbackLoopbackCertificateThumbprint -or
+        [int]$resultTicket.RequestCount -le 0 -or
+        [int]$resultTicket.CompletedResponseCount -le 0 -or
+        [long]$resultTicket.CompletedBodyBytes -le 0 -or
+        [int]$resultTicket.FailureCount -ne 0) {
+        throw "The playback acceptance result ticket is invalid."
+    }
+
+    $playbackUiRequestCount = [int]$resultTicket.RequestCount
+    $playbackUiCompletedResponseCount = [int]$resultTicket.CompletedResponseCount
+    $playbackUiCompletedBodyBytes = [long]$resultTicket.CompletedBodyBytes
+    $playbackUiAcceptanceVerified = $true
+
     $packageFileName = $packages[0].Name
     Remove-ExactDevelopmentPackage
 
@@ -1644,6 +2408,10 @@ try {
         CatalogDwmFrameMaximumMilliseconds = [Math]::Round($catalogFrameMaximumMilliseconds, 3)
         CatalogDwmDroppedFramePercent = [Math]::Round($catalogDroppedFramePercent, 3)
         CatalogDwmFrameIntervalCount = $catalogFrameIntervalCount
+        PlaybackUiAcceptanceVerified = $playbackUiAcceptanceVerified
+        PlaybackUiRequestCount = $playbackUiRequestCount
+        PlaybackUiCompletedResponseCount = $playbackUiCompletedResponseCount
+        PlaybackUiCompletedBodyBytes = $playbackUiCompletedBodyBytes
         NormalClose       = $true
         PackageRemoved    = $true
     }
@@ -1676,6 +2444,47 @@ finally {
         }
     }
 
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Stop playback acceptance harness" -Action {
+        if ($null -ne $playbackHarnessProcess) {
+            try {
+                $playbackHarnessProcess.Refresh()
+                if (-not $playbackHarnessProcess.HasExited) {
+                    if ($playbackHarnessReady -and -not $playbackStopSignalCreated) {
+                        if (Test-Path -LiteralPath $playbackStopSignalPath) {
+                            $existingStopSignal = Get-Item -LiteralPath $playbackStopSignalPath -Force
+                            if ($existingStopSignal.PSIsContainer -or
+                                ($existingStopSignal.Attributes -band
+                                    [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                                $existingStopSignal.Length -ne 0) {
+                                throw "The playback acceptance stop signal is invalid during cleanup."
+                            }
+                        }
+                        else {
+                            $cleanupStopSignalStream = [System.IO.File]::Open(
+                                $playbackStopSignalPath,
+                                [System.IO.FileMode]::CreateNew,
+                                [System.IO.FileAccess]::Write,
+                                [System.IO.FileShare]::None)
+                            $cleanupStopSignalStream.Dispose()
+                        }
+                        $playbackStopSignalCreated = $true
+                    }
+
+                    if (-not $playbackHarnessReady -or
+                        -not $playbackHarnessProcess.WaitForExit(10000)) {
+                        $playbackHarnessProcess.Kill()
+                        if (-not $playbackHarnessProcess.WaitForExit(10000)) {
+                            throw "The exact playback acceptance harness process did not stop during cleanup."
+                        }
+                    }
+                }
+            }
+            finally {
+                $playbackHarnessProcess.Dispose()
+            }
+        }
+    }
+
     Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact development package" -Action {
         if ($installAttempted -or $null -ne $installedPackage) {
             Remove-ExactDevelopmentPackage
@@ -1690,6 +2499,39 @@ finally {
                 $environmentName,
                 $previousEnvironmentValue,
                 "Process")
+        }
+    }
+
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact playback acceptance certificate" -Action {
+        if ($playbackLoopbackCertificateImported) {
+            if ([string]::IsNullOrWhiteSpace($playbackLoopbackCertificateThumbprint) -or
+                -not [System.Text.RegularExpressions.Regex]::IsMatch(
+                    $playbackLoopbackCertificateThumbprint,
+                    '\A[0-9A-F]{40}\z')) {
+                throw "Refusing playback certificate cleanup because the thumbprint is invalid."
+            }
+
+            $playbackCertificatePath =
+                "Cert:\LocalMachine\Root\$playbackLoopbackCertificateThumbprint"
+            $playbackCertificateCandidate = Get-Item `
+                -LiteralPath $playbackCertificatePath `
+                -ErrorAction SilentlyContinue
+            if ($null -ne $playbackCertificateCandidate) {
+                if ($playbackCertificateCandidate.Subject -cne
+                        $expectedPlaybackCertificateSubject -or
+                    $playbackCertificateCandidate.Thumbprint -cne
+                        $playbackLoopbackCertificateThumbprint) {
+                    throw "Refusing playback certificate cleanup because its identity does not match."
+                }
+
+                Remove-Item -LiteralPath $playbackCertificatePath -Force -ErrorAction Stop
+            }
+        }
+    }
+
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Dispose playback acceptance certificate" -Action {
+        if ($null -ne $playbackLoopbackCertificate) {
+            $playbackLoopbackCertificate.Dispose()
         }
     }
 
@@ -1714,6 +2556,10 @@ finally {
         if (Test-Path -LiteralPath $publicCertificatePath) {
             Remove-Item -LiteralPath $publicCertificatePath -Force -ErrorAction Stop
         }
+    }
+
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact playback-control directory" -Action {
+        Remove-ExactPlaybackControlDirectory
     }
 
     Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact package-output directory" -Action {
