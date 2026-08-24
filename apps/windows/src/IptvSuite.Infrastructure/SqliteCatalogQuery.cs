@@ -30,10 +30,12 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
         command.CommandText = """
             SELECT source_id, display_name
             FROM sources
-            WHERE active_snapshot_id IS NOT NULL
+            WHERE status = $ready
+              AND active_snapshot_id IS NOT NULL
             ORDER BY display_name COLLATE NOCASE, source_id
             LIMIT $limit;
             """;
+        command.Parameters.AddWithValue("$ready", (int)ContentSourceStatus.Ready);
         command.Parameters.AddWithValue("$limit", MaximumSourceCount + 1);
         var rows = new List<CatalogSourceItem>();
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -79,10 +81,12 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
             FROM categories AS c
             JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id
             WHERE s.source_id = $source
+              AND s.status = $ready
             ORDER BY c.sort_order, c.display_name COLLATE NOCASE, c.category_id
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$source", sourceId.Value.ToString("N"));
+        command.Parameters.AddWithValue("$ready", (int)ContentSourceStatus.Ready);
         command.Parameters.AddWithValue("$limit", MaximumCategoryCount + 1);
         var rows = new List<CatalogCategoryItem>();
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -130,6 +134,7 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
             FROM channels AS c
             JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id
             WHERE s.source_id = $source
+              AND s.status = $ready
               AND ($category IS NULL OR c.category_id = $category)
               AND ($search IS NULL OR instr(lower(c.display_name), lower($search)) > 0);
             """;
@@ -146,6 +151,7 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
             FROM channels AS c
             JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id
             WHERE s.source_id = $source
+              AND s.status = $ready
               AND ($category IS NULL OR c.category_id = $category)
               AND ($search IS NULL OR instr(lower(c.display_name), lower($search)) > 0)
             ORDER BY c.display_name COLLATE NOCASE, c.channel_id
@@ -265,6 +271,7 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
         string? search)
     {
         command.Parameters.AddWithValue("$source", sourceId.Value.ToString("N"));
+        command.Parameters.AddWithValue("$ready", (int)ContentSourceStatus.Ready);
         command.Parameters.AddWithValue("$category", categoryId.HasValue
             ? categoryId.Value.Value.ToString("N")
             : DBNull.Value);

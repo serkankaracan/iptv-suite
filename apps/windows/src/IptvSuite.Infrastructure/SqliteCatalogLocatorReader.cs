@@ -68,6 +68,7 @@ internal sealed class SqliteCatalogLocatorReader
               ON k.snapshot_id = l.snapshot_id AND k.key_generation_id = l.key_generation_id
             JOIN sources AS s
               ON s.source_id = $source AND s.active_snapshot_id = l.snapshot_id
+             AND s.status = $ready
             WHERE l.locator_reference = $reference
               AND l.owner_kind = $ownerKind
               AND l.owner_id = $owner
@@ -76,6 +77,7 @@ internal sealed class SqliteCatalogLocatorReader
               AND k.wrapped_dek IS NOT NULL;
             """;
         command.Parameters.AddWithValue("$source", sourceId.Value.ToString("N"));
+        command.Parameters.AddWithValue("$ready", (int)ContentSourceStatus.Ready);
         command.Parameters.AddWithValue("$reference", referenceText);
         command.Parameters.AddWithValue("$ownerKind", (int)ProtectedRecordOwnerKind.Channel);
         command.Parameters.AddWithValue("$owner", channelId.Value.ToString("N"));

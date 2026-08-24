@@ -61,9 +61,13 @@ public sealed class SqliteChannelLogoProvider : IChannelLogoProvider
         command.CommandText = """
             SELECT c.logo_reference, s.endpoint_scheme, s.endpoint_host, s.endpoint_port FROM channels c
             JOIN sources s ON s.active_snapshot_id = c.snapshot_id
-            WHERE s.source_id = $source AND c.channel_id = $channel AND c.logo_reference IS NOT NULL;
+            WHERE s.source_id = $source
+              AND s.status = $ready
+              AND c.channel_id = $channel
+              AND c.logo_reference IS NOT NULL;
             """;
         command.Parameters.AddWithValue("$source", sourceId.Value.ToString("N"));
+        command.Parameters.AddWithValue("$ready", (int)ContentSourceStatus.Ready);
         command.Parameters.AddWithValue("$channel", channelId.Value.ToString("N"));
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.IsDBNull(0) || reader.IsDBNull(1) || reader.IsDBNull(2) || reader.IsDBNull(3)) return null;

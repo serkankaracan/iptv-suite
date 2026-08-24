@@ -15,7 +15,7 @@ public sealed class CatalogBrowseCoordinator : IDisposable
     private readonly ICatalogBrowser _browser;
     private readonly TimeProvider _timeProvider;
     private readonly object _sync = new();
-    private CancellationTokenSource? _activeRequest;
+    private BrowseRequest? _activeRequest;
     private long _generation;
     private bool _disposed;
 
@@ -34,21 +34,22 @@ public sealed class CatalogBrowseCoordinator : IDisposable
         bool debounce,
         CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        long generation = Interlocked.Increment(ref _generation);
-        var request = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        CancellationTokenSource? previous;
+        BrowseRequest request;
+        BrowseRequest? previous;
+        long generation;
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            generation = checked(_generation + 1);
+            request = new BrowseRequest(cancellationToken);
+            _generation = generation;
             previous = _activeRequest;
             _activeRequest = request;
         }
 
-        previous?.Cancel();
-        previous?.Dispose();
         try
         {
+            previous?.CancelSafely();
             if (debounce)
             {
                 await Task.Delay(DefaultDebounce, _timeProvider, request.Token).ConfigureAwait(false);
@@ -83,7 +84,7 @@ public sealed class CatalogBrowseCoordinator : IDisposable
                 }
             }
 
-            request.Dispose();
+            request.Complete();
         }
     }
 
@@ -94,9 +95,27 @@ public sealed class CatalogBrowseCoordinator : IDisposable
         return _browser.ReadSourcesAsync(cancellationToken);
     }
 
+    public void CancelPending()
+    {
+        BrowseRequest? active;
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            checked
+            {
+                _generation++;
+            }
+
+            active = _activeRequest;
+            _activeRequest = null;
+        }
+
+        active?.CancelSafely();
+    }
+
     public void Dispose()
     {
-        CancellationTokenSource? active;
+        BrowseRequest? active;
         lock (_sync)
         {
             if (_disposed)
@@ -110,7 +129,91 @@ public sealed class CatalogBrowseCoordinator : IDisposable
             _activeRequest = null;
         }
 
-        active?.Cancel();
-        active?.Dispose();
+        active?.CancelSafely();
+    }
+
+    private sealed class BrowseRequest
+    {
+        private readonly object _sync = new();
+        private readonly CancellationTokenSource _source;
+        private bool _canceling;
+        private bool _completed;
+        private bool _disposed;
+
+        internal BrowseRequest(CancellationToken cancellationToken)
+        {
+            _source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Token = _source.Token;
+        }
+
+        internal CancellationToken Token { get; }
+
+        internal void CancelSafely()
+        {
+            lock (_sync)
+            {
+                if (_disposed || _canceling)
+                {
+                    return;
+                }
+
+                _canceling = true;
+            }
+
+            try
+            {
+                _source.Cancel(throwOnFirstException: false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Completion can win before a detached request is canceled.
+            }
+            catch (AggregateException)
+            {
+                // Cancellation callbacks cannot escape the coordinator control flow.
+            }
+            finally
+            {
+                bool dispose = false;
+                lock (_sync)
+                {
+                    _canceling = false;
+                    if (_completed && !_disposed)
+                    {
+                        _disposed = true;
+                        dispose = true;
+                    }
+                }
+
+                if (dispose)
+                {
+                    _source.Dispose();
+                }
+            }
+        }
+
+        internal void Complete()
+        {
+            bool dispose = false;
+            lock (_sync)
+            {
+                if (_completed)
+                {
+                    return;
+                }
+
+                _completed = true;
+                if (!_canceling && !_disposed)
+                {
+                    _disposed = true;
+                    dispose = true;
+                }
+            }
+
+            if (dispose)
+            {
+                _source.Dispose();
+            }
+        }
     }
 }
