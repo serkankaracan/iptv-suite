@@ -1,12 +1,13 @@
+using IptvSuite.Domain;
 using Microsoft.Data.Sqlite;
 
 namespace IptvSuite.Infrastructure;
 
 internal sealed class SqliteCatalogDatabase
 {
-    internal const int SchemaVersion = 3;
+    internal const int SchemaVersion = 4;
 
-    private static readonly string[] RequiredTables =
+    private static readonly string[] LegacyRequiredTables =
     [
         "catalog_metadata",
         "sources",
@@ -17,6 +18,23 @@ internal sealed class SqliteCatalogDatabase
         "protected_locators",
         "favorites",
         "sync_runs",
+    ];
+
+    private static readonly string[] RequiredTables =
+    [
+        .. LegacyRequiredTables,
+        "source_deletion_tombstones",
+    ];
+
+    private static readonly string[] RequiredTriggers =
+    [
+        "tr_source_deletion_tombstones_reject_delete",
+        "tr_source_deletion_tombstones_reject_invalid_insert",
+        "tr_source_deletion_tombstones_reject_invalid_update",
+        "tr_source_deletion_tombstones_require_authorized_phase",
+        "tr_sources_reject_tombstoned_insert",
+        "tr_sources_reject_tombstoned_update",
+        "tr_sources_require_completed_delete",
     ];
 
     private readonly string _databasePath;
@@ -64,19 +82,25 @@ internal sealed class SqliteCatalogDatabase
             return;
         }
 
+        if (version == 3)
+        {
+            await MigrateVersionThreeAsync(connection, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (version != SchemaVersion)
         {
             throw new InvalidDataException("Catalog schema version is unsupported.");
         }
 
-        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task MigrateVersionOneAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
-        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await ValidateLegacySchemaAsync(connection, cancellationToken).ConfigureAwait(false);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
         await ExecuteAsync(
@@ -90,24 +114,40 @@ internal sealed class SqliteCatalogDatabase
             cancellationToken,
             transaction).ConfigureAwait(false);
         await CreateCatalogBrowseIndexesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task MigrateVersionTwoAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
-        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await ValidateLegacySchemaAsync(connection, cancellationToken).ConfigureAwait(false);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
         await CreateCatalogBrowseIndexesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task MigrateVersionThreeAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await ValidateLegacySchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
+            .ConfigureAwait(false);
+        await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task CreateCatalogBrowseIndexesAsync(
@@ -132,28 +172,54 @@ internal sealed class SqliteCatalogDatabase
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
         await ExecuteAsync(connection, SchemaSql, cancellationToken, transaction).ConfigureAwait(false);
+        await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        await ValidateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task ValidateSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private static Task ValidateLegacySchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken) =>
+        ValidateSchemaAsync(connection, LegacyRequiredTables, [], cancellationToken);
+
+    private static Task ValidateCurrentSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken) =>
+        ValidateSchemaAsync(connection, RequiredTables, RequiredTriggers, cancellationToken);
+
+    private static async Task ValidateSchemaAsync(
+        SqliteConnection connection,
+        IReadOnlyCollection<string> requiredTables,
+        IReadOnlyCollection<string> requiredTriggers,
+        CancellationToken cancellationToken)
     {
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;";
-        var actual = new HashSet<string>(StringComparer.Ordinal);
+        command.CommandText = "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'trigger') ORDER BY type, name;";
+        var actualTables = new HashSet<string>(StringComparer.Ordinal);
+        var actualTriggers = new HashSet<string>(StringComparer.Ordinal);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            actual.Add(reader.GetString(0));
+            HashSet<string> target = string.Equals(reader.GetString(0), "table", StringComparison.Ordinal)
+                ? actualTables
+                : actualTriggers;
+            target.Add(reader.GetString(1));
         }
 
-        if (RequiredTables.Any(table => !actual.Contains(table)))
+        if (requiredTables.Any(table => !actualTables.Contains(table)) ||
+            requiredTriggers.Any(trigger => !actualTriggers.Contains(trigger)))
         {
             throw new InvalidDataException("Catalog schema is incomplete.");
         }
     }
+
+    private static Task CreateSourceDeletionBoundaryAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(connection, SourceDeletionBoundarySql, cancellationToken, transaction);
 
     private static async Task<long> ReadSchemaVersionAsync(
         SqliteConnection connection,
@@ -224,6 +290,160 @@ internal sealed class SqliteCatalogDatabase
             current = current.Parent;
         }
     }
+
+    private static readonly string SourceDeletionBoundarySql = $$"""
+        CREATE TABLE source_deletion_tombstones (
+            source_id TEXT NOT NULL PRIMARY KEY CHECK (length(source_id) = 32),
+            configuration_id TEXT NOT NULL CHECK (length(configuration_id) = 32),
+            source_kind INTEGER NOT NULL,
+            configuration_reference TEXT NOT NULL CHECK (length(configuration_reference) IN (46, 47)),
+            protected_delete_completed INTEGER NOT NULL CHECK (protected_delete_completed IN (0, 1)),
+            marked_utc TEXT NOT NULL
+        ) WITHOUT ROWID, STRICT;
+
+        INSERT INTO source_deletion_tombstones(
+            source_id, configuration_id, source_kind, configuration_reference,
+            protected_delete_completed, marked_utc)
+        SELECT source_id, configuration_id, source_kind, configuration_reference,
+            0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        FROM sources
+        WHERE status = {{(int)ContentSourceStatus.DeletionPending}};
+
+        CREATE TRIGGER tr_source_deletion_tombstones_reject_invalid_insert
+        BEFORE INSERT ON source_deletion_tombstones
+        WHEN NEW.protected_delete_completed <> 0
+            OR EXISTS (
+                SELECT 1
+                FROM source_deletion_tombstones
+                WHERE source_id = NEW.source_id
+            )
+            OR NOT EXISTS (
+                SELECT 1
+                FROM sources AS source
+                WHERE source.source_id = NEW.source_id
+                  AND source.configuration_id = NEW.configuration_id
+                  AND source.source_kind = NEW.source_kind
+                  AND source.configuration_reference = NEW.configuration_reference
+            )
+        BEGIN
+            SELECT RAISE(IGNORE);
+        END;
+
+        CREATE TRIGGER tr_source_deletion_tombstones_reject_invalid_update
+        BEFORE UPDATE ON source_deletion_tombstones
+        WHEN NEW.source_id IS NOT OLD.source_id
+            OR NEW.configuration_id IS NOT OLD.configuration_id
+            OR NEW.source_kind IS NOT OLD.source_kind
+            OR NEW.configuration_reference IS NOT OLD.configuration_reference
+            OR NEW.marked_utc IS NOT OLD.marked_utc
+            OR NOT (
+                NEW.protected_delete_completed = OLD.protected_delete_completed
+                OR (
+                    OLD.protected_delete_completed = 0
+                    AND NEW.protected_delete_completed = 1
+                )
+            )
+        BEGIN
+            SELECT RAISE(IGNORE);
+        END;
+
+        CREATE TRIGGER tr_source_deletion_tombstones_reject_delete
+        BEFORE DELETE ON source_deletion_tombstones
+        BEGIN
+            SELECT RAISE(IGNORE);
+        END;
+
+        CREATE TRIGGER tr_source_deletion_tombstones_require_authorized_phase
+        BEFORE UPDATE OF protected_delete_completed ON source_deletion_tombstones
+        WHEN OLD.protected_delete_completed = 0
+            AND NEW.protected_delete_completed = 1
+            AND iptv_source_delete_authorized(
+                NEW.source_id,
+                NEW.configuration_id,
+                NEW.source_kind,
+                NEW.configuration_reference) <> 1
+        BEGIN
+            SELECT RAISE(IGNORE);
+        END;
+
+        CREATE TRIGGER tr_sources_reject_tombstoned_insert
+        BEFORE INSERT ON sources
+        WHEN NEW.status = {{(int)ContentSourceStatus.DeletionPending}}
+            OR EXISTS (
+                SELECT 1 FROM source_deletion_tombstones WHERE source_id = NEW.source_id
+            )
+        BEGIN
+            SELECT RAISE(IGNORE);
+        END;
+
+        CREATE TRIGGER tr_sources_reject_tombstoned_update
+        BEFORE UPDATE ON sources
+        WHEN (
+                NEW.status = {{(int)ContentSourceStatus.DeletionPending}}
+                OR
+                EXISTS (
+                    SELECT 1 FROM source_deletion_tombstones WHERE source_id = OLD.source_id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM source_deletion_tombstones WHERE source_id = NEW.source_id
+                )
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM source_deletion_tombstones AS tombstone
+                WHERE tombstone.source_id = OLD.source_id
+                  AND NEW.source_id = OLD.source_id
+                  AND OLD.configuration_id = tombstone.configuration_id
+                  AND NEW.configuration_id = tombstone.configuration_id
+                  AND OLD.source_kind = tombstone.source_kind
+                  AND NEW.source_kind = tombstone.source_kind
+                  AND OLD.configuration_reference = tombstone.configuration_reference
+                  AND NEW.configuration_reference = tombstone.configuration_reference
+                  AND tombstone.protected_delete_completed = 0
+                  AND NEW.display_name IS OLD.display_name
+                  AND NEW.endpoint_scheme IS OLD.endpoint_scheme
+                  AND NEW.endpoint_host IS OLD.endpoint_host
+                  AND NEW.endpoint_port IS OLD.endpoint_port
+                  AND NEW.active_snapshot_id IS OLD.active_snapshot_id
+                  AND NEW.created_utc IS OLD.created_utc
+                  AND NEW.last_error_code IS OLD.last_error_code
+                  AND (
+                      (
+                          OLD.status <> {{(int)ContentSourceStatus.DeletionPending}}
+                          AND NEW.status = {{(int)ContentSourceStatus.DeletionPending}}
+                      )
+                      OR (
+                          OLD.status = {{(int)ContentSourceStatus.DeletionPending}}
+                          AND NEW.status = {{(int)ContentSourceStatus.DeletionPending}}
+                          AND NEW.updated_utc IS OLD.updated_utc
+                      )
+                  )
+            )
+        BEGIN
+            SELECT RAISE(IGNORE);
+        END;
+
+        CREATE TRIGGER tr_sources_require_completed_delete
+        BEFORE DELETE ON sources
+        WHEN OLD.status <> {{(int)ContentSourceStatus.DeletionPending}}
+            OR NOT EXISTS (
+                SELECT 1
+                FROM source_deletion_tombstones AS tombstone
+                WHERE tombstone.source_id = OLD.source_id
+                  AND tombstone.configuration_id = OLD.configuration_id
+                  AND tombstone.source_kind = OLD.source_kind
+                  AND tombstone.configuration_reference = OLD.configuration_reference
+                  AND tombstone.protected_delete_completed = 1
+            )
+            OR iptv_source_delete_authorized(
+                OLD.source_id,
+                OLD.configuration_id,
+                OLD.source_kind,
+                OLD.configuration_reference) <> 1
+        BEGIN
+            SELECT RAISE(IGNORE);
+        END;
+        """;
 
     private const string SchemaSql = """
         CREATE TABLE catalog_metadata (

@@ -18,6 +18,15 @@ public sealed class DependencyRulesTests
     private static readonly string[] RequiredCapabilities = ["runFullTrust"];
     private static readonly int[] ProtectedCatalogSmokeRecordCounts = [1_000];
     private static readonly int[] ProtectedCatalogDecisionRecordCounts = [5_000, 10_000, 20_000, 50_000];
+    private static readonly string[] SourceDeletionCapabilityOwners =
+    [
+        "IptvSuite.Infrastructure/SqliteCatalogDatabase.cs",
+        "IptvSuite.Infrastructure/SqliteSourceDeletionLifecycle.cs",
+    ];
+    private static readonly string[] SourceDeletionCapabilityRegistrationOwners =
+    [
+        "IptvSuite.Infrastructure/SqliteSourceDeletionLifecycle.cs",
+    ];
 
     private static readonly ProjectRule[] ProjectRules =
     [
@@ -3963,6 +3972,47 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(adapter, "public const int MaximumSearchLength = 100;");
         StringAssert.Contains(adapter, "BeginTransactionAsync(cancellationToken)");
         Assert.IsFalse(adapter.Contains("SELECT *", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void M12SourceDeletionCapabilityIsConfinedToSchemaAndLifecycleAdapter()
+    {
+        const string capability = "iptv_source_delete_authorized";
+        string sourceRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src");
+        string[] sourceFiles = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .ToArray();
+        string[] capabilityOwners = sourceFiles
+            .Where(path => File.ReadAllText(path).Contains(capability, StringComparison.Ordinal))
+            .Select(path => Path.GetRelativePath(sourceRoot, path).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        string[] registrationOwners = sourceFiles
+            .Where(path => File.ReadAllText(path).Contains("CreateFunction", StringComparison.Ordinal))
+            .Select(path => Path.GetRelativePath(sourceRoot, path).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        CollectionAssert.AreEqual(
+            SourceDeletionCapabilityOwners,
+            capabilityOwners);
+        CollectionAssert.AreEqual(
+            SourceDeletionCapabilityRegistrationOwners,
+            registrationOwners);
+
+        string schema = File.ReadAllText(Path.Combine(
+            sourceRoot,
+            "IptvSuite.Infrastructure",
+            "SqliteCatalogDatabase.cs"));
+        string lifecycle = File.ReadAllText(Path.Combine(
+            sourceRoot,
+            "IptvSuite.Infrastructure",
+            "SqliteSourceDeletionLifecycle.cs"));
+        Assert.AreEqual(2, Regex.Count(schema, capability, RegexOptions.CultureInvariant));
+        StringAssert.Contains(lifecycle, "CreateFunction<string?, string?, long, string?, long>(");
+        StringAssert.Contains(lifecycle, "isDeterministic: false");
+        Assert.IsFalse(lifecycle.Contains("Console.", StringComparison.Ordinal));
+        Assert.IsFalse(lifecycle.Contains("Trace.", StringComparison.Ordinal));
+        Assert.IsFalse(lifecycle.Contains("Debug.", StringComparison.Ordinal));
     }
 
     [TestMethod]

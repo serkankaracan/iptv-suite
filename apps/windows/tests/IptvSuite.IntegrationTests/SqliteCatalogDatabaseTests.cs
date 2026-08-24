@@ -15,8 +15,20 @@ public sealed class SqliteCatalogDatabaseTests
         "protected_locators",
         "snapshot_keys",
         "snapshots",
+        "source_deletion_tombstones",
         "sources",
         "sync_runs",
+    ];
+
+    private static readonly string[] ExpectedTriggers =
+    [
+        "tr_source_deletion_tombstones_reject_delete",
+        "tr_source_deletion_tombstones_reject_invalid_insert",
+        "tr_source_deletion_tombstones_reject_invalid_update",
+        "tr_source_deletion_tombstones_require_authorized_phase",
+        "tr_sources_reject_tombstoned_insert",
+        "tr_sources_reject_tombstoned_update",
+        "tr_sources_require_completed_delete",
     ];
 
     private static readonly string[] ExpectedIndexes =
@@ -43,9 +55,10 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection connection = await OpenAsync(databasePath);
-        Assert.AreEqual(3L, await ExecuteScalarInt64Async(connection, "PRAGMA user_version;"));
+        Assert.AreEqual(4L, await ExecuteScalarInt64Async(connection, "PRAGMA user_version;"));
         CollectionAssert.AreEqual(ExpectedTables, await ReadObjectNamesAsync(connection, "table"));
         CollectionAssert.AreEqual(ExpectedIndexes, await ReadObjectNamesAsync(connection, "index", "ix_%"));
+        CollectionAssert.AreEqual(ExpectedTriggers, await ReadObjectNamesAsync(connection, "trigger"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(connection, "PRAGMA foreign_keys;"));
         Assert.AreEqual(2L, await ExecuteScalarInt64Async(connection, "PRAGMA synchronous;"));
         Assert.AreEqual("delete", await ExecuteScalarStringAsync(connection, "PRAGMA journal_mode;"));
@@ -76,6 +89,10 @@ public sealed class SqliteCatalogDatabaseTests
         await using (SqliteConnection connection = await OpenAsync(databasePath))
         {
             await ExecuteAsync(connection, """
+                DROP TRIGGER tr_sources_reject_tombstoned_insert;
+                DROP TRIGGER tr_sources_reject_tombstoned_update;
+                DROP TRIGGER tr_sources_require_completed_delete;
+                DROP TABLE source_deletion_tombstones;
                 DROP INDEX ix_snapshots_source_cache;
                 DROP INDEX ix_channels_snapshot_name;
                 DROP INDEX ix_channels_snapshot_category_name;
@@ -87,7 +104,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection migrated = await OpenAsync(databasePath);
-        Assert.AreEqual(3L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(4L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(
             migrated,
             "SELECT count(*) FROM pragma_table_info('snapshots') WHERE name = 'cache_key';"));
@@ -97,6 +114,7 @@ public sealed class SqliteCatalogDatabaseTests
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(
             migrated,
             "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_channels_snapshot_name';"));
+        CollectionAssert.AreEqual(ExpectedTriggers, await ReadObjectNamesAsync(migrated, "trigger"));
     }
 
     [TestMethod]
@@ -109,6 +127,10 @@ public sealed class SqliteCatalogDatabaseTests
         await using (SqliteConnection connection = await OpenAsync(databasePath))
         {
             await ExecuteAsync(connection, """
+                DROP TRIGGER tr_sources_reject_tombstoned_insert;
+                DROP TRIGGER tr_sources_reject_tombstoned_update;
+                DROP TRIGGER tr_sources_require_completed_delete;
+                DROP TABLE source_deletion_tombstones;
                 DROP INDEX ix_channels_snapshot_name;
                 DROP INDEX ix_channels_snapshot_category_name;
                 PRAGMA user_version = 2;
@@ -118,9 +140,87 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection migrated = await OpenAsync(databasePath);
-        Assert.AreEqual(3L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(4L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
         CollectionAssert.Contains(await ReadObjectNamesAsync(migrated, "index", "ix_%"), "ix_channels_snapshot_name");
         CollectionAssert.Contains(await ReadObjectNamesAsync(migrated, "index", "ix_%"), "ix_channels_snapshot_category_name");
+        CollectionAssert.AreEqual(ExpectedTriggers, await ReadObjectNamesAsync(migrated, "trigger"));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task VersionThreeSchemaAddsDurableSourceDeletionBoundaryAtomically()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m12-sqlite-deletion-migration");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeAsync(databasePath);
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await ExecuteAsync(connection, """
+                DROP TRIGGER tr_sources_reject_tombstoned_insert;
+                DROP TRIGGER tr_sources_reject_tombstoned_update;
+                DROP TRIGGER tr_sources_require_completed_delete;
+                DROP TABLE source_deletion_tombstones;
+                PRAGMA user_version = 3;
+                """);
+        }
+
+        await InitializeAsync(databasePath);
+
+        await using SqliteConnection migrated = await OpenAsync(databasePath);
+        Assert.AreEqual(4L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        CollectionAssert.Contains(
+            await ReadObjectNamesAsync(migrated, "table"),
+            "source_deletion_tombstones");
+        CollectionAssert.AreEqual(ExpectedTriggers, await ReadObjectNamesAsync(migrated, "trigger"));
+    }
+
+    [TestMethod]
+    [DataRow(1)]
+    [DataRow(2)]
+    [DataRow(3)]
+    [Timeout(30_000)]
+    public async Task LegacyPendingSourceIsBackfilledIntoExactPhaseZeroJournal(int legacyVersion)
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m12-sqlite-deletion-backfill");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeAsync(databasePath);
+        await using (SqliteConnection connection = await OpenAsync(databasePath))
+        {
+            await ExecuteAsync(connection, """
+                DROP TRIGGER tr_sources_reject_tombstoned_insert;
+                DROP TRIGGER tr_sources_reject_tombstoned_update;
+                DROP TRIGGER tr_sources_require_completed_delete;
+                DROP TABLE source_deletion_tombstones;
+                INSERT INTO sources(
+                    source_id, configuration_id, source_kind, display_name, endpoint_scheme,
+                    endpoint_host, endpoint_port, configuration_reference, status,
+                    active_snapshot_id, created_utc, updated_utc, last_error_code)
+                VALUES (
+                    '11111111111111111111111111111111',
+                    '22222222222222222222222222222222',
+                    1, 'Legacy pending source', 'https', 'fixtures.invalid', 443,
+                    'locator-ref-v1:33333333333333333333333333333333', 6, NULL,
+                    '2026-08-24T00:00:00.0000000+00:00',
+                    '2026-08-24T00:00:00.0000000+00:00', NULL);
+                """);
+            await DowngradeToLegacyVersionAsync(connection, legacyVersion);
+        }
+
+        await InitializeAsync(databasePath);
+
+        await using SqliteConnection migrated = await OpenAsync(databasePath);
+        Assert.AreEqual(4L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(1L, await ExecuteScalarInt64Async(
+            migrated,
+            """
+            SELECT count(*)
+            FROM source_deletion_tombstones
+            WHERE source_id = '11111111111111111111111111111111'
+              AND configuration_id = '22222222222222222222222222222222'
+              AND source_kind = 1
+              AND configuration_reference = 'locator-ref-v1:33333333333333333333333333333333'
+              AND protected_delete_completed = 0;
+            """));
     }
 
     [TestMethod]
@@ -133,6 +233,10 @@ public sealed class SqliteCatalogDatabaseTests
         await using (SqliteConnection connection = await OpenAsync(databasePath))
         {
             await ExecuteAsync(connection, """
+                DROP TRIGGER tr_sources_reject_tombstoned_insert;
+                DROP TRIGGER tr_sources_reject_tombstoned_update;
+                DROP TRIGGER tr_sources_require_completed_delete;
+                DROP TABLE source_deletion_tombstones;
                 DROP INDEX ix_snapshots_source_cache;
                 DROP INDEX ix_channels_snapshot_name;
                 DROP INDEX ix_channels_snapshot_category_name;
@@ -232,6 +336,26 @@ public sealed class SqliteCatalogDatabaseTests
         object valueTask = method.Invoke(database, [CancellationToken.None])!;
         await (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
     }
+
+    private static Task DowngradeToLegacyVersionAsync(
+        SqliteConnection connection,
+        int legacyVersion) => legacyVersion switch
+        {
+            1 => ExecuteAsync(connection, """
+                DROP INDEX ix_snapshots_source_cache;
+                DROP INDEX ix_channels_snapshot_name;
+                DROP INDEX ix_channels_snapshot_category_name;
+                ALTER TABLE snapshots DROP COLUMN cache_key;
+                PRAGMA user_version = 1;
+                """),
+            2 => ExecuteAsync(connection, """
+                DROP INDEX ix_channels_snapshot_name;
+                DROP INDEX ix_channels_snapshot_category_name;
+                PRAGMA user_version = 2;
+                """),
+            3 => ExecuteAsync(connection, "PRAGMA user_version = 3;"),
+            _ => throw new ArgumentOutOfRangeException(nameof(legacyVersion)),
+        };
 
     private static async Task AssertInitializationFailureAsync(string databasePath)
     {

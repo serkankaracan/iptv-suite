@@ -165,15 +165,9 @@ public sealed class RemotePlaylistCatalogLoaderTests
         Assert.IsTrue(pendingInitial.IsSuccess);
         Assert.IsTrue(siblingInitial.IsSuccess);
 
-        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Pooling=False"))
-        {
-            await connection.OpenAsync();
-            await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "UPDATE sources SET status = $pending WHERE source_id = $source;";
-            command.Parameters.AddWithValue("$pending", (int)ContentSourceStatus.DeletionPending);
-            command.Parameters.AddWithValue("$source", pending.Id.Value.ToString("N"));
-            Assert.AreEqual(1, await command.ExecuteNonQueryAsync());
-        }
+        ISourceDeletionLifecycle lifecycle = CreateDeletionLifecycle(databasePath, store);
+        SourceDeletionLifecycleOperationResult marked = await lifecycle.MarkPendingAsync(pending.Id);
+        Assert.IsTrue(marked.IsSuccess);
 
         DomainResultSnapshot rejected = await InvokeSqliteLoaderAsync(
             store,
@@ -384,6 +378,21 @@ public sealed class RemotePlaylistCatalogLoaderTests
             now);
         Assert.IsTrue(source.IsSuccess);
         return source.Value!;
+    }
+
+    private static ISourceDeletionLifecycle CreateDeletionLifecycle(
+        string databasePath,
+        ISecretStore store)
+    {
+        Type type = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly.GetType(
+            "IptvSuite.Infrastructure.SqliteSourceDeletionLifecycle",
+            throwOnError: true)!;
+        return (ISourceDeletionLifecycle)Activator.CreateInstance(
+            type,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            args: [databasePath, store],
+            culture: null)!;
     }
 
     private static async Task<LoaderSnapshot> InvokeLoaderAsync(

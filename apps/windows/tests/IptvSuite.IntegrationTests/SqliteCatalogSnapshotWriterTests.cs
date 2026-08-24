@@ -222,18 +222,17 @@ public sealed class SqliteCatalogSnapshotWriterTests
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-delete-activation-guard");
         string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
         await InitializeDatabaseAsync(databasePath);
-        TestBatch pending = await CreateBatchAsync(itemSuffix: "pending-original");
+        using var store = new M4InMemorySecretStore();
+        TestBatch pending = await CreateBatchAsync(
+            itemSuffix: "pending-original",
+            sourceStore: store);
         TestBatch sibling = await CreateBatchAsync(itemSuffix: "sibling");
         await ActivateAsync(databasePath, pending.Batch);
         await ActivateAsync(databasePath, sibling.Batch);
-        await using (SqliteConnection connection = await OpenAsync(databasePath))
-        {
-            await ExecuteAsync(
-                connection,
-                "UPDATE sources SET status = $pending WHERE source_id = $source;",
-                ("$pending", (int)ContentSourceStatus.DeletionPending),
-                ("$source", Id(pending.Source.Id.Value)));
-        }
+        ISourceDeletionLifecycle lifecycle = CreateDeletionLifecycle(databasePath, store);
+        SourceDeletionLifecycleOperationResult marked =
+            await lifecycle.MarkPendingAsync(pending.Source.Id);
+        Assert.IsTrue(marked.IsSuccess);
 
         TestBatch staleReplacement = await CreateBatchAsync(pending.Source, itemSuffix: "stale-replacement");
 
@@ -304,32 +303,6 @@ public sealed class SqliteCatalogSnapshotWriterTests
 
     [TestMethod]
     [Timeout(30_000)]
-    public async Task DeletionPendingSourceRemovesEntireCatalogIdempotently()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-source-delete");
-        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
-        await InitializeDatabaseAsync(databasePath);
-        TestBatch test = await CreateBatchAsync(itemSuffix: "delete");
-        await ActivateAsync(databasePath, test.Batch);
-        ContentSource deletionPending = await CreateDeletionPendingSourceAsync(test.Source.Id);
-
-        await DeleteSourceAsync(databasePath, deletionPending);
-        await DeleteSourceAsync(databasePath, deletionPending);
-
-        await using SqliteConnection connection = await OpenAsync(databasePath);
-        foreach (string table in new[] { "sources", "snapshots", "snapshot_keys", "categories", "channels", "protected_locators" })
-        {
-            Assert.AreEqual(0L, await ScalarInt64Async(connection, $"SELECT count(*) FROM {table};"), table);
-        }
-    }
-
-    [TestMethod]
-    [Timeout(30_000)]
     public async Task StartupReconciliationRemovesOnlyInactiveImportingSnapshots()
     {
         if (!OperatingSystem.IsWindows())
@@ -380,9 +353,10 @@ public sealed class SqliteCatalogSnapshotWriterTests
     private static async Task<TestBatch> CreateBatchAsync(
         ContentSource? existingSource = null,
         string itemSuffix = "item",
-        string? logoUrl = null)
+        string? logoUrl = null,
+        M4InMemorySecretStore? sourceStore = null)
     {
-        var store = new M4InMemorySecretStore();
+        M4InMemorySecretStore store = sourceStore ?? new M4InMemorySecretStore();
         ContentSource source = existingSource ?? await CreateSourceAsync(store);
         SnapshotId snapshotId = SnapshotId.Generate();
         DomainResult<PlaylistSnapshot> snapshot = PlaylistSnapshot.Create(
@@ -487,20 +461,19 @@ public sealed class SqliteCatalogSnapshotWriterTests
         return source.Value!;
     }
 
-    private static async Task<ContentSource> CreateDeletionPendingSourceAsync(SourceId sourceId)
+    private static ISourceDeletionLifecycle CreateDeletionLifecycle(
+        string databasePath,
+        ISecretStore store)
     {
-        var store = new M4InMemorySecretStore();
-        DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(store)
-            .ProtectRemotePlaylistAsync(sourceId, "Deletion pending", "https://fixtures.invalid/delete/list.m3u");
-        Assert.IsTrue(draft.IsSuccess);
-        DateTimeOffset now = new(2026, 8, 20, 13, 0, 0, TimeSpan.Zero);
-        DomainResult<ContentSource> source = ContentSource.Create(
-            draft.Value,
-            ContentSourceStatus.DeletionPending,
-            now,
-            now);
-        Assert.IsTrue(source.IsSuccess);
-        return source.Value!;
+        Type type = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly.GetType(
+            "IptvSuite.Infrastructure.SqliteSourceDeletionLifecycle",
+            throwOnError: true)!;
+        return (ISourceDeletionLifecycle)Activator.CreateInstance(
+            type,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            args: [databasePath, store],
+            culture: null)!;
     }
 
     private static async Task<SqliteConnection> OpenAsync(string databasePath)
@@ -626,22 +599,6 @@ public sealed class SqliteCatalogSnapshotWriterTests
         var lease = (SecretLease?)result.GetType().GetProperty("Lease")!.GetValue(result);
         string failure = result.GetType().GetProperty("Failure")!.GetValue(result)!.ToString()!;
         return (lease, failure);
-    }
-
-    private static async Task DeleteSourceAsync(string databasePath, ContentSource source)
-    {
-        Assembly assembly = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly;
-        Type deletionType = assembly.GetType("IptvSuite.Infrastructure.SqliteCatalogSourceDeletion", true)!;
-        object deletion = Activator.CreateInstance(
-            deletionType,
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            null,
-            [databasePath],
-            null)!;
-        await InvokeValueTaskAsync(
-            deletionType.GetMethod("DeleteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!,
-            deletion,
-            [source, CancellationToken.None]);
     }
 
     private static async Task PruneSnapshotsAsync(string databasePath, SourceId sourceId)
