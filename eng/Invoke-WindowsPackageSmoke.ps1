@@ -2175,7 +2175,7 @@ try {
         throw "The packaged playback source list is incomplete."
     }
 
-    $selectedSources = @($sourceSelectionPattern.GetCurrentSelection())
+    $selectedSources = @($sourceSelectionPattern.Current.GetSelection())
     $playbackSourceSelected =
         $selectedSources.Count -eq 1 -and
         $selectedSources[0].Current.Name -ceq $expectedPlaybackSourceName
@@ -2223,7 +2223,7 @@ try {
     $playbackCatalogReady = $false
     do {
         Assert-PackagedProcessAlive -Process $launchedProcess
-        $selectedSources = @($sourceSelectionPattern.GetCurrentSelection())
+        $selectedSources = @($sourceSelectionPattern.Current.GetSelection())
         if ($selectedSources.Count -eq 1 -and
             $selectedSources[0].Current.Name -ceq $expectedPlaybackSourceName -and
             $catalogStatusElement.Current.Name -ceq $expectedPlaybackCatalogStatus) {
