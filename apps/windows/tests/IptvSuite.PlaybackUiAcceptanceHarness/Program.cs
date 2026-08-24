@@ -510,8 +510,7 @@ internal static class Program
         await using SqliteConnection connection = await OpenReadOnlyConnectionAsync(
             catalogDatabasePath,
             cancellationToken).ConfigureAwait(false);
-        await using SqliteTransaction transaction = (SqliteTransaction)await connection
-            .BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
         SourceBindingRow? target = await ReadSourceBindingAsync(
             connection,
             transaction,
@@ -578,8 +577,7 @@ internal static class Program
         await using SqliteConnection connection = await OpenReadOnlyConnectionAsync(
             paths.CatalogDatabasePath,
             cancellationToken).ConfigureAwait(false);
-        await using SqliteTransaction transaction = (SqliteTransaction)await connection
-            .BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
         SourceBindingRow? target = await ReadSourceBindingAsync(
             connection,
             transaction,
@@ -640,8 +638,7 @@ internal static class Program
         await using SqliteConnection connection = await OpenReadOnlyConnectionAsync(
             paths.CatalogDatabasePath,
             cancellationToken).ConfigureAwait(false);
-        await using SqliteTransaction transaction = (SqliteTransaction)await connection
-            .BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
         string source = context.TargetSourceId.Value.ToString("N");
         string snapshot = context.TargetSnapshotId.Value.ToString("N");
         bool targetCatalogDeleted =

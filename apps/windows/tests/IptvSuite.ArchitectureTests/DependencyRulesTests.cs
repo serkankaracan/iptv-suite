@@ -4276,9 +4276,16 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             Regex.Count(
                 liveOracles,
-                @"\.BeginTransactionAsync\(cancellationToken\)",
+                @"\.BeginTransaction\(deferred: true\)",
                 RegexOptions.CultureInvariant) == 2,
             "Each live state oracle must use exactly one read-only transaction.");
+        Assert.AreEqual(
+            3,
+            Regex.Count(
+                harness,
+                @"\.BeginTransaction\(deferred: true\)",
+                RegexOptions.CultureInvariant),
+            "The seed baseline and both live oracles must use deferred read-only transactions.");
 
         foreach (string exactGraphOracle in new[]
                  {
