@@ -17,6 +17,8 @@ public sealed class DependencyRulesTests
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string[] RequiredCapabilities = ["runFullTrust"];
     private static readonly string[] SbomToolCommands = ["sbom-tool"];
+    private static readonly string[] CveAuditConfigurationSections = ["packageSources", "auditSources"];
+    private static readonly string[] CveAuditSourceElements = ["clear", "add"];
     private static readonly int[] ProtectedCatalogSmokeRecordCounts = [1_000];
     private static readonly int[] ProtectedCatalogDecisionRecordCounts = [5_000, 10_000, 20_000, 50_000];
     private static readonly string[] SourceDeletionCapabilityOwners =
@@ -4474,6 +4476,227 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             contractCompleted && contractProcess.ExitCode == 0,
             $"Package SBOM contract failed.{Environment.NewLine}{contractOutput}{contractError}");
+    }
+
+    [TestMethod]
+    public void M15KnownVulnerabilityProducerIsPinnedScopedAndFailClosed()
+    {
+        string helperPath = Path.Combine(RepositoryRoot, "eng", "WindowsPackageVulnerabilityAudit.ps1");
+        string runnerPath = Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageVulnerabilityAudit.ps1");
+        string configurationPath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "windows-package-vulnerability-audit.config");
+        string selfTestPath = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ArchitectureTests",
+            "Test-WindowsPackageVulnerabilityAudit.ps1");
+        string workflowPath = Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-cve-review.yml");
+        string qualityWorkflowPath = Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-quality.yml");
+
+        foreach (string requiredPath in new[]
+                 {
+                     helperPath,
+                     runnerPath,
+                     configurationPath,
+                     selfTestPath,
+                     workflowPath,
+                 })
+        {
+            Assert.IsTrue(File.Exists(requiredPath), $"The CVE producer contract file is missing: {requiredPath}");
+        }
+
+        XDocument configuration = XDocument.Load(configurationPath, LoadOptions.PreserveWhitespace);
+        XElement configurationRoot = configuration.Root
+            ?? throw new AssertFailedException("The CVE audit configuration root is missing.");
+        Assert.AreEqual("configuration", configurationRoot.Name.LocalName);
+        XElement[] configurationChildren = configurationRoot.Elements().ToArray();
+        CollectionAssert.AreEqual(
+            CveAuditConfigurationSections,
+            configurationChildren.Select(element => element.Name.LocalName).ToArray());
+        foreach (XElement sourceGroup in configurationChildren)
+        {
+            XElement[] sourceEntries = sourceGroup.Elements().ToArray();
+            CollectionAssert.AreEqual(
+                CveAuditSourceElements,
+                sourceEntries.Select(element => element.Name.LocalName).ToArray());
+            Assert.HasCount(0, sourceEntries[0].Attributes().ToArray());
+            Assert.AreEqual("nuget.org", sourceEntries[1].Attribute("key")?.Value);
+            Assert.AreEqual("3", sourceEntries[1].Attribute("protocolVersion")?.Value);
+        }
+        Assert.AreEqual(
+            "https://api.nuget.org/v3/index.json",
+            configurationChildren[0].Elements().Last().Attribute("value")?.Value);
+        Assert.AreEqual(
+            "https://data.nuget.org/v3/index.json",
+            configurationChildren[1].Elements().Last().Attribute("value")?.Value);
+
+        string helper = File.ReadAllText(helperPath);
+        string runner = File.ReadAllText(runnerPath).Replace("\r\n", "\n", StringComparison.Ordinal);
+        string workflow = File.ReadAllText(workflowPath).Replace("\r\n", "\n", StringComparison.Ordinal);
+        string qualityWorkflow = File.ReadAllText(qualityWorkflowPath);
+        StringAssert.Contains(helper, "$script:packageVulnerabilityExpectedSource = \"https://data.nuget.org/v3/index.json\"");
+        StringAssert.Contains(helper, "$script:packageVulnerabilityExpectedFramework = \"net10.0-windows10.0.26100.0\"");
+        StringAssert.Contains(helper, "DuplicateJsonProperty");
+        StringAssert.Contains(helper, "KnownVulnerabilityFound");
+        StringAssert.Contains(helper, "InventoryOutputGraphMismatch");
+        StringAssert.Contains(helper, "$packages.Count -eq 23");
+        StringAssert.Contains(helper, "$windowsPackages.Count -eq 23");
+        StringAssert.Contains(helper, "class BoundedProcessCapture");
+        StringAssert.Contains(helper, "state.OutputExceeded = true;");
+        StringAssert.Contains(helper, "Stop(state);");
+        StringAssert.Contains(helper, "EnumerateFileSystemEntries");
+        StringAssert.Contains(helper, "Assert-WindowsPackageVulnerabilityBuildInputPolicy");
+        StringAssert.Contains(helper, "NuGetAuditSuppress");
+        StringAssert.Contains(helper, "MSBuildProjectExtensionsPath");
+        StringAssert.Contains(helper, "ContractSnapshotInvalid");
+        Assert.IsFalse(helper.Contains("ReadToEndAsync", StringComparison.Ordinal));
+        Assert.IsFalse(helper.Contains("@(Get-ChildItem -LiteralPath $directory.FullName", StringComparison.Ordinal));
+        StringAssert.Contains(runner, ". (Join-Path $PSScriptRoot \"WindowsPackageVulnerabilityAudit.ps1\")");
+        StringAssert.Contains(runner, "'package',\n        'list',");
+        StringAssert.Contains(runner, "'--vulnerable',");
+        StringAssert.Contains(runner, "'--include-transitive',");
+        StringAssert.Contains(runner, "'--output-version',\n        '1',");
+        StringAssert.Contains(runner, "'--no-restore',");
+        StringAssert.Contains(runner, "'--no-http-cache',");
+        StringAssert.Contains(runner, "'-property:RestoreUseStaticGraphEvaluation=false'");
+        StringAssert.Contains(runner, "'-property:RestoreForceEvaluate=true'");
+        StringAssert.Contains(runner, "'-property:RestoreLockedMode=true'");
+        StringAssert.Contains(runner, "'-property:NuGetAuditMode=all'");
+        StringAssert.Contains(runner, "'-property:NuGetAuditLevel=low'");
+        StringAssert.Contains(runner, "'-getProperty:RestoreProjectCount'");
+        StringAssert.Contains(runner, "'-getProperty:RestoreSkippedCount'");
+        StringAssert.Contains(runner, "'-getProperty:RestoreProjectsAuditedCount'");
+        StringAssert.Contains(runner, "'FreshDirectoryNotFresh'");
+        Assert.HasCount(
+            3,
+            Regex.Matches(runner, "Get-WindowsPackageVulnerabilityContractSnapshot"));
+        StringAssert.Contains(runner, "'ContractSnapshotChanged'");
+        StringAssert.Contains(runner, "'FinalRepositoryStatus'");
+        StringAssert.Contains(runner, "'RepositoryChangedDuringAudit'");
+        StringAssert.Contains(runner, "knownVulnerabilityCount = 0");
+        StringAssert.Contains(runner, "auditSource = 'https://data.nuget.org/v3/index.json'");
+        StringAssert.Contains(runner, "producerCheckpointOnly = $true");
+        StringAssert.Contains(runner, "cveReviewPending = $true");
+        Assert.IsFalse(
+            qualityWorkflow.Contains("Invoke-WindowsPackageVulnerabilityAudit.ps1", StringComparison.Ordinal),
+            "The accepted Windows quality workflow must not absorb the new producer checkpoint.");
+
+        const string expectedWorkflowHeader =
+            "name: Windows known-vulnerability producer\n\n" +
+            "on:\n" +
+            "  merge_group:\n" +
+            "  pull_request:\n" +
+            "  push:\n" +
+            "    branches:\n" +
+            "      - main\n" +
+            "  workflow_dispatch:\n\n" +
+            "permissions:\n" +
+            "  contents: read\n\n" +
+            "concurrency:\n";
+        Assert.IsTrue(
+            workflow.StartsWith(expectedWorkflowHeader, StringComparison.Ordinal),
+            "The CVE producer trigger and top-level permission set must remain exact.");
+        Assert.IsFalse(workflow.Contains("pull_request_target:", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(workflow.Contains("secrets.", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(workflow.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase));
+        Assert.HasCount(1, Regex.Matches(workflow, "(?m)^on:$"));
+        Assert.HasCount(1, Regex.Matches(workflow, "(?m)^jobs:$"));
+        Assert.HasCount(0, Regex.Matches(workflow, "(?m)^[ \\t]+paths(?:-ignore)?:"));
+        Assert.HasCount(1, Regex.Matches(workflow, "(?m)^permissions:\\r?$"));
+        Assert.HasCount(0, Regex.Matches(workflow, "(?m)^[ \\t]+permissions:\\r?$"));
+        Assert.HasCount(1, Regex.Matches(workflow, "(?m)^[ \\t]+runs-on:[^\\r\\n]+$"));
+        Assert.HasCount(1, Regex.Matches(workflow, "(?m)^    runs-on: windows-2025$"));
+        Assert.IsFalse(workflow.Contains("self-hosted", StringComparison.OrdinalIgnoreCase));
+        Assert.HasCount(1, Regex.Matches(workflow, "persist-credentials: false"));
+        StringAssert.Contains(workflow, "timeout-minutes: 15\n");
+        StringAssert.Contains(workflow, "NUGET_HTTP_CACHE_PATH: ${{ github.workspace }}\\.artifacts\\m15-cve-review-cache\n");
+        StringAssert.Contains(workflow, "NUGET_PACKAGES: ${{ github.workspace }}\\.artifacts\\m15-cve-review-packages\n");
+        StringAssert.Contains(workflow, "DOTNET_CLI_HOME: ${{ github.workspace }}\\.artifacts\\m15-cve-review-cli-home\n");
+        Assert.HasCount(3, Regex.Matches(workflow, "(?m)^[ \\t]+uses:[^\\r\\n]+$"));
+        Assert.HasCount(
+            1,
+            Regex.Matches(
+                workflow,
+                "(?m)^[ \\t]+uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\\.0\\.1$"));
+        Assert.HasCount(
+            1,
+            Regex.Matches(
+                workflow,
+                "(?m)^[ \\t]+uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6\\.0\\.0$"));
+        Assert.HasCount(
+            1,
+            Regex.Matches(
+                workflow,
+                "(?m)^[ \\t]+uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7\\.0\\.1$"));
+        Assert.IsFalse(workflow.Contains("cache: true", StringComparison.Ordinal));
+        StringAssert.Contains(workflow, "scan-artifacts .\\.artifacts\\m15-cve-review M15 CVE_REVIEW_EVIDENCE\n");
+        const string expectedUploadStep =
+            "      - name: Upload sanitized CVE review evidence\n" +
+            "        if: ${{ success() }}\n" +
+            "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n" +
+            "        with:\n" +
+            "          name: windows-cve-review-evidence\n" +
+            "          path: .artifacts/m15-cve-review/last-success.json\n" +
+            "          if-no-files-found: error\n" +
+            "          include-hidden-files: true\n" +
+            "          retention-days: 7\n";
+        StringAssert.Contains(workflow, expectedUploadStep);
+        Assert.HasCount(
+            1,
+            Regex.Matches(
+                workflow,
+                Regex.Escape("path: .artifacts/m15-cve-review/last-success.json")));
+
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(
+            File.Exists(windowsPowerShell),
+            "Windows PowerShell 5.1 is required for the CVE producer contract.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(selfTestPath);
+
+        using Process contractProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The CVE producer self-test could not start.");
+        bool contractCompleted = contractProcess.WaitForExit(120_000);
+        if (!contractCompleted)
+        {
+            contractProcess.Kill(entireProcessTree: true);
+            contractProcess.WaitForExit();
+        }
+
+        string contractOutput = contractProcess.StandardOutput.ReadToEnd();
+        string contractError = contractProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            contractCompleted && contractProcess.ExitCode == 0,
+            $"CVE producer contract failed.{Environment.NewLine}{contractOutput}{contractError}");
     }
 
     [TestMethod]
