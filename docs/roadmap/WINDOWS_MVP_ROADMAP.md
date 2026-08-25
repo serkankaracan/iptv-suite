@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M1–M9, M11, M13 ve M14 completed; M10 conditional success; M12 partial verified; M15 sıradaki milestone
+**Durum:** M1–M9, M11, M13 ve M14 completed; M10 conditional success; M12 partial verified; M15 `IN PROGRESS / BLOCKED`
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -798,6 +798,10 @@ Ortalamanın p95 stall/leak'i gizlemesi veya sentetik benchmark'a özel optimiza
 ### Amaç
 
 RC ile aynı bitlerin clean machine/private flight üzerinden kurulmasını ve teknik, privacy, içerik ve lisans gate'lerini kapatmak.
+
+**Current milestone status — `IN PROGRESS / BLOCKED, 2026-08-25`:** Clean commit `0236894f8cc8c6212305f5ba9c294e335f3d031e` üzerinde static release-readiness allow-mode denetimi `technicalBaselinePassed=true`, `result=blocked` ve `releaseReady=false` üretti. `19.343` byte evidence SHA-256 `b41bad875b940958b52383051b215630fae22b8487ba3263f2237b78c9061895`; exact sekiz asset, dört schema-v2 production lockfile, 23 package adı ve 16 açık blocker taşır. Windows PowerShell 5.1 self-test, architecture `50/50` ve dış-sandbox normal-user full gate `567/567 × 2` geçti. Run #219 (`32871431008`) iki CI denemesinde generic M15 `ProjectContractsFailed` verdi; host-independent hash fix sonrasındaki run #220 (`32872859688`) yalnız M14 child-process `30 saniye` harness timeout'ında fail oldu. Assertion'ları değiştirmeyen bounded `120 saniye` düzeltmesiyle run #221 (`32873776770`) locked quality, signed package/lifecycle, DPAPI ve required gate zincirini geçti. [Teknik baseline ve exact blocker seti](../quality/M15_RELEASE_READINESS_BASELINE.md).
+
+Bu checkpoint yalnız statik technical drift guard'ıdır. Disposable development identity Store identity değildir; known-pattern source scan runtime/clean-VM install-directory write yokluğunu, package inventory ise SBOM/legal/CVE kapanışını kanıtlamaz. Aşağıdaki acceptance kriterleri ve bütün release blocker'ları açık kalır; M15 completed değildir.
 
 ### Kapsam
 
