@@ -1816,6 +1816,55 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void PlaybackReconnectKernelStaysApplicationOnlyMonotonicAndUnwired()
+    {
+        string contracts = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "PlaybackReconnectContracts.cs"));
+        string orchestrator = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "PlaybackReconnectOrchestrator.cs"));
+        string combined = string.Concat(contracts, orchestrator);
+        string[] forbidden =
+        [
+            "IptvSuite.Infrastructure",
+            "IptvSuite.Windows",
+            "Microsoft.UI",
+            "Windows.Media",
+            "System.Net.Http",
+            "BoundedHttpTransport",
+            "Retry-After",
+            "DateTime.UtcNow",
+            "DateTimeOffset.UtcNow",
+            "Stopwatch",
+        ];
+
+        StringAssert.Contains(orchestrator, "TimeProvider");
+        StringAssert.Contains(orchestrator, "GetTimestamp()");
+        StringAssert.Contains(orchestrator, "GetElapsedTime(");
+        StringAssert.Contains(orchestrator, "RunOwnedDeadlineAsync(");
+        StringAssert.Contains(orchestrator, "Task.Delay(delay, _timeProvider, stopToken)");
+        StringAssert.Contains(orchestrator, "CancelSourceSafely(deadline)");
+        Assert.IsFalse(
+            orchestrator.Contains("new CancellationTokenSource(remainingBudget, _timeProvider)", StringComparison.Ordinal),
+            "Provider-timed CTS callbacks must not escape the owned deadline scheduler.");
+        foreach (string value in forbidden)
+        {
+            Assert.IsFalse(
+                combined.Contains(value, StringComparison.Ordinal),
+                $"The unwired reconnect kernel contains forbidden dependency or clock text: {value}.");
+        }
+    }
+
+    [TestMethod]
     public void DomainRemainsPureAndMvpScoped()
     {
         string domainRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src", "IptvSuite.Domain");

@@ -100,6 +100,58 @@ public sealed class PlaybackContractSecurityTests
     }
 
     [TestMethod]
+    public void ReconnectSnapshotSurfaceAndSerializationContainOnlySafeBoundedFacts()
+    {
+        string sensitive = SecurityTestAssertions.CreateSensitiveValue("RECONNECT-SNAPSHOT");
+        PlaybackReconnectCorrelationId correlation = PlaybackReconnectCorrelationId.FromSequence(7);
+        ConstructorInfo constructor = typeof(PlaybackReconnectSnapshot)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(candidate => candidate.GetParameters().Length == 7);
+        var waiting = (PlaybackReconnectSnapshot)constructor.Invoke(
+            [
+                PlaybackReconnectPhase.Waiting,
+                correlation,
+                2,
+                3,
+                TimeSpan.FromMilliseconds(2125),
+                TimeSpan.FromSeconds(24),
+                null,
+            ]);
+        var terminal = (PlaybackReconnectSnapshot)constructor.Invoke(
+            [
+                PlaybackReconnectPhase.Exhausted,
+                correlation,
+                3,
+                3,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                DomainErrorCode.ReconnectExhausted,
+            ]);
+        var eventArgs = new PlaybackReconnectSnapshotChangedEventArgs(waiting);
+
+        string observable = string.Join(
+            '|',
+            waiting,
+            terminal,
+            eventArgs,
+            JsonSerializer.Serialize(waiting),
+            JsonSerializer.Serialize(terminal),
+            JsonSerializer.Serialize(eventArgs));
+
+        SecurityTestAssertions.DoesNotContainSensitive(observable, sensitive);
+        Type[] propertyTypes = typeof(PlaybackReconnectSnapshot)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Select(property => property.PropertyType)
+            .ToArray();
+        Assert.IsFalse(propertyTypes.Contains(typeof(string)));
+        Assert.IsFalse(propertyTypes.Contains(typeof(Uri)));
+        Assert.IsFalse(propertyTypes.Any(type => typeof(Exception).IsAssignableFrom(type)));
+        Assert.IsFalse(propertyTypes.Any(type => typeof(Delegate).IsAssignableFrom(type)));
+        Assert.IsFalse(observable.Contains(nameof(Exception), StringComparison.Ordinal));
+        Assert.IsFalse(observable.Contains("Uri", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
     public void PlaybackSnapshotFactoriesRejectContradictoryState()
     {
         PlaybackSessionId sessionId = CreateSessionId();
