@@ -238,6 +238,141 @@ public sealed class ChannelLogoCacheTests
     }
 
     [TestMethod]
+    [Timeout(10_000)]
+    public async Task CancellationAfterANonCooperativeProviderReturnPreventsCacheInsertion()
+    {
+        var provider = new NonCooperativeProvider();
+        using var cache = new ChannelLogoCache(provider);
+        using var cancellation = new CancellationTokenSource();
+        SourceId sourceId = SourceId.Generate();
+        ChannelId channelId = ChannelId.Generate();
+        Task<ChannelLogoImage?> canceledLoad = cache.GetAsync(
+            sourceId,
+            channelId,
+            cancellation.Token).AsTask();
+        await provider.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        cancellation.Cancel();
+        provider.ReleaseFirst.TrySetResult(true);
+
+        try
+        {
+            await canceledLoad.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Fail("The canceled noncooperative load unexpectedly completed.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        Assert.AreEqual(0, ReadEntryCount(cache));
+        Assert.AreEqual(0L, ReadCachedPayloadBytes(cache));
+
+        ChannelLogoImage? current = await cache.GetAsync(sourceId, channelId);
+        ChannelLogoImage? cached = await cache.GetAsync(sourceId, channelId);
+        Assert.IsNotNull(current);
+        Assert.AreSame(current, cached);
+        Assert.AreEqual(2, provider.Calls);
+        Assert.AreEqual(1, ReadEntryCount(cache));
+    }
+
+    [TestMethod]
+    [Timeout(10_000)]
+    public async Task RapidVisibleWindowReplacementCancelsQueuedLoadsAndPreservesCacheBounds()
+    {
+        const int obsoleteWindowSize = 24;
+        const int currentWindowSize = 140;
+        const int payloadBytes = 256 * 1024;
+        SourceId sourceId = SourceId.Generate();
+        ChannelId[] obsoleteChannels = Enumerable.Range(0, obsoleteWindowSize)
+            .Select(_ => ChannelId.Generate())
+            .ToArray();
+        ChannelId[] currentChannels = Enumerable.Range(0, currentWindowSize)
+            .Select(_ => ChannelId.Generate())
+            .ToArray();
+        var provider = new VisibleWindowStressProvider(obsoleteChannels, payloadBytes);
+        using var cache = new ChannelLogoCache(provider);
+        CancellationTokenSource[] obsoleteCancellations = obsoleteChannels
+            .Select(_ => new CancellationTokenSource())
+            .ToArray();
+        Task<ChannelLogoImage?>[] obsoleteLoads = obsoleteChannels
+            .Select((channelId, index) => cache.GetAsync(
+                sourceId,
+                channelId,
+                obsoleteCancellations[index].Token).AsTask())
+            .ToArray();
+
+        try
+        {
+            await provider.ObsoleteWindowSaturated.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            HashSet<ChannelId> startedObsoleteChannels =
+                [.. provider.GetStartedObsoleteChannels()];
+            int[] queuedIndexes = Enumerable.Range(0, obsoleteChannels.Length)
+                .Where(index => !startedObsoleteChannels.Contains(obsoleteChannels[index]))
+                .ToArray();
+            int[] activeIndexes = Enumerable.Range(0, obsoleteChannels.Length)
+                .Where(index => startedObsoleteChannels.Contains(obsoleteChannels[index]))
+                .ToArray();
+            Assert.HasCount(4, activeIndexes);
+            Assert.HasCount(obsoleteWindowSize - 4, queuedIndexes);
+            foreach (int index in queuedIndexes)
+            {
+                obsoleteCancellations[index].Cancel();
+            }
+
+            Task<ChannelLogoImage?>[] queuedLoads = queuedIndexes
+                .Select(index => obsoleteLoads[index])
+                .ToArray();
+            try
+            {
+                await Task.WhenAll(queuedLoads).WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Fail("The queued obsolete logo loads unexpectedly completed.");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            Assert.IsTrue(queuedLoads.All(load => load.IsCanceled));
+
+            foreach (int index in activeIndexes)
+            {
+                obsoleteCancellations[index].Cancel();
+            }
+
+            try
+            {
+                await Task.WhenAll(obsoleteLoads).WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Fail("The obsolete visible window unexpectedly completed.");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            Assert.IsTrue(obsoleteLoads.All(load => load.IsCanceled));
+            Assert.AreEqual(4, provider.ObsoleteWindowCalls);
+
+            ChannelLogoImage?[] currentImages = await Task.WhenAll(currentChannels
+                    .Select(channelId => cache.GetAsync(sourceId, channelId).AsTask()))
+                .WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.IsTrue(currentImages.All(image => image is not null));
+            Assert.AreEqual(4, provider.PeakConcurrency);
+            Assert.AreEqual(
+                provider.ObsoleteWindowCalls + currentWindowSize,
+                provider.Calls);
+            Assert.AreEqual(ChannelLogoCache.MaximumEntries, ReadEntryCount(cache));
+            Assert.AreEqual(
+                ChannelLogoCache.MaximumCachedPayloadBytes,
+                ReadCachedPayloadBytes(cache));
+        }
+        finally
+        {
+            foreach (CancellationTokenSource cancellation in obsoleteCancellations)
+            {
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task DisposeDefersSemaphoreCleanupAndRejectsReinsertion()
     {
         var provider = new BlockingProvider();
@@ -309,6 +444,121 @@ public sealed class ChannelLogoCacheTests
             }
 
             return new ChannelLogoImage(new byte[] { (byte)call }, ChannelLogoFormat.Png);
+        }
+    }
+
+    private sealed class NonCooperativeProvider : IChannelLogoProvider
+    {
+        private int _calls;
+
+        internal int Calls => Volatile.Read(ref _calls);
+
+        internal TaskCompletionSource<bool> FirstStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal TaskCompletionSource<bool> ReleaseFirst { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask<ChannelLogoImage?> LoadAsync(
+            SourceId sourceId,
+            ChannelId channelId,
+            CancellationToken cancellationToken = default)
+        {
+            int call = Interlocked.Increment(ref _calls);
+            if (call == 1)
+            {
+                FirstStarted.TrySetResult(true);
+                await ReleaseFirst.Task.ConfigureAwait(false);
+            }
+
+            return new ChannelLogoImage(new byte[] { (byte)call }, ChannelLogoFormat.Png);
+        }
+    }
+
+    private sealed class VisibleWindowStressProvider(
+        IEnumerable<ChannelId> obsoleteChannels,
+        int payloadBytes) : IChannelLogoProvider
+    {
+        private readonly HashSet<ChannelId> _obsoleteChannels = [.. obsoleteChannels];
+        private readonly object _startedObsoleteSync = new();
+        private readonly HashSet<ChannelId> _startedObsoleteChannels = [];
+        private readonly int _payloadBytes = payloadBytes;
+        private int _active;
+        private int _calls;
+        private int _obsoleteWindowCalls;
+        private int _peakConcurrency;
+
+        internal int Calls => Volatile.Read(ref _calls);
+
+        internal int ObsoleteWindowCalls => Volatile.Read(ref _obsoleteWindowCalls);
+
+        internal int PeakConcurrency => Volatile.Read(ref _peakConcurrency);
+
+        internal TaskCompletionSource<bool> ObsoleteWindowSaturated { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal ChannelId[] GetStartedObsoleteChannels()
+        {
+            lock (_startedObsoleteSync)
+            {
+                return [.. _startedObsoleteChannels];
+            }
+        }
+
+        public async ValueTask<ChannelLogoImage?> LoadAsync(
+            SourceId sourceId,
+            ChannelId channelId,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+            int active = Interlocked.Increment(ref _active);
+            UpdatePeak(active);
+            try
+            {
+                if (_obsoleteChannels.Contains(channelId))
+                {
+                    lock (_startedObsoleteSync)
+                    {
+                        _startedObsoleteChannels.Add(channelId);
+                    }
+
+                    int obsoleteCalls = Interlocked.Increment(ref _obsoleteWindowCalls);
+                    if (obsoleteCalls == 4)
+                    {
+                        ObsoleteWindowSaturated.TrySetResult(true);
+                    }
+
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                return new ChannelLogoImage(
+                    new byte[_payloadBytes],
+                    ChannelLogoFormat.Png);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _active);
+            }
+        }
+
+        private void UpdatePeak(int active)
+        {
+            int observed = Volatile.Read(ref _peakConcurrency);
+            while (active > observed)
+            {
+                int previous = Interlocked.CompareExchange(
+                    ref _peakConcurrency,
+                    active,
+                    observed);
+                if (previous == observed)
+                {
+                    return;
+                }
+
+                observed = previous;
+            }
         }
     }
 

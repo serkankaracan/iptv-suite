@@ -7,7 +7,9 @@ param(
     [string]$CacheCondition,
     [string]$PowerCondition,
     [string]$ThermalCondition,
-    [string]$BackgroundCondition
+    [string]$BackgroundCondition,
+    [string]$RunnerProfileId,
+    [string]$BaselineEvidencePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,15 +37,35 @@ foreach ($declaration in $referenceDeclarations) {
     }
 }
 
+$runnerProfileBound = $PSBoundParameters.ContainsKey('RunnerProfileId')
+if ($ReferenceMode -and
+    (-not $runnerProfileBound -or
+        [string]::IsNullOrWhiteSpace($RunnerProfileId) -or
+        $RunnerProfileId -cnotmatch '^[a-z0-9][a-z0-9._-]{0,63}$')) {
+    throw 'M14 reference mode requires -RunnerProfileId matching ^[a-z0-9][a-z0-9._-]{0,63}$.'
+}
+if (-not $ReferenceMode -and $runnerProfileBound) {
+    throw '-RunnerProfileId is valid only with explicit -ReferenceMode.'
+}
+
+$baselineEvidenceBound = $PSBoundParameters.ContainsKey('BaselineEvidencePath')
+if ($baselineEvidenceBound -and -not $ReferenceMode) {
+    throw '-BaselineEvidencePath is valid only with explicit -ReferenceMode.'
+}
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $globalJsonPath = Join-Path $repositoryRoot 'global.json'
 $project = Join-Path $repositoryRoot 'apps\windows\tests\IptvSuite.IntegrationTests\IptvSuite.IntegrationTests.csproj'
 $evidenceRoot = Join-Path $repositoryRoot '.artifacts\m14-catalog-benchmark\evidence'
 $evidencePath = Join-Path $evidenceRoot 'benchmark-summary.json'
 $temporaryEvidencePath = $evidencePath + '.tmp'
+$regressionEvidencePath = Join-Path $evidenceRoot 'regression-summary.json'
+$temporaryRegressionEvidencePath = $regressionEvidencePath + '.tmp'
 $legacyManifestPath = Join-Path $evidenceRoot 'corpus-manifest.json'
 $legacyTemporaryManifestPath = $legacyManifestPath + '.tmp'
 $dotnet = (Resolve-Path -LiteralPath $DotNetPath).Path
+$regressionHelper = Join-Path $PSScriptRoot 'WindowsCatalogBenchmarkRegression.ps1'
+. $regressionHelper
 
 function Get-RepositoryHead {
     $output = @(& git -C $repositoryRoot rev-parse --verify HEAD)
@@ -69,7 +91,7 @@ $globalJson = Get-Content -LiteralPath $globalJsonPath -Raw | ConvertFrom-Json
 $expectedSdk = [string]$globalJson.sdk.version
 if ($expectedSdk -notmatch '^\d+\.\d+\.\d+$' -or
     [string]$globalJson.sdk.rollForward -ne 'disable' -or
-    [bool]$globalJson.sdk.allowPrerelease) {
+    (Get-M14CatalogBoolean $globalJson.sdk 'allowPrerelease')) {
     throw 'The repository exact .NET SDK contract is invalid.'
 }
 
@@ -86,9 +108,32 @@ if ($initialStatus.Count -ne 0) {
     throw 'M14 catalog benchmark requires a clean repository.'
 }
 
+$baselineRecord = $null
+if ($baselineEvidenceBound) {
+    $baselineRecord = Import-M14CatalogBenchmarkEvidence -Path $BaselineEvidencePath
+    $baselinePath = [IO.Path]::GetFullPath([string]$baselineRecord.FullPath)
+    $evidenceRootPrefix = [IO.Path]::GetFullPath($evidenceRoot).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if ($baselinePath.StartsWith($evidenceRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'M14 regression baseline must be outside the transient candidate evidence directory.'
+    }
+
+    Assert-M14CatalogBenchmarkReferenceEvidence `
+        -Record $baselineRecord `
+        -ExpectedRunnerProfileId $RunnerProfileId
+    & git -C $repositoryRoot merge-base --is-ancestor `
+        ([string]$baselineRecord.Evidence.commitSha) $initialHead
+    if ($LASTEXITCODE -ne 0) {
+        throw 'M14 regression baseline commit must be an ancestor of or equal to repository HEAD.'
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $evidenceRoot | Out-Null
 Remove-Item -LiteralPath $evidencePath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $temporaryEvidencePath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $regressionEvidencePath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $temporaryRegressionEvidencePath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $legacyManifestPath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $legacyTemporaryManifestPath -Force -ErrorAction SilentlyContinue
 
@@ -103,7 +148,8 @@ $environmentNames = @(
     'IPTVSUITE_M14_CATALOG_CACHE_CONDITION',
     'IPTVSUITE_M14_CATALOG_POWER_CONDITION',
     'IPTVSUITE_M14_CATALOG_THERMAL_CONDITION',
-    'IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION'
+    'IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION',
+    'IPTVSUITE_M14_CATALOG_RUNNER_PROFILE_ID'
 )
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) {
@@ -122,12 +168,14 @@ try {
     [Environment]::SetEnvironmentVariable('IPTVSUITE_M14_CATALOG_POWER_CONDITION', $null, 'Process')
     [Environment]::SetEnvironmentVariable('IPTVSUITE_M14_CATALOG_THERMAL_CONDITION', $null, 'Process')
     [Environment]::SetEnvironmentVariable('IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('IPTVSUITE_M14_CATALOG_RUNNER_PROFILE_ID', $null, 'Process')
     if ($ReferenceMode) {
         $env:IPTVSUITE_M14_CATALOG_REFERENCE_MODE = '1'
         $env:IPTVSUITE_M14_CATALOG_CACHE_CONDITION = $CacheCondition
         $env:IPTVSUITE_M14_CATALOG_POWER_CONDITION = $PowerCondition
         $env:IPTVSUITE_M14_CATALOG_THERMAL_CONDITION = $ThermalCondition
         $env:IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION = $BackgroundCondition
+        $env:IPTVSUITE_M14_CATALOG_RUNNER_PROFILE_ID = $RunnerProfileId
     }
 
     & $dotnet test $project -c Release -p:Platform=x64 --no-restore `
@@ -164,31 +212,64 @@ catch {
 if ($evidenceText.IndexOf($initialHead, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
     throw 'M14 catalog benchmark evidence is not bound to the initial repository commit.'
 }
+if ((Get-M14CatalogString $evidence 'commitSha') -cne $initialHead) {
+    throw 'M14 catalog benchmark evidence commit binding is invalid.'
+}
 if ($ReferenceMode) {
-    if ([string]$evidence.result -ne 'passed' -or
-        -not ([bool]$evidence.referenceModeRequested) -or
-        -not ([bool]$evidence.measurementIntegrityVerified) -or
-        -not ([bool]$evidence.conditionDeclarationsComplete) -or
-        -not ([bool]$evidence.referenceEligible) -or
-        [string]$evidence.conditions.cache.verification -cne 'Declared' -or
-        [string]$evidence.conditions.cache.value -cne 'Warm' -or
-        [string]$evidence.conditions.power.verification -cne 'Declared' -or
-        [string]$evidence.conditions.power.value -cne 'AcStable' -or
-        [string]$evidence.conditions.thermal.verification -cne 'Declared' -or
-        [string]$evidence.conditions.thermal.value -cne 'Nominal' -or
-        [string]$evidence.conditions.background.verification -cne 'Declared' -or
-        [string]$evidence.conditions.background.value -cne 'Controlled') {
+    if ((Get-M14CatalogString $evidence 'result') -cne 'passed' -or
+        -not (Get-M14CatalogBoolean $evidence 'referenceModeRequested') -or
+        -not (Get-M14CatalogBoolean $evidence 'measurementIntegrityVerified') -or
+        -not (Get-M14CatalogBoolean $evidence 'conditionDeclarationsComplete') -or
+        -not (Get-M14CatalogBoolean $evidence 'referenceEligible') -or
+        (Get-M14CatalogString $evidence.runnerProfile 'verification') -cne 'Declared' -or
+        (Get-M14CatalogString $evidence.runnerProfile 'value') -cne $RunnerProfileId -or
+        (Get-M14CatalogString $evidence.conditions.cache 'verification') -cne 'Declared' -or
+        (Get-M14CatalogString $evidence.conditions.cache 'value') -cne 'Warm' -or
+        (Get-M14CatalogString $evidence.conditions.power 'verification') -cne 'Declared' -or
+        (Get-M14CatalogString $evidence.conditions.power 'value') -cne 'AcStable' -or
+        (Get-M14CatalogString $evidence.conditions.thermal 'verification') -cne 'Declared' -or
+        (Get-M14CatalogString $evidence.conditions.thermal 'value') -cne 'Nominal' -or
+        (Get-M14CatalogString $evidence.conditions.background 'verification') -cne 'Declared' -or
+        (Get-M14CatalogString $evidence.conditions.background 'value') -cne 'Controlled') {
         throw 'M14 catalog benchmark reference evidence is not eligible.'
     }
 }
-elseif ([string]$evidence.result -ne 'passed' -or
-    [bool]$evidence.referenceModeRequested -or
-    [bool]$evidence.referenceEligible) {
+elseif ((Get-M14CatalogString $evidence 'result') -cne 'passed' -or
+    (Get-M14CatalogBoolean $evidence 'referenceModeRequested') -or
+    (Get-M14CatalogBoolean $evidence 'referenceEligible') -or
+    (Get-M14CatalogString $evidence.runnerProfile 'verification') -cne 'Unverified' -or
+    (Get-M14CatalogString $evidence.runnerProfile 'value') -cne 'Unverified') {
     throw 'M14 catalog benchmark evidence result or foundation eligibility is invalid.'
+}
+$candidateRecord = Import-M14CatalogBenchmarkEvidence -Path $evidencePath
+if ($ReferenceMode) {
+    Assert-M14CatalogBenchmarkReferenceEvidence `
+        -Record $candidateRecord `
+        -ExpectedRunnerProfileId $RunnerProfileId
 }
 if ((Test-Path -LiteralPath $legacyManifestPath) -or
     (Test-Path -LiteralPath $legacyTemporaryManifestPath)) {
     throw 'M14 catalog benchmark retained a legacy transient corpus manifest.'
+}
+
+if ($baselineEvidenceBound) {
+    $stableBaselineRecord = Import-M14CatalogBenchmarkEvidence -Path $baselineRecord.FullPath
+    if ([string]$stableBaselineRecord.Sha256 -cne [string]$baselineRecord.Sha256 -or
+        [long]$stableBaselineRecord.ByteLength -ne [long]$baselineRecord.ByteLength) {
+        throw 'M14 regression baseline evidence changed during the benchmark.'
+    }
+
+    $regressionSummary = Compare-M14CatalogRegression `
+        -BaselineRecord $baselineRecord `
+        -CandidateRecord $candidateRecord `
+        -BaselineCommitAncestorOrSelf $true `
+        -BaselineContentStable $true
+    Write-M14CatalogRegressionSummaryAtomically `
+        -Summary $regressionSummary `
+        -Path $regressionEvidencePath
+    if (-not (Get-M14CatalogBoolean $regressionSummary 'allPassed')) {
+        throw "M14 same-runner regression gate failed. Evidence: $regressionEvidencePath"
+    }
 }
 
 $mode = if ($ReferenceMode) { 'reference' } else { 'foundation' }

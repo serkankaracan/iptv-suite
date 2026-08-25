@@ -550,7 +550,7 @@ public sealed partial class MainPage : Page, IDisposable
         _logoPageCancellation.Cancel();
         foreach (ChannelRow row in Channels.Where(row => row.SourceId == sourceId))
         {
-            row.BeginLogoLoad();
+            row.CancelLogoLoad(releaseLogoSource: true);
         }
 
         await WaitForCatalogOperationsAsync();
@@ -1173,33 +1173,53 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async void ChannelList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
-        if (_disposed || !_catalogAdmissionReady || args.InRecycleQueue ||
-            args.Item is not ChannelRow row ||
+        if (args.InRecycleQueue)
+        {
+            if (args.Item is ChannelRow recycledRow)
+            {
+                recycledRow.CancelLogoLoad(releaseLogoSource: true);
+            }
+
+            return;
+        }
+
+        if (_disposed || !_catalogAdmissionReady || args.Item is not ChannelRow row ||
             !row.HasLogo || row.LogoSource is not null || _logoCache is null)
         {
             return;
         }
         using AsyncOperationLease operation = BeginAsyncOperation();
         using CatalogOperationLease catalogOperation = BeginCatalogOperation();
-        long generation = row.BeginLogoLoad();
+        ChannelRow.LogoLoadOperation logoLoad = row.BeginLogoLoad(
+            _logoPageCancellation.Token);
+        long generation = logoLoad.Generation;
         try
         {
-            ChannelLogoImage? logo = await _logoCache.GetAsync(row.SourceId, row.ChannelId, _logoPageCancellation.Token);
+            ChannelLogoImage? logo = await _logoCache.GetAsync(
+                row.SourceId,
+                row.ChannelId,
+                logoLoad.Token);
             if (_disposed || logo is null || !row.IsCurrentLogoLoad(generation)) return;
             using var stream = new InMemoryRandomAccessStream();
             using (var writer = new DataWriter(stream))
             {
                 writer.WriteBytes(logo.Content.ToArray());
                 await writer.StoreAsync();
+                logoLoad.Token.ThrowIfCancellationRequested();
                 writer.DetachStream();
             }
             stream.Seek(0);
             var image = new BitmapImage();
             await image.SetSourceAsync(stream);
+            logoLoad.Token.ThrowIfCancellationRequested();
             if (!_disposed && row.IsCurrentLogoLoad(generation)) row.LogoSource = image;
         }
-        catch (OperationCanceledException) when (_logoPageCancellation.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (logoLoad.Token.IsCancellationRequested) { }
         catch (Exception) { }
+        finally
+        {
+            logoLoad.Dispose();
+        }
     }
 
     private void MainPage_Unloaded(object sender, RoutedEventArgs e)
@@ -1230,6 +1250,10 @@ public sealed partial class MainPage : Page, IDisposable
 
         _lifetime.Cancel();
         _logoPageCancellation.Cancel();
+        foreach (ChannelRow row in Channels)
+        {
+            row.CancelLogoLoad(releaseLogoSource: true);
+        }
         _coordinator?.Dispose();
         _retryPendingSourceCleanup = null;
         _deleteSource = null;
@@ -1376,8 +1400,10 @@ public sealed partial class MainPage : Page, IDisposable
 
     public sealed class ChannelRow : INotifyPropertyChanged
     {
+        private readonly object _logoLoadSync = new();
         private ImageSource? _logoSource;
         private long _logoGeneration;
+        private LogoLoadOperation? _logoLoad;
         public SourceId SourceId { get; set; }
         public ChannelId ChannelId { get; set; }
         public string Name { get; set; } = string.Empty;
@@ -1385,7 +1411,111 @@ public sealed partial class MainPage : Page, IDisposable
         public bool HasLogo { get; set; }
         public ImageSource? LogoSource { get => _logoSource; set { _logoSource = value; PropertyChanged?.Invoke(this, new(nameof(LogoSource))); } }
         public event PropertyChangedEventHandler? PropertyChanged;
-        internal long BeginLogoLoad() => Interlocked.Increment(ref _logoGeneration);
-        internal bool IsCurrentLogoLoad(long generation) => generation == Volatile.Read(ref _logoGeneration);
+
+        internal LogoLoadOperation BeginLogoLoad(CancellationToken pageCancellationToken)
+        {
+            LogoLoadOperation current;
+            LogoLoadOperation? previous;
+            lock (_logoLoadSync)
+            {
+                long generation = checked(_logoGeneration + 1);
+                _logoGeneration = generation;
+                current = new LogoLoadOperation(this, generation, pageCancellationToken);
+                previous = _logoLoad;
+                _logoLoad = current;
+            }
+
+            previous?.Cancel();
+            return current;
+        }
+
+        internal void CancelLogoLoad(bool releaseLogoSource)
+        {
+            LogoLoadOperation? current;
+            lock (_logoLoadSync)
+            {
+                _logoGeneration = checked(_logoGeneration + 1);
+                current = _logoLoad;
+                _logoLoad = null;
+            }
+
+            current?.Cancel();
+            if (releaseLogoSource && LogoSource is not null)
+            {
+                LogoSource = null;
+            }
+        }
+
+        internal bool IsCurrentLogoLoad(long generation)
+        {
+            lock (_logoLoadSync)
+            {
+                return _logoGeneration == generation &&
+                    _logoLoad is { } current &&
+                    current.Generation == generation &&
+                    !current.Token.IsCancellationRequested;
+            }
+        }
+
+        private void CompleteLogoLoad(LogoLoadOperation completed)
+        {
+            lock (_logoLoadSync)
+            {
+                if (ReferenceEquals(_logoLoad, completed))
+                {
+                    _logoLoad = null;
+                }
+            }
+        }
+
+        internal sealed class LogoLoadOperation : IDisposable
+        {
+            private readonly object _sync = new();
+            private readonly ChannelRow _owner;
+            private readonly CancellationTokenSource _cancellation;
+            private bool _disposed;
+
+            internal LogoLoadOperation(
+                ChannelRow owner,
+                long generation,
+                CancellationToken pageCancellationToken)
+            {
+                _owner = owner;
+                Generation = generation;
+                _cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    pageCancellationToken);
+                Token = _cancellation.Token;
+            }
+
+            internal long Generation { get; }
+
+            internal CancellationToken Token { get; }
+
+            internal void Cancel()
+            {
+                lock (_sync)
+                {
+                    if (!_disposed)
+                    {
+                        _cancellation.Cancel();
+                    }
+                }
+            }
+
+            public void Dispose()
+            {
+                _owner.CompleteLogoLoad(this);
+                lock (_sync)
+                {
+                    if (_disposed)
+                    {
+                        return;
+                    }
+
+                    _disposed = true;
+                    _cancellation.Dispose();
+                }
+            }
+        }
     }
 }

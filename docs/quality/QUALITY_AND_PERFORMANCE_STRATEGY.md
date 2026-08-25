@@ -293,7 +293,7 @@ Referans: Release x64, telemetry/profiler instrumentation'ın ölçümü bozmad�
 | Realized channel containers | ≤ 300, viewport'a bağlı assertion |
 | Player kapalı steady catalog working set | ≤ 350 MiB |
 | Image network concurrency | 4 |
-| Image memory/disk budget | 32 MiB / 200 MiB LRU |
+| Image memory/disk budget | Memory-only 32 MiB / 128-entry LRU; MVP durable disk cache `0` byte; gelecekte açılırsa hard üst sınır 200 MiB |
 | Tier A playback start, controlled LAN | p95 ≤ 3,0 s |
 | Channel switch, controlled LAN | p95 ≤ 3,0 s |
 | User retry/reconnect cancel | ≤ 1,0 s; yeni session açılmaz |
@@ -312,6 +312,8 @@ Bunlar garanti değil, tasarım bütçesidir. İlk ölçüm bütçeyi geçerse s
 - Baseline artifact saklanır; CI smoke threshold daha gevşek olabilir, M14 dedicated runner authoritative'dir.
 - Regression gate: aynı cihaz/baseline'a göre p95'te >%10 ve mutlak kullanıcı bütçesi ihlali review gerektirir.
 - ETW/.NET counters/profiler trace yalnız ihlali açıklamak için; benchmark sonucu instrumentation'sız tekrar doğrulanır.
+- Signed package smoke'un opt-in `-EmitM14TraceMarkers` modu, exact activation PID'li fixed WPR begin/end marker'larını yalnız input/search + iki scroll/proxy geçişi çevresinde üretir; player-off idle working-set örneklemesini marker aralığına katmaz. Normal CI bu switch'i kullanmaz. Marker üretimi trace PASS'i değildir: dışarıdan CPU + XAML activity/responsiveness kaydı alınır, WPA/ADK `10.1.26100.1+` ile exact PID ve marker aralığında frame/UI delay süreleri incelenir; authoritative bütçe koşusu instrumentation kapalı tekrar edilir [S127][S128].
+- Image görünür-pencere stresi; recycle edilen satırın per-row linked cancellation'ını, noncooperative dönüşün cache'e girmemesini, peak concurrency `4` ve `32 MiB / 128-entry` memory LRU sınırını deterministik doğrular. Durable disk image cache MVP'de kapalıdır; `200 MiB` yalnız gelecekte review ile açılabilecek hard üst sınırdır.
 
 ## 6. Playback compatibility matrix
 

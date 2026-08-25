@@ -2186,6 +2186,16 @@ public sealed class DependencyRulesTests
             "tests",
             "IptvSuite.IntegrationTests",
             "M14CatalogPerformanceBenchmarkTests.cs"));
+        string regressionHelperPath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "WindowsCatalogBenchmarkRegression.ps1");
+        string regressionSelfTestPath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Test-WindowsCatalogBenchmarkRegression.ps1");
+        string regressionHelper = File.ReadAllText(regressionHelperPath);
+        string regressionSelfTest = File.ReadAllText(regressionSelfTestPath);
         string qualityGate = File.ReadAllText(Path.Combine(
             RepositoryRoot,
             "eng",
@@ -2216,9 +2226,33 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(wrapper, "M14CatalogPerformanceBenchmarkTests.MeasureM14CatalogBenchmarkMatrix");
         StringAssert.Contains(wrapper, "$temporaryEvidencePath = $evidencePath + '.tmp'");
         StringAssert.Contains(wrapper, "evidence was not published atomically");
-        StringAssert.Contains(wrapper, "[string]$evidence.result -ne 'passed'");
-        StringAssert.Contains(wrapper, "[bool]$evidence.referenceEligible");
+        StringAssert.Contains(wrapper, "(Get-M14CatalogString $evidence 'result') -cne 'passed'");
+        StringAssert.Contains(wrapper, "Get-M14CatalogBoolean $evidence 'referenceEligible'");
         StringAssert.Contains(wrapper, "retained a legacy transient corpus manifest");
+        StringAssert.Contains(wrapper, "[string]$RunnerProfileId");
+        StringAssert.Contains(wrapper, "[string]$BaselineEvidencePath");
+        StringAssert.Contains(wrapper, "merge-base --is-ancestor");
+        StringAssert.Contains(wrapper, "regression baseline must be outside the transient candidate evidence directory");
+        StringAssert.Contains(wrapper, "regression baseline evidence changed during the benchmark");
+        StringAssert.Contains(wrapper, "Write-M14CatalogRegressionSummaryAtomically");
+        StringAssert.Contains(wrapper, "Get-M14CatalogBoolean $regressionSummary 'allPassed'");
+
+        StringAssert.Contains(regressionHelper, "$script:M14CatalogEvidenceMaximumBytes = 1MB");
+        StringAssert.Contains(regressionHelper, "$script:M14CatalogRegressionMaximumIncreasePercent = 10.0");
+        StringAssert.Contains(regressionHelper, "function Get-M14CatalogBoolean");
+        StringAssert.Contains(regressionHelper, "$result -isnot [bool]");
+        StringAssert.Contains(regressionHelper, "query50k = [ordered]@{");
+        StringAssert.Contains(regressionHelper, "cancellation = [ordered]@{");
+        StringAssert.Contains(regressionHelper, "entryLimitProbe = [ordered]@{");
+        StringAssert.Contains(regressionHelper, "baselineContentStable = $BaselineContentStable");
+        StringAssert.Contains(regressionHelper, "physicalMachineIdentityVerified = $false");
+        StringAssert.Contains(regressionHelper, "maximumIncreasePercent = $script:M14CatalogRegressionMaximumIncreasePercent");
+        StringAssert.Contains(regressionHelper, "[IO.File]::Move($temporaryPath, $fullPath)");
+        StringAssert.Contains(regressionSelfTest, "A non-empty string must not spoof a Boolean evidence value.");
+        StringAssert.Contains(regressionSelfTest, "Query workload mismatch must fail closed.");
+        StringAssert.Contains(regressionSelfTest, "Cancellation workload mismatch must fail closed.");
+        StringAssert.Contains(regressionSelfTest, "Entry-limit workload mismatch must fail closed.");
+        StringAssert.Contains(regressionSelfTest, "The regression evidence must contain exactly eight metrics.");
 
         StringAssert.Contains(benchmarkTest, "private const int Iterations = 20;");
         StringAssert.Contains(benchmarkTest, "private const int MinimumAuthoritativeWarmIterations = 20;");
@@ -2244,6 +2278,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(benchmarkTest, "result = budgetEvaluation.AllPassed ? \"passed\" : \"failed\"");
         StringAssert.Contains(benchmarkTest, "const bool referenceEligible = false;");
         StringAssert.Contains(benchmarkTest, "referenceModeRequested");
+        StringAssert.Contains(benchmarkTest, "IPTVSUITE_M14_CATALOG_RUNNER_PROFILE_ID");
+        StringAssert.Contains(benchmarkTest, "runnerProfile.IsDeclared");
         StringAssert.Contains(benchmarkTest, "operatingSystemCacheFlushPerformed = false");
         StringAssert.Contains(benchmarkTest, "normalizeProtectPersistIndexConservativeUpperBoundP95");
         StringAssert.Contains(benchmarkTest, "no exact stage split is measured or claimed");
@@ -2288,6 +2324,124 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(logoCache, "LinkedList<(SourceId SourceId, ChannelId ChannelId)>");
         StringAssert.Contains(logoCache, "_cachedPayloadBytes + payloadBytes > MaximumCachedPayloadBytes");
         StringAssert.Contains(logoCache, "GetSourceGeneration(sourceId) != sourceGeneration");
+        Assert.HasCount(
+            2,
+            Regex.Matches(logoCache, @"cancellationToken\.ThrowIfCancellationRequested\(\)"),
+            "A canceled noncooperative image load must be rejected before and during cache insertion.");
+
+        string mainPage = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows",
+            "MainPage.xaml.cs"));
+        StringAssert.Contains(mainPage, "if (args.InRecycleQueue)");
+        StringAssert.Contains(mainPage, "recycledRow.CancelLogoLoad(releaseLogoSource: true)");
+        StringAssert.Contains(mainPage, "CancellationTokenSource.CreateLinkedTokenSource(");
+        StringAssert.Contains(mainPage, "ChannelRow.LogoLoadOperation logoLoad = row.BeginLogoLoad(");
+        StringAssert.Contains(mainPage, "logoLoad.Token.ThrowIfCancellationRequested()");
+        StringAssert.Contains(mainPage, "logoLoad.Dispose();");
+        StringAssert.Contains(mainPage, "previous?.Cancel();");
+        StringAssert.Contains(mainPage, "_owner.CompleteLogoLoad(this);");
+
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(
+            File.Exists(windowsPowerShell),
+            "Windows PowerShell 5.1 is required for the M14 regression self-test.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(regressionSelfTestPath);
+
+        using Process selfTestProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The M14 regression self-test could not start.");
+        bool selfTestCompleted = selfTestProcess.WaitForExit(30_000);
+        if (!selfTestCompleted)
+        {
+            selfTestProcess.Kill(entireProcessTree: true);
+            selfTestProcess.WaitForExit();
+        }
+
+        string selfTestOutput = selfTestProcess.StandardOutput.ReadToEnd();
+        string selfTestError = selfTestProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            selfTestCompleted && selfTestProcess.ExitCode == 0,
+            $"M14 catalog regression self-test failed.{Environment.NewLine}{selfTestOutput}{selfTestError}");
+    }
+
+    [TestMethod]
+    public void M14PackagedCatalogTraceMarkersAreOptInPidBoundAndExcludeIdleSampling()
+    {
+        string packageSmoke = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1"));
+        string workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-quality.yml"));
+
+        StringAssert.Contains(packageSmoke, "[switch]$EmitM14TraceMarkers");
+        StringAssert.Contains(packageSmoke, "function Write-M14CatalogTraceMarker");
+        StringAssert.Contains(packageSmoke, "System32\\wpr.exe");
+        StringAssert.Contains(packageSmoke, "& $wprPath -marker $Name -flush");
+        StringAssert.Contains(
+            packageSmoke,
+            "IptvSuite.M14.CatalogInteraction.Begin.Pid$catalogTraceMarkerProcessId");
+        StringAssert.Contains(
+            packageSmoke,
+            "IptvSuite.M14.CatalogInteraction.End.Pid$catalogTraceMarkerProcessId");
+        StringAssert.Contains(
+            packageSmoke,
+            "CatalogTraceMarkerProcessId = $catalogTraceMarkerProcessId");
+        StringAssert.Contains(packageSmoke, "$catalogTraceMarkerCount -ne 2");
+
+        int beginMarker = packageSmoke.IndexOf(
+            "Write-M14CatalogTraceMarker -Name $catalogTraceMarkerBeginName",
+            StringComparison.Ordinal);
+        int inputProbe = packageSmoke.IndexOf(
+            "$inputSamples = [System.Collections.Generic.List[double]]::new()",
+            beginMarker,
+            StringComparison.Ordinal);
+        int uiThreadProbe = packageSmoke.IndexOf(
+            "$catalogUiThreadResponsivenessProxyVerified = $true",
+            inputProbe,
+            StringComparison.Ordinal);
+        int endMarker = packageSmoke.IndexOf(
+            "Write-M14CatalogTraceMarker -Name $catalogTraceMarkerEndName",
+            uiThreadProbe,
+            StringComparison.Ordinal);
+        int idleWorkingSet = packageSmoke.IndexOf(
+            "$catalogWorkingSetSettleTimer = [System.Diagnostics.Stopwatch]::StartNew()",
+            endMarker,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            beginMarker >= 0 &&
+            inputProbe > beginMarker &&
+            uiThreadProbe > inputProbe &&
+            endMarker > uiThreadProbe &&
+            idleWorkingSet > endMarker,
+            "External trace markers must bracket active 50k interaction work without including the idle working-set interval.");
+        Assert.IsFalse(
+            workflow.Contains("-EmitM14TraceMarkers", StringComparison.Ordinal),
+            "Normal hosted package smoke must remain trace-instrumentation free.");
     }
 
     [TestMethod]
@@ -4401,7 +4555,7 @@ public sealed class DependencyRulesTests
         string quiescence = page[cancelStart..beginSingleFlight];
         StringAssert.Contains(quiescence, "coordinator.CancelPending();");
         StringAssert.Contains(quiescence, "_logoPageCancellation.Cancel();");
-        StringAssert.Contains(quiescence, "row.BeginLogoLoad();");
+        StringAssert.Contains(quiescence, "row.CancelLogoLoad(releaseLogoSource: true);");
         StringAssert.Contains(quiescence, "await WaitForCatalogOperationsAsync();");
         StringAssert.Contains(quiescence, "ResetLogoPageCancellation();");
         StringAssert.Contains(quiescence, "ClearCatalogView();");

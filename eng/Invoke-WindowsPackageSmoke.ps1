@@ -3,7 +3,9 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
 
-    [string]$DotNetPath = "dotnet"
+    [string]$DotNetPath = "dotnet",
+
+    [switch]$EmitM14TraceMarkers
 )
 
 Set-StrictMode -Version Latest
@@ -733,6 +735,13 @@ $catalogKeyboardFocusOrderVerified = $false
 $catalog50kSeedVerified = $false
 $catalogRealizedContainerBoundVerified = $false
 $catalogRealizedContainerCount = 0
+$catalogTraceMarkersRequested = [bool]$EmitM14TraceMarkers
+$catalogTraceMarkerBeginEmitted = $false
+$catalogTraceMarkerEndEmitted = $false
+$catalogTraceMarkerCount = 0
+$catalogTraceMarkerProcessId = 0
+$catalogTraceMarkerBeginName = ""
+$catalogTraceMarkerEndName = ""
 $catalogInputResponseP95Milliseconds = 0.0
 $catalogFrameP95Milliseconds = 0.0
 $catalogFrameMaximumMilliseconds = 0.0
@@ -1626,6 +1635,32 @@ function Get-Percentile95 {
     $ordered = @($Samples | Sort-Object)
     $index = [Math]::Ceiling(0.95 * $ordered.Count) - 1
     return [double]$ordered[[Math]::Max(0, [int]$index)]
+}
+
+function Write-M14CatalogTraceMarker {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidatePattern('\AIptvSuite\.M14\.CatalogInteraction\.(Begin|End)\.Pid[1-9][0-9]{0,9}\z')]
+        [string]$Name
+    )
+
+    if (-not $EmitM14TraceMarkers) {
+        throw "M14 catalog trace markers were not requested."
+    }
+    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+        throw "The Windows system root is unavailable for M14 trace markers."
+    }
+
+    $wprPath = Join-Path $env:SystemRoot "System32\wpr.exe"
+    if (-not (Test-Path -LiteralPath $wprPath -PathType Leaf)) {
+        throw "Windows Performance Recorder is unavailable for M14 trace markers."
+    }
+
+    & $wprPath -marker $Name -flush | Out-Null
+    $markerExitCode = $LASTEXITCODE
+    if ($markerExitCode -ne 0) {
+        throw "Windows Performance Recorder rejected an M14 trace marker."
+    }
 }
 
 function Assert-FocusedAutomationElement {
@@ -3063,6 +3098,16 @@ try {
         throw "The packaged catalog search value pattern is unavailable."
     }
     $valuePattern = [System.Windows.Automation.ValuePattern]$valuePatternObject
+    if ($EmitM14TraceMarkers) {
+        $catalogTraceMarkerProcessId = [int]$activationProcessId
+        $catalogTraceMarkerBeginName =
+            "IptvSuite.M14.CatalogInteraction.Begin.Pid$catalogTraceMarkerProcessId"
+        $catalogTraceMarkerEndName =
+            "IptvSuite.M14.CatalogInteraction.End.Pid$catalogTraceMarkerProcessId"
+        Write-M14CatalogTraceMarker -Name $catalogTraceMarkerBeginName
+        $catalogTraceMarkerBeginEmitted = $true
+        $catalogTraceMarkerCount++
+    }
     $inputSamples = [System.Collections.Generic.List[double]]::new()
     for ($sample = 0; $sample -lt 20; $sample++) {
         $value = if (($sample % 2) -eq 0) { "Synthetic" } else { "channel" }
@@ -3244,6 +3289,15 @@ try {
     $catalogRealizedContainerCount = [Math]::Max(
         $catalogRealizedContainerCount,
         $rapidScrollRealizedContainerCount)
+
+    if ($EmitM14TraceMarkers) {
+        Write-M14CatalogTraceMarker -Name $catalogTraceMarkerEndName
+        $catalogTraceMarkerEndEmitted = $true
+        $catalogTraceMarkerCount++
+        if ($catalogTraceMarkerCount -ne 2) {
+            throw "The M14 catalog trace marker count is invalid."
+        }
+    }
 
     $catalogPlayerOffStatusElement =
         Get-AutomationElementById $automationRoot "PlaybackStatusText"
@@ -5023,6 +5077,11 @@ try {
         CatalogUiaContractVerified = $catalogUiaContractVerified
         CatalogKeyboardFocusOrderVerified = $catalogKeyboardFocusOrderVerified
         Catalog50kSeedVerified = $catalog50kSeedVerified
+        CatalogTraceMarkersRequested = $catalogTraceMarkersRequested
+        CatalogTraceMarkerBeginEmitted = $catalogTraceMarkerBeginEmitted
+        CatalogTraceMarkerEndEmitted = $catalogTraceMarkerEndEmitted
+        CatalogTraceMarkerCount = $catalogTraceMarkerCount
+        CatalogTraceMarkerProcessId = $catalogTraceMarkerProcessId
         CatalogRealizedContainerBoundVerified = $catalogRealizedContainerBoundVerified
         CatalogRealizedContainerCount = $catalogRealizedContainerCount
         CatalogInputResponseP95Milliseconds = [Math]::Round($catalogInputResponseP95Milliseconds, 3)
@@ -5186,6 +5245,16 @@ catch {
     $primaryFailure = $_
 }
 finally {
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "End M14 catalog trace marker" -Action {
+        if ($catalogTraceMarkersRequested -and
+            $catalogTraceMarkerBeginEmitted -and
+            -not $catalogTraceMarkerEndEmitted) {
+            Write-M14CatalogTraceMarker -Name $catalogTraceMarkerEndName
+            $catalogTraceMarkerEndEmitted = $true
+            $catalogTraceMarkerCount++
+        }
+    }
+
     Invoke-CleanupStep -Failures $cleanupFailures -Name "Stop launched application" -Action {
         if ($null -ne $launchedProcess) {
             try {

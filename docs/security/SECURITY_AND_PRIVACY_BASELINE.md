@@ -181,7 +181,8 @@ Logo fetch player request'inden ayrıdır:
 - kullanıcı açıkça private source origin yapılandırdıysa yalnız aynı-origin erişim yeni policy ile değerlendirilebilir;
 - DNS rebinding/redirect'te final IP tekrar kontrol edilir;
 - MIME/magic eşleşmesi, byte ≤ provisional 5 MiB, dimension/pixel/decode-time budget;
-- concurrency 4, memory cache 32 MiB, disk LRU 200 MiB provisional;
+- concurrency 4 ve memory-only 32 MiB / 128-entry LRU uygulanır; görünürlükten çıkan satırın işi iptal edilir ve iptal edilmiş noncooperative sonuç cache'e alınmaz;
+- MVP'de durable image disk cache kapalıdır (`0` byte). İleride ayrıca threat/lifecycle review ile açılırsa `200 MiB` sessiz hedef değil hard üst sınırdır;
 - source silme cache namespace'ini temizler.
 
 ## 7. Local data lifecycle

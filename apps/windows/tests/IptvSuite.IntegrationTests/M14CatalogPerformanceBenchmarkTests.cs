@@ -24,6 +24,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
     private const string PowerConditionVariable = "IPTVSUITE_M14_CATALOG_POWER_CONDITION";
     private const string ThermalConditionVariable = "IPTVSUITE_M14_CATALOG_THERMAL_CONDITION";
     private const string BackgroundConditionVariable = "IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION";
+    private const string RunnerProfileIdVariable = "IPTVSUITE_M14_CATALOG_RUNNER_PROFILE_ID";
     private const int Iterations = 20;
     private const int MinimumAuthoritativeWarmIterations = 20;
     private const int ColdObservationsPerStage = 1;
@@ -70,6 +71,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         MetadataValue powerCondition = ReadCondition(PowerConditionVariable, "AcStable");
         MetadataValue thermalCondition = ReadCondition(ThermalConditionVariable, "Nominal");
         MetadataValue backgroundCondition = ReadCondition(BackgroundConditionVariable, "Controlled");
+        MetadataValue runnerProfile = ReadRunnerProfile(referenceModeRequested);
         bool conditionDeclarationsComplete =
             cacheCondition.IsDeclared &&
             powerCondition.IsDeclared &&
@@ -169,7 +171,10 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         const bool referenceEligible = false;
         BudgetEvaluation budgetEvaluation = EvaluateBudgets(scaleResults, query, cancellation);
         bool effectiveReferenceEligible = referenceModeRequested
-            ? conditionDeclarationsComplete && measurementIntegrityVerified && budgetEvaluation.AllPassed
+            ? conditionDeclarationsComplete &&
+                runnerProfile.IsDeclared &&
+                measurementIntegrityVerified &&
+                budgetEvaluation.AllPassed
             : referenceEligible;
 
         var evidence = new
@@ -196,9 +201,11 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             authoritativeWarmSampleCountVerified,
             conditionDeclarationsComplete,
             referenceModeRequested,
+            runnerProfile,
             referenceEligibilityRequirements = new
             {
                 exactConditionDeclarations = conditionDeclarationsComplete,
+                declaredRunnerProfile = runnerProfile.IsDeclared,
                 measurementIntegrity = measurementIntegrityVerified,
                 passingBenchmarkResult = budgetEvaluation.AllPassed,
             },
@@ -296,6 +303,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
                 "This component benchmark does not claim WinUI input, frame, image-cache or physical-device acceptance.",
                 "Generated corpora and their aggregate manifest are transient and reproducible from the commit-bound specification; only bounded aggregate hashes are retained.",
                 "Machine-condition values are closed caller declarations, not dedicated-runner verification.",
+                "The runner-profile identifier is a bounded caller declaration; it is not a hardware identifier and does not independently verify physical-machine identity.",
                 "Foundation mode is not reference eligible; reference mode requires exact declarations, measurement integrity and a passing result.",
                 "Reference eligibility does not perform a baseline comparison or establish a performance baseline.",
             },
@@ -1055,6 +1063,36 @@ public sealed class M14CatalogPerformanceBenchmarkTests
 
         return new MetadataValue("Declared", value);
     }
+
+    private static MetadataValue ReadRunnerProfile(bool referenceModeRequested)
+    {
+        string? value = Environment.GetEnvironmentVariable(RunnerProfileIdVariable);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            if (referenceModeRequested)
+            {
+                throw new InvalidDataException(
+                    "M14 reference mode requires a declared runner-profile identifier.");
+            }
+
+            return new MetadataValue("Unverified", "Unverified");
+        }
+
+        if (!referenceModeRequested ||
+            value.Length > 64 ||
+            !IsAsciiLowerOrDigit(value[0]) ||
+            value.Skip(1).Any(character =>
+                !IsAsciiLowerOrDigit(character) && character is not '.' and not '_' and not '-'))
+        {
+            throw new InvalidDataException(
+                "M14 runner-profile identifier must match ^[a-z0-9][a-z0-9._-]{0,63}$ and is valid only in reference mode.");
+        }
+
+        return new MetadataValue("Declared", value);
+    }
+
+    private static bool IsAsciiLowerOrDigit(char value) =>
+        value is >= 'a' and <= 'z' or >= '0' and <= '9';
 
     private static MetadataValue ReadProcessorMetadata()
     {

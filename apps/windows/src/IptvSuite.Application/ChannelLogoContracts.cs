@@ -68,9 +68,11 @@ public sealed class ChannelLogoCache : IDisposable
 
             ChannelLogoImage? loaded = await _provider.LoadAsync(sourceId, channelId, cancellationToken)
                 .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             if (loaded is null) return null;
             lock (_sync)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (_disposed || GetSourceGeneration(sourceId) != sourceGeneration)
                 {
                     return loaded;
