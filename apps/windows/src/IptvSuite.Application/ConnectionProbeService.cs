@@ -30,25 +30,10 @@ public sealed class ConnectionProbeService(IHttpTransport transport)
         HttpTransportResult result = await _transport.GetAsync(request, cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
-            return DomainResult.Failure<ConnectionProbeResult>(MapFailure(result.Failure));
+            return DomainResult.Failure<ConnectionProbeResult>(HttpTransportDomainErrorMapper.Map(result.Failure));
         }
 
         using HttpResponseLease response = result.Response!;
         return DomainResult.Success(new ConnectionProbeResult(result.StatusCode, response.Content.Length));
     }
-
-    private static DomainErrorCode MapFailure(HttpTransportFailure? failure) => failure switch
-    {
-        HttpTransportFailure.AuthenticationRejected => DomainErrorCode.AuthenticationRejected,
-        HttpTransportFailure.RequestTimedOut => DomainErrorCode.RequestTimedOut,
-        HttpTransportFailure.NetworkUnavailable => DomainErrorCode.NetworkUnreachable,
-        HttpTransportFailure.TlsValidationFailed => DomainErrorCode.TlsValidationFailed,
-        HttpTransportFailure.InvalidRequest or
-        HttpTransportFailure.RedirectRejected or
-        HttpTransportFailure.RedirectLimitExceeded or
-        HttpTransportFailure.ResourceNotFound or
-        HttpTransportFailure.RequestRejected or
-        HttpTransportFailure.ResponseTooLarge => DomainErrorCode.PlaylistDownloadFailed,
-        _ => DomainErrorCode.PlaylistDownloadFailed,
-    };
 }

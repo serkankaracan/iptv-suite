@@ -347,18 +347,39 @@ public sealed class RemotePlaylistCatalogLoaderTests
     }
 
     [TestMethod]
-    public async Task TransportFailureMapsWithoutParsingOrExposingLocator()
+    [DataRow(HttpTransportFailure.AuthenticationRejected, HttpTransportRetryability.Never,
+        DomainErrorCode.AuthenticationRejected)]
+    [DataRow(HttpTransportFailure.ResourceNotFound, HttpTransportRetryability.Never,
+        DomainErrorCode.RemoteResourceNotFound)]
+    [DataRow(HttpTransportFailure.RequestRejected, HttpTransportRetryability.Never,
+        DomainErrorCode.RemoteRequestRejected)]
+    [DataRow(HttpTransportFailure.ResponseTooLarge, HttpTransportRetryability.Never,
+        DomainErrorCode.RemoteResponseTooLarge)]
+    [DataRow(HttpTransportFailure.RequestTimedOut, HttpTransportRetryability.BoundedTransient,
+        DomainErrorCode.RequestTimedOut)]
+    [DataRow(HttpTransportFailure.NetworkUnavailable, HttpTransportRetryability.Manual,
+        DomainErrorCode.NetworkUnreachable)]
+    [DataRow(HttpTransportFailure.TlsValidationFailed, HttpTransportRetryability.Never,
+        DomainErrorCode.TlsValidationFailed)]
+    [DataRow(HttpTransportFailure.RateLimited, HttpTransportRetryability.BoundedTransient,
+        DomainErrorCode.RequestRateLimited)]
+    [DataRow(HttpTransportFailure.RemoteServiceUnavailable, HttpTransportRetryability.BoundedTransient,
+        DomainErrorCode.RemoteServiceUnavailable)]
+    public async Task TransportFailureMapsWithoutParsingOrExposingLocator(
+        HttpTransportFailure failure,
+        HttpTransportRetryability retryability,
+        DomainErrorCode expectedError)
     {
         var store = new M4InMemorySecretStore();
         ContentSource source = await CreateSourceAsync(store);
         var transport = new SingleResponseTransport(HttpStreamingResult.Failed(
-            HttpTransportFailure.TlsValidationFailed,
-            HttpTransportRetryability.Never));
+            failure,
+            retryability));
 
         LoaderSnapshot result = await InvokeLoaderAsync(store, transport, source);
 
         Assert.IsFalse(result.IsSuccess);
-        Assert.AreEqual(DomainErrorCode.TlsValidationFailed, result.ErrorCode);
+        Assert.AreEqual(expectedError, result.ErrorCode);
         Assert.AreEqual("[HTTP-TRANSPORT-REQUEST]", transport.RequestText);
     }
 

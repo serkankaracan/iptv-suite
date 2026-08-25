@@ -37,6 +37,11 @@ public sealed class DomainErrorContractTests
         new(DomainErrorCode.StorageUnavailable, DomainRetryability.Manual, "Errors.Storage.Unavailable"),
         new(DomainErrorCode.OperationCancelled, DomainRetryability.Never, "Errors.Operation.Cancelled"),
         new(DomainErrorCode.PlaybackControlFailed, DomainRetryability.Manual, "Errors.Playback.ControlFailed"),
+        new(DomainErrorCode.RemoteResourceNotFound, DomainRetryability.Never, "Errors.Network.ResourceNotFound"),
+        new(DomainErrorCode.RemoteRequestRejected, DomainRetryability.Never, "Errors.Network.RequestRejected"),
+        new(DomainErrorCode.RequestRateLimited, DomainRetryability.BoundedTransient, "Errors.Network.RateLimited"),
+        new(DomainErrorCode.RemoteServiceUnavailable, DomainRetryability.BoundedTransient, "Errors.Network.ServiceUnavailable"),
+        new(DomainErrorCode.RemoteResponseTooLarge, DomainRetryability.Never, "Errors.Network.ResponseTooLarge"),
     ];
 
     [TestMethod]

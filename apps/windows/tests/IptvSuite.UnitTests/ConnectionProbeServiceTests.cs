@@ -25,25 +25,71 @@ public sealed class ConnectionProbeServiceTests
     [TestMethod]
     public async Task TransportFailuresMapToStableDomainErrors()
     {
-        (HttpTransportFailure Failure, DomainErrorCode Error)[] cases =
+        (HttpTransportFailure Failure, HttpTransportRetryability Retryability, DomainErrorCode Error)[] cases =
         [
-            (HttpTransportFailure.AuthenticationRejected, DomainErrorCode.AuthenticationRejected),
-            (HttpTransportFailure.RequestTimedOut, DomainErrorCode.RequestTimedOut),
-            (HttpTransportFailure.NetworkUnavailable, DomainErrorCode.NetworkUnreachable),
-            (HttpTransportFailure.TlsValidationFailed, DomainErrorCode.TlsValidationFailed),
-            (HttpTransportFailure.ResponseTooLarge, DomainErrorCode.PlaylistDownloadFailed),
+            (HttpTransportFailure.InvalidRequest, HttpTransportRetryability.Never,
+                DomainErrorCode.RemoteRequestRejected),
+            (HttpTransportFailure.RedirectRejected, HttpTransportRetryability.Never,
+                DomainErrorCode.RemoteRequestRejected),
+            (HttpTransportFailure.RedirectLimitExceeded, HttpTransportRetryability.Never,
+                DomainErrorCode.RemoteRequestRejected),
+            (HttpTransportFailure.AuthenticationRejected, HttpTransportRetryability.Never,
+                DomainErrorCode.AuthenticationRejected),
+            (HttpTransportFailure.ResourceNotFound, HttpTransportRetryability.Never,
+                DomainErrorCode.RemoteResourceNotFound),
+            (HttpTransportFailure.RequestRejected, HttpTransportRetryability.Never,
+                DomainErrorCode.RemoteRequestRejected),
+            (HttpTransportFailure.ResponseTooLarge, HttpTransportRetryability.Never,
+                DomainErrorCode.RemoteResponseTooLarge),
+            (HttpTransportFailure.RequestTimedOut, HttpTransportRetryability.BoundedTransient,
+                DomainErrorCode.RequestTimedOut),
+            (HttpTransportFailure.NetworkUnavailable, HttpTransportRetryability.Manual,
+                DomainErrorCode.NetworkUnreachable),
+            (HttpTransportFailure.TlsValidationFailed, HttpTransportRetryability.Never,
+                DomainErrorCode.TlsValidationFailed),
+            (HttpTransportFailure.RateLimited, HttpTransportRetryability.BoundedTransient,
+                DomainErrorCode.RequestRateLimited),
+            (HttpTransportFailure.RemoteServiceUnavailable, HttpTransportRetryability.BoundedTransient,
+                DomainErrorCode.RemoteServiceUnavailable),
         ];
 
-        foreach ((HttpTransportFailure failure, DomainErrorCode error) in cases)
+        HttpTransportFailure[] failures = Enum.GetValues<HttpTransportFailure>();
+        CollectionAssert.AreEqual(
+            failures,
+            cases.Select(item => item.Failure).ToArray(),
+            "HTTP transport failures are a public append-only contract and must remain exhaustively mapped.");
+        for (int ordinal = 0; ordinal < failures.Length; ordinal++)
+        {
+            Assert.AreEqual(
+                ordinal,
+                (int)failures[ordinal],
+                $"HTTP transport failure ordinal changed for {failures[ordinal]}.");
+        }
+
+        foreach ((HttpTransportFailure failure, HttpTransportRetryability retryability, DomainErrorCode error) in cases)
         {
             ConnectionProbeService service = new(new StubTransport(
-                HttpTransportResult.Failed(failure, HttpTransportRetryability.Never)));
+                HttpTransportResult.Failed(failure, retryability)));
 
             DomainResult<ConnectionProbeResult> result = await service.ProbeAsync(CreateRequest());
 
             Assert.IsFalse(result.IsSuccess);
             Assert.AreEqual(error, result.Error!.Code);
         }
+    }
+
+    [TestMethod]
+    public async Task UnknownTransportFailureFailsClosed()
+    {
+        ConnectionProbeService service = new(new StubTransport(HttpTransportResult.Failed(
+            (HttpTransportFailure)int.MaxValue,
+            HttpTransportRetryability.Never)));
+
+        DomainResult<ConnectionProbeResult> result = await service.ProbeAsync(CreateRequest());
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.DomainInvariantViolation, result.Error!.Code);
+        Assert.AreEqual(DomainRetryability.Never, result.Error.Retryability);
     }
 
     [TestMethod]

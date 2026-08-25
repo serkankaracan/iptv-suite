@@ -499,22 +499,26 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
         }
     }
 
-    private static HttpTransportResult ClassifyStatus(HttpStatusCode statusCode) => statusCode switch
+    private static HttpTransportResult ClassifyStatus(HttpStatusCode statusCode) => (int)statusCode switch
     {
-        HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => HttpTransportResult.Failed(
+        (int)HttpStatusCode.Unauthorized or (int)HttpStatusCode.Forbidden => HttpTransportResult.Failed(
             HttpTransportFailure.AuthenticationRejected,
             HttpTransportRetryability.Never,
             (int)statusCode),
-        HttpStatusCode.NotFound => HttpTransportResult.Failed(
+        (int)HttpStatusCode.NotFound => HttpTransportResult.Failed(
             HttpTransportFailure.ResourceNotFound,
             HttpTransportRetryability.Never,
             (int)statusCode),
-        HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests => HttpTransportResult.Failed(
-            HttpTransportFailure.RequestRejected,
+        (int)HttpStatusCode.RequestTimeout => HttpTransportResult.Failed(
+            HttpTransportFailure.RequestTimedOut,
             HttpTransportRetryability.BoundedTransient,
             (int)statusCode),
-        >= HttpStatusCode.InternalServerError => HttpTransportResult.Failed(
-            HttpTransportFailure.RequestRejected,
+        (int)HttpStatusCode.TooManyRequests => HttpTransportResult.Failed(
+            HttpTransportFailure.RateLimited,
+            HttpTransportRetryability.BoundedTransient,
+            (int)statusCode),
+        >= 500 and <= 599 => HttpTransportResult.Failed(
+            HttpTransportFailure.RemoteServiceUnavailable,
             HttpTransportRetryability.BoundedTransient,
             (int)statusCode),
         _ => HttpTransportResult.Failed(

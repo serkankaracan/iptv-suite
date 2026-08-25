@@ -15,6 +15,8 @@ public enum HttpTransportFailure
     RequestTimedOut,
     NetworkUnavailable,
     TlsValidationFailed,
+    RateLimited,
+    RemoteServiceUnavailable,
 }
 
 public enum HttpTransportRetryability

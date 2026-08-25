@@ -379,9 +379,13 @@ public sealed class BoundedHttpTransportTests
     [DataRow(401, HttpTransportFailure.AuthenticationRejected, HttpTransportRetryability.Never)]
     [DataRow(403, HttpTransportFailure.AuthenticationRejected, HttpTransportRetryability.Never)]
     [DataRow(404, HttpTransportFailure.ResourceNotFound, HttpTransportRetryability.Never)]
-    [DataRow(408, HttpTransportFailure.RequestRejected, HttpTransportRetryability.BoundedTransient)]
-    [DataRow(429, HttpTransportFailure.RequestRejected, HttpTransportRetryability.BoundedTransient)]
-    [DataRow(500, HttpTransportFailure.RequestRejected, HttpTransportRetryability.BoundedTransient)]
+    [DataRow(400, HttpTransportFailure.RequestRejected, HttpTransportRetryability.Never)]
+    [DataRow(408, HttpTransportFailure.RequestTimedOut, HttpTransportRetryability.BoundedTransient)]
+    [DataRow(429, HttpTransportFailure.RateLimited, HttpTransportRetryability.BoundedTransient)]
+    [DataRow(500, HttpTransportFailure.RemoteServiceUnavailable, HttpTransportRetryability.BoundedTransient)]
+    [DataRow(503, HttpTransportFailure.RemoteServiceUnavailable, HttpTransportRetryability.BoundedTransient)]
+    [DataRow(599, HttpTransportFailure.RemoteServiceUnavailable, HttpTransportRetryability.BoundedTransient)]
+    [DataRow(600, HttpTransportFailure.RequestRejected, HttpTransportRetryability.Never)]
     public async Task StatusCodesMapToStableTypedFailures(
         int statusCode,
         HttpTransportFailure expectedFailure,

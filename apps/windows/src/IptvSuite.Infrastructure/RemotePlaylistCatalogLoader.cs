@@ -77,7 +77,8 @@ internal sealed class RemotePlaylistCatalogLoader
             HttpStreamingResult response = await _transport.GetStreamAsync(request, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccess)
             {
-                return DomainResult.Failure<RemoteM3uParseResult>(MapTransportFailure(response.Failure));
+                return DomainResult.Failure<RemoteM3uParseResult>(
+                    HttpTransportDomainErrorMapper.Map(response.Failure));
             }
 
             using HttpStreamingResponseLease responseLease = response.Response!;
@@ -130,13 +131,4 @@ internal sealed class RemotePlaylistCatalogLoader
             }
         }
     }
-
-    private static DomainErrorCode MapTransportFailure(HttpTransportFailure? failure) => failure switch
-    {
-        HttpTransportFailure.AuthenticationRejected => DomainErrorCode.AuthenticationRejected,
-        HttpTransportFailure.RequestTimedOut => DomainErrorCode.RequestTimedOut,
-        HttpTransportFailure.NetworkUnavailable => DomainErrorCode.NetworkUnreachable,
-        HttpTransportFailure.TlsValidationFailed => DomainErrorCode.TlsValidationFailed,
-        _ => DomainErrorCode.PlaylistDownloadFailed,
-    };
 }

@@ -109,7 +109,7 @@ public sealed class XtreamProviderClient : IXtreamProviderClient
         HttpTransportResult response = await _transport.GetAsync(request, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccess)
         {
-            return DomainResult.Failure<T>(MapTransportFailure(response.Failure));
+            return DomainResult.Failure<T>(HttpTransportDomainErrorMapper.Map(response.Failure));
         }
 
         using HttpResponseLease lease = response.Response!;
@@ -171,14 +171,5 @@ public sealed class XtreamProviderClient : IXtreamProviderClient
         SecretStoreFailure.ProtectedRecordUnavailable => DomainErrorCode.CredentialInvalid,
         SecretStoreFailure.StorageUnavailable => DomainErrorCode.StorageUnavailable,
         _ => DomainErrorCode.StorageUnavailable,
-    };
-
-    private static DomainErrorCode MapTransportFailure(HttpTransportFailure? failure) => failure switch
-    {
-        HttpTransportFailure.AuthenticationRejected => DomainErrorCode.AuthenticationRejected,
-        HttpTransportFailure.RequestTimedOut => DomainErrorCode.RequestTimedOut,
-        HttpTransportFailure.NetworkUnavailable => DomainErrorCode.NetworkUnreachable,
-        HttpTransportFailure.TlsValidationFailed => DomainErrorCode.TlsValidationFailed,
-        _ => DomainErrorCode.PlaylistDownloadFailed,
     };
 }

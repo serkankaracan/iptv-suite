@@ -33,6 +33,11 @@ public enum DomainErrorCode
     StorageUnavailable,
     OperationCancelled,
     PlaybackControlFailed,
+    RemoteResourceNotFound,
+    RemoteRequestRejected,
+    RequestRateLimited,
+    RemoteServiceUnavailable,
+    RemoteResponseTooLarge,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<DomainRetryability>))]
@@ -91,6 +96,11 @@ public sealed record DomainError
         DomainErrorCode.ReconnectExhausted => Manual(code, "Errors.Playback.ReconnectExhausted"),
         DomainErrorCode.StorageUnavailable => Manual(code, "Errors.Storage.Unavailable"),
         DomainErrorCode.OperationCancelled => Never(code, "Errors.Operation.Cancelled"),
+        DomainErrorCode.RemoteResourceNotFound => Never(code, "Errors.Network.ResourceNotFound"),
+        DomainErrorCode.RemoteRequestRejected => Never(code, "Errors.Network.RequestRejected"),
+        DomainErrorCode.RequestRateLimited => Transient(code, "Errors.Network.RateLimited"),
+        DomainErrorCode.RemoteServiceUnavailable => Transient(code, "Errors.Network.ServiceUnavailable"),
+        DomainErrorCode.RemoteResponseTooLarge => Never(code, "Errors.Network.ResponseTooLarge"),
         _ => throw new ArgumentOutOfRangeException(nameof(code), code, "Unknown domain error code."),
     };
 

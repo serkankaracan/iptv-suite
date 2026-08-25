@@ -76,14 +76,18 @@ public sealed class XtreamProviderClientTests
         [
             (HttpTransportFailure.AuthenticationRejected, HttpTransportRetryability.Never, 403,
                 DomainErrorCode.AuthenticationRejected),
-            (HttpTransportFailure.RequestRejected, HttpTransportRetryability.BoundedTransient, 429,
-                DomainErrorCode.PlaylistDownloadFailed),
-            (HttpTransportFailure.RequestRejected, HttpTransportRetryability.BoundedTransient, 500,
-                DomainErrorCode.PlaylistDownloadFailed),
+            (HttpTransportFailure.ResourceNotFound, HttpTransportRetryability.Never, 404,
+                DomainErrorCode.RemoteResourceNotFound),
+            (HttpTransportFailure.RequestRejected, HttpTransportRetryability.Never, 400,
+                DomainErrorCode.RemoteRequestRejected),
             (HttpTransportFailure.RequestTimedOut, HttpTransportRetryability.BoundedTransient, 0,
                 DomainErrorCode.RequestTimedOut),
+            (HttpTransportFailure.RateLimited, HttpTransportRetryability.BoundedTransient, 429,
+                DomainErrorCode.RequestRateLimited),
+            (HttpTransportFailure.RemoteServiceUnavailable, HttpTransportRetryability.BoundedTransient, 503,
+                DomainErrorCode.RemoteServiceUnavailable),
             (HttpTransportFailure.ResponseTooLarge, HttpTransportRetryability.Never, 200,
-                DomainErrorCode.PlaylistDownloadFailed),
+                DomainErrorCode.RemoteResponseTooLarge),
         ];
 
         foreach ((HttpTransportFailure transportFailure, HttpTransportRetryability retry, int status,

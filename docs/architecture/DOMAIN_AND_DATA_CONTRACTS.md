@@ -260,6 +260,11 @@ Cache key: `sourceId + contentHash + parserVersion + normalizationVersion + sche
 | `UnsupportedPlaylistFormat` | Playlist biçimi desteklenmiyor. | Input değişmeden retry yok. |
 | `RequestTimedOut` | Bağlantı zaman aşımına uğradı. | Safe read için bounded retry. |
 | `TlsValidationFailed` | Güvenli bağlantı doğrulanamadı. | Insecure fallback yok. |
+| `RemoteResourceNotFound` | Uzak kaynak bulunamadı. | Automatic retry yok. |
+| `RemoteRequestRejected` | Uzak sunucu isteği kalıcı olarak reddetti. | Input veya policy değişmeden retry yok. |
+| `RequestRateLimited` | Uzak sunucu istek hızını sınırladı. | `Retry-After` sınırı içinde bounded retry. |
+| `RemoteServiceUnavailable` | Uzak servis geçici olarak kullanılamıyor. | Bounded transient retry. |
+| `RemoteResponseTooLarge` | Uzak yanıt güvenli boyut sınırını aştı. | Contract değişmeden retry yok. |
 | `InsecureTransportRejected` | Bu kaynak güvenli bağlantı kullanmıyor. | Policy değişmeden retry yok. |
 | `PlaybackStartFailed` | Yayın başlatılamadı. | Capability/error'a göre bounded. |
 | `StreamInterrupted` | Yayın kesildi. | Reconnect policy'ye girer. |
