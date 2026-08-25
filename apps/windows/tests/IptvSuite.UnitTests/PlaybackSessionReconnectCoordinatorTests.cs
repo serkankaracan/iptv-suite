@@ -972,7 +972,8 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         var engine = new ReconnectPlaybackEngine();
         await using var coordinator = Create(engine, time);
         PlaybackSessionSnapshot logical = await StartPlayingAsync(coordinator);
-        bool terminalObserved = false;
+        var terminalObserved = new TaskCompletionSource<PlaybackSessionSnapshot>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         coordinator.StateChanged += (_, args) =>
         {
             if (args.Snapshot is
@@ -981,7 +982,7 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
                     Error.Code: DomainErrorCode.ReconnectExhausted,
                 })
             {
-                terminalObserved = true;
+                terminalObserved.TrySetResult(args.Snapshot);
                 throw new InvalidOperationException("Synthetic terminal observer failure.");
             }
         };
@@ -1007,15 +1008,12 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
             time.ReleaseArmedTimestamp.Set();
         }
 
-        await WaitUntilAsync(() => coordinator.Current is
-        {
-            State: PlaybackState.Failed,
-            Error.Code: DomainErrorCode.ReconnectExhausted,
-        });
+        PlaybackSessionSnapshot terminal = await terminalObserved.Task
+            .WaitAsync(TimeSpan.FromSeconds(2));
         PlaybackSessionId drainedPhysical = await engine.ReconnectPhysicalStopCompleted.Task
             .WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.IsTrue(terminalObserved);
+        Assert.AreEqual(DomainErrorCode.ReconnectExhausted, terminal.Error?.Code);
         Assert.AreEqual(DomainErrorCode.ReconnectExhausted, coordinator.Current.Error?.Code);
         Assert.AreEqual(freshPhysical, drainedPhysical);
         Assert.AreEqual(freshPhysical, engine.StopSessions.ToArray()[^1]);
