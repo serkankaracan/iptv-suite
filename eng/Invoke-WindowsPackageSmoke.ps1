@@ -621,22 +621,22 @@ $playbackPendingVerificationSignalPath = Join-Path $playbackControlDirectory "ve
 $playbackPendingVerificationTicketPath = Join-Path $playbackControlDirectory "pending-result.json"
 $playbackStreamFaultArmSignalPath = Join-Path $playbackControlDirectory "arm-stream-fault.signal"
 $playbackStreamFaultReadyTicketPath = Join-Path $playbackControlDirectory "stream-fault-ready.json"
-$playbackStreamAbortSignalPath = Join-Path $playbackControlDirectory "abort-stream.signal"
-$playbackStreamAbortResultTicketPath = Join-Path $playbackControlDirectory "stream-abort-result.json"
+$playbackStreamEndSignalPath = Join-Path $playbackControlDirectory "end-stream.signal"
+$playbackStreamEndResultTicketPath = Join-Path $playbackControlDirectory "stream-end-result.json"
 $playbackStreamRestoreSignalPath = Join-Path $playbackControlDirectory "restore-stream.signal"
 $playbackStreamRestoreResultTicketPath = Join-Path $playbackControlDirectory "stream-restore-result.json"
-$playbackStreamCancelArmSignalPath = Join-Path $playbackControlDirectory "abort-stream-for-cancel.signal"
+$playbackStreamEndForCancelSignalPath = Join-Path $playbackControlDirectory "end-stream-for-cancel.signal"
 $playbackStreamCancelReadyTicketPath = Join-Path $playbackControlDirectory "stream-cancel-ready.json"
 $playbackStreamCancelVerificationSignalPath = Join-Path $playbackControlDirectory "verify-stream-cancel.signal"
 $playbackStreamCancelResultTicketPath = Join-Path $playbackControlDirectory "stream-cancel-result.json"
 $playbackStreamProtocolControlNames = @(
     "arm-stream-fault.signal",
     "stream-fault-ready.json",
-    "abort-stream.signal",
-    "stream-abort-result.json",
+    "end-stream.signal",
+    "stream-end-result.json",
     "restore-stream.signal",
     "stream-restore-result.json",
-    "abort-stream-for-cancel.signal",
+    "end-stream-for-cancel.signal",
     "stream-cancel-ready.json",
     "verify-stream-cancel.signal",
     "stream-cancel-result.json")
@@ -738,7 +738,7 @@ $playbackReconnectNoLaterOpenRequestCountAtReady = 0
 $playbackReconnectNoLaterOpenRequestCountAfterObservation = 0
 $normalStreamLastAssignedRequestOrdinal = 0L
 $normalStreamClientDetachCount = 0
-$faultStreamExpectedAbortCount = 0
+$faultStreamExpectedCompletionCount = 0
 $faultStreamClientDetachCount = 0
 $windowsAppRuntimeDisposition = "NotStarted"
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
@@ -1322,7 +1322,7 @@ function Read-StrictPlaybackJsonTicket {
         [System.IO.Path]::GetFullPath($playbackDeletionFaultReadyTicketPath),
         [System.IO.Path]::GetFullPath($playbackPendingVerificationTicketPath),
         [System.IO.Path]::GetFullPath($playbackStreamFaultReadyTicketPath),
-        [System.IO.Path]::GetFullPath($playbackStreamAbortResultTicketPath),
+        [System.IO.Path]::GetFullPath($playbackStreamEndResultTicketPath),
         [System.IO.Path]::GetFullPath($playbackStreamRestoreResultTicketPath),
         [System.IO.Path]::GetFullPath($playbackStreamCancelReadyTicketPath),
         [System.IO.Path]::GetFullPath($playbackStreamCancelResultTicketPath)
@@ -2069,9 +2069,9 @@ function New-ExactPlaybackControlSignal {
         [System.IO.Path]::GetFullPath($playbackDeletionFaultArmSignalPath),
         [System.IO.Path]::GetFullPath($playbackPendingVerificationSignalPath),
         [System.IO.Path]::GetFullPath($playbackStreamFaultArmSignalPath),
-        [System.IO.Path]::GetFullPath($playbackStreamAbortSignalPath),
+        [System.IO.Path]::GetFullPath($playbackStreamEndSignalPath),
         [System.IO.Path]::GetFullPath($playbackStreamRestoreSignalPath),
-        [System.IO.Path]::GetFullPath($playbackStreamCancelArmSignalPath),
+        [System.IO.Path]::GetFullPath($playbackStreamEndForCancelSignalPath),
         [System.IO.Path]::GetFullPath($playbackStreamCancelVerificationSignalPath),
         [System.IO.Path]::GetFullPath($playbackStopSignalPath)
     )
@@ -3919,38 +3919,38 @@ try {
         -ChannelElement $playbackCurrentChannelElement `
         -ExpectedChannelName $expectedPlaybackChannelBName
 
-    New-ExactPlaybackControlSignal -Path $playbackStreamAbortSignalPath
-    $streamAbortResultTicket = Wait-PlaybackStreamTicket `
+    New-ExactPlaybackControlSignal -Path $playbackStreamEndSignalPath
+    $streamEndResultTicket = Wait-PlaybackStreamTicket `
         -HarnessProcess $playbackHarnessProcess `
-        -TicketPath $playbackStreamAbortResultTicketPath `
+        -TicketPath $playbackStreamEndResultTicketPath `
         -AllowedControlNames ($streamBaseControlNames + @(
                 "arm-stream-fault.signal",
                 "stream-fault-ready.json",
-                "abort-stream.signal",
-                "stream-abort-result.json")) `
+                "end-stream.signal",
+                "stream-end-result.json")) `
         -AllowedProperties @(
             "IsVerified",
             "LastAssignedRequestOrdinal",
             "ActiveRequestOrdinal",
             "CurrentHeldRequestCount",
-            "ExpectedAbortCount",
-            "LastExpectedAbortOrdinal")
-    $streamAbortExpected = [ordered]@{
+            "ExpectedCompletionCount",
+            "LastExpectedCompletionOrdinal")
+    $streamEndExpected = [ordered]@{
         LastAssignedRequestOrdinal = 2L
         ActiveRequestOrdinal = 0L
         CurrentHeldRequestCount = 1L
-        ExpectedAbortCount = 1L
-        LastExpectedAbortOrdinal = 1L
+        ExpectedCompletionCount = 1L
+        LastExpectedCompletionOrdinal = 1L
     }
-    if ($streamAbortResultTicket.IsVerified -isnot [bool] -or
-        -not $streamAbortResultTicket.IsVerified) {
-        throw "The first playback stream interruption was not verified."
+    if ($streamEndResultTicket.IsVerified -isnot [bool] -or
+        -not $streamEndResultTicket.IsVerified) {
+        throw "The first playback stream completion was not verified."
     }
-    foreach ($propertyName in $streamAbortExpected.Keys) {
-        $actualValue = $streamAbortResultTicket.$propertyName
+    foreach ($propertyName in $streamEndExpected.Keys) {
+        $actualValue = $streamEndResultTicket.$propertyName
         if (($actualValue -isnot [int] -and $actualValue -isnot [long]) -or
-            [long]$actualValue -ne [long]$streamAbortExpected[$propertyName]) {
-            throw "The first playback stream interruption result is invalid."
+            [long]$actualValue -ne [long]$streamEndExpected[$propertyName]) {
+            throw "The first playback stream completion result is invalid."
         }
     }
     Wait-PackagedPlaybackStatus `
@@ -3973,8 +3973,8 @@ try {
         -AllowedControlNames ($streamBaseControlNames + @(
                 "arm-stream-fault.signal",
                 "stream-fault-ready.json",
-                "abort-stream.signal",
-                "stream-abort-result.json",
+                "end-stream.signal",
+                "stream-end-result.json",
                 "restore-stream.signal",
                 "stream-restore-result.json")) `
         -AllowedProperties @(
@@ -3982,12 +3982,14 @@ try {
             "LastAssignedRequestOrdinal",
             "ActiveRequestOrdinal",
             "CurrentHeldRequestCount",
-            "ExpectedAbortCount")
+            "ExpectedCompletionCount",
+            "LastExpectedCompletionOrdinal")
     $streamRestoreExpected = [ordered]@{
         LastAssignedRequestOrdinal = 2L
         ActiveRequestOrdinal = 2L
         CurrentHeldRequestCount = 0L
-        ExpectedAbortCount = 1L
+        ExpectedCompletionCount = 1L
+        LastExpectedCompletionOrdinal = 1L
     }
     if ($streamRestoreResultTicket.IsVerified -isnot [bool] -or
         -not $streamRestoreResultTicket.IsVerified) {
@@ -4008,33 +4010,33 @@ try {
         -TimeoutMilliseconds 10000
     $playbackReconnectRecoveryVerified = $true
 
-    New-ExactPlaybackControlSignal -Path $playbackStreamCancelArmSignalPath
+    New-ExactPlaybackControlSignal -Path $playbackStreamEndForCancelSignalPath
     $streamCancelReadyTicket = Wait-PlaybackStreamTicket `
         -HarnessProcess $playbackHarnessProcess `
         -TicketPath $playbackStreamCancelReadyTicketPath `
         -AllowedControlNames ($streamBaseControlNames + @(
                 "arm-stream-fault.signal",
                 "stream-fault-ready.json",
-                "abort-stream.signal",
-                "stream-abort-result.json",
+                "end-stream.signal",
+                "stream-end-result.json",
                 "restore-stream.signal",
                 "stream-restore-result.json",
-                "abort-stream-for-cancel.signal",
+                "end-stream-for-cancel.signal",
                 "stream-cancel-ready.json")) `
         -AllowedProperties @(
             "IsVerified",
             "LastAssignedRequestOrdinal",
             "ActiveRequestOrdinal",
             "CurrentHeldRequestCount",
-            "ExpectedAbortCount",
-            "LastExpectedAbortOrdinal",
+            "ExpectedCompletionCount",
+            "LastExpectedCompletionOrdinal",
             "RequestCountAtReady")
     $streamCancelReadyExpected = [ordered]@{
         LastAssignedRequestOrdinal = 3L
         ActiveRequestOrdinal = 0L
         CurrentHeldRequestCount = 1L
-        ExpectedAbortCount = 2L
-        LastExpectedAbortOrdinal = 2L
+        ExpectedCompletionCount = 2L
+        LastExpectedCompletionOrdinal = 2L
     }
     if ($streamCancelReadyTicket.IsVerified -isnot [bool] -or
         -not $streamCancelReadyTicket.IsVerified) {
@@ -4097,6 +4099,8 @@ try {
         "PeakHeldRequestCount",
         "PeakActiveRequestCount",
         "OverlapViolationCount",
+        "ExpectedCompletionCount",
+        "LastExpectedCompletionOrdinal",
         "ExpectedAbortCount",
         "LastExpectedAbortOrdinal",
         "ExpectedRejectCount",
@@ -4121,8 +4125,10 @@ try {
         PeakHeldRequestCount = 1L
         PeakActiveRequestCount = 1L
         OverlapViolationCount = 0L
-        ExpectedAbortCount = 2L
-        LastExpectedAbortOrdinal = 2L
+        ExpectedCompletionCount = 2L
+        LastExpectedCompletionOrdinal = 2L
+        ExpectedAbortCount = 0L
+        LastExpectedAbortOrdinal = 0L
         ExpectedRejectCount = 0L
         LastExpectedRejectOrdinal = 0L
         ClientDetachCount = 1L
@@ -4441,6 +4447,8 @@ try {
             "NormalStreamPeakHeldRequestCount",
             "NormalStreamPeakActiveRequestCount",
             "NormalStreamOverlapViolationCount",
+            "NormalStreamExpectedCompletionCount",
+            "NormalStreamLastExpectedCompletionOrdinal",
             "NormalStreamExpectedAbortCount",
             "NormalStreamLastExpectedAbortOrdinal",
             "NormalStreamExpectedRejectCount",
@@ -4459,6 +4467,8 @@ try {
             "FaultStreamPeakHeldRequestCount",
             "FaultStreamPeakActiveRequestCount",
             "FaultStreamOverlapViolationCount",
+            "FaultStreamExpectedCompletionCount",
+            "FaultStreamLastExpectedCompletionOrdinal",
             "FaultStreamExpectedAbortCount",
             "FaultStreamLastExpectedAbortOrdinal",
             "FaultStreamExpectedRejectCount",
@@ -4491,6 +4501,8 @@ try {
         "NormalStreamPeakHeldRequestCount",
         "NormalStreamPeakActiveRequestCount",
         "NormalStreamOverlapViolationCount",
+        "NormalStreamExpectedCompletionCount",
+        "NormalStreamLastExpectedCompletionOrdinal",
         "NormalStreamExpectedAbortCount",
         "NormalStreamLastExpectedAbortOrdinal",
         "NormalStreamExpectedRejectCount",
@@ -4508,6 +4520,8 @@ try {
         "FaultStreamPeakHeldRequestCount",
         "FaultStreamPeakActiveRequestCount",
         "FaultStreamOverlapViolationCount",
+        "FaultStreamExpectedCompletionCount",
+        "FaultStreamLastExpectedCompletionOrdinal",
         "FaultStreamExpectedAbortCount",
         "FaultStreamLastExpectedAbortOrdinal",
         "FaultStreamExpectedRejectCount",
@@ -4532,8 +4546,10 @@ try {
         FaultStreamPeakHeldRequestCount = 1L
         FaultStreamPeakActiveRequestCount = 1L
         FaultStreamOverlapViolationCount = 0L
-        FaultStreamExpectedAbortCount = 2L
-        FaultStreamLastExpectedAbortOrdinal = 2L
+        FaultStreamExpectedCompletionCount = 2L
+        FaultStreamLastExpectedCompletionOrdinal = 2L
+        FaultStreamExpectedAbortCount = 0L
+        FaultStreamLastExpectedAbortOrdinal = 0L
         FaultStreamExpectedRejectCount = 0L
         FaultStreamLastExpectedRejectOrdinal = 0L
         FaultStreamClientDetachCount = 1L
@@ -4583,7 +4599,6 @@ try {
         [int]$resultTicket.RequestCount -lt 27 -or
         [int]$resultTicket.CompletedResponseCount +
             [int]$resultTicket.NormalStreamClientDetachCount +
-            [int]$resultTicket.FaultStreamExpectedAbortCount +
             [int]$resultTicket.FaultStreamClientDetachCount -ne
             [int]$resultTicket.RequestCount -or
         [long]$resultTicket.CompletedBodyBytes -le 0 -or
@@ -4613,6 +4628,8 @@ try {
         [int]$resultTicket.NormalStreamCurrentHeldRequestCount -ne 0 -or
         [int]$resultTicket.NormalStreamPeakActiveRequestCount -ne 1 -or
         [int]$resultTicket.NormalStreamOverlapViolationCount -ne 0 -or
+        [int]$resultTicket.NormalStreamExpectedCompletionCount -ne 0 -or
+        [long]$resultTicket.NormalStreamLastExpectedCompletionOrdinal -ne 0 -or
         [int]$resultTicket.NormalStreamExpectedAbortCount -ne 0 -or
         [long]$resultTicket.NormalStreamLastExpectedAbortOrdinal -ne 0 -or
         [int]$resultTicket.NormalStreamExpectedRejectCount -ne 0 -or
@@ -4649,7 +4666,8 @@ try {
     $normalStreamLastAssignedRequestOrdinal =
         [long]$resultTicket.NormalStreamLastAssignedRequestOrdinal
     $normalStreamClientDetachCount = [int]$resultTicket.NormalStreamClientDetachCount
-    $faultStreamExpectedAbortCount = [int]$resultTicket.FaultStreamExpectedAbortCount
+    $faultStreamExpectedCompletionCount =
+        [int]$resultTicket.FaultStreamExpectedCompletionCount
     $faultStreamClientDetachCount = [int]$resultTicket.FaultStreamClientDetachCount
     $sourceDeletionPendingCatalogPreserved = $resultTicket.PendingTargetCatalogPreserved
     $sourceDeletionPendingConfigurationRecordPreserved =
@@ -4769,7 +4787,7 @@ try {
         FaultStreamHolding = [bool]$resultTicket.FaultStreamHolding
         FaultStreamLastAssignedRequestOrdinal =
             [long]$resultTicket.FaultStreamLastAssignedRequestOrdinal
-        FaultStreamExpectedAbortCount = $faultStreamExpectedAbortCount
+        FaultStreamExpectedCompletionCount = $faultStreamExpectedCompletionCount
         FaultStreamClientDetachCount = $faultStreamClientDetachCount
         FaultStreamCapacityRejectCount = [int]$resultTicket.FaultStreamCapacityRejectCount
         FaultStreamUnexpectedFailureCount = [int]$resultTicket.FaultStreamUnexpectedFailureCount

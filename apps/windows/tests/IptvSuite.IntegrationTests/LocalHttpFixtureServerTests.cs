@@ -245,6 +245,86 @@ public sealed class LocalHttpFixtureServerTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task ControlledStreamCompletesActiveResponseAsCleanEofWithExactAccounting()
+    {
+        byte[] body = Enumerable.Range(0, 16).Select(value => (byte)value).ToArray();
+        Dictionary<string, FixtureHttpResponse> routes = new(StringComparer.Ordinal)
+        {
+            ["/media.ts"] = new FixtureHttpResponse(
+                StatusCodes.Status200OK,
+                "video/mp2t",
+                body,
+                SupportsByteRanges: true),
+        };
+
+        await using LocalHttpFixtureServer server = await LocalHttpFixtureServer.StartAsync(routes);
+        ControlledFixtureStreamControl control = server.EnableControlledStream(
+            "/media.ts",
+            new ControlledFixtureStreamOptions
+            {
+                WriteInterval = TimeSpan.FromMilliseconds(2),
+                WriteSize = 4,
+                MaximumRequestOrdinals = 3,
+            });
+        using HttpClient client = new()
+        {
+            BaseAddress = server.BaseAddress,
+            Timeout = TimeSpan.FromSeconds(10),
+        };
+
+        using HttpResponseMessage response = await client.SendAsync(
+            new HttpRequestMessage(HttpMethod.Get, "media.ts"),
+            HttpCompletionOption.ResponseHeadersRead);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        await using Stream responseBody = await response.Content.ReadAsStreamAsync();
+        byte[] prefix = new byte[body.Length + 4];
+        await responseBody.ReadExactlyAsync(prefix);
+        CollectionAssert.AreEqual(body.Concat(body[..4]).ToArray(), prefix);
+
+        ControlledFixtureStreamSnapshot active = await WaitForControlledSnapshotAsync(
+            control,
+            snapshot => snapshot.ActiveRequestOrdinal == 1);
+        Assert.IsFalse(control.TryCompleteActive(2));
+        Assert.IsTrue(control.TryCompleteActive(active.ActiveRequestOrdinal));
+        Assert.IsFalse(control.TryCompleteActive(active.ActiveRequestOrdinal));
+
+        using var received = new MemoryStream();
+        received.Write(prefix);
+        await responseBody.CopyToAsync(received);
+        byte[] eofProbe = new byte[1];
+        Assert.AreEqual(0, await responseBody.ReadAsync(eofProbe));
+        ControlledFixtureStreamSnapshot completed = await WaitForControlledSnapshotAsync(
+            control,
+            snapshot =>
+                snapshot.ExpectedCompletionCount == 1 &&
+                snapshot.ActiveRequestOrdinal == 0);
+
+        Assert.IsGreaterThan(0, received.Length);
+        Assert.AreEqual(ControlledFixtureStreamMode.Enabled, completed.Mode);
+        Assert.AreEqual(1L, completed.LastAssignedRequestOrdinal);
+        Assert.AreEqual(0L, completed.ActiveRequestOrdinal);
+        Assert.AreEqual(0, completed.CurrentHeldRequestCount);
+        Assert.AreEqual(0, completed.PeakHeldRequestCount);
+        Assert.AreEqual(1, completed.PeakActiveRequestCount);
+        Assert.AreEqual(1, completed.ExpectedCompletionCount);
+        Assert.AreEqual(1L, completed.LastExpectedCompletionOrdinal);
+        Assert.AreEqual(0, completed.ExpectedAbortCount);
+        Assert.AreEqual(0L, completed.LastExpectedAbortOrdinal);
+        Assert.IsFalse(control.TryAbortActive(1));
+        Assert.AreEqual(0, completed.ClientDetachCount);
+        Assert.AreEqual(0, completed.ExpectedRejectCount);
+        Assert.AreEqual(0, completed.DisabledFallbackCount);
+        Assert.AreEqual(0, completed.CapacityRejectCount);
+        Assert.AreEqual(0, completed.OverlapViolationCount);
+        Assert.AreEqual(0, completed.UnexpectedFailureCount);
+        Assert.AreEqual(1, server.RequestCount);
+        Assert.AreEqual(1, server.CompletedResponseCount);
+        Assert.AreEqual(received.Length, server.CompletedBodyBytes);
+        Assert.AreEqual(0, server.FailureCount);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task ControlledStreamBoundsOrdinalsAndClassifiesHeldClientDetachWithoutOverlap()
     {
         byte[] body = Enumerable.Range(0, 8).Select(value => (byte)value).ToArray();

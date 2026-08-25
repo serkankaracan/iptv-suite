@@ -549,6 +549,8 @@ public sealed record ControlledFixtureStreamSnapshot(
     int OverlapViolationCount,
     int ExpectedAbortCount,
     long LastExpectedAbortOrdinal,
+    int ExpectedCompletionCount,
+    long LastExpectedCompletionOrdinal,
     int ExpectedRejectCount,
     long LastExpectedRejectOrdinal,
     int ClientDetachCount,
@@ -573,6 +575,8 @@ public sealed class ControlledFixtureStreamControl
     private int _overlapViolationCount;
     private int _expectedAbortCount;
     private long _lastExpectedAbortOrdinal;
+    private int _expectedCompletionCount;
+    private long _lastExpectedCompletionOrdinal;
     private int _expectedRejectCount;
     private long _lastExpectedRejectOrdinal;
     private int _clientDetachCount;
@@ -604,6 +608,8 @@ public sealed class ControlledFixtureStreamControl
                     _overlapViolationCount,
                     _expectedAbortCount,
                     _lastExpectedAbortOrdinal,
+                    _expectedCompletionCount,
+                    _lastExpectedCompletionOrdinal,
                     _expectedRejectCount,
                     _lastExpectedRejectOrdinal,
                     _clientDetachCount,
@@ -650,6 +656,38 @@ public sealed class ControlledFixtureStreamControl
             }
 
             _activeRequest.State = ActiveControlledRequestState.AbortRequested;
+            cancellation = _activeRequest.Cancellation;
+        }
+
+        try
+        {
+            cancellation.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        return true;
+    }
+
+    public bool TryCompleteActive(long expectedRequestOrdinal)
+    {
+        if (expectedRequestOrdinal <= 0)
+        {
+            return false;
+        }
+
+        CancellationTokenSource cancellation;
+        lock (_gate)
+        {
+            if (_activeRequest is null ||
+                _activeRequest.Ordinal != expectedRequestOrdinal ||
+                _activeRequest.State != ActiveControlledRequestState.Active)
+            {
+                return false;
+            }
+
+            _activeRequest.State = ActiveControlledRequestState.CompletionRequested;
             cancellation = _activeRequest.Cancellation;
         }
 
@@ -867,6 +905,11 @@ public sealed class ControlledFixtureStreamControl
                 Interlocked.Increment(ref metrics.FailureCount);
             }
 
+            if (terminalOutcome == ControlledRequestOutcome.ExpectedCompletion)
+            {
+                Interlocked.Increment(ref metrics.CompletedResponseCount);
+            }
+
             if (terminalOutcome == ControlledRequestOutcome.ExpectedAbort)
             {
                 context.Abort();
@@ -889,10 +932,14 @@ public sealed class ControlledFixtureStreamControl
                 return ControlledRequestOutcome.UnexpectedFailure;
             }
 
-            ControlledRequestOutcome outcome =
-                activeRequest.State == ActiveControlledRequestState.AbortRequested
-                    ? ControlledRequestOutcome.ExpectedAbort
-                    : observedOutcome;
+            ControlledRequestOutcome outcome = activeRequest.State switch
+            {
+                ActiveControlledRequestState.AbortRequested =>
+                    ControlledRequestOutcome.ExpectedAbort,
+                ActiveControlledRequestState.CompletionRequested =>
+                    ControlledRequestOutcome.ExpectedCompletion,
+                _ => observedOutcome,
+            };
             activeRequest.State = ActiveControlledRequestState.Terminal;
             _activeRequest = null;
             switch (outcome)
@@ -900,6 +947,10 @@ public sealed class ControlledFixtureStreamControl
                 case ControlledRequestOutcome.ExpectedAbort:
                     IncrementBounded(ref _expectedAbortCount);
                     _lastExpectedAbortOrdinal = activeRequest.Ordinal;
+                    break;
+                case ControlledRequestOutcome.ExpectedCompletion:
+                    IncrementBounded(ref _expectedCompletionCount);
+                    _lastExpectedCompletionOrdinal = activeRequest.Ordinal;
                     break;
                 case ControlledRequestOutcome.ClientDetached:
                     IncrementBounded(ref _clientDetachCount);
@@ -1034,6 +1085,7 @@ internal sealed record ControlledRequestAdmission(
 internal enum ControlledRequestOutcome
 {
     ExpectedAbort,
+    ExpectedCompletion,
     ClientDetached,
     UnexpectedFailure,
 }
@@ -1042,5 +1094,6 @@ internal enum ActiveControlledRequestState
 {
     Active,
     AbortRequested,
+    CompletionRequested,
     Terminal,
 }

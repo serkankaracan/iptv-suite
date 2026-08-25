@@ -635,7 +635,6 @@ public sealed class DependencyRulesTests
             RepositoryRoot,
             "eng",
             "Invoke-WindowsPackageSmoke.ps1"));
-
         StringAssert.Contains(page, "<ItemsStackPanel CacheLength=\"1\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSourceSelector\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogCategorySelector\"");
@@ -4934,16 +4933,23 @@ public sealed class DependencyRulesTests
             RepositoryRoot,
             "eng",
             "Invoke-WindowsPackageSmoke.ps1"));
+        string fixtureServer = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.Testing",
+            "LocalHttpFixtureServer.cs"));
 
         string[] exactStreamProtocolNames =
         [
             "arm-stream-fault.signal",
             "stream-fault-ready.json",
-            "abort-stream.signal",
-            "stream-abort-result.json",
+            "end-stream.signal",
+            "stream-end-result.json",
             "restore-stream.signal",
             "stream-restore-result.json",
-            "abort-stream-for-cancel.signal",
+            "end-stream-for-cancel.signal",
             "stream-cancel-ready.json",
             "verify-stream-cancel.signal",
             "stream-cancel-result.json",
@@ -4955,7 +4961,7 @@ public sealed class DependencyRulesTests
         }
 
         const string streamProtocolPattern =
-            "\"(?<name>(?:(?:arm|abort|restore|verify)-stream[^\"]*\\.signal|" +
+            "\"(?<name>(?:(?:arm|end|restore|verify)-stream[^\"]*\\.signal|" +
             "stream-[^\"]*\\.json))\"";
         string[] harnessProtocolNames = Regex.Matches(
                 harness,
@@ -5026,6 +5032,7 @@ public sealed class DependencyRulesTests
                      "snapshot.ClientDetachCount == snapshot.LastAssignedRequestOrdinal",
                      "snapshot.LastClientDetachOrdinal == snapshot.LastAssignedRequestOrdinal",
                      "snapshot.OverlapViolationCount == 0",
+                     "snapshot.ExpectedCompletionCount == 0",
                      "snapshot.ExpectedAbortCount == 0",
                      "snapshot.ExpectedRejectCount == 0",
                      "snapshot.DisabledFallbackCount == 0",
@@ -5063,14 +5070,19 @@ public sealed class DependencyRulesTests
         [
             "snapshot.LastAssignedRequestOrdinal == 1",
             "snapshot.ActiveRequestOrdinal == 1",
-            "faultStreamControl.TryAbortActive(1)",
+            "faultStreamControl.TryCompleteActive(1)",
             "snapshot.LastAssignedRequestOrdinal == 2",
+            "snapshot.ExpectedCompletionCount == 1",
+            "snapshot.LastExpectedCompletionOrdinal == 1",
             "faultStreamControl.Restore()",
             "snapshot.ActiveRequestOrdinal == 2",
-            "faultStreamControl.TryAbortActive(2)",
+            "beforeCancelEnd.ExpectedCompletionCount != 1",
+            "faultStreamControl.TryCompleteActive(2)",
             "snapshot.LastAssignedRequestOrdinal == 3",
-            "snapshot.ExpectedAbortCount == 2",
-            "snapshot.LastExpectedAbortOrdinal == 2",
+            "snapshot.ExpectedCompletionCount == 2",
+            "snapshot.LastExpectedCompletionOrdinal == 2",
+            "snapshot.ExpectedAbortCount == 0",
+            "snapshot.LastExpectedAbortOrdinal == 0",
             "snapshot.ClientDetachCount == 1",
             "snapshot.LastClientDetachOrdinal == 3",
         ];
@@ -5091,10 +5103,29 @@ public sealed class DependencyRulesTests
         StringAssert.Matches(
             harness,
             new Regex(@"TimeSpan\.FromSeconds\(\s*31\s*\)", RegexOptions.CultureInvariant));
+        Assert.IsFalse(
+            harness.Contains("TryAbortActive(", StringComparison.Ordinal),
+            "Signed recovery/cancel evidence must use clean EOF, not transport aborts.");
+        Assert.AreEqual(
+            2,
+            Regex.Count(
+                packageSmoke,
+                @"-ExpectedStatus\s+""Reconnect attempt 1 of 3 is starting\.""",
+                RegexOptions.CultureInvariant),
+            "Both recovery and cancellation must observe the exact first reconnect attempt.");
+        Assert.AreEqual(
+            2,
+            Regex.Count(
+                packageSmoke,
+                @"-ExpectedName\s+""Cancel reconnect""",
+                RegexOptions.CultureInvariant),
+            "Both reconnect phases must expose the exact cancellation control.");
 
         foreach (string exactMetric in new[]
                  {
                      "LastAssignedRequestOrdinal",
+                     "LastExpectedCompletionOrdinal",
+                     "ExpectedCompletionCount",
                      "LastExpectedAbortOrdinal",
                      "ExpectedAbortCount",
                      "LastClientDetachOrdinal",
@@ -5147,7 +5178,6 @@ public sealed class DependencyRulesTests
         const string exactAccountingPattern =
             @"\[int\]\$resultTicket\.CompletedResponseCount\s*\+\s*" +
             @"\[int\]\$resultTicket\.NormalStreamClientDetachCount\s*\+\s*" +
-            @"\[int\]\$resultTicket\.FaultStreamExpectedAbortCount\s*\+\s*" +
             @"\[int\]\$resultTicket\.FaultStreamClientDetachCount\s*" +
             @"-ne\s*\[int\]\$resultTicket\.RequestCount";
         Assert.AreEqual(
@@ -5156,10 +5186,12 @@ public sealed class DependencyRulesTests
                 packageSmoke,
                 exactAccountingPattern,
                 RegexOptions.CultureInvariant),
-            "Every request must have one exact completed, normal-detach, fault-abort, or fault-detach owner.");
+            "Every request must have one exact completed, normal-detach, or fault-detach owner.");
         foreach (string exactResultMetric in new[]
                  {
                      "FaultStreamLastAssignedRequestOrdinal",
+                     "FaultStreamExpectedCompletionCount",
+                     "FaultStreamLastExpectedCompletionOrdinal",
                      "FaultStreamExpectedAbortCount",
                      "FaultStreamLastExpectedAbortOrdinal",
                      "FaultStreamClientDetachCount",
@@ -5177,7 +5209,7 @@ public sealed class DependencyRulesTests
         string[] streamTicketTypes =
         [
             "StreamFaultReadyTicket",
-            "StreamAbortResultTicket",
+            "StreamEndResultTicket",
             "StreamRestoreResultTicket",
             "StreamCancelReadyTicket",
             "StreamCancelResultTicket",
@@ -5228,6 +5260,8 @@ public sealed class DependencyRulesTests
             "PeakHeldRequestCount",
             "PeakActiveRequestCount",
             "OverlapViolationCount",
+            "ExpectedCompletionCount",
+            "LastExpectedCompletionOrdinal",
             "ExpectedAbortCount",
             "LastExpectedAbortOrdinal",
             "ExpectedRejectCount",
@@ -5247,6 +5281,26 @@ public sealed class DependencyRulesTests
             .Select(match => match.Groups["field"].Value)
             .ToArray();
         CollectionAssert.AreEquivalent(exactFinalCancelFields, actualFinalCancelFields);
+
+        StringAssert.Contains(fixtureServer, "public bool TryCompleteActive(long expectedRequestOrdinal)");
+        StringAssert.Contains(
+            fixtureServer,
+            "_activeRequest.State = ActiveControlledRequestState.CompletionRequested;");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                fixtureServer,
+                @"ActiveControlledRequestState\.CompletionRequested\s*=>\s*" +
+                @"ControlledRequestOutcome\.ExpectedCompletion",
+                RegexOptions.CultureInvariant),
+            "An explicit clean completion must be accounted as an expected completion.");
+        StringAssert.Contains(
+            fixtureServer,
+            "Interlocked.Increment(ref metrics.CompletedResponseCount);");
+        StringAssert.Contains(fixtureServer, "case ControlledRequestOutcome.ExpectedCompletion:");
+        StringAssert.Contains(fixtureServer, "IncrementBounded(ref _expectedCompletionCount);");
+        StringAssert.Contains(
+            fixtureServer,
+            "_lastExpectedCompletionOrdinal = activeRequest.Ordinal;");
     }
 
     [TestMethod]
