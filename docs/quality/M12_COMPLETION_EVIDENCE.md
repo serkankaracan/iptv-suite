@@ -14,25 +14,30 @@ M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback ko
 - [GitHub Actions run `32783701519`](https://github.com/serkankaracan/iptv-suite/actions/runs/32783701519), commit `b10b6ceb56eaba51668169dca904524808f4517b` için locked quality, signed package ve DPAPI boundary işlerini geçti. Bu checkpoint product source-delete UI route'unu build/architecture düzeyinde korur; product-level delete E2E kanıtı değildir.
 - [GitHub Actions run `32785306860`](https://github.com/serkankaracan/iptv-suite/actions/runs/32785306860), commit `33afcef741f518b439c9934b0f4035fd92662586` için yeni signed short-run resource guard'ını ve bütün required işleri geçti. İndirilen evidence `PlaybackResourceBudgetVerified=true` taşır.
 - [GitHub Actions run `32792088083`](https://github.com/serkankaracan/iptv-suite/actions/runs/32792088083), commit `4e96b27e1397c10df82b63531a3c3f227fe0f774` için locked quality, signed package, gerçek-user DPAPI boundary ve Required Windows gate işlerini geçti. İndirilen `3.522` byte MSIX evidence SHA-256 `0e07d37d388439bcbdd7d506c7b8d37a8b28e5e1b3f718dccc132aa212be8053` ve exact commit/SDK bağını taşır.
+- [GitHub Actions run `32796910469`](https://github.com/serkankaracan/iptv-suite/actions/runs/32796910469), commit `45124f72cc62b21942790c39bd032242706af339` için locked quality, signed package, gerçek-user DPAPI boundary ve Required Windows gate işlerini geçti. İndirilen `3.973` byte MSIX evidence SHA-256 `882f42b5c649358cbb700459f012b3df694cf5da9fb298ec7ca313ec135ed618`, exact commit/SDK bağını ve pending-failure/restart/manual-retry source-delete sonuçlarını taşır.
 
 | Otomatik acceptance alanı | Sonuç |
 |---|---:|
-| Rapid switch | `25`; p95 `2231,596 ms`; maksimum `2232,186 ms` |
+| Rapid switch | `25`; p95 `2228,312 ms`; maksimum `2244,541 ms` |
 | Fullscreen enter / exit / focus restore | `true / true / true` |
 | Surface bounds / resize | `true / true`; `2` resize |
 | Minimize / restore / state preservation | `true / true / true` |
 | Volume / mute / aspect | `true / true / true` |
 | Resource snapshot / active close | `true / true` |
-| UI request / completed response | `79 / 79`; `52.052.020` byte |
+| UI request / completed response | `88 / 88`; `57.987.980` byte |
 | Normal close / package removed | `true / true` |
 
 ## Protected source-delete kabulü
 
-`VERIFIED — run 32792088083`: Signed production package'ta 50k kayıtlı sibling source korunurken iki Tier-A kanallı protected hedef source için cancel ve dialog-close yolları read-only oracle ile mutasyonsuz kaldı. Confirm yolu aktif playback'i durdurup source admission'ını kapattı; relaunch hedefi yeniden kabul etmedi. Son read-only katalog/DPAPI oracle'ları hedef source, snapshot, snapshot key, category, channel, protected locator, favorite ve sync-run kayıtlarının yokluğunu; completed tombstone binding'i ve sibling katalogdaki exact 50k kaydın korunduğunu doğruladı.
+`VERIFIED — run 32796910469`: Signed production package'ta 50k kayıtlı sibling source korunurken iki Tier-A kanallı protected hedef source için cancel ve dialog-close yolları read-only oracle ile mutasyonsuz kaldı. Controller'ın explicit arm işaretinden sonra harness exact configuration record üzerinde yalnız delete'i engelleyen bounded lease açtı. Confirm yolu aktif playback'i durdurdu, source'u durable `DeletionPending` durumuna aldı ve yeni admission'ı kapattı. Relaunch pending source'u yeniden kabul etmedi; read-only oracle exact hedef katalog grafiğini, configuration record'u, incomplete tombstone binding'ini ve sibling katalogu korundu olarak doğruladı. Fault bırakıldıktan sonra yalnız production manual-retry entry point'i kullanıldı. Son relaunch hedefi kabul etmedi; final read-only katalog/DPAPI oracle'ları hedef source, snapshot, snapshot key, category, channel, protected locator, favorite ve sync-run kayıtlarının yokluğunu, completed tombstone binding'ini ve sibling katalogdaki exact 50k kaydın korunduğunu doğruladı.
 
 | Source-delete alanı | Sonuç |
 |---|---:|
 | Cancel no-mutation / dialog-close no-mutation | `true / true` |
+| Pending failure / restart admission blocked | `true / true` |
+| Pending catalog / configuration record preserved | `true / true` |
+| Pending tombstone binding / sibling retained | `true / true` |
+| Fault released / manual retry | `true / true` |
 | Active playback drain / restart non-admission | `true / true` |
 | Target catalog / protected records deleted | `true / true` |
 | Tombstone binding completed / sibling catalog retained | `true / true` |
@@ -43,10 +48,10 @@ Bu kanıt test-only doğrudan kayıt silme değildir: kullanıcıya görünen pr
 
 | Sayaç | Baseline | Final | Delta |
 |---|---:|---:|---:|
-| Private bytes | `76.722.176` | `73.543.680` | `-3.178.496` |
-| Working set | `190.877.696` | `198.156.288` | `+7.278.592` |
-| Handle | `1.851` | `1.905` | `+54` |
-| Thread | `51` | `49` | `-2` |
+| Private bytes | `76.849.152` | `74.043.392` | `-2.805.760` |
+| Working set | `193.007.616` | `199.069.696` | `+6.062.080` |
+| Handle | `1.943` | `1.934` | `-9` |
+| Thread | `54` | `48` | `-6` |
 
 `VERIFIED`: Sayaçlar warmed playback sonrasındaki baseline ile 25 rapid switch ve explicit stop sonrasındaki final snapshot'tan alınmıştır; snapshot zinciri ve active-close doğrulaması geçmiştir.
 
@@ -63,7 +68,7 @@ Aşağıdaki maddeler `NOT RUN` durumundadır ve M12'yi `COMPLETED` yazmayı eng
 - iki gerçek audio endpoint arasında default-output değişimi;
 - Narrator ile exploratory accessibility/keyboard/focus akışı.
 
-Source-release coordinator contract'ının unit/race testleri tek başına product-level delete orchestration kanıtı değildir; run `32792088083` bu açığı production entry point üzerinden kapatır. Doğrudan SQLite/DPAPI kaydı silmek kabul testi yerine kullanılamaz. M13 reconnect kapsamı, M10'un koşullu relative-memory sapması, WACK/Store, gerçek cihaz/HW-decode ve M16 final soak ayrı kapılarda kalır.
+Source-release coordinator contract'ının unit/race testleri tek başına product-level delete orchestration kanıtı değildir; run `32796910469` success ve injected pending-failure/manual-retry yollarını production entry point üzerinden kapatır. Doğrudan SQLite/DPAPI kaydı silmek kabul testi yerine kullanılamaz. M13 reconnect kapsamı, M10'un koşullu relative-memory sapması, WACK/Store, gerçek cihaz/HW-decode ve M16 final soak ayrı kapılarda kalır.
 
 ## Kaynaklar
 
