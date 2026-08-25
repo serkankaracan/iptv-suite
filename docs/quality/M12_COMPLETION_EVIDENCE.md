@@ -4,7 +4,7 @@
 
 ## Doğrulanan sınır
 
-M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback kontrollerini, fullscreen enter/exit ve focus dönüşünü, iki pencere resize'ını, minimize/restore sırasında kanal ve playback state'inin korunmasını, 25 hızlı kanal geçişini ve aktif playback sırasında normal window-close teardown'unu kapsar. Application katmanındaki suspend policy yalnız `SystemSuspendStatus.Entering` olayında playback'i durdurur; resume otomatik playback başlatmaz. Exact source için release contract'ı replacement session'ı durdurmadan mevcut session'ı drain eder [S131]. Windows-native player sistemin varsayılan audio render endpoint'ini kullanır; gerçek endpoint değişimi aşağıdaki fiziksel matriste açık kalır [S132].
+M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback kontrollerini, fullscreen enter/exit ve focus dönüşünü, iki pencere resize'ını, minimize/restore sırasında kanal ve playback state'inin korunmasını, 25 hızlı kanal geçişini, aktif playback sırasında normal window-close teardown'unu ve protected source-delete uçtan uca zincirini kapsar. Application katmanındaki suspend policy yalnız `SystemSuspendStatus.Entering` olayında playback'i durdurur; resume otomatik playback başlatmaz. Exact source için release contract'ı replacement session'ı durdurmadan mevcut session'ı drain eder [S131]. Windows-native player sistemin varsayılan audio render endpoint'ini kullanır; gerçek endpoint değişimi aşağıdaki fiziksel matriste açık kalır [S132].
 
 ## Commit-bound hosted kanıt
 
@@ -13,6 +13,7 @@ M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback ko
 - `VERIFIED`: Bütün UI/control, fullscreen, resize, minimize/restore, state-preservation, resource-snapshot ve active-close Boolean alanları `true`dur.
 - [GitHub Actions run `32783701519`](https://github.com/serkankaracan/iptv-suite/actions/runs/32783701519), commit `b10b6ceb56eaba51668169dca904524808f4517b` için locked quality, signed package ve DPAPI boundary işlerini geçti. Bu checkpoint product source-delete UI route'unu build/architecture düzeyinde korur; product-level delete E2E kanıtı değildir.
 - [GitHub Actions run `32785306860`](https://github.com/serkankaracan/iptv-suite/actions/runs/32785306860), commit `33afcef741f518b439c9934b0f4035fd92662586` için yeni signed short-run resource guard'ını ve bütün required işleri geçti. İndirilen evidence `PlaybackResourceBudgetVerified=true` taşır.
+- [GitHub Actions run `32792088083`](https://github.com/serkankaracan/iptv-suite/actions/runs/32792088083), commit `4e96b27e1397c10df82b63531a3c3f227fe0f774` için locked quality, signed package, gerçek-user DPAPI boundary ve Required Windows gate işlerini geçti. İndirilen `3.522` byte MSIX evidence SHA-256 `0e07d37d388439bcbdd7d506c7b8d37a8b28e5e1b3f718dccc132aa212be8053` ve exact commit/SDK bağını taşır.
 
 | Otomatik acceptance alanı | Sonuç |
 |---|---:|
@@ -24,6 +25,19 @@ M12'nin otomatikleştirilebilen production-package dilimi; app-owned playback ko
 | Resource snapshot / active close | `true / true` |
 | UI request / completed response | `79 / 79`; `52.052.020` byte |
 | Normal close / package removed | `true / true` |
+
+## Protected source-delete kabulü
+
+`VERIFIED — run 32792088083`: Signed production package'ta 50k kayıtlı sibling source korunurken iki Tier-A kanallı protected hedef source için cancel ve dialog-close yolları read-only oracle ile mutasyonsuz kaldı. Confirm yolu aktif playback'i durdurup source admission'ını kapattı; relaunch hedefi yeniden kabul etmedi. Son read-only katalog/DPAPI oracle'ları hedef source, snapshot, snapshot key, category, channel, protected locator, favorite ve sync-run kayıtlarının yokluğunu; completed tombstone binding'i ve sibling katalogdaki exact 50k kaydın korunduğunu doğruladı.
+
+| Source-delete alanı | Sonuç |
+|---|---:|
+| Cancel no-mutation / dialog-close no-mutation | `true / true` |
+| Active playback drain / restart non-admission | `true / true` |
+| Target catalog / protected records deleted | `true / true` |
+| Tombstone binding completed / sibling catalog retained | `true / true` |
+
+Bu kanıt test-only doğrudan kayıt silme değildir: kullanıcıya görünen production source-delete entry point'ini, gerçek packaged UIA akışını, production SQLite coordinator'ını ve DPAPI `CurrentUser` store'unu birlikte kullanır. Assertion, security boundary veya cleanup kapsamı gevşetilmemiştir.
 
 ## Resource kalibrasyonu
 
@@ -47,10 +61,9 @@ Aşağıdaki maddeler `NOT RUN` durumundadır ve M12'yi `COMPLETED` yazmayı eng
 - fiziksel Windows Client'ta `%100 / %150 / %200` DPI ve mixed-DPI multi-monitor geçişleri;
 - gerçek sleep/Modern Standby → wake davranışı ve kullanıcı intent'i olmadan autoplay yapılmaması;
 - iki gerçek audio endpoint arasında default-output değişimi;
-- Narrator ile exploratory accessibility/keyboard/focus akışı;
-- product-level source delete entry point'i üzerinden stop/drain/delete uçtan uca zinciri.
+- Narrator ile exploratory accessibility/keyboard/focus akışı.
 
-Source-release coordinator contract'ının unit/race testleri product-level delete orchestration kanıtı değildir. Doğrudan SQLite/DPAPI kaydı silmek kabul testi yerine kullanılamaz. M13 reconnect kapsamı, M10'un koşullu relative-memory sapması, WACK/Store, gerçek cihaz/HW-decode ve M16 final soak ayrı kapılarda kalır.
+Source-release coordinator contract'ının unit/race testleri tek başına product-level delete orchestration kanıtı değildir; run `32792088083` bu açığı production entry point üzerinden kapatır. Doğrudan SQLite/DPAPI kaydı silmek kabul testi yerine kullanılamaz. M13 reconnect kapsamı, M10'un koşullu relative-memory sapması, WACK/Store, gerçek cihaz/HW-decode ve M16 final soak ayrı kapılarda kalır.
 
 ## Kaynaklar
 
