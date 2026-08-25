@@ -4250,6 +4250,9 @@ public sealed class DependencyRulesTests
                      "cancel-result.json",
                      "verify-dialog-close.signal",
                      "dialog-close-result.json",
+                     "delete-failure-ready.json",
+                     "verify-pending.signal",
+                     "pending-result.json",
                  })
         {
             StringAssert.Contains(harness, protocolName);
@@ -4259,13 +4262,20 @@ public sealed class DependencyRulesTests
         int preservedStart = harness.IndexOf(
             "private static async Task<PreservationOracleResult> VerifyPreservedStateAsync(",
             StringComparison.Ordinal);
+        int pendingStart = harness.IndexOf(
+            "private static async Task<PendingOracleResult> VerifyPendingStateAsync(",
+            StringComparison.Ordinal);
         int deletedStart = harness.IndexOf(
             "private static async Task<DeletionOracleResult> VerifyDeletedStateAsync(",
             StringComparison.Ordinal);
         int connectionStart = harness.IndexOf(
             "private static async Task<SqliteConnection> OpenReadOnlyConnectionAsync(",
             StringComparison.Ordinal);
-        Assert.IsTrue(preservedStart >= 0 && deletedStart > preservedStart && connectionStart > deletedStart);
+        Assert.IsTrue(
+            preservedStart >= 0 &&
+            pendingStart > preservedStart &&
+            deletedStart > pendingStart &&
+            connectionStart > deletedStart);
         string liveOracles = harness[preservedStart..connectionStart];
         Assert.IsFalse(liveOracles.Contains("SqliteCatalogQuery", StringComparison.Ordinal));
         Assert.IsFalse(liveOracles.Contains("SqlitePlaybackSourceResolver", StringComparison.Ordinal));
@@ -4277,15 +4287,15 @@ public sealed class DependencyRulesTests
             Regex.Count(
                 liveOracles,
                 @"\.BeginTransaction\(deferred: true\)",
-                RegexOptions.CultureInvariant) == 2,
+                RegexOptions.CultureInvariant) == 3,
             "Each live state oracle must use exactly one read-only transaction.");
         Assert.AreEqual(
-            3,
+            4,
             Regex.Count(
                 harness,
                 @"\.BeginTransaction\(deferred: true\)",
                 RegexOptions.CultureInvariant),
-            "The seed baseline and both live oracles must use deferred read-only transactions.");
+            "The seed baseline and three live oracles must use deferred read-only transactions.");
 
         foreach (string exactGraphOracle in new[]
                  {
@@ -4298,6 +4308,7 @@ public sealed class DependencyRulesTests
                      "SELECT count(*) FROM favorites WHERE source_id = $source;",
                      "SELECT count(*) FROM sync_runs WHERE source_id = $source;",
                      "FROM source_deletion_tombstones",
+                     "reader.GetInt64(3) == 0",
                      "reader.GetInt64(3) == 1",
                  })
         {
@@ -4313,6 +4324,29 @@ public sealed class DependencyRulesTests
             harness,
             "public void Dispose() => CryptographicOperations.ZeroMemory(ExpectedConfigurationDigest);");
         StringAssert.Contains(harness, "SecretStoreFailure.ProtectedRecordUnavailable");
+        StringAssert.Contains(harness, "target.Status == ContentSourceStatus.DeletionPending");
+
+        int faultLeaseStart = harness.IndexOf(
+            "private static FileStream OpenDeletionFaultLease(",
+            StringComparison.Ordinal);
+        int pendingOracleStart = harness.IndexOf(
+            "private static async Task<PendingOracleResult> VerifyPendingStateAsync(",
+            faultLeaseStart,
+            StringComparison.Ordinal);
+        Assert.IsTrue(faultLeaseStart >= 0 && pendingOracleStart > faultLeaseStart);
+        string faultLease = harness[faultLeaseStart..pendingOracleStart];
+        StringAssert.Contains(faultLease, "Share = FileShare.Read,");
+        Assert.IsFalse(faultLease.Contains("FileShare.Delete", StringComparison.Ordinal));
+        StringAssert.Contains(harness, "record-v2-");
+        StringAssert.Contains(harness, "IsProtectedRecordFileName");
+        int releaseLease = harness.IndexOf(
+            "deletionFaultLease.Dispose();",
+            StringComparison.Ordinal);
+        int pendingTicket = harness.IndexOf(
+            "new PendingVerificationTicket(",
+            releaseLease,
+            StringComparison.Ordinal);
+        Assert.IsTrue(releaseLease >= 0 && pendingTicket > releaseLease);
 
         int phaseWaitStart = harness.IndexOf(
             "private static async Task<bool> WaitForPhaseSignalAsync(",
@@ -4350,13 +4384,33 @@ public sealed class DependencyRulesTests
             "New-ExactPlaybackControlSignal -Path $playbackDialogCloseVerificationSignalPath",
             cancelInvoke,
             StringComparison.Ordinal);
+        int deletionFaultReady = packageSmoke.IndexOf(
+            "Wait-PlaybackDeletionFaultReadyTicket",
+            dialogCloseSignal,
+            StringComparison.Ordinal);
         int confirmedDelete = packageSmoke.IndexOf(
             "$confirmDeleteButtonElement = Wait-PackagedSourceDeletionDialogButton",
-            dialogCloseSignal,
+            deletionFaultReady,
+            StringComparison.Ordinal);
+        int pendingFailure = packageSmoke.IndexOf(
+            "$sourceDeletionPendingFailureVerified = $true",
+            confirmedDelete,
+            StringComparison.Ordinal);
+        int pendingRestartBlocked = packageSmoke.IndexOf(
+            "$sourceDeletionPendingRestartAdmissionBlockedVerified = $true",
+            pendingFailure,
+            StringComparison.Ordinal);
+        int pendingSignal = packageSmoke.IndexOf(
+            "New-ExactPlaybackControlSignal -Path $playbackPendingVerificationSignalPath",
+            pendingRestartBlocked,
+            StringComparison.Ordinal);
+        int manualRetry = packageSmoke.IndexOf(
+            "$sourceDeletionManualRetryVerified = $true",
+            pendingSignal,
             StringComparison.Ordinal);
         int restartNonAdmission = packageSmoke.IndexOf(
             "$sourceDeletionRestartNonAdmissionVerified = $true",
-            confirmedDelete,
+            manualRetry,
             StringComparison.Ordinal);
         int finalStop = packageSmoke.IndexOf(
             "New-ExactPlaybackControlSignal -Path $playbackStopSignalPath",
@@ -4366,8 +4420,13 @@ public sealed class DependencyRulesTests
             resourceGuard >= 0 &&
             cancelInvoke > resourceGuard &&
             dialogCloseSignal > cancelInvoke &&
-            confirmedDelete > dialogCloseSignal &&
-            restartNonAdmission > confirmedDelete &&
+            deletionFaultReady > dialogCloseSignal &&
+            confirmedDelete > deletionFaultReady &&
+            pendingFailure > confirmedDelete &&
+            pendingRestartBlocked > pendingFailure &&
+            pendingSignal > pendingRestartBlocked &&
+            manualRetry > pendingSignal &&
+            restartNonAdmission > manualRetry &&
             finalStop > restartNonAdmission,
             "Packaged deletion must run after the resource guard and preserve the exact bounded phase order.");
         StringAssert.Contains(packageSmoke, "\"CatalogDeleteSourceButton\"");
@@ -4382,10 +4441,28 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$launchedProcess = $null");
         StringAssert.Contains(packageSmoke, "$playbackWindowHandle = [IntPtr]::Zero");
         StringAssert.Contains(packageSmoke, "$playbackAutomationRoot = $null");
-        StringAssert.Contains(packageSmoke, "Wait-PackagedDeletedSourceState -Instance $deleteInstance");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedPendingSourceCleanupState -Instance $deleteInstance");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedPendingSourceCleanupState");
+        StringAssert.Contains(packageSmoke, "\"CatalogRetryPendingDeletionButton\"");
+        StringAssert.Contains(
+            packageSmoke,
+            "\"Pending source cleanup must finish before the catalog can be opened.\"");
+        StringAssert.Contains(packageSmoke, "Wait-PlaybackPendingDeletionTicket");
+        StringAssert.Contains(
+            packageSmoke,
+            "$retryPendingDeletionButtonElement = Get-RequiredAutomationElement");
+        StringAssert.Contains(packageSmoke, "Wait-PackagedDeletedSourceState -Instance $pendingRestartInstance");
         StringAssert.Contains(packageSmoke, "Wait-PackagedDeletedSourceState -Instance $restartInstance");
         StringAssert.Contains(packageSmoke, "SourceDeletionCancelNoMutationVerified");
         StringAssert.Contains(packageSmoke, "SourceDeletionDialogCloseNoMutationVerified");
+        StringAssert.Contains(packageSmoke, "SourceDeletionPendingFailureVerified");
+        StringAssert.Contains(packageSmoke, "SourceDeletionPendingRestartAdmissionBlockedVerified");
+        StringAssert.Contains(packageSmoke, "SourceDeletionPendingCatalogPreserved");
+        StringAssert.Contains(packageSmoke, "SourceDeletionPendingConfigurationRecordPreserved");
+        StringAssert.Contains(packageSmoke, "SourceDeletionPendingTombstoneBindingVerified");
+        StringAssert.Contains(packageSmoke, "SourceDeletionPendingSiblingCatalogRetained");
+        StringAssert.Contains(packageSmoke, "SourceDeletionFaultReleased");
+        StringAssert.Contains(packageSmoke, "SourceDeletionManualRetryVerified");
         StringAssert.Contains(packageSmoke, "SourceDeletionTargetCatalogDeleted");
         StringAssert.Contains(packageSmoke, "SourceDeletionProtectedRecordsDeleted");
         StringAssert.Contains(packageSmoke, "SourceDeletionTombstoneBindingCompleted");

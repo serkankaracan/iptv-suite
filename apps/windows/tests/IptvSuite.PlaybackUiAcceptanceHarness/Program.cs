@@ -32,6 +32,9 @@ internal static class Program
     private const string CancelVerificationTicketName = "cancel-result.json";
     private const string DialogCloseVerificationSignalName = "verify-dialog-close.signal";
     private const string DialogCloseVerificationTicketName = "dialog-close-result.json";
+    private const string DeletionFaultReadyTicketName = "delete-failure-ready.json";
+    private const string PendingVerificationSignalName = "verify-pending.signal";
+    private const string PendingVerificationTicketName = "pending-result.json";
     private const string PublicCertificateName = "loopback.cer";
     private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(5);
     private static readonly JsonSerializerOptions TicketJsonOptions = new()
@@ -100,11 +103,18 @@ internal static class Program
         bool stoppedGracefully = false;
         bool cancelNoMutationVerified = false;
         bool dialogCloseNoMutationVerified = false;
+        bool pendingDeletionVerified = false;
+        bool pendingTargetCatalogPreserved = false;
+        bool pendingConfigurationRecordPreserved = false;
+        bool pendingTombstoneBindingVerified = false;
+        bool pendingSiblingCatalogRetained = false;
+        bool deletionFaultReleased = false;
         bool targetCatalogDeleted = false;
         bool targetProtectedRecordsDeleted = false;
         bool tombstoneBindingCompleted = false;
         bool siblingCatalogRetained = false;
         SeedContext? seedContext = null;
+        FileStream? deletionFaultLease = null;
         int exitCode = 0;
 
         try
@@ -209,6 +219,58 @@ internal static class Program
                 throw new InvalidDataException("The dialog-close preservation oracle failed.");
             }
 
+            deletionFaultLease = OpenDeletionFaultLease(paths, seedContext);
+            WriteJsonAtomically(
+                new DeletionFaultReadyTicket(IsReady: true),
+                paths.DeletionFaultReadyTicketPath);
+
+            bool pendingSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.PendingVerificationSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    CancelVerificationSignalName,
+                    CancelVerificationTicketName,
+                    DialogCloseVerificationSignalName,
+                    DialogCloseVerificationTicketName,
+                    DeletionFaultReadyTicketName,
+                    PendingVerificationSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!pendingSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before pending verification.");
+            }
+
+            PendingOracleResult pendingOracle = await VerifyPendingStateAsync(
+                paths,
+                seedContext,
+                cancellationToken).ConfigureAwait(false);
+            deletionFaultLease.Dispose();
+            deletionFaultLease = null;
+            deletionFaultReleased = true;
+            WriteJsonAtomically(
+                new PendingVerificationTicket(
+                    IsVerified: pendingOracle.IsVerified,
+                    TargetCatalogPreserved: pendingOracle.TargetCatalogPreserved,
+                    ConfigurationRecordPreserved: pendingOracle.ConfigurationRecordPreserved,
+                    TombstoneBindingPending: pendingOracle.TombstoneBindingPending,
+                    SiblingCatalogRetained: pendingOracle.SiblingCatalogRetained,
+                    DeletionFaultReleased: deletionFaultReleased),
+                paths.PendingVerificationTicketPath);
+            pendingDeletionVerified = pendingOracle.IsVerified;
+            pendingTargetCatalogPreserved = pendingOracle.TargetCatalogPreserved;
+            pendingConfigurationRecordPreserved = pendingOracle.ConfigurationRecordPreserved;
+            pendingTombstoneBindingVerified = pendingOracle.TombstoneBindingPending;
+            pendingSiblingCatalogRetained = pendingOracle.SiblingCatalogRetained;
+            if (!pendingOracle.IsVerified)
+            {
+                throw new InvalidDataException("The pending source-deletion oracle failed.");
+            }
+
             await WaitForFinalStopSignalAsync(
                 paths,
                 [
@@ -218,6 +280,9 @@ internal static class Program
                     CancelVerificationTicketName,
                     DialogCloseVerificationSignalName,
                     DialogCloseVerificationTicketName,
+                    DeletionFaultReadyTicketName,
+                    PendingVerificationSignalName,
+                    PendingVerificationTicketName,
                     StopSignalName,
                 ],
                 cancellationToken).ConfigureAwait(false);
@@ -245,6 +310,23 @@ internal static class Program
         }
         finally
         {
+            if (deletionFaultLease is not null)
+            {
+                try
+                {
+                    deletionFaultLease.Dispose();
+                    deletionFaultReleased = true;
+                }
+                catch
+                {
+                    exitCode = 1;
+                }
+                finally
+                {
+                    deletionFaultLease = null;
+                }
+            }
+
             if (server is not null && !stoppedGracefully)
             {
                 try
@@ -278,6 +360,12 @@ internal static class Program
                             string.Equals(request.Path, MediaRouteB, StringComparison.Ordinal)),
                         CancelNoMutationVerified: cancelNoMutationVerified,
                         DialogCloseNoMutationVerified: dialogCloseNoMutationVerified,
+                        PendingDeletionVerified: pendingDeletionVerified,
+                        PendingTargetCatalogPreserved: pendingTargetCatalogPreserved,
+                        PendingConfigurationRecordPreserved: pendingConfigurationRecordPreserved,
+                        PendingTombstoneBindingVerified: pendingTombstoneBindingVerified,
+                        PendingSiblingCatalogRetained: pendingSiblingCatalogRetained,
+                        DeletionFaultReleased: deletionFaultReleased,
                         TargetCatalogDeleted: targetCatalogDeleted,
                         TargetProtectedRecordsDeleted: targetProtectedRecordsDeleted,
                         TombstoneBindingCompleted: tombstoneBindingCompleted,
@@ -329,6 +417,7 @@ internal static class Program
         var secretStore = new DpapiCurrentUserSecretStore(
             protectedStorePath,
             cancellationToken);
+        string[] protectedRecordsBefore = ReadProtectedRecordInventory(protectedStorePath);
         SourceId sourceId = SourceId.Generate();
         DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(secretStore)
             .ProtectRemotePlaylistAsync(
@@ -341,6 +430,10 @@ internal static class Program
         {
             throw new InvalidDataException("The protected source draft could not be created.");
         }
+
+        string configurationRecordFileName = GetAddedProtectedRecordFileName(
+            protectedRecordsBefore,
+            ReadProtectedRecordInventory(protectedStorePath));
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         DomainResult<ContentSource> source = ContentSource.Create(
@@ -491,7 +584,72 @@ internal static class Program
             playbackPage.Items.Select(item => item.ChannelId).ToArray(),
             baseline.TargetGraph,
             secretStore,
+            configurationRecordFileName,
             expectedConfigurationDigest);
+    }
+
+    private static string[] ReadProtectedRecordInventory(string protectedStorePath)
+    {
+        EnsureNoReparsePoints(protectedStorePath);
+        string[] entries = Directory.EnumerateFileSystemEntries(
+                protectedStorePath,
+                "*",
+                SearchOption.TopDirectoryOnly)
+            .ToArray();
+        var fileNames = new string[entries.Length];
+        for (int index = 0; index < entries.Length; index++)
+        {
+            string entryPath = entries[index];
+            FileAttributes attributes = File.GetAttributes(entryPath);
+            string fileName = Path.GetFileName(entryPath);
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 ||
+                !IsProtectedRecordFileName(fileName))
+            {
+                throw new IOException("The protected-store inventory is invalid.");
+            }
+
+            fileNames[index] = fileName;
+        }
+
+        Array.Sort(fileNames, StringComparer.Ordinal);
+        return fileNames;
+    }
+
+    private static string GetAddedProtectedRecordFileName(
+        string[] before,
+        string[] after)
+    {
+        string[] added = after.Except(before, StringComparer.Ordinal).ToArray();
+        if (added.Length != 1 ||
+            after.Length != before.Length + 1 ||
+            before.Except(after, StringComparer.Ordinal).Any())
+        {
+            throw new InvalidDataException("The protected source record inventory is invalid.");
+        }
+
+        return added[0];
+    }
+
+    private static bool IsProtectedRecordFileName(string value)
+    {
+        const string prefix = "record-v2-";
+        const string suffix = ".dpapi";
+        if (value.Length != prefix.Length + 64 + suffix.Length ||
+            !value.StartsWith(prefix, StringComparison.Ordinal) ||
+            !value.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (char character in value.AsSpan(prefix.Length, 64))
+        {
+            if (character is not (>= '0' and <= '9') and not (>= 'A' and <= 'F'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static async Task<SeedBaseline> ReadSeedBaselineAsync(
@@ -627,6 +785,113 @@ internal static class Program
             TargetCatalogPreserved: targetPreserved,
             ConfigurationRecordPreserved: configurationPreserved,
             NoDeletionTombstone: tombstones == 0,
+            SiblingCatalogRetained: siblingRetained);
+    }
+
+    private static FileStream OpenDeletionFaultLease(
+        HarnessPaths paths,
+        SeedContext context)
+    {
+        if (!IsProtectedRecordFileName(context.ConfigurationRecordFileName))
+        {
+            throw new InvalidDataException("The protected source record binding is invalid.");
+        }
+
+        string recordPath = Path.GetFullPath(Path.Combine(
+            paths.ProtectedStorePath,
+            context.ConfigurationRecordFileName));
+        if (!string.Equals(
+                Path.GetDirectoryName(recordPath),
+                paths.ProtectedStorePath,
+                StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(recordPath))
+        {
+            throw new IOException("The protected source record is unavailable.");
+        }
+
+        EnsureNoReparsePoints(recordPath);
+        FileAttributes attributes = File.GetAttributes(recordPath);
+        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+        {
+            throw new IOException("The protected source record is invalid.");
+        }
+
+        var options = new FileStreamOptions
+        {
+            Access = FileAccess.Read,
+            Mode = FileMode.Open,
+            Share = FileShare.Read,
+            Options = FileOptions.SequentialScan,
+            BufferSize = 4096,
+        };
+        var lease = new FileStream(recordPath, options);
+        if (lease.Length <= 0)
+        {
+            lease.Dispose();
+            throw new InvalidDataException("The protected source record is empty.");
+        }
+
+        return lease;
+    }
+
+    private static async Task<PendingOracleResult> VerifyPendingStateAsync(
+        HarnessPaths paths,
+        SeedContext context,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = await OpenReadOnlyConnectionAsync(
+            paths.CatalogDatabasePath,
+            cancellationToken).ConfigureAwait(false);
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
+        SourceBindingRow? target = await ReadSourceBindingAsync(
+            connection,
+            transaction,
+            context.TargetSourceId,
+            cancellationToken).ConfigureAwait(false);
+        TargetGraphCounts graph = await ReadTargetGraphAsync(
+            connection,
+            transaction,
+            context.TargetSourceId,
+            context.TargetSnapshotId,
+            cancellationToken).ConfigureAwait(false);
+        long exactChannels = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM channels WHERE snapshot_id = $snapshot AND channel_id IN ($channelA, $channelB);",
+            cancellationToken,
+            ("$snapshot", context.TargetSnapshotId.Value.ToString("N")),
+            ("$channelA", context.TargetChannelIds[0].Value.ToString("N")),
+            ("$channelB", context.TargetChannelIds[1].Value.ToString("N"))).ConfigureAwait(false);
+        bool tombstoneBindingPending = await VerifyPendingTombstoneAsync(
+            connection,
+            transaction,
+            context,
+            cancellationToken).ConfigureAwait(false);
+        bool siblingRetained = await VerifySiblingCatalogAsync(
+            connection,
+            transaction,
+            context.SiblingSourceId,
+            cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        bool targetPreserved = target is not null &&
+            target.Status == ContentSourceStatus.DeletionPending &&
+            target.ConfigurationId == context.ConfigurationId.Value.ToString("N") &&
+            target.SourceKind == (long)SourceKind.RemotePlaylist &&
+            target.ConfigurationReference == context.ConfigurationReference &&
+            target.SnapshotId == context.TargetSnapshotId &&
+            graph == context.TargetGraph &&
+            exactChannels == 2;
+        bool configurationPreserved = await VerifyConfigurationRecordAsync(
+            context,
+            expectPresent: true,
+            cancellationToken).ConfigureAwait(false);
+        return new PendingOracleResult(
+            IsVerified: targetPreserved && configurationPreserved &&
+                tombstoneBindingPending && siblingRetained,
+            TargetCatalogPreserved: targetPreserved,
+            ConfigurationRecordPreserved: configurationPreserved,
+            TombstoneBindingPending: tombstoneBindingPending,
             SiblingCatalogRetained: siblingRetained);
     }
 
@@ -809,6 +1074,30 @@ internal static class Program
             reader.GetInt64(1) == (long)SourceKind.RemotePlaylist &&
             reader.GetString(2) == context.ConfigurationReference &&
             reader.GetInt64(3) == 1;
+        return matches && !await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> VerifyPendingTombstoneAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SeedContext context,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT configuration_id, source_kind, configuration_reference, protected_delete_completed
+            FROM source_deletion_tombstones
+            WHERE source_id = $source;
+            """;
+        command.Parameters.AddWithValue("$source", context.TargetSourceId.Value.ToString("N"));
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        bool matches = await reader.ReadAsync(cancellationToken).ConfigureAwait(false) &&
+            reader.GetString(0) == context.ConfigurationId.Value.ToString("N") &&
+            reader.GetInt64(1) == (long)SourceKind.RemotePlaylist &&
+            reader.GetString(2) == context.ConfigurationReference &&
+            reader.GetInt64(3) == 0;
         return matches && !await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1009,6 +1298,9 @@ internal static class Program
             Path.Combine(controlPath, CancelVerificationTicketName),
             Path.Combine(controlPath, DialogCloseVerificationSignalName),
             Path.Combine(controlPath, DialogCloseVerificationTicketName),
+            Path.Combine(controlPath, DeletionFaultReadyTicketName),
+            Path.Combine(controlPath, PendingVerificationSignalName),
+            Path.Combine(controlPath, PendingVerificationTicketName),
             Path.Combine(controlPath, PublicCertificateName));
     }
 
@@ -1211,6 +1503,9 @@ internal static class Program
         string CancelVerificationTicketPath,
         string DialogCloseVerificationSignalPath,
         string DialogCloseVerificationTicketPath,
+        string DeletionFaultReadyTicketPath,
+        string PendingVerificationSignalPath,
+        string PendingVerificationTicketPath,
         string PublicCertificatePath);
 
     private sealed record SeedBaseline(
@@ -1246,6 +1541,7 @@ internal static class Program
             ChannelId[] targetChannelIds,
             TargetGraphCounts targetGraph,
             ISecretStore secretStore,
+            string configurationRecordFileName,
             byte[] expectedConfigurationDigest)
         {
             TargetSourceId = targetSourceId;
@@ -1257,6 +1553,7 @@ internal static class Program
             TargetChannelIds = targetChannelIds;
             TargetGraph = targetGraph;
             SecretStore = secretStore;
+            ConfigurationRecordFileName = configurationRecordFileName;
             ExpectedConfigurationDigest = expectedConfigurationDigest;
         }
 
@@ -1277,6 +1574,8 @@ internal static class Program
         public TargetGraphCounts TargetGraph { get; }
 
         public ISecretStore SecretStore { get; }
+
+        public string ConfigurationRecordFileName { get; }
 
         public byte[] ExpectedConfigurationDigest { get; }
 
@@ -1302,6 +1601,12 @@ internal static class Program
         int ChannelBRequestCount,
         bool CancelNoMutationVerified,
         bool DialogCloseNoMutationVerified,
+        bool PendingDeletionVerified,
+        bool PendingTargetCatalogPreserved,
+        bool PendingConfigurationRecordPreserved,
+        bool PendingTombstoneBindingVerified,
+        bool PendingSiblingCatalogRetained,
+        bool DeletionFaultReleased,
         bool TargetCatalogDeleted,
         bool TargetProtectedRecordsDeleted,
         bool TombstoneBindingCompleted,
@@ -1312,6 +1617,23 @@ internal static class Program
         bool TargetCatalogPreserved,
         bool ConfigurationRecordPreserved,
         bool NoDeletionTombstone,
+        bool SiblingCatalogRetained);
+
+    private sealed record DeletionFaultReadyTicket(bool IsReady);
+
+    private sealed record PendingVerificationTicket(
+        bool IsVerified,
+        bool TargetCatalogPreserved,
+        bool ConfigurationRecordPreserved,
+        bool TombstoneBindingPending,
+        bool SiblingCatalogRetained,
+        bool DeletionFaultReleased);
+
+    private sealed record PendingOracleResult(
+        bool IsVerified,
+        bool TargetCatalogPreserved,
+        bool ConfigurationRecordPreserved,
+        bool TombstoneBindingPending,
         bool SiblingCatalogRetained);
 
     private sealed record DeletionOracleResult(

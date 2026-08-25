@@ -615,6 +615,9 @@ $playbackCancelVerificationSignalPath = Join-Path $playbackControlDirectory "ver
 $playbackCancelVerificationTicketPath = Join-Path $playbackControlDirectory "cancel-result.json"
 $playbackDialogCloseVerificationSignalPath = Join-Path $playbackControlDirectory "verify-dialog-close.signal"
 $playbackDialogCloseVerificationTicketPath = Join-Path $playbackControlDirectory "dialog-close-result.json"
+$playbackDeletionFaultReadyTicketPath = Join-Path $playbackControlDirectory "delete-failure-ready.json"
+$playbackPendingVerificationSignalPath = Join-Path $playbackControlDirectory "verify-pending.signal"
+$playbackPendingVerificationTicketPath = Join-Path $playbackControlDirectory "pending-result.json"
 $playbackPublicCertificatePath = Join-Path $playbackControlDirectory "loopback.cer"
 $publicCertificatePath = Join-Path $artifactRoot "$runId.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
@@ -684,6 +687,14 @@ $playbackThreadCountDelta = 0
 $playbackActiveCloseVerified = $false
 $sourceDeletionCancelNoMutationVerified = $false
 $sourceDeletionDialogCloseNoMutationVerified = $false
+$sourceDeletionPendingFailureVerified = $false
+$sourceDeletionPendingRestartAdmissionBlockedVerified = $false
+$sourceDeletionManualRetryVerified = $false
+$sourceDeletionPendingCatalogPreserved = $false
+$sourceDeletionPendingConfigurationRecordPreserved = $false
+$sourceDeletionPendingTombstoneBindingVerified = $false
+$sourceDeletionPendingSiblingCatalogRetained = $false
+$sourceDeletionFaultReleased = $false
 $sourceDeletionActivePlaybackDrainVerified = $false
 $sourceDeletionRestartNonAdmissionVerified = $false
 $sourceDeletionTargetCatalogDeleted = $false
@@ -1273,7 +1284,9 @@ function Read-StrictPlaybackJsonTicket {
         [System.IO.Path]::GetFullPath($playbackReadyPath),
         [System.IO.Path]::GetFullPath($playbackResultPath),
         [System.IO.Path]::GetFullPath($playbackCancelVerificationTicketPath),
-        [System.IO.Path]::GetFullPath($playbackDialogCloseVerificationTicketPath)
+        [System.IO.Path]::GetFullPath($playbackDialogCloseVerificationTicketPath),
+        [System.IO.Path]::GetFullPath($playbackDeletionFaultReadyTicketPath),
+        [System.IO.Path]::GetFullPath($playbackPendingVerificationTicketPath)
     )
     if ($allowedPaths -notcontains $resolvedPath -or
         -not [System.IO.Directory]::GetParent($resolvedPath).FullName.Equals(
@@ -1972,6 +1985,7 @@ function New-ExactPlaybackControlSignal {
     $allowedPaths = @(
         [System.IO.Path]::GetFullPath($playbackCancelVerificationSignalPath),
         [System.IO.Path]::GetFullPath($playbackDialogCloseVerificationSignalPath),
+        [System.IO.Path]::GetFullPath($playbackPendingVerificationSignalPath),
         [System.IO.Path]::GetFullPath($playbackStopSignalPath)
     )
     if ($allowedPaths -notcontains $resolvedPath -or
@@ -2035,6 +2049,81 @@ function Wait-PlaybackPreservationTicket {
     } while ((Get-Date) -lt $deadline)
 
     throw "The playback preservation result was not published before the deadline."
+}
+
+function Wait-PlaybackDeletionFaultReadyTicket {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$HarnessProcess,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedControlNames
+    )
+
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $HarnessProcess.Refresh()
+        if ($HarnessProcess.HasExited) {
+            throw "The playback acceptance harness exited before preparing deletion failure."
+        }
+        if (Test-Path -LiteralPath $playbackDeletionFaultReadyTicketPath -PathType Leaf) {
+            Assert-ExactPlaybackControlEntries -AllowedNames $AllowedControlNames
+            $ticket = Read-StrictPlaybackJsonTicket `
+                -Path $playbackDeletionFaultReadyTicketPath `
+                -AllowedProperties @("IsReady")
+            if ($ticket.IsReady -isnot [bool] -or -not $ticket.IsReady) {
+                throw "The playback deletion-failure readiness result is invalid."
+            }
+
+            return
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The playback deletion-failure readiness result was not published before the deadline."
+}
+
+function Wait-PlaybackPendingDeletionTicket {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$HarnessProcess,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedControlNames
+    )
+
+    $allowedProperties = @(
+        "IsVerified",
+        "TargetCatalogPreserved",
+        "ConfigurationRecordPreserved",
+        "TombstoneBindingPending",
+        "SiblingCatalogRetained",
+        "DeletionFaultReleased")
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $HarnessProcess.Refresh()
+        if ($HarnessProcess.HasExited) {
+            throw "The playback acceptance harness exited during pending-deletion verification."
+        }
+        if (Test-Path -LiteralPath $playbackPendingVerificationTicketPath -PathType Leaf) {
+            Assert-ExactPlaybackControlEntries -AllowedNames $AllowedControlNames
+            $ticket = Read-StrictPlaybackJsonTicket `
+                -Path $playbackPendingVerificationTicketPath `
+                -AllowedProperties $allowedProperties
+            foreach ($propertyName in $allowedProperties) {
+                if ($ticket.$propertyName -isnot [bool] -or -not $ticket.$propertyName) {
+                    throw "The playback pending-deletion result is invalid."
+                }
+            }
+
+            return $ticket
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The playback pending-deletion result was not published before the deadline."
 }
 
 function Start-PackagedPlaybackApplicationInstance {
@@ -2358,6 +2447,67 @@ function Wait-PackagedSourceDeletionDialogDismissed {
     } while ((Get-Date) -lt $deadline)
 
     throw "The packaged source-deletion confirmation dialog did not close before the deadline."
+}
+
+function Wait-PackagedPendingSourceCleanupState {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Instance
+    )
+
+    $disabledControlIds = @(
+        "CatalogSourceSelector",
+        "CatalogCategorySelector",
+        "CatalogSearchBox",
+        "CatalogChannelList",
+        "CatalogDeleteSourceButton",
+        "CatalogPreviousPage",
+        "CatalogNextPage")
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        Assert-PackagedProcessAlive -Process $Instance.Process
+        try {
+            $catalogStatus = Get-AutomationElementById $Instance.Root "CatalogStatusText"
+            $retryButton = Get-AutomationElementById `
+                $Instance.Root `
+                "CatalogRetryPendingDeletionButton"
+            $playbackStatus = Get-AutomationElementById $Instance.Root "PlaybackStatusText"
+            $playbackChannel = Get-AutomationElementById $Instance.Root "PlaybackChannelText"
+            $controlsDisabled = $true
+            foreach ($controlId in $disabledControlIds) {
+                $control = Get-AutomationElementById $Instance.Root $controlId
+                if ($null -eq $control -or $control.Current.IsEnabled) {
+                    $controlsDisabled = $false
+                    break
+                }
+            }
+
+            if ($controlsDisabled -and
+                $null -ne $catalogStatus -and
+                $catalogStatus.Current.Name -ceq
+                    "Pending source cleanup must finish before the catalog can be opened." -and
+                $null -ne $retryButton -and
+                $retryButton.Current.ControlType -eq
+                    [System.Windows.Automation.ControlType]::Button -and
+                $retryButton.Current.Name -ceq "Retry pending source cleanup" -and
+                $retryButton.Current.IsEnabled -and
+                -not $retryButton.Current.IsOffscreen -and
+                $null -ne $playbackStatus -and
+                $playbackStatus.Current.Name -ceq "Playback stopped." -and
+                $null -ne $playbackChannel -and
+                $playbackChannel.Current.Name -ceq "No channel selected.") {
+                return [pscustomobject]@{
+                    RetryButton = $retryButton
+                }
+            }
+        }
+        catch [System.Windows.Automation.ElementNotAvailableException] {
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged catalog did not reach the pending source-cleanup state."
 }
 
 function Wait-PackagedDeletedSourceState {
@@ -3701,6 +3851,17 @@ try {
             "dialog-close-result.json")
     $sourceDeletionDialogCloseNoMutationVerified = $true
 
+    Wait-PlaybackDeletionFaultReadyTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -AllowedControlNames @(
+            "loopback.cer",
+            "ready.json",
+            "verify-cancel.signal",
+            "cancel-result.json",
+            "verify-dialog-close.signal",
+            "dialog-close-result.json",
+            "delete-failure-ready.json")
+
     $deleteInstance = Start-PackagedPlaybackApplicationInstance
     $launchedProcess = $deleteInstance.Process
     $playbackActivationProcessId = $deleteInstance.ProcessId
@@ -3717,22 +3878,79 @@ try {
     Invoke-PackagedPlaybackControlButton `
         -Process $launchedProcess `
         -ButtonElement $confirmDeleteButtonElement
-    Wait-PackagedDeletedSourceState -Instance $deleteInstance
+    $pendingDeleteState = Wait-PackagedPendingSourceCleanupState -Instance $deleteInstance
+    $sourceDeletionPendingFailureVerified = $true
     $sourceDeletionActivePlaybackDrainVerified = $true
 
     if (-not $launchedProcess.CloseMainWindow() -or
         -not $launchedProcess.WaitForExit(10000)) {
-        throw "The packaged playback application did not close after source deletion."
+        throw "The packaged playback application did not close after pending source deletion."
     }
     $launchedProcess.Refresh()
     if ($null -eq $launchedProcess.ExitCode -or [int]$launchedProcess.ExitCode -ne 0) {
-        throw "The packaged playback application returned a failure after source deletion."
+        throw "The packaged playback application returned a failure after pending source deletion."
     }
     $launchedProcess.Dispose()
     $launchedProcess = $null
     $deleteContext = $null
     $confirmDeleteButtonElement = $null
+    $pendingDeleteState = $null
     $deleteInstance = $null
+    $playbackWindowHandle = [IntPtr]::Zero
+    $playbackAutomationRoot = $null
+
+    $pendingRestartInstance = Start-PackagedPlaybackApplicationInstance
+    $launchedProcess = $pendingRestartInstance.Process
+    $playbackActivationProcessId = $pendingRestartInstance.ProcessId
+    $playbackWindowHandle = $pendingRestartInstance.WindowHandle
+    $playbackAutomationRoot = $pendingRestartInstance.Root
+    $pendingRestartState = Wait-PackagedPendingSourceCleanupState `
+        -Instance $pendingRestartInstance
+    $sourceDeletionPendingRestartAdmissionBlockedVerified = $true
+
+    New-ExactPlaybackControlSignal -Path $playbackPendingVerificationSignalPath
+    $pendingTicket = Wait-PlaybackPendingDeletionTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -AllowedControlNames @(
+            "loopback.cer",
+            "ready.json",
+            "verify-cancel.signal",
+            "cancel-result.json",
+            "verify-dialog-close.signal",
+            "dialog-close-result.json",
+            "delete-failure-ready.json",
+            "verify-pending.signal",
+            "pending-result.json")
+    $sourceDeletionPendingCatalogPreserved = $pendingTicket.TargetCatalogPreserved
+    $sourceDeletionPendingConfigurationRecordPreserved =
+        $pendingTicket.ConfigurationRecordPreserved
+    $sourceDeletionPendingTombstoneBindingVerified = $pendingTicket.TombstoneBindingPending
+    $sourceDeletionPendingSiblingCatalogRetained = $pendingTicket.SiblingCatalogRetained
+    $sourceDeletionFaultReleased = $pendingTicket.DeletionFaultReleased
+
+    $retryPendingDeletionButtonElement = Get-RequiredAutomationElement `
+        $playbackAutomationRoot `
+        "CatalogRetryPendingDeletionButton" `
+        ([System.Windows.Automation.ControlType]::Button) `
+        "Retry pending source cleanup"
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $retryPendingDeletionButtonElement
+    Wait-PackagedDeletedSourceState -Instance $pendingRestartInstance
+    $sourceDeletionManualRetryVerified = $true
+    if (-not $launchedProcess.CloseMainWindow() -or
+        -not $launchedProcess.WaitForExit(10000)) {
+        throw "The retried packaged playback application did not close normally."
+    }
+    $launchedProcess.Refresh()
+    if ($null -eq $launchedProcess.ExitCode -or [int]$launchedProcess.ExitCode -ne 0) {
+        throw "The retried packaged playback application returned a failure."
+    }
+    $launchedProcess.Dispose()
+    $launchedProcess = $null
+    $pendingRestartInstance = $null
+    $pendingRestartState = $null
+    $retryPendingDeletionButtonElement = $null
     $playbackWindowHandle = [IntPtr]::Zero
     $playbackAutomationRoot = $null
 
@@ -3775,6 +3993,9 @@ try {
             "cancel-result.json",
             "verify-dialog-close.signal",
             "dialog-close-result.json",
+            "delete-failure-ready.json",
+            "verify-pending.signal",
+            "pending-result.json",
             "result.json",
             "stop.signal")
     $resultTicket = Read-StrictPlaybackJsonTicket `
@@ -3793,6 +4014,12 @@ try {
             "ChannelBRequestCount",
             "CancelNoMutationVerified",
             "DialogCloseNoMutationVerified",
+            "PendingDeletionVerified",
+            "PendingTargetCatalogPreserved",
+            "PendingConfigurationRecordPreserved",
+            "PendingTombstoneBindingVerified",
+            "PendingSiblingCatalogRetained",
+            "DeletionFaultReleased",
             "TargetCatalogDeleted",
             "TargetProtectedRecordsDeleted",
             "TombstoneBindingCompleted",
@@ -3811,6 +4038,12 @@ try {
         $resultTicket.ChannelBRequestCount -isnot [int] -or
         $resultTicket.CancelNoMutationVerified -isnot [bool] -or
         $resultTicket.DialogCloseNoMutationVerified -isnot [bool] -or
+        $resultTicket.PendingDeletionVerified -isnot [bool] -or
+        $resultTicket.PendingTargetCatalogPreserved -isnot [bool] -or
+        $resultTicket.PendingConfigurationRecordPreserved -isnot [bool] -or
+        $resultTicket.PendingTombstoneBindingVerified -isnot [bool] -or
+        $resultTicket.PendingSiblingCatalogRetained -isnot [bool] -or
+        $resultTicket.DeletionFaultReleased -isnot [bool] -or
         $resultTicket.TargetCatalogDeleted -isnot [bool] -or
         $resultTicket.TargetProtectedRecordsDeleted -isnot [bool] -or
         $resultTicket.TombstoneBindingCompleted -isnot [bool] -or
@@ -3830,6 +4063,12 @@ try {
         [int]$resultTicket.ChannelBRequestCount -le 0 -or
         -not $resultTicket.CancelNoMutationVerified -or
         -not $resultTicket.DialogCloseNoMutationVerified -or
+        -not $resultTicket.PendingDeletionVerified -or
+        -not $resultTicket.PendingTargetCatalogPreserved -or
+        -not $resultTicket.PendingConfigurationRecordPreserved -or
+        -not $resultTicket.PendingTombstoneBindingVerified -or
+        -not $resultTicket.PendingSiblingCatalogRetained -or
+        -not $resultTicket.DeletionFaultReleased -or
         -not $resultTicket.TargetCatalogDeleted -or
         -not $resultTicket.TargetProtectedRecordsDeleted -or
         -not $resultTicket.TombstoneBindingCompleted -or
@@ -3845,6 +4084,13 @@ try {
     $playbackUiCompletedBodyBytes = [long]$resultTicket.CompletedBodyBytes
     $playbackChannelARequestCount = [int]$resultTicket.ChannelARequestCount
     $playbackChannelBRequestCount = [int]$resultTicket.ChannelBRequestCount
+    $sourceDeletionPendingCatalogPreserved = $resultTicket.PendingTargetCatalogPreserved
+    $sourceDeletionPendingConfigurationRecordPreserved =
+        $resultTicket.PendingConfigurationRecordPreserved
+    $sourceDeletionPendingTombstoneBindingVerified =
+        $resultTicket.PendingTombstoneBindingVerified
+    $sourceDeletionPendingSiblingCatalogRetained = $resultTicket.PendingSiblingCatalogRetained
+    $sourceDeletionFaultReleased = $resultTicket.DeletionFaultReleased
     $sourceDeletionTargetCatalogDeleted = $resultTicket.TargetCatalogDeleted
     $sourceDeletionProtectedRecordsDeleted = $resultTicket.TargetProtectedRecordsDeleted
     $sourceDeletionTombstoneBindingCompleted = $resultTicket.TombstoneBindingCompleted
@@ -3937,6 +4183,18 @@ try {
         PlaybackActiveCloseVerified = $playbackActiveCloseVerified
         SourceDeletionCancelNoMutationVerified = $sourceDeletionCancelNoMutationVerified
         SourceDeletionDialogCloseNoMutationVerified = $sourceDeletionDialogCloseNoMutationVerified
+        SourceDeletionPendingFailureVerified = $sourceDeletionPendingFailureVerified
+        SourceDeletionPendingRestartAdmissionBlockedVerified =
+            $sourceDeletionPendingRestartAdmissionBlockedVerified
+        SourceDeletionPendingCatalogPreserved = $sourceDeletionPendingCatalogPreserved
+        SourceDeletionPendingConfigurationRecordPreserved =
+            $sourceDeletionPendingConfigurationRecordPreserved
+        SourceDeletionPendingTombstoneBindingVerified =
+            $sourceDeletionPendingTombstoneBindingVerified
+        SourceDeletionPendingSiblingCatalogRetained =
+            $sourceDeletionPendingSiblingCatalogRetained
+        SourceDeletionFaultReleased = $sourceDeletionFaultReleased
+        SourceDeletionManualRetryVerified = $sourceDeletionManualRetryVerified
         SourceDeletionActivePlaybackDrainVerified = $sourceDeletionActivePlaybackDrainVerified
         SourceDeletionRestartNonAdmissionVerified = $sourceDeletionRestartNonAdmissionVerified
         SourceDeletionTargetCatalogDeleted = $sourceDeletionTargetCatalogDeleted
