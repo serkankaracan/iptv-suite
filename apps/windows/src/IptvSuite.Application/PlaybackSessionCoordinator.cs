@@ -94,6 +94,18 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
     }
 
+    public bool CanRetryReconnect
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _reconnectContext is { } context &&
+                    CanStartManualReconnectLocked(context);
+            }
+        }
+    }
+
     public async ValueTask<PlaybackSessionSnapshot?> StartAsync(
         SourceId sourceId,
         ChannelId channelId,
@@ -407,6 +419,85 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
 
         return new ValueTask<PlaybackEngineOperationResult>(
             StopSessionAsync(expectedSession: null, requireCurrentSession: false));
+    }
+
+    public ValueTask<PlaybackEngineOperationResult> RetryReconnectAsync()
+    {
+        ReconnectContext? context;
+        PlaybackReconnectOrchestrator? orchestrator;
+        SessionLifetime? lifetime;
+        long generation;
+
+        lock (_sync)
+        {
+            context = _reconnectContext;
+            if (context is not null && IsManualReconnectInFlightLocked(context))
+            {
+                return ValueTask.FromResult(PlaybackEngineOperationResult.Succeeded());
+            }
+
+            if (context is null || !CanStartManualReconnectLocked(context))
+            {
+                return ValueTask.FromResult(PlaybackEngineOperationResult.Failed(
+                    DomainErrorCode.OperationCancelled));
+            }
+
+            orchestrator = _reconnectOrchestrator;
+            lifetime = _currentLifetime;
+            generation = _generation;
+            context.ManualRetryStarting = true;
+        }
+
+        try
+        {
+            _ = orchestrator!.RetryNowAsync(context.CorrelationId);
+        }
+        catch (ObjectDisposedException)
+        {
+            ResetManualRetryStarting(context);
+            return ValueTask.FromResult(PlaybackEngineOperationResult.Failed(
+                DomainErrorCode.OperationCancelled));
+        }
+        catch (InvalidOperationException)
+        {
+            ResetManualRetryStarting(context);
+            return ValueTask.FromResult(PlaybackEngineOperationResult.Failed(
+                DomainErrorCode.OperationCancelled));
+        }
+        catch (Exception)
+        {
+            ResetManualRetryStarting(context);
+            return ValueTask.FromResult(PlaybackEngineOperationResult.Failed(
+                DomainErrorCode.DomainInvariantViolation));
+        }
+
+        bool accepted;
+        lock (_sync)
+        {
+            accepted = !_disposed &&
+                generation == _generation &&
+                ReferenceEquals(_currentLifetime, lifetime) &&
+                _current.SessionId == context.SessionId &&
+                ReferenceEquals(_currentSelection, context.Selection) &&
+                !_sourceRetirements.ContainsKey(context.Selection.SourceId);
+
+            if (ReferenceEquals(_reconnectContext, context))
+            {
+                context.ManualRetryStarting = false;
+                context.ManualRetryActive = accepted &&
+                    _current.State == PlaybackState.Reconnecting &&
+                    _current.Reconnect?.CorrelationId == context.CorrelationId;
+            }
+        }
+
+        if (!accepted)
+        {
+            CancelReconnectSafely(context.CorrelationId);
+        }
+
+        return ValueTask.FromResult(accepted
+            ? PlaybackEngineOperationResult.Succeeded()
+            : PlaybackEngineOperationResult.Failed(DomainErrorCode.OperationCancelled));
     }
 
     internal SourceRetirementLease AcquireSourceRetirement(SourceId sourceId)
@@ -1921,6 +2012,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             if (!reconnect.IsTerminal)
             {
                 context.IsTerminal = false;
+                context.ManualRetryActive = context.ManualRetryActive ||
+                    context.ManualRetryStarting;
                 _current = PlaybackSessionSnapshot.Reconnecting(
                     context.SessionId,
                     context.Selection,
@@ -1956,6 +2049,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 _currentTracks = null;
                 context.AttemptInProgress = false;
                 context.IsTerminal = true;
+                context.ManualRetryStarting = false;
+                context.ManualRetryActive = false;
                 if (!_engineSession.IsEmpty &&
                     _engineSession == context.PhysicalSessionId &&
                     _engineLogicalSession == context.SessionId)
@@ -2035,6 +2130,55 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         catch (Exception)
         {
             return false;
+        }
+    }
+
+    private bool CanStartManualReconnectLocked(ReconnectContext context) =>
+        !_disposed &&
+        _reconnectOrchestrator is not null &&
+        _currentLifetime is not null &&
+        context.IsTerminal &&
+        !context.ManualRetryStarting &&
+        !context.ManualRetryActive &&
+        _current.State == PlaybackState.Failed &&
+        IsCanonicalManualError(_current.Error) &&
+        !_sourceRetirements.ContainsKey(context.Selection.SourceId) &&
+        IsExactReconnectContextLocked(context);
+
+    private bool IsManualReconnectInFlightLocked(ReconnectContext context) =>
+        !_disposed &&
+        _currentLifetime is not null &&
+        (context.ManualRetryStarting || context.ManualRetryActive) &&
+        !_sourceRetirements.ContainsKey(context.Selection.SourceId) &&
+        IsExactReconnectContextLocked(context) &&
+        (_current.State == PlaybackState.Reconnecting ||
+            (_current.State == PlaybackState.Failed &&
+                IsCanonicalManualError(_current.Error)));
+
+    private static bool IsCanonicalManualError(DomainError? error)
+    {
+        if (error is null || !Enum.IsDefined(error.Code))
+        {
+            return false;
+        }
+
+        DomainError canonical = DomainError.Create(error.Code);
+        return canonical.Retryability == DomainRetryability.Manual &&
+            error.Retryability == canonical.Retryability &&
+            string.Equals(
+                error.ResourceKey,
+                canonical.ResourceKey,
+                StringComparison.Ordinal);
+    }
+
+    private void ResetManualRetryStarting(ReconnectContext context)
+    {
+        lock (_sync)
+        {
+            if (ReferenceEquals(_reconnectContext, context))
+            {
+                context.ManualRetryStarting = false;
+            }
         }
     }
 
@@ -2216,8 +2360,42 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         };
     }
 
-    private void RaiseStateChanged(PlaybackSessionSnapshot snapshot) =>
-        StateChanged?.Invoke(this, new PlaybackSessionStateChangedEventArgs(snapshot));
+    private void RaiseStateChanged(PlaybackSessionSnapshot snapshot)
+    {
+        EventHandler<PlaybackSessionStateChangedEventArgs>[] handlers;
+        lock (_sync)
+        {
+            if (_disposed || !ReferenceEquals(_current, snapshot))
+            {
+                return;
+            }
+
+            handlers = StateChanged?.GetInvocationList()
+                .Cast<EventHandler<PlaybackSessionStateChangedEventArgs>>()
+                .ToArray() ?? [];
+        }
+
+        var eventArgs = new PlaybackSessionStateChangedEventArgs(snapshot);
+        foreach (EventHandler<PlaybackSessionStateChangedEventArgs> handler in handlers)
+        {
+            lock (_sync)
+            {
+                if (_disposed || !ReferenceEquals(_current, snapshot))
+                {
+                    break;
+                }
+            }
+
+            try
+            {
+                handler.Invoke(this, eventArgs);
+            }
+            catch (Exception)
+            {
+                // Observer failures cannot mutate or stop playback lifecycle coordination.
+            }
+        }
+    }
 
     private sealed class ReconnectContext
     {
@@ -2250,6 +2428,10 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         internal bool AttemptInProgress { get; set; }
 
         internal bool IsTerminal { get; set; }
+
+        internal bool ManualRetryStarting { get; set; }
+
+        internal bool ManualRetryActive { get; set; }
 
         internal DomainError? AttemptFailure { get; set; }
 

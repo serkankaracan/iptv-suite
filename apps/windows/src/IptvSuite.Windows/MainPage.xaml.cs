@@ -737,6 +737,49 @@ public sealed partial class MainPage : Page, IDisposable
         await ExecutePlaybackCommandAsync(
             static (playback, token) => playback.StopAsync(token));
 
+    private void RetryPlaybackButton_Click(object sender, RoutedEventArgs e)
+    {
+        PlaybackSessionCoordinator? playback = _playback;
+        if (_disposed || playback is null || !playback.CanRetryReconnect)
+        {
+            if (!_disposed && playback is not null)
+            {
+                ApplyPlaybackState(playback.Current);
+            }
+
+            return;
+        }
+
+        RetryPlaybackButton.IsEnabled = false;
+        _ = ObserveRetryPlaybackAdmissionAsync(playback);
+    }
+
+    private async Task ObserveRetryPlaybackAdmissionAsync(
+        PlaybackSessionCoordinator playback)
+    {
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        try
+        {
+            PlaybackEngineOperationResult result = await playback.RetryReconnectAsync();
+            if (!result.IsSuccess &&
+                !_disposed &&
+                ReferenceEquals(_playback, playback))
+            {
+                ApplyPlaybackState(playback.Current);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            if (!_disposed && ReferenceEquals(_playback, playback))
+            {
+                ApplyPlaybackState(playback.Current);
+            }
+        }
+    }
+
     private async void VolumeDownButton_Click(object sender, RoutedEventArgs e) =>
         await ChangeVolumeAsync(-VolumeStep);
 
@@ -952,7 +995,7 @@ public sealed partial class MainPage : Page, IDisposable
         }
 
         PlaybackSessionSnapshot current = playback.Current;
-        if (current.SessionId != snapshot.SessionId || current.State != snapshot.State)
+        if (current != snapshot)
         {
             return;
         }
@@ -970,16 +1013,17 @@ public sealed partial class MainPage : Page, IDisposable
             PlaybackChannelText.Text = "No channel selected.";
         }
 
-        PlaybackStatusText.Text = snapshot.State switch
-        {
-            PlaybackState.Opening => "Opening channel.",
-            PlaybackState.Buffering => "Buffering channel.",
-            PlaybackState.Playing => "Channel is playing.",
-            PlaybackState.Paused => "Playback paused.",
-            PlaybackState.Stopping => "Stopping playback.",
-            PlaybackState.Failed => "Playback is unavailable.",
-            _ => "Playback stopped.",
-        };
+        bool canRetryReconnect = snapshot.State == PlaybackState.Failed &&
+            playback.CanRetryReconnect;
+        PlaybackStatusText.Text = GetPlaybackStatusText(snapshot, canRetryReconnect);
+        PlaybackReconnectSnapshot? reconnect = snapshot.Reconnect;
+        bool waitingToReconnect = reconnect?.Phase == PlaybackReconnectPhase.Waiting;
+        PlaybackReconnectCountdownText.Text = waitingToReconnect
+            ? $"Retrying in {GetRemainingDelaySeconds(reconnect!.RemainingDelay)} seconds."
+            : string.Empty;
+        PlaybackReconnectCountdownText.Visibility = waitingToReconnect
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         PlayButton.IsEnabled = snapshot.State == PlaybackState.Paused;
         PauseButton.IsEnabled = snapshot.State == PlaybackState.Playing;
         StopButton.IsEnabled = snapshot.State is
@@ -987,7 +1031,17 @@ public sealed partial class MainPage : Page, IDisposable
             PlaybackState.Buffering or
             PlaybackState.Playing or
             PlaybackState.Paused or
+            PlaybackState.Reconnecting or
             PlaybackState.Failed;
+        bool isReconnecting = snapshot.State == PlaybackState.Reconnecting;
+        StopButton.Content = isReconnecting ? "Cancel reconnect" : "Stop";
+        AutomationProperties.SetName(
+            StopButton,
+            isReconnecting ? "Cancel reconnect" : "Stop channel");
+        RetryPlaybackButton.Visibility = canRetryReconnect
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        RetryPlaybackButton.IsEnabled = canRetryReconnect;
 
         PlaybackControlSnapshot controls = playback.CurrentControls;
         bool controlsEnabled = CanChangePlaybackControls(snapshot.State);
@@ -1011,6 +1065,36 @@ public sealed partial class MainPage : Page, IDisposable
 
     private static bool CanChangePlaybackControls(PlaybackState state) =>
         state is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused;
+
+    private static string GetPlaybackStatusText(
+        PlaybackSessionSnapshot snapshot,
+        bool canRetryReconnect) => snapshot.State switch
+    {
+        PlaybackState.Opening => "Opening channel.",
+        PlaybackState.Buffering => "Buffering channel.",
+        PlaybackState.Playing => "Channel is playing.",
+        PlaybackState.Paused => "Playback paused.",
+        PlaybackState.Reconnecting => GetReconnectStatusText(snapshot.Reconnect),
+        PlaybackState.Stopping => "Stopping playback.",
+        PlaybackState.Failed when canRetryReconnect =>
+            "Playback could not reconnect. Check your connection and retry.",
+        PlaybackState.Failed => "Playback is unavailable.",
+        _ => "Playback stopped.",
+    };
+
+    private static string GetReconnectStatusText(PlaybackReconnectSnapshot? reconnect) =>
+        reconnect?.Phase switch
+        {
+            PlaybackReconnectPhase.Evaluating => "Checking playback connection.",
+            PlaybackReconnectPhase.Waiting =>
+                $"Reconnect attempt {reconnect.AttemptNumber} of {reconnect.MaximumAttempts} is waiting.",
+            PlaybackReconnectPhase.Attempting =>
+                $"Reconnect attempt {reconnect.AttemptNumber} of {reconnect.MaximumAttempts} is starting.",
+            _ => "Reconnecting playback.",
+        };
+
+    private static int GetRemainingDelaySeconds(TimeSpan remainingDelay) =>
+        Math.Max(1, checked((int)Math.Ceiling(remainingDelay.TotalSeconds)));
 
     private async void ChannelList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {

@@ -24,6 +24,10 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         Assert.AreEqual(DomainErrorCode.StreamInterrupted, coordinator.Current.Error?.Code);
         Assert.IsNull(coordinator.Current.Reconnect);
         Assert.AreEqual(1, engine.OpenCount);
+        Assert.IsFalse(coordinator.CanRetryReconnect);
+        PlaybackEngineOperationResult retry = await coordinator.RetryReconnectAsync();
+        Assert.IsFalse(retry.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.OperationCancelled, retry.Error?.Code);
     }
 
     [TestMethod]
@@ -104,6 +108,7 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         Assert.AreEqual(DomainErrorCode.AuthenticationRejected, coordinator.Current.Error?.Code);
         Assert.IsNull(coordinator.Current.Reconnect);
         Assert.AreEqual(1, engine.OpenCount);
+        Assert.IsFalse(coordinator.CanRetryReconnect);
     }
 
     [TestMethod]
@@ -192,6 +197,170 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         AssertFreshPhysicalSessions(engine.OpenSessions.ToArray(), expectedCount: 4);
         Assert.AreEqual(DomainErrorCode.ReconnectExhausted, coordinator.Current.Error?.Code);
         Assert.IsNull(coordinator.Current.Reconnect);
+        Assert.IsTrue(coordinator.CanRetryReconnect);
+    }
+
+    [TestMethod]
+    public async Task ManualRetryStartsImmediatelyWithFreshBudgetAndCoalescesDuplicates()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        var engine = new ReconnectPlaybackEngine
+        {
+            BlockFirstReconnectOpen = true,
+            BlockingReconnectOpenOrdinal = 5,
+        };
+        await using var coordinator = Create(engine, time);
+        await ExhaustReconnectAsync(coordinator, engine, time);
+
+        ValueTask<PlaybackEngineOperationResult> firstRetry = coordinator.RetryReconnectAsync();
+        Assert.IsTrue(firstRetry.IsCompletedSuccessfully);
+        Assert.IsTrue((await firstRetry).IsSuccess);
+        await engine.FirstReconnectOpenEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        PlaybackReconnectSnapshot progress = coordinator.Current.Reconnect!;
+        Assert.AreEqual(PlaybackReconnectPhase.Attempting, progress.Phase);
+        Assert.AreEqual(1, progress.AttemptNumber);
+        Assert.AreEqual(TimeSpan.FromSeconds(30), progress.RemainingBudget);
+        Assert.IsFalse(coordinator.CanRetryReconnect);
+
+        ValueTask<PlaybackEngineOperationResult> duplicate = coordinator.RetryReconnectAsync();
+        Assert.IsTrue(duplicate.IsCompletedSuccessfully);
+        Assert.IsTrue((await duplicate).IsSuccess);
+        Assert.AreEqual(5, engine.OpenCount);
+
+        Assert.IsTrue((await coordinator.StopAsync()).IsSuccess);
+        await AdvanceAsync(time, TimeSpan.FromSeconds(30));
+        Assert.AreEqual(PlaybackState.Closed, coordinator.Current.State);
+        Assert.AreEqual(5, engine.OpenCount);
+    }
+
+    [TestMethod]
+    public async Task ManualRetryKeepsLogicalSessionAndRestoresDesiredControls()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        var engine = new ReconnectPlaybackEngine();
+        await using var coordinator = Create(engine, time);
+        PlaybackSessionSnapshot logical = await StartPlayingAsync(coordinator);
+        await coordinator.SetVolumeAsync(logical.SessionId, PlaybackVolume.FromPercent(37));
+        await coordinator.SetMutedAsync(logical.SessionId, isMuted: true);
+        await coordinator.SetAspectModeAsync(logical.SessionId, PlaybackAspectMode.Fill);
+        await ExhaustCurrentReconnectAsync(coordinator, engine, time, logical.SessionId);
+
+        PlaybackEngineOperationResult retry = await coordinator.RetryReconnectAsync();
+        await WaitUntilAsync(() => coordinator.Current.State == PlaybackState.Playing);
+
+        Assert.IsTrue(retry.IsSuccess);
+        Assert.IsFalse(coordinator.CanRetryReconnect);
+        Assert.AreEqual(logical.SessionId, coordinator.Current.SessionId);
+        Assert.AreEqual(5, engine.OpenCount);
+        PlaybackSessionId physical = engine.OpenSessions.ToArray()[^1];
+        Assert.AreNotEqual(logical.SessionId, physical);
+        Assert.AreEqual(37, coordinator.CurrentControls.Volume.Percent);
+        Assert.IsTrue(coordinator.CurrentControls.IsMuted);
+        Assert.AreEqual(PlaybackAspectMode.Fill, coordinator.CurrentControls.AspectMode);
+        CollectionAssert.IsSubsetOf(
+            new[]
+            {
+                $"Volume:{physical.Value}:37",
+                $"Muted:{physical.Value}:True",
+                $"Aspect:{physical.Value}:Fill",
+            },
+            engine.Journal.ToArray());
+    }
+
+    [TestMethod]
+    public async Task CanonicalManualAttemptFailureAllowsManualRetry()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        var engine = new ReconnectPlaybackEngine();
+        await using var coordinator = Create(engine, time);
+        PlaybackSessionSnapshot logical = await StartPlayingAsync(coordinator);
+        engine.EnqueueReconnectOpenFailure(DomainErrorCode.PlaybackStartFailed);
+
+        engine.EmitFailure(logical.SessionId, DomainErrorCode.StreamInterrupted);
+        await WaitForWaitingAttemptAsync(coordinator, attemptNumber: 1);
+        await AdvanceAsync(time, TimeSpan.FromSeconds(1));
+        await WaitUntilAsync(() => coordinator.Current is
+        {
+            State: PlaybackState.Failed,
+            Error.Code: DomainErrorCode.PlaybackStartFailed,
+        });
+
+        Assert.IsTrue(coordinator.CanRetryReconnect);
+        Assert.IsTrue((await coordinator.RetryReconnectAsync()).IsSuccess);
+        await WaitUntilAsync(() => coordinator.Current.State == PlaybackState.Playing);
+        Assert.AreEqual(logical.SessionId, coordinator.Current.SessionId);
+        Assert.AreEqual(3, engine.OpenCount);
+    }
+
+    [TestMethod]
+    public async Task NeverAttemptFailureRejectsManualRetry()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        var engine = new ReconnectPlaybackEngine();
+        await using var coordinator = Create(engine, time);
+        PlaybackSessionSnapshot logical = await StartPlayingAsync(coordinator);
+        engine.EnqueueReconnectOpenFailure(DomainErrorCode.AuthenticationRejected);
+
+        engine.EmitFailure(logical.SessionId, DomainErrorCode.StreamInterrupted);
+        await WaitForWaitingAttemptAsync(coordinator, attemptNumber: 1);
+        await AdvanceAsync(time, TimeSpan.FromSeconds(1));
+        await WaitUntilAsync(() => coordinator.Current is
+        {
+            State: PlaybackState.Failed,
+            Error.Code: DomainErrorCode.AuthenticationRejected,
+        });
+
+        Assert.IsFalse(coordinator.CanRetryReconnect);
+        PlaybackEngineOperationResult retry = await coordinator.RetryReconnectAsync();
+        Assert.IsFalse(retry.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.OperationCancelled, retry.Error?.Code);
+        Assert.AreEqual(2, engine.OpenCount);
+    }
+
+    [TestMethod]
+    public async Task SourceRetirementInvalidatesTerminalManualRetryAndPreventsLaterOpen()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        var engine = new ReconnectPlaybackEngine();
+        await using var coordinator = Create(engine, time);
+        PlaybackSessionSnapshot logical = await ExhaustReconnectAsync(coordinator, engine, time);
+
+        Assert.IsTrue((await coordinator.ReleaseSourceAsync(logical.SourceId!.Value)).IsSuccess);
+        PlaybackEngineOperationResult retry = await coordinator.RetryReconnectAsync();
+        await AdvanceAsync(time, TimeSpan.FromSeconds(30));
+
+        Assert.IsFalse(retry.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.OperationCancelled, retry.Error?.Code);
+        Assert.IsFalse(coordinator.CanRetryReconnect);
+        Assert.AreEqual(PlaybackState.Closed, coordinator.Current.State);
+        Assert.AreEqual(4, engine.OpenCount);
+    }
+
+    [TestMethod]
+    public async Task ReplacementAndDisposeInvalidateTerminalManualRetry()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        var engine = new ReconnectPlaybackEngine();
+        var coordinator = Create(engine, time);
+        await ExhaustReconnectAsync(coordinator, engine, time);
+
+        PlaybackSessionSnapshot? replacement = await coordinator.StartAsync(
+            SourceId.Generate(),
+            ChannelId.Generate());
+        PlaybackEngineOperationResult replacedRetry = await coordinator.RetryReconnectAsync();
+        Assert.IsNotNull(replacement);
+        Assert.IsFalse(replacedRetry.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.OperationCancelled, replacedRetry.Error?.Code);
+        Assert.AreEqual(5, engine.OpenCount);
+
+        await coordinator.DisposeAsync();
+        PlaybackEngineOperationResult disposedRetry = await coordinator.RetryReconnectAsync();
+        Assert.IsFalse(disposedRetry.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.OperationCancelled, disposedRetry.Error?.Code);
+        Assert.IsFalse(coordinator.CanRetryReconnect);
+        await AdvanceAsync(time, TimeSpan.FromSeconds(30));
+        Assert.AreEqual(5, engine.OpenCount);
     }
 
     [TestMethod]
@@ -758,6 +927,50 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
     }
 
     [TestMethod]
+    public async Task ThrowingStateObserverDoesNotBlockLaterObservers()
+    {
+        var engine = new ReconnectPlaybackEngine();
+        await using var coordinator = Create(engine, TestTime.Create(Start));
+        var observed = new ConcurrentQueue<PlaybackState>();
+        coordinator.StateChanged += (_, _) =>
+            throw new InvalidOperationException("Synthetic observer failure.");
+        coordinator.StateChanged += (_, args) => observed.Enqueue(args.Snapshot.State);
+
+        PlaybackSessionSnapshot playing = await StartPlayingAsync(coordinator);
+
+        Assert.AreEqual(PlaybackState.Playing, playing.State);
+        Assert.IsTrue(observed.Contains(PlaybackState.Opening));
+        Assert.IsTrue(observed.Contains(PlaybackState.Playing));
+    }
+
+    [TestMethod]
+    public async Task ReentrantStopPreventsStaleReconnectDeliveryToLaterObservers()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        var engine = new ReconnectPlaybackEngine();
+        await using var coordinator = Create(engine, time);
+        PlaybackSessionSnapshot logical = await StartPlayingAsync(coordinator);
+        var laterObserver = new ConcurrentQueue<PlaybackState>();
+        coordinator.StateChanged += (_, args) =>
+        {
+            if (args.Snapshot.State == PlaybackState.Reconnecting)
+            {
+                _ = coordinator.StopAsync().AsTask();
+            }
+        };
+        coordinator.StateChanged += (_, args) => laterObserver.Enqueue(args.Snapshot.State);
+
+        engine.EmitFailure(logical.SessionId, DomainErrorCode.StreamInterrupted);
+        await WaitUntilAsync(() => coordinator.Current.State == PlaybackState.Closed);
+        await AdvanceAsync(time, TimeSpan.FromSeconds(30));
+
+        Assert.IsFalse(laterObserver.Contains(PlaybackState.Reconnecting));
+        Assert.IsTrue(laterObserver.Contains(PlaybackState.Stopping));
+        Assert.IsTrue(laterObserver.Contains(PlaybackState.Closed));
+        Assert.AreEqual(1, engine.OpenCount);
+    }
+
+    [TestMethod]
     public void ReconnectingContractsRejectEngineOwnershipAndInactiveProgress()
     {
         PlaybackSessionId sessionId = CreateSessionId(1);
@@ -932,6 +1145,39 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         return snapshot;
     }
 
+    private static async Task<PlaybackSessionSnapshot> ExhaustReconnectAsync(
+        PlaybackSessionCoordinator coordinator,
+        ReconnectPlaybackEngine engine,
+        FakeTimeProvider time)
+    {
+        PlaybackSessionSnapshot logical = await StartPlayingAsync(coordinator);
+        await ExhaustCurrentReconnectAsync(coordinator, engine, time, logical.SessionId);
+        return logical;
+    }
+
+    private static async Task ExhaustCurrentReconnectAsync(
+        PlaybackSessionCoordinator coordinator,
+        ReconnectPlaybackEngine engine,
+        FakeTimeProvider time,
+        PlaybackSessionId logicalSession)
+    {
+        engine.EnqueueReconnectOpenFailure(DomainErrorCode.StreamInterrupted);
+        engine.EnqueueReconnectOpenFailure(DomainErrorCode.StreamInterrupted);
+        engine.EnqueueReconnectOpenFailure(DomainErrorCode.StreamInterrupted);
+        engine.EmitFailure(logicalSession, DomainErrorCode.StreamInterrupted);
+        await WaitForWaitingAttemptAsync(coordinator, attemptNumber: 1);
+        await AdvanceAsync(time, TimeSpan.FromSeconds(1));
+        await WaitForWaitingAttemptAsync(coordinator, attemptNumber: 2);
+        await AdvanceAsync(time, TimeSpan.FromSeconds(2));
+        await WaitForWaitingAttemptAsync(coordinator, attemptNumber: 3);
+        await AdvanceAsync(time, TimeSpan.FromSeconds(4));
+        await WaitUntilAsync(() => coordinator.Current is
+        {
+            State: PlaybackState.Failed,
+            Error.Code: DomainErrorCode.ReconnectExhausted,
+        });
+    }
+
     private static Task WaitForWaitingAttemptAsync(
         PlaybackSessionCoordinator coordinator,
         int attemptNumber) => WaitUntilAsync(() =>
@@ -1081,6 +1327,8 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
 
         internal bool BlockFirstReconnectOpen { get; init; }
 
+        internal int BlockingReconnectOpenOrdinal { get; init; } = 2;
+
         internal bool BlockFirstStop { get; init; }
 
         internal bool HoldFirstReconnectOpenAfterCancellation { get; init; }
@@ -1228,7 +1476,7 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
             int ordinal = Interlocked.Increment(ref _openCount);
             Journal.Enqueue($"Open:{sessionId.Value}");
             OpenSessions.Enqueue(sessionId);
-            if (ordinal == 2 && BlockFirstReconnectOpen)
+            if (ordinal == BlockingReconnectOpenOrdinal && BlockFirstReconnectOpen)
             {
                 FirstReconnectOpenEntered.TrySetResult(true);
                 try

@@ -4749,8 +4749,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "_playback.StateChanged += Playback_StateChanged;");
         StringAssert.Contains(codeBehind, "DispatcherQueue.TryEnqueue(() => ApplyPlaybackState(snapshot));");
         StringAssert.Contains(codeBehind, "PlaybackSessionSnapshot current = playback.Current;");
-        StringAssert.Contains(codeBehind, "current.SessionId != snapshot.SessionId");
-        StringAssert.Contains(codeBehind, "current.State != snapshot.State");
+        StringAssert.Contains(codeBehind, "if (current != snapshot)");
         StringAssert.Contains(codeBehind, "_playback.StateChanged -= Playback_StateChanged;");
         StringAssert.Contains(codeBehind, "PlaybackState.Failed => \"Playback is unavailable.\"");
         StringAssert.Contains(
@@ -4758,7 +4757,13 @@ public sealed class DependencyRulesTests
             "new SqlitePlaybackSourceResolver(\n                _catalogServices.DatabasePath,\n                secretStore)");
         StringAssert.Contains(window, "var engine = new WindowsNativePlaybackEngine(");
         StringAssert.Contains(window, "_mainPage.PlaybackSurfaceElement);");
-        StringAssert.Contains(window, "var playback = new PlaybackSessionCoordinator(engine);");
+        StringAssert.Contains(
+            window,
+            "var playback = new PlaybackSessionCoordinator(\n" +
+            "                engine,\n" +
+            "                new PlaybackReconnectPolicy(),\n" +
+            "                TimeProvider.System,\n" +
+            "                CreatePlaybackReconnectJitter);");
         StringAssert.Contains(window, "_playback = playback;");
         StringAssert.Contains(window, "AppWindow.Closing += AppWindow_Closing;");
         StringAssert.Contains(window, "args.Cancel = true;");
@@ -5048,6 +5053,121 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "-ExpectedName \"Unmute playback\"");
         StringAssert.Contains(packageSmoke, "-ExpectedName \"Use fit aspect mode\"");
         StringAssert.Contains(packageSmoke, "-ExpectedName \"Exit fullscreen\"");
+    }
+
+    [TestMethod]
+    public void M13ReconnectUiIsBoundedAccessibleAndProductionEnabled()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
+        string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+        string window = File.ReadAllText(Path.Combine(windowsRoot, "MainWindow.xaml.cs"));
+
+        StringAssert.Contains(
+            window,
+            "new PlaybackReconnectPolicy(),\n" +
+            "                TimeProvider.System,\n" +
+            "                CreatePlaybackReconnectJitter);");
+        StringAssert.Contains(window, "using System.Security.Cryptography;");
+        StringAssert.Contains(
+            window,
+            "nextAttemptNumber is < 1 or > " +
+            "PlaybackReconnectPolicyOptions.MaximumAllowedAttempts");
+        StringAssert.Contains(
+            window,
+            "PlaybackReconnectPolicyOptions.MaximumAllowedJitter.TotalMilliseconds");
+        StringAssert.Contains(
+            window,
+            "RandomNumberGenerator.GetInt32(maximumMilliseconds + 1)");
+
+        StringAssert.Contains(
+            page,
+            "AutomationProperties.AutomationId=\"PlaybackRetryReconnectButton\"");
+        StringAssert.Contains(
+            page,
+            "AutomationProperties.Name=\"Retry playback connection\"");
+        StringAssert.Contains(
+            page,
+            "AutomationProperties.AutomationId=\"PlaybackReconnectCountdownText\"");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                page,
+                @"PlaybackReconnectCountdownText[^>]*AutomationProperties\.LiveSetting=""Off""",
+                RegexOptions.CultureInvariant),
+            "Per-second reconnect countdown updates must not be announced as a live region.");
+
+        StringAssert.Contains(codeBehind, "if (current != snapshot)");
+        StringAssert.Contains(
+            codeBehind,
+            "bool canRetryReconnect = snapshot.State == PlaybackState.Failed &&");
+        StringAssert.Contains(codeBehind, "playback.CanRetryReconnect;");
+        StringAssert.Contains(
+            codeBehind,
+            "RetryPlaybackButton.Visibility = canRetryReconnect");
+        StringAssert.Contains(
+            codeBehind,
+            "PlaybackReconnectCountdownText.Visibility = waitingToReconnect");
+        StringAssert.Contains(
+            codeBehind,
+            "$\"Retrying in {GetRemainingDelaySeconds(reconnect!.RemainingDelay)} seconds.\"");
+        StringAssert.Contains(
+            codeBehind,
+            "$\"Reconnect attempt {reconnect.AttemptNumber} of {reconnect.MaximumAttempts} is waiting.\"");
+        StringAssert.Contains(
+            codeBehind,
+            "$\"Reconnect attempt {reconnect.AttemptNumber} of {reconnect.MaximumAttempts} is starting.\"");
+        StringAssert.Contains(
+            codeBehind,
+            "PlaybackState.Reconnecting or\n            PlaybackState.Failed;");
+        StringAssert.Contains(
+            codeBehind,
+            "StopButton.Content = isReconnecting ? \"Cancel reconnect\" : \"Stop\";");
+        StringAssert.Contains(
+            codeBehind,
+            "isReconnecting ? \"Cancel reconnect\" : \"Stop channel\"");
+
+        int retryHandlerStart = codeBehind.IndexOf(
+            "private void RetryPlaybackButton_Click(",
+            StringComparison.Ordinal);
+        int retryObserverStart = codeBehind.IndexOf(
+            "private async Task ObserveRetryPlaybackAdmissionAsync(",
+            StringComparison.Ordinal);
+        int nextHandlerStart = codeBehind.IndexOf(
+            "private async void VolumeDownButton_Click(",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            retryHandlerStart >= 0 &&
+            retryObserverStart > retryHandlerStart &&
+            nextHandlerStart > retryObserverStart);
+        string retryHandler = codeBehind[retryHandlerStart..retryObserverStart];
+        string retryObserver = codeBehind[retryObserverStart..nextHandlerStart];
+        Assert.IsFalse(retryHandler.Contains("await ", StringComparison.Ordinal));
+        StringAssert.Contains(
+            retryHandler,
+            "_ = ObserveRetryPlaybackAdmissionAsync(playback);");
+        StringAssert.Contains(
+            retryObserver,
+            "await playback.RetryReconnectAsync()");
+
+        int applyStart = codeBehind.IndexOf(
+            "private void ApplyPlaybackState(",
+            StringComparison.Ordinal);
+        int changeControlsStart = codeBehind.IndexOf(
+            "private static bool CanChangePlaybackControls(",
+            StringComparison.Ordinal);
+        Assert.IsTrue(applyStart >= 0 && changeControlsStart > applyStart);
+        string apply = codeBehind[applyStart..changeControlsStart];
+        Assert.IsFalse(
+            apply.Contains("ChannelList.IsEnabled", StringComparison.Ordinal),
+            "Reconnect progress must not disable choosing another channel.");
+        Assert.IsFalse(codeBehind.Contains("Task.Delay", StringComparison.Ordinal));
+        Assert.IsFalse(codeBehind.Contains("snapshot.Error", StringComparison.Ordinal));
+        Assert.IsFalse(codeBehind.Contains("exception.Message", StringComparison.Ordinal));
     }
 
     [TestMethod]

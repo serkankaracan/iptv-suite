@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using IptvSuite.Application;
 using IptvSuite.Domain;
 using IptvSuite.Infrastructure;
@@ -54,7 +55,11 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
                 resolver,
                 _mainPage.PlaybackSurfaceElement);
             rollbackOwner = engine;
-            var playback = new PlaybackSessionCoordinator(engine);
+            var playback = new PlaybackSessionCoordinator(
+                engine,
+                new PlaybackReconnectPolicy(),
+                TimeProvider.System,
+                CreatePlaybackReconnectJitter);
             rollbackOwner = playback;
             var sourceDeletion = new SourceDeletionCoordinator(
                 new SqliteSourceDeletionLifecycle(
@@ -521,4 +526,17 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         exception is not OutOfMemoryException and
         not StackOverflowException and
         not AccessViolationException;
+
+    private static TimeSpan CreatePlaybackReconnectJitter(int nextAttemptNumber)
+    {
+        if (nextAttemptNumber is < 1 or > PlaybackReconnectPolicyOptions.MaximumAllowedAttempts)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nextAttemptNumber));
+        }
+
+        int maximumMilliseconds = checked(
+            (int)PlaybackReconnectPolicyOptions.MaximumAllowedJitter.TotalMilliseconds);
+        return TimeSpan.FromMilliseconds(
+            RandomNumberGenerator.GetInt32(maximumMilliseconds + 1));
+    }
 }
