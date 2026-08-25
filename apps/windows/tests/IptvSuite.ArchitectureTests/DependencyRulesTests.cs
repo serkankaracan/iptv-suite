@@ -4317,6 +4317,223 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M15SignedPackageSmokeAuditsTheExactInstallRootBeforeRemoval()
+    {
+        string packageSmokePath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1");
+        string auditHelperPath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "WindowsPackageInstallRootAudit.ps1");
+        string selfTestPath = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ArchitectureTests",
+            "Test-WindowsPackageInstallRootAudit.ps1");
+        string workflowPath = Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-quality.yml");
+
+        Assert.IsTrue(File.Exists(auditHelperPath), "The package install-root audit helper is missing.");
+        Assert.IsTrue(File.Exists(selfTestPath), "The package install-root audit self-test is missing.");
+
+        string packageSmoke = File.ReadAllText(packageSmokePath);
+        string workflow = File.ReadAllText(workflowPath);
+        StringAssert.Contains(
+            packageSmoke,
+            ". (Join-Path $PSScriptRoot \"WindowsPackageInstallRootAudit.ps1\")");
+        Assert.AreEqual(
+            1,
+            Regex.Count(packageSmoke, @"\bStart-WindowsPackageInstallRootAudit\b"),
+            "The exact package install-root audit must start once.");
+        Assert.AreEqual(
+            2,
+            Regex.Count(packageSmoke, @"\bComplete-WindowsPackageInstallRootAudit\b"),
+            "The audit needs one normal and one failure-path completion site.");
+        Assert.AreEqual(
+            1,
+            Regex.Count(packageSmoke, @"\bStop-WindowsPackageInstallRootAudit\b"),
+            "The audit must have one idempotent cleanup site.");
+        Assert.IsFalse(
+            workflow.Contains("WindowsPackageInstallRootAudit", StringComparison.Ordinal),
+            "The runtime audit belongs to the existing signed package smoke lane.");
+
+        int installedPackageIndex = packageSmoke.IndexOf(
+            "$installedPackage = $installedPackages[0]",
+            StringComparison.Ordinal);
+        int manifestPolicyIndex = packageSmoke.IndexOf(
+            "Assert-BuiltManifestPolicy -Manifest $installedManifestXml",
+            installedPackageIndex,
+            StringComparison.Ordinal);
+        int bindingIndex = packageSmoke.IndexOf(
+            "[System.IO.Path]::GetFileName($canonicalInstalledPackageLocation)",
+            manifestPolicyIndex,
+            StringComparison.Ordinal);
+        int startIndex = packageSmoke.IndexOf(
+            "$packageInstallRootAudit = Start-WindowsPackageInstallRootAudit",
+            bindingIndex,
+            StringComparison.Ordinal);
+        int firstActivationIndex = packageSmoke.IndexOf(
+            "::Activate($aumid)",
+            startIndex,
+            StringComparison.Ordinal);
+        int firstPlaybackInstanceIndex = packageSmoke.IndexOf(
+            "$deleteInstance = Start-PackagedPlaybackApplicationInstance",
+            startIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            installedPackageIndex >= 0 &&
+            installedPackageIndex < manifestPolicyIndex &&
+            manifestPolicyIndex < bindingIndex &&
+            bindingIndex < startIndex &&
+            startIndex < firstActivationIndex &&
+            startIndex < firstPlaybackInstanceIndex,
+            "The audit must bind the exact installed package before every product activation.");
+
+        int harnessExitIndex = packageSmoke.IndexOf(
+            "$playbackHarnessProcess.WaitForExit(15000)",
+            startIndex,
+            StringComparison.Ordinal);
+        int resultValidationIndex = packageSmoke.IndexOf(
+            "$playbackUiAcceptanceVerified = $true",
+            harnessExitIndex,
+            StringComparison.Ordinal);
+        int normalAttemptIndex = packageSmoke.IndexOf(
+            "$packageInstallRootAuditCompletionAttempted = $true",
+            resultValidationIndex,
+            StringComparison.Ordinal);
+        int normalCompleteIndex = packageSmoke.IndexOf(
+            "$packageInstallRootAuditResult = Complete-WindowsPackageInstallRootAudit",
+            normalAttemptIndex,
+            StringComparison.Ordinal);
+        int normalRemoveIndex = packageSmoke.IndexOf(
+            "    Remove-ExactDevelopmentPackage",
+            normalCompleteIndex,
+            StringComparison.Ordinal);
+        int successEvidenceIndex = packageSmoke.IndexOf(
+            "$successEvidence = [ordered]@{",
+            normalRemoveIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            harnessExitIndex >= 0 &&
+            harnessExitIndex < resultValidationIndex &&
+            resultValidationIndex < normalAttemptIndex &&
+            normalAttemptIndex < normalCompleteIndex &&
+            normalCompleteIndex < normalRemoveIndex &&
+            normalRemoveIndex < successEvidenceIndex,
+            "The normal path must stop workloads and complete the audit before uninstall.");
+
+        int stopApplicationIndex = packageSmoke.IndexOf(
+            "-Name \"Stop launched application\"",
+            successEvidenceIndex,
+            StringComparison.Ordinal);
+        int stopHarnessIndex = packageSmoke.IndexOf(
+            "-Name \"Stop playback acceptance harness\"",
+            stopApplicationIndex,
+            StringComparison.Ordinal);
+        int cleanupCompleteIndex = packageSmoke.IndexOf(
+            "-Name \"Complete exact product install-root audit\"",
+            stopHarnessIndex,
+            StringComparison.Ordinal);
+        int cleanupStopIndex = packageSmoke.IndexOf(
+            "-Name \"Stop exact product install-root audit\"",
+            cleanupCompleteIndex,
+            StringComparison.Ordinal);
+        int cleanupRemoveIndex = packageSmoke.IndexOf(
+            "-Name \"Remove exact development package\"",
+            cleanupStopIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            stopApplicationIndex >= 0 &&
+            stopApplicationIndex < stopHarnessIndex &&
+            stopHarnessIndex < cleanupCompleteIndex &&
+            cleanupCompleteIndex < cleanupStopIndex &&
+            cleanupStopIndex < cleanupRemoveIndex,
+            "The failure path must stop workloads and finalize the audit before uninstall.");
+
+        int successEvidenceEndIndex = packageSmoke.IndexOf(
+            "$githubSha =",
+            successEvidenceIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(successEvidenceEndIndex > successEvidenceIndex);
+        string successEvidenceBlock = packageSmoke[successEvidenceIndex..successEvidenceEndIndex];
+        foreach (string forbiddenEvidenceTerm in new[]
+                 {
+                     ".InstallLocation",
+                     "$installedPackageLocation",
+                     "$canonicalInstalledPackageLocation",
+                     ".CanonicalRoot",
+                     ".Collector",
+                     ".InventoryArguments",
+                     ".FullPath",
+                     ".RelativePath",
+                 })
+        {
+            Assert.IsFalse(
+                successEvidenceBlock.Contains(forbiddenEvidenceTerm, StringComparison.Ordinal),
+                $"Install-root evidence must not expose '{forbiddenEvidenceTerm}'.");
+        }
+        foreach (string requiredEvidenceTerm in new[]
+                 {
+                     "PackageInstallRootAuditScope",
+                     "PackageInstallRootBaselineManifestSha256",
+                     "PackageInstallRootFinalManifestSha256",
+                     "PackageInstallRootMutationEventCount",
+                     "PackageInstallRootWatcherOverflow",
+                     "PackageInstallRootPrePostInventoryEquivalent",
+                     "PackageInstallRootAuditPassed",
+                 })
+        {
+            StringAssert.Contains(successEvidenceBlock, requiredEvidenceTerm);
+        }
+
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(
+            File.Exists(windowsPowerShell),
+            "Windows PowerShell 5.1 is required for the install-root audit contract.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(selfTestPath);
+
+        using Process contractProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The install-root audit self-test could not start.");
+        bool contractCompleted = contractProcess.WaitForExit(120_000);
+        if (!contractCompleted)
+        {
+            contractProcess.Kill(entireProcessTree: true);
+            contractProcess.WaitForExit();
+        }
+
+        string contractOutput = contractProcess.StandardOutput.ReadToEnd();
+        string contractError = contractProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            contractCompleted && contractProcess.ExitCode == 0,
+            $"Package install-root audit contract failed.{Environment.NewLine}{contractOutput}{contractError}");
+    }
+
+    [TestMethod]
     public void M8CatalogCrashHarnessIsIsolatedAndKillsOnlyItsTrackedProcess()
     {
         string harness = File.ReadAllText(Path.Combine(

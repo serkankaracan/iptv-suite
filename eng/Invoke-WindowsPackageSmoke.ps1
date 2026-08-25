@@ -651,6 +651,7 @@ namespace IptvSuite.PackageSmoke
 }
 '@
 Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
+. (Join-Path $PSScriptRoot "WindowsPackageInstallRootAudit.ps1")
 
 $expectedName = "IptvSuite.LocalDev.6f0d9a64"
 $expectedPublisher = "CN=IptvSuite Local Development"
@@ -717,6 +718,9 @@ $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
 
 $certificate = $null
 $installedPackage = $null
+$packageInstallRootAudit = $null
+$packageInstallRootAuditResult = $null
+$packageInstallRootAuditCompletionAttempted = $false
 $launchedProcess = $null
 $playbackHarnessProcess = $null
 $playbackLoopbackCertificate = $null
@@ -2971,6 +2975,37 @@ try {
         throw "Expected an x64 package, received $($installedPackage.Architecture)."
     }
 
+    $installedManifest = $installedPackage | Get-AppxPackageManifest
+    [xml]$installedManifestXml = $installedManifest.Package.OuterXml
+    Assert-BuiltManifestPolicy -Manifest $installedManifestXml
+
+    $installedPackageFullName = [string]$installedPackage.PackageFullName
+    $installedPackageLocation = [string]$installedPackage.InstallLocation
+    if ([string]::IsNullOrWhiteSpace($installedPackageFullName) -or
+        [string]::IsNullOrWhiteSpace($installedPackageLocation) -or
+        -not [System.IO.Path]::IsPathRooted($installedPackageLocation)) {
+        throw "The exact installed development package has no auditable install-root binding."
+    }
+    $canonicalInstalledPackageLocation = [System.IO.Path]::GetFullPath(
+        $installedPackageLocation).TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar)
+    $trimmedInstalledPackageLocation = $installedPackageLocation.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    if (-not [string]::Equals(
+            $canonicalInstalledPackageLocation,
+            $trimmedInstalledPackageLocation,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals(
+            [System.IO.Path]::GetFileName($canonicalInstalledPackageLocation),
+            $installedPackageFullName,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The exact installed development package has an invalid install-root binding."
+    }
+    $packageInstallRootAudit = Start-WindowsPackageInstallRootAudit `
+        -RootPath $canonicalInstalledPackageLocation
+
     $packageFamilyName = $installedPackage.PackageFamilyName
     $catalogDatabasePath = Join-Path $env:LOCALAPPDATA `
         "Packages\$packageFamilyName\LocalCache\Catalog\v2\catalog.db"
@@ -2979,10 +3014,6 @@ try {
         throw "The disposable 50k packaged catalog seed failed."
     }
     $catalog50kSeedVerified = $true
-
-    $installedManifest = $installedPackage | Get-AppxPackageManifest
-    [xml]$installedManifestXml = $installedManifest.Package.OuterXml
-    Assert-BuiltManifestPolicy -Manifest $installedManifestXml
 
     $existingProcesses = @(Get-Process -Name "IptvSuite.Windows" -ErrorAction SilentlyContinue)
     if ($existingProcesses.Count -ne 0) {
@@ -5037,6 +5068,34 @@ try {
     $sourceDeletionSiblingCatalogRetained = $resultTicket.SiblingCatalogRetained
     $playbackUiAcceptanceVerified = $true
 
+    $packageInstallRootAuditCompletionAttempted = $true
+    $packageInstallRootAuditResult = Complete-WindowsPackageInstallRootAudit `
+        -Audit $packageInstallRootAudit
+    if ($packageInstallRootAuditResult.SchemaVersion -ne 1 -or
+        $packageInstallRootAuditResult.Scope -cne
+            "ExactRegisteredProductPackageInstallLocation" -or
+        $packageInstallRootAuditResult.ExcludedEntryCount -ne 0 -or
+        $packageInstallRootAuditResult.BaselineEntryCount -le 0 -or
+        $packageInstallRootAuditResult.BaselineFileCount -le 0 -or
+        $packageInstallRootAuditResult.BaselineTotalBytes -le 0 -or
+        $packageInstallRootAuditResult.FinalEntryCount -ne
+            $packageInstallRootAuditResult.BaselineEntryCount -or
+        $packageInstallRootAuditResult.FinalFileCount -ne
+            $packageInstallRootAuditResult.BaselineFileCount -or
+        $packageInstallRootAuditResult.FinalTotalBytes -ne
+            $packageInstallRootAuditResult.BaselineTotalBytes -or
+        -not [System.Text.RegularExpressions.Regex]::IsMatch(
+            $packageInstallRootAuditResult.BaselineManifestSha256,
+            '\A[0-9a-f]{64}\z') -or
+        $packageInstallRootAuditResult.FinalManifestSha256 -cne
+            $packageInstallRootAuditResult.BaselineManifestSha256 -or
+        $packageInstallRootAuditResult.MutationEventCount -ne 0 -or
+        $packageInstallRootAuditResult.WatcherOverflow -ne $false -or
+        $packageInstallRootAuditResult.SnapshotEquivalent -ne $true -or
+        $packageInstallRootAuditResult.RuntimeWriteAuditPassed -ne $true) {
+        throw "The packaged install-root runtime audit result is invalid."
+    }
+
     $packageFileName = $packages[0].Name
     Remove-ExactDevelopmentPackage
 
@@ -5073,6 +5132,34 @@ try {
         SignatureStatus   = $signature.Status.ToString()
         WindowsAppRuntimeDisposition = $windowsAppRuntimeDisposition
         PayloadLeakGate   = $true
+        PackageInstallRootAuditSchemaVersion = $packageInstallRootAuditResult.SchemaVersion
+        PackageInstallRootAuditScope = $packageInstallRootAuditResult.Scope
+        PackageInstallRootAuditExcludedEntryCount =
+            $packageInstallRootAuditResult.ExcludedEntryCount
+        PackageInstallRootBaselineEntryCount =
+            $packageInstallRootAuditResult.BaselineEntryCount
+        PackageInstallRootBaselineFileCount =
+            $packageInstallRootAuditResult.BaselineFileCount
+        PackageInstallRootBaselineTotalBytes =
+            $packageInstallRootAuditResult.BaselineTotalBytes
+        PackageInstallRootBaselineManifestSha256 =
+            $packageInstallRootAuditResult.BaselineManifestSha256
+        PackageInstallRootFinalEntryCount =
+            $packageInstallRootAuditResult.FinalEntryCount
+        PackageInstallRootFinalFileCount =
+            $packageInstallRootAuditResult.FinalFileCount
+        PackageInstallRootFinalTotalBytes =
+            $packageInstallRootAuditResult.FinalTotalBytes
+        PackageInstallRootFinalManifestSha256 =
+            $packageInstallRootAuditResult.FinalManifestSha256
+        PackageInstallRootMutationEventCount =
+            $packageInstallRootAuditResult.MutationEventCount
+        PackageInstallRootWatcherOverflow =
+            $packageInstallRootAuditResult.WatcherOverflow
+        PackageInstallRootPrePostInventoryEquivalent =
+            $packageInstallRootAuditResult.SnapshotEquivalent
+        PackageInstallRootAuditPassed =
+            $packageInstallRootAuditResult.RuntimeWriteAuditPassed
         ProtectedStoreDirectoryInitialized = $protectedStoreDirectoryInitialized
         CatalogUiaContractVerified = $catalogUiaContractVerified
         CatalogKeyboardFocusOrderVerified = $catalogKeyboardFocusOrderVerified
@@ -5310,6 +5397,20 @@ finally {
             finally {
                 $playbackHarnessProcess.Dispose()
             }
+        }
+    }
+
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Complete exact product install-root audit" -Action {
+        if ($null -ne $packageInstallRootAudit -and
+            -not $packageInstallRootAuditCompletionAttempted) {
+            $null = Complete-WindowsPackageInstallRootAudit `
+                -Audit $packageInstallRootAudit
+        }
+    }
+
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Stop exact product install-root audit" -Action {
+        if ($null -ne $packageInstallRootAudit) {
+            Stop-WindowsPackageInstallRootAudit -Audit $packageInstallRootAudit
         }
     }
 
