@@ -2205,21 +2205,34 @@ function Get-PackagedPlaybackTargetContext {
         $expand.Collapse()
     }
 
-    $catalogStatusElement = Get-AutomationElementById $root "CatalogStatusText"
+    $catalogStatusElement = $null
     $expectedStatus = "Showing 1$([char]0x2013)2 of 2 channels."
     $deadline = (Get-Date).AddSeconds(15)
+    $targetReady = $false
     do {
         Assert-PackagedProcessAlive -Process $process
-        $selected = @($selection.Current.GetSelection())
-        if ($selected.Count -eq 1 -and
-            $selected[0].Current.Name -ceq $expectedPlaybackSourceName -and
-            $null -ne $catalogStatusElement -and
-            $catalogStatusElement.Current.Name -ceq $expectedStatus) {
-            break
+        try {
+            if ($null -eq $catalogStatusElement) {
+                $catalogStatusElement = Get-AutomationElementById $root "CatalogStatusText"
+            }
+            $selected = @($selection.Current.GetSelection())
+            if ($selected.Count -eq 1 -and
+                $selected[0].Current.Name -ceq $expectedPlaybackSourceName -and
+                $null -ne $catalogStatusElement -and
+                $catalogStatusElement.Current.Name -ceq $expectedStatus) {
+                $targetReady = $true
+                break
+            }
+        }
+        catch [System.Windows.Automation.ElementNotAvailableException] {
+            $catalogStatusElement = $null
         }
         Start-Sleep -Milliseconds 100
     } while ((Get-Date) -lt $deadline)
-    if ((Get-Date) -ge $deadline) {
+    if (-not $targetReady) {
+        if ($null -eq $catalogStatusElement) {
+            throw "The packaged playback catalog status automation element is missing after relaunch."
+        }
         throw "The packaged playback target source did not become ready."
     }
 
