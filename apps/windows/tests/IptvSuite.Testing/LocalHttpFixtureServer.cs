@@ -20,6 +20,8 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
     private readonly X509Certificate2? _certificate;
     private readonly FixtureHttpMetrics _metrics;
     private readonly IReadOnlyList<byte[]> _ownedResponseBodies;
+    private readonly Dictionary<string, FixtureHttpResponse> _routes;
+    private readonly ControlledFixtureStreamRegistry _controlledStreams;
     private bool _disposed;
 
     private LocalHttpFixtureServer(
@@ -28,7 +30,9 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
         ConcurrentQueue<FixtureHttpRequest> requests,
         X509Certificate2? certificate,
         FixtureHttpMetrics metrics,
-        IReadOnlyList<byte[]> ownedResponseBodies)
+        IReadOnlyList<byte[]> ownedResponseBodies,
+        Dictionary<string, FixtureHttpResponse> routes,
+        ControlledFixtureStreamRegistry controlledStreams)
     {
         _application = application;
         BaseAddress = baseAddress;
@@ -36,6 +40,8 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
         _certificate = certificate;
         _metrics = metrics;
         _ownedResponseBodies = ownedResponseBodies;
+        _routes = routes;
+        _controlledStreams = controlledStreams;
     }
 
     public Uri BaseAddress { get; }
@@ -53,6 +59,31 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
     public long CompletedBodyBytes => Interlocked.Read(ref _metrics.CompletedBodyBytes);
 
     public int FailureCount => Volatile.Read(ref _metrics.FailureCount);
+
+    public ControlledFixtureStreamControl EnableControlledStream(
+        string route,
+        ControlledFixtureStreamOptions? options = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        string validatedRoute = ValidateRoute(route);
+        if (!_routes.TryGetValue(validatedRoute, out FixtureHttpResponse? response))
+        {
+            throw new ArgumentException("A controlled fixture stream must bind to an existing route.", nameof(route));
+        }
+
+        if (response.StatusCode != StatusCodes.Status200OK || response.Body.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A controlled fixture stream requires a non-empty successful response.",
+                nameof(route));
+        }
+
+        ControlledFixtureStreamOptions validatedOptions =
+            ControlledFixtureStreamOptions.Validate(options ?? new ControlledFixtureStreamOptions());
+        var stream = new ControlledFixtureStreamControl(validatedOptions);
+        _controlledStreams.Add(validatedRoute, stream);
+        return stream;
+    }
 
     public static async Task<LocalHttpFixtureServer> StartAsync(
         IReadOnlyDictionary<string, FixtureHttpResponse> routes,
@@ -97,12 +128,14 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
 
             WebApplication application = builder.Build();
             ConcurrentQueue<FixtureHttpRequest> requests = new();
+            var controlledStreams = new ControlledFixtureStreamRegistry();
 
             application.Run(context => HandleRequestAsync(
                 context,
                 routeSnapshot,
                 requests,
-                metrics));
+                metrics,
+                controlledStreams));
 
             try
             {
@@ -126,7 +159,9 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
                     requests,
                     certificate,
                     metrics,
-                    ownedResponseBodies);
+                    ownedResponseBodies,
+                    routeSnapshot,
+                    controlledStreams);
             }
             catch
             {
@@ -150,6 +185,7 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
         }
 
         _disposed = true;
+        _controlledStreams.DisableAll();
         try
         {
             using CancellationTokenSource stopTimeout = new(TimeSpan.FromSeconds(5));
@@ -214,7 +250,8 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
         HttpContext context,
         Dictionary<string, FixtureHttpResponse> routes,
         ConcurrentQueue<FixtureHttpRequest> requests,
-        FixtureHttpMetrics metrics)
+        FixtureHttpMetrics metrics,
+        ControlledFixtureStreamRegistry controlledStreams)
     {
         string method = context.Request.Method;
         string path = context.Request.Path.Value ?? "/";
@@ -227,6 +264,12 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 Interlocked.Increment(ref metrics.FailureCount);
+                return;
+            }
+
+            if (controlledStreams.TryGet(path, out ControlledFixtureStreamControl controlledStream) &&
+                await controlledStream.TryHandleAsync(context, response, metrics).ConfigureAwait(false))
+            {
                 return;
             }
 
@@ -450,4 +493,554 @@ internal sealed class FixtureHttpMetrics
     internal int CompletedResponseCount;
     internal long CompletedBodyBytes;
     internal int FailureCount;
+}
+
+public enum ControlledFixtureStreamMode
+{
+    Enabled,
+    Holding,
+    RejectingNext,
+    Disabled,
+}
+
+public sealed record ControlledFixtureStreamOptions
+{
+    public TimeSpan WriteInterval { get; init; } = TimeSpan.FromMilliseconds(20);
+
+    public int WriteSize { get; init; } = 12_032;
+
+    public int MaximumRequestOrdinals { get; init; } = 64;
+
+    internal static ControlledFixtureStreamOptions Validate(ControlledFixtureStreamOptions options)
+    {
+        if (options.WriteInterval < TimeSpan.FromMilliseconds(1) ||
+            options.WriteInterval > TimeSpan.FromSeconds(1))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "The controlled stream write interval must be between one millisecond and one second.");
+        }
+
+        if (options.WriteSize is < 1 or > 65_536)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "The controlled stream write size must be between one and 65536 bytes.");
+        }
+
+        if (options.MaximumRequestOrdinals is < 1 or > 1_024)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "The controlled stream request ordinal limit must be between one and 1024.");
+        }
+
+        return options with { };
+    }
+}
+
+public sealed record ControlledFixtureStreamSnapshot(
+    ControlledFixtureStreamMode Mode,
+    long LastAssignedRequestOrdinal,
+    long ActiveRequestOrdinal,
+    int CurrentHeldRequestCount,
+    int PeakHeldRequestCount,
+    int PeakActiveRequestCount,
+    int OverlapViolationCount,
+    int ExpectedAbortCount,
+    long LastExpectedAbortOrdinal,
+    int ExpectedRejectCount,
+    long LastExpectedRejectOrdinal,
+    int ClientDetachCount,
+    long LastClientDetachOrdinal,
+    int DisabledFallbackCount,
+    long LastDisabledFallbackOrdinal,
+    int CapacityRejectCount,
+    int UnexpectedFailureCount,
+    long LastUnexpectedFailureOrdinal);
+
+public sealed class ControlledFixtureStreamControl
+{
+    private readonly object _gate = new();
+    private readonly ControlledFixtureStreamOptions _options;
+    private TaskCompletionSource<bool> _stateChanged = CreateStateSignal();
+    private ControlledFixtureStreamMode _mode = ControlledFixtureStreamMode.Enabled;
+    private ActiveControlledRequest? _activeRequest;
+    private long _lastAssignedRequestOrdinal;
+    private int _currentHeldRequestCount;
+    private int _peakHeldRequestCount;
+    private int _peakActiveRequestCount;
+    private int _overlapViolationCount;
+    private int _expectedAbortCount;
+    private long _lastExpectedAbortOrdinal;
+    private int _expectedRejectCount;
+    private long _lastExpectedRejectOrdinal;
+    private int _clientDetachCount;
+    private long _lastClientDetachOrdinal;
+    private int _disabledFallbackCount;
+    private long _lastDisabledFallbackOrdinal;
+    private int _capacityRejectCount;
+    private int _unexpectedFailureCount;
+    private long _lastUnexpectedFailureOrdinal;
+
+    internal ControlledFixtureStreamControl(ControlledFixtureStreamOptions options)
+    {
+        _options = options;
+    }
+
+    public ControlledFixtureStreamSnapshot Snapshot
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new ControlledFixtureStreamSnapshot(
+                    _mode,
+                    _lastAssignedRequestOrdinal,
+                    _activeRequest?.Ordinal ?? 0,
+                    _currentHeldRequestCount,
+                    _peakHeldRequestCount,
+                    _peakActiveRequestCount,
+                    _overlapViolationCount,
+                    _expectedAbortCount,
+                    _lastExpectedAbortOrdinal,
+                    _expectedRejectCount,
+                    _lastExpectedRejectOrdinal,
+                    _clientDetachCount,
+                    _lastClientDetachOrdinal,
+                    _disabledFallbackCount,
+                    _lastDisabledFallbackOrdinal,
+                    _capacityRejectCount,
+                    _unexpectedFailureCount,
+                    _lastUnexpectedFailureOrdinal);
+            }
+        }
+    }
+
+    public void HoldSubsequentRequests()
+    {
+        SetAdmissionMode(ControlledFixtureStreamMode.Holding);
+    }
+
+    public void RejectNextRequest()
+    {
+        SetAdmissionMode(ControlledFixtureStreamMode.RejectingNext);
+    }
+
+    public void Restore()
+    {
+        SetAdmissionMode(ControlledFixtureStreamMode.Enabled);
+    }
+
+    public bool TryAbortActive(long expectedRequestOrdinal)
+    {
+        if (expectedRequestOrdinal <= 0)
+        {
+            return false;
+        }
+
+        CancellationTokenSource cancellation;
+        lock (_gate)
+        {
+            if (_activeRequest is null ||
+                _activeRequest.Ordinal != expectedRequestOrdinal ||
+                _activeRequest.State != ActiveControlledRequestState.Active)
+            {
+                return false;
+            }
+
+            _activeRequest.State = ActiveControlledRequestState.AbortRequested;
+            cancellation = _activeRequest.Cancellation;
+        }
+
+        try
+        {
+            cancellation.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        return true;
+    }
+
+    public void Disable()
+    {
+        CancellationTokenSource? cancellation = null;
+        lock (_gate)
+        {
+            if (_mode == ControlledFixtureStreamMode.Disabled)
+            {
+                return;
+            }
+
+            _mode = ControlledFixtureStreamMode.Disabled;
+            if (_activeRequest is { State: ActiveControlledRequestState.Active } activeRequest)
+            {
+                activeRequest.State = ActiveControlledRequestState.AbortRequested;
+                cancellation = activeRequest.Cancellation;
+            }
+
+            PulseStateChangedLocked();
+        }
+
+        try
+        {
+            cancellation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    internal async Task<bool> TryHandleAsync(
+        HttpContext context,
+        FixtureHttpResponse response,
+        FixtureHttpMetrics metrics)
+    {
+        if (!HttpMethods.IsGet(context.Request.Method))
+        {
+            return false;
+        }
+
+        ControlledRequestAdmission admission = await WaitForAdmissionAsync(context.RequestAborted)
+            .ConfigureAwait(false);
+        switch (admission.Kind)
+        {
+            case ControlledRequestAdmissionKind.DisabledFallback:
+                return false;
+            case ControlledRequestAdmissionKind.Rejected:
+            case ControlledRequestAdmissionKind.CapacityRejected:
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.ContentLength = 0;
+                context.Response.Headers.CacheControl = "no-store";
+                return true;
+            case ControlledRequestAdmissionKind.ClientDetached:
+                return true;
+            case ControlledRequestAdmissionKind.Active:
+                await WritePacedResponseAsync(context, response, metrics, admission.ActiveRequest!)
+                    .ConfigureAwait(false);
+                return true;
+            default:
+                throw new InvalidOperationException("Unknown controlled stream admission.");
+        }
+    }
+
+    private async Task<ControlledRequestAdmission> WaitForAdmissionAsync(
+        CancellationToken requestAborted)
+    {
+        long requestOrdinal;
+        lock (_gate)
+        {
+            if (_mode == ControlledFixtureStreamMode.Disabled && _activeRequest is null)
+            {
+                return ControlledRequestAdmission.DisabledFallback();
+            }
+
+            if (_lastAssignedRequestOrdinal >= _options.MaximumRequestOrdinals)
+            {
+                IncrementBounded(ref _capacityRejectCount);
+                return ControlledRequestAdmission.CapacityRejected();
+            }
+
+            requestOrdinal = ++_lastAssignedRequestOrdinal;
+        }
+
+        bool held = false;
+        try
+        {
+            while (true)
+            {
+                Task stateChanged;
+                lock (_gate)
+                {
+                    if (_mode == ControlledFixtureStreamMode.Disabled && _activeRequest is null)
+                    {
+                        IncrementBounded(ref _disabledFallbackCount);
+                        _lastDisabledFallbackOrdinal = requestOrdinal;
+                        return ControlledRequestAdmission.DisabledFallback();
+                    }
+
+                    if (_mode == ControlledFixtureStreamMode.RejectingNext)
+                    {
+                        _mode = ControlledFixtureStreamMode.Holding;
+                        IncrementBounded(ref _expectedRejectCount);
+                        _lastExpectedRejectOrdinal = requestOrdinal;
+                        PulseStateChangedLocked();
+                        return ControlledRequestAdmission.Rejected();
+                    }
+
+                    if (_mode == ControlledFixtureStreamMode.Enabled && _activeRequest is null)
+                    {
+                        var activeRequest = new ActiveControlledRequest(requestOrdinal);
+                        _activeRequest = activeRequest;
+                        _peakActiveRequestCount = Math.Max(_peakActiveRequestCount, 1);
+                        return ControlledRequestAdmission.Active(activeRequest);
+                    }
+
+                    if (!held)
+                    {
+                        held = true;
+                        _currentHeldRequestCount++;
+                        _peakHeldRequestCount = Math.Max(
+                            _peakHeldRequestCount,
+                            _currentHeldRequestCount);
+                    }
+
+                    stateChanged = _stateChanged.Task;
+                }
+
+                await stateChanged.WaitAsync(requestAborted).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (requestAborted.IsCancellationRequested)
+        {
+            lock (_gate)
+            {
+                IncrementBounded(ref _clientDetachCount);
+                _lastClientDetachOrdinal = requestOrdinal;
+            }
+
+            return ControlledRequestAdmission.ClientDetached();
+        }
+        finally
+        {
+            if (held)
+            {
+                lock (_gate)
+                {
+                    _currentHeldRequestCount--;
+                }
+            }
+        }
+    }
+
+    private async Task WritePacedResponseAsync(
+        HttpContext context,
+        FixtureHttpResponse response,
+        FixtureHttpMetrics metrics,
+        ActiveControlledRequest activeRequest)
+    {
+        using CancellationTokenSource linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            context.RequestAborted,
+            activeRequest.Cancellation.Token);
+        CancellationToken cancellationToken = linkedCancellation.Token;
+        ControlledRequestOutcome outcome = ControlledRequestOutcome.UnexpectedFailure;
+
+        try
+        {
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            context.Response.ContentType = response.ContentType;
+            context.Response.Headers.CacheControl = "no-store";
+            await context.Response.StartAsync(cancellationToken).ConfigureAwait(false);
+
+            int offset = 0;
+            while (true)
+            {
+                int length = Math.Min(_options.WriteSize, response.Body.Length - offset);
+                await context.Response.Body.WriteAsync(
+                    response.Body.Slice(offset, length),
+                    cancellationToken).ConfigureAwait(false);
+                await context.Response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
+                Interlocked.Add(ref metrics.CompletedBodyBytes, length);
+                offset = offset + length == response.Body.Length ? 0 : offset + length;
+                await Task.Delay(_options.WriteInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            outcome = ControlledRequestOutcome.ClientDetached;
+        }
+        catch (IOException)
+        {
+            outcome = ControlledRequestOutcome.ClientDetached;
+        }
+        catch
+        {
+            outcome = ControlledRequestOutcome.UnexpectedFailure;
+        }
+        finally
+        {
+            ControlledRequestOutcome terminalOutcome = CompleteActiveRequest(activeRequest, outcome);
+            if (terminalOutcome == ControlledRequestOutcome.UnexpectedFailure)
+            {
+                Interlocked.Increment(ref metrics.FailureCount);
+            }
+
+            if (terminalOutcome == ControlledRequestOutcome.ExpectedAbort)
+            {
+                context.Abort();
+            }
+
+            activeRequest.Cancellation.Dispose();
+        }
+    }
+
+    private ControlledRequestOutcome CompleteActiveRequest(
+        ActiveControlledRequest activeRequest,
+        ControlledRequestOutcome observedOutcome)
+    {
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_activeRequest, activeRequest) ||
+                activeRequest.State == ActiveControlledRequestState.Terminal)
+            {
+                IncrementBounded(ref _overlapViolationCount);
+                return ControlledRequestOutcome.UnexpectedFailure;
+            }
+
+            ControlledRequestOutcome outcome =
+                activeRequest.State == ActiveControlledRequestState.AbortRequested
+                    ? ControlledRequestOutcome.ExpectedAbort
+                    : observedOutcome;
+            activeRequest.State = ActiveControlledRequestState.Terminal;
+            _activeRequest = null;
+            switch (outcome)
+            {
+                case ControlledRequestOutcome.ExpectedAbort:
+                    IncrementBounded(ref _expectedAbortCount);
+                    _lastExpectedAbortOrdinal = activeRequest.Ordinal;
+                    break;
+                case ControlledRequestOutcome.ClientDetached:
+                    IncrementBounded(ref _clientDetachCount);
+                    _lastClientDetachOrdinal = activeRequest.Ordinal;
+                    break;
+                case ControlledRequestOutcome.UnexpectedFailure:
+                    IncrementBounded(ref _unexpectedFailureCount);
+                    _lastUnexpectedFailureOrdinal = activeRequest.Ordinal;
+                    break;
+                default:
+                    throw new InvalidOperationException("Unknown controlled stream outcome.");
+            }
+
+            PulseStateChangedLocked();
+            return outcome;
+        }
+    }
+
+    private void SetAdmissionMode(ControlledFixtureStreamMode mode)
+    {
+        lock (_gate)
+        {
+            if (_mode == ControlledFixtureStreamMode.Disabled)
+            {
+                throw new InvalidOperationException("A disabled controlled fixture stream cannot change admission mode.");
+            }
+
+            _mode = mode;
+            PulseStateChangedLocked();
+        }
+    }
+
+    private void IncrementBounded(ref int value)
+    {
+        if (value < _options.MaximumRequestOrdinals)
+        {
+            value++;
+        }
+    }
+
+    private void PulseStateChangedLocked()
+    {
+        TaskCompletionSource<bool> previous = _stateChanged;
+        _stateChanged = CreateStateSignal();
+        previous.TrySetResult(true);
+    }
+
+    private static TaskCompletionSource<bool> CreateStateSignal()
+    {
+        return new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    internal sealed class ActiveControlledRequest(long ordinal)
+    {
+        internal long Ordinal { get; } = ordinal;
+
+        internal CancellationTokenSource Cancellation { get; } = new();
+
+        internal ActiveControlledRequestState State { get; set; } = ActiveControlledRequestState.Active;
+    }
+}
+
+internal sealed class ControlledFixtureStreamRegistry
+{
+    private readonly object _gate = new();
+    private readonly Dictionary<string, ControlledFixtureStreamControl> _streams = new(StringComparer.Ordinal);
+
+    internal void Add(string route, ControlledFixtureStreamControl stream)
+    {
+        lock (_gate)
+        {
+            if (!_streams.TryAdd(route, stream))
+            {
+                throw new InvalidOperationException("The fixture route already has a controlled stream.");
+            }
+        }
+    }
+
+    internal bool TryGet(string route, out ControlledFixtureStreamControl stream)
+    {
+        lock (_gate)
+        {
+            return _streams.TryGetValue(route, out stream!);
+        }
+    }
+
+    internal void DisableAll()
+    {
+        ControlledFixtureStreamControl[] streams;
+        lock (_gate)
+        {
+            streams = [.. _streams.Values];
+        }
+
+        foreach (ControlledFixtureStreamControl stream in streams)
+        {
+            stream.Disable();
+        }
+    }
+}
+
+internal enum ControlledRequestAdmissionKind
+{
+    Active,
+    Rejected,
+    CapacityRejected,
+    ClientDetached,
+    DisabledFallback,
+}
+
+internal sealed record ControlledRequestAdmission(
+    ControlledRequestAdmissionKind Kind,
+    ControlledFixtureStreamControl.ActiveControlledRequest? ActiveRequest)
+{
+    internal static ControlledRequestAdmission Active(
+        ControlledFixtureStreamControl.ActiveControlledRequest activeRequest) =>
+        new(ControlledRequestAdmissionKind.Active, activeRequest);
+
+    internal static ControlledRequestAdmission Rejected() =>
+        new(ControlledRequestAdmissionKind.Rejected, null);
+
+    internal static ControlledRequestAdmission CapacityRejected() =>
+        new(ControlledRequestAdmissionKind.CapacityRejected, null);
+
+    internal static ControlledRequestAdmission ClientDetached() =>
+        new(ControlledRequestAdmissionKind.ClientDetached, null);
+
+    internal static ControlledRequestAdmission DisabledFallback() =>
+        new(ControlledRequestAdmissionKind.DisabledFallback, null);
+}
+
+internal enum ControlledRequestOutcome
+{
+    ExpectedAbort,
+    ClientDetached,
+    UnexpectedFailure,
+}
+
+internal enum ActiveControlledRequestState
+{
+    Active,
+    AbortRequested,
+    Terminal,
 }

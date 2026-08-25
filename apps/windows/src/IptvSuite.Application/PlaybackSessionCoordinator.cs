@@ -1443,6 +1443,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         ReconnectContext? context = null;
         SessionOperationCancellation? request = null;
         PlaybackSessionId physicalSession = default;
+        TaskCompletionSource<PlaybackEngineOperationResult>? playableCompletion = null;
         bool gateEntered = false;
         bool successCandidate = false;
         try
@@ -1519,11 +1520,14 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 }
 
                 physicalSession = NextSessionId();
+                playableCompletion = new TaskCompletionSource<PlaybackEngineOperationResult>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
                 context.PhysicalSessionId = physicalSession;
                 context.AttemptInProgress = true;
                 context.AttemptNumber = attemptNumber;
                 context.AttemptFailure = null;
                 context.RecoveredState = null;
+                context.PlayableCompletion = playableCompletion;
                 _engineSession = physicalSession;
                 _engineLogicalSession = context.SessionId;
                 _engineSource = context.Selection.SourceId;
@@ -1540,6 +1544,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             if (!checkedOpen.IsSuccess)
             {
                 return await RollbackReconnectAttemptUnderGateAsync(
+                    context,
                     physicalSession,
                     checkedOpen).ConfigureAwait(false);
             }
@@ -1558,6 +1563,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             if (!checkedVolume.IsSuccess)
             {
                 return await RollbackReconnectAttemptUnderGateAsync(
+                    context,
                     physicalSession,
                     checkedVolume).ConfigureAwait(false);
             }
@@ -1576,6 +1582,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             if (!checkedMute.IsSuccess)
             {
                 return await RollbackReconnectAttemptUnderGateAsync(
+                    context,
                     physicalSession,
                     checkedMute).ConfigureAwait(false);
             }
@@ -1594,6 +1601,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             if (!checkedAspect.IsSuccess)
             {
                 return await RollbackReconnectAttemptUnderGateAsync(
+                    context,
                     physicalSession,
                     checkedAspect).ConfigureAwait(false);
             }
@@ -1609,46 +1617,24 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             if (!checkedPlay.IsSuccess)
             {
                 return await RollbackReconnectAttemptUnderGateAsync(
+                    context,
                     physicalSession,
                     checkedPlay).ConfigureAwait(false);
             }
 
-            PlaybackEngineSnapshot engineCurrent = _engine.Current;
-            if (engineCurrent.SessionId != physicalSession ||
-                engineCurrent.State is not (
-                    PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused))
+            PlaybackEngineOperationResult playable =
+                await WaitForReconnectPlayableAsync(
+                    context,
+                    physicalSession,
+                    playableCompletion,
+                    request.Token).ConfigureAwait(false);
+            if (!playable.IsSuccess)
             {
                 return await RollbackReconnectAttemptUnderGateAsync(
+                    context,
                     physicalSession,
-                    PlaybackEngineOperationResult.Failed(
-                        engineCurrent.State == PlaybackState.Failed &&
-                            engineCurrent.Error is not null
-                            ? engineCurrent.Error
-                            : DomainError.Create(DomainErrorCode.PlaybackStartFailed)))
+                    playable)
                     .ConfigureAwait(false);
-            }
-
-            PlaybackEngineOperationResult? finalFailure = null;
-            lock (_sync)
-            {
-                if (!CanRunReconnectAttemptLocked(context, correlationId) ||
-                    context.AttemptFailure is not null)
-                {
-                    finalFailure = PlaybackEngineOperationResult.Failed(
-                        context.AttemptFailure ??
-                            DomainError.Create(DomainErrorCode.OperationCancelled));
-                }
-                else
-                {
-                    context.RecoveredState = engineCurrent.State;
-                }
-            }
-
-            if (finalFailure is not null)
-            {
-                return await RollbackReconnectAttemptUnderGateAsync(
-                    physicalSession,
-                    finalFailure).ConfigureAwait(false);
             }
 
             successCandidate = true;
@@ -1659,6 +1645,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             if (gateEntered && context is not null)
             {
                 await RollbackReconnectAttemptUnderGateAsync(
+                    context,
                     physicalSession,
                     PlaybackEngineOperationResult.Failed(
                         DomainErrorCode.OperationCancelled)).ConfigureAwait(false);
@@ -1671,6 +1658,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             if (gateEntered && context is not null)
             {
                 await RollbackReconnectAttemptUnderGateAsync(
+                    context,
                     physicalSession,
                     PlaybackEngineOperationResult.Failed(
                         DomainErrorCode.DomainInvariantViolation)).ConfigureAwait(false);
@@ -1688,6 +1676,11 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     if (ReferenceEquals(_reconnectContext, context))
                     {
                         context.AttemptInProgress = false;
+                        context.RecoveredState = null;
+                        context.PlayableCompletion?.TrySetResult(
+                            PlaybackEngineOperationResult.Failed(
+                                DomainErrorCode.OperationCancelled));
+                        context.PlayableCompletion = null;
                     }
                 }
             }
@@ -1699,6 +1692,53 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
 
             request?.Dispose();
         }
+    }
+
+    private async ValueTask<PlaybackEngineOperationResult> WaitForReconnectPlayableAsync(
+        ReconnectContext context,
+        PlaybackSessionId physicalSession,
+        TaskCompletionSource<PlaybackEngineOperationResult> playableCompletion,
+        CancellationToken cancellationToken)
+    {
+        PlaybackEngineOperationResult observed = await playableCompletion.Task
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!observed.IsSuccess)
+        {
+            return observed;
+        }
+
+        PlaybackEngineSnapshot engineCurrent = _engine.Current;
+        lock (_sync)
+        {
+            if (!CanRunReconnectAttemptLocked(context, context.CorrelationId) ||
+                !context.AttemptInProgress ||
+                !ReferenceEquals(context.PlayableCompletion, playableCompletion) ||
+                context.PhysicalSessionId != physicalSession ||
+                context.AttemptFailure is not null)
+            {
+                return PlaybackEngineOperationResult.Failed(
+                    context.AttemptFailure ??
+                        DomainError.Create(DomainErrorCode.OperationCancelled));
+            }
+
+            if (context.RecoveredState is not (
+                    PlaybackState.Playing or PlaybackState.Paused) ||
+                engineCurrent.SessionId != physicalSession ||
+                engineCurrent.State is not (
+                    PlaybackState.Playing or PlaybackState.Paused))
+            {
+                return PlaybackEngineOperationResult.Failed(
+                    engineCurrent.State == PlaybackState.Failed &&
+                        engineCurrent.Error is not null
+                        ? engineCurrent.Error
+                        : DomainError.Create(DomainErrorCode.PlaybackStartFailed));
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return PlaybackEngineOperationResult.Succeeded();
     }
 
     private PlaybackEngineOperationResult CheckReconnectAttemptProgress(
@@ -1723,9 +1763,23 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
 
     private async ValueTask<PlaybackEngineOperationResult>
         RollbackReconnectAttemptUnderGateAsync(
+            ReconnectContext context,
             PlaybackSessionId sessionId,
             PlaybackEngineOperationResult failure)
     {
+        lock (_sync)
+        {
+            if (context.PhysicalSessionId == sessionId)
+            {
+                context.AttemptInProgress = false;
+                context.AttemptFailure = failure.Error ??
+                    DomainError.Create(DomainErrorCode.DomainInvariantViolation);
+                context.RecoveredState = null;
+                context.PlayableCompletion?.TrySetResult(failure);
+                context.PlayableCompletion = null;
+            }
+        }
+
         if (_engineSession != sessionId)
         {
             return failure;
@@ -1868,11 +1922,19 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                         activeReconnect.AttemptFailure = engineSnapshot.Error ??
                             DomainError.Create(DomainErrorCode.DomainInvariantViolation);
                         activeReconnect.RecoveredState = null;
+                        activeReconnect.PlayableCompletion?.TrySetResult(
+                            PlaybackEngineOperationResult.Failed(
+                                activeReconnect.AttemptFailure));
                     }
-                    else if (engineSnapshot.State is PlaybackState.Buffering or
-                        PlaybackState.Playing or PlaybackState.Paused)
+                    else if (engineSnapshot.State == PlaybackState.Buffering)
+                    {
+                        activeReconnect.RecoveredState = null;
+                    }
+                    else if (engineSnapshot.State is PlaybackState.Playing or PlaybackState.Paused)
                     {
                         activeReconnect.RecoveredState = engineSnapshot.State;
+                        activeReconnect.PlayableCompletion?.TrySetResult(
+                            PlaybackEngineOperationResult.Succeeded());
                     }
                 }
 
@@ -2021,14 +2083,14 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             }
             else if (reconnect.Phase == PlaybackReconnectPhase.Succeeded &&
                 context.AttemptFailure is null &&
-                context.RecoveredState is PlaybackState.Buffering or
-                    PlaybackState.Playing or PlaybackState.Paused)
+                context.RecoveredState is PlaybackState.Playing or PlaybackState.Paused)
             {
                 _current = PlaybackSessionSnapshot.Active(
                     context.SessionId,
                     context.Selection,
                     context.RecoveredState.Value);
                 context.AttemptInProgress = false;
+                context.PlayableCompletion = null;
                 _reconnectContext = null;
             }
             else
@@ -2048,6 +2110,9 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     DomainError.Create(terminalCode));
                 _currentTracks = null;
                 context.AttemptInProgress = false;
+                context.PlayableCompletion?.TrySetResult(
+                    PlaybackEngineOperationResult.Failed(terminalCode));
+                context.PlayableCompletion = null;
                 context.IsTerminal = true;
                 context.ManualRetryStarting = false;
                 context.ManualRetryActive = false;
@@ -2288,6 +2353,16 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
     private PlaybackReconnectCorrelationId? InvalidateReconnectUnderLock()
     {
         ReconnectContext? context = _reconnectContext;
+        if (context is not null)
+        {
+            context.AttemptInProgress = false;
+            context.RecoveredState = null;
+            context.PlayableCompletion?.TrySetResult(
+                PlaybackEngineOperationResult.Failed(
+                    DomainErrorCode.OperationCancelled));
+            context.PlayableCompletion = null;
+        }
+
         _reconnectContext = null;
         return context?.CorrelationId;
     }
@@ -2436,6 +2511,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         internal DomainError? AttemptFailure { get; set; }
 
         internal PlaybackState? RecoveredState { get; set; }
+
+        internal TaskCompletionSource<PlaybackEngineOperationResult>? PlayableCompletion { get; set; }
     }
 
     private sealed class SessionLifetime : IDisposable
