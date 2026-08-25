@@ -8,7 +8,7 @@ Bu kayıt, M15'in statik teknik envanter ve exact installed-package runtime audi
 
 Manifestteki `IptvSuite.LocalDev.6f0d9a64` / `CN=IptvSuite Local Development` yalnız disposable development lineage'ıdır. Store reservation, public package identity, marka hakkı, production signing veya development paketinden production PFN'e migration garantisi değildir.
 
-## Clean statik denetim sonucu
+## İlk clean statik denetim sonucu
 
 | Alan | Sonuç |
 |---|---|
@@ -36,7 +36,7 @@ Statik teknik baseline şu mevcut sözleşmeleri doğrular:
 ## Test bağı
 
 - Windows PowerShell 5.1 parser ve deterministik release-readiness self-test: `PASS`.
-- Self-test; gerçek source audit'ine ek olarak `.artifacts` dışı/ADS evidence, extra veya yanlış-namespace capability, erken Store association, self-contained/ARM64 RID, eksik ya da exclusive-lock altındaki asset, production lock'a yeni LibVLC package adı ve alternatif install-root discovery yüzeylerini fail-closed mutation'larla doğruladı.
+- Self-test; gerçek source audit'ine ek olarak `.artifacts` dışı/ADS evidence, extra veya yanlış-namespace capability, erken Store association, self-contained/ARM64 RID, false-condition RID, explicit MSBuild import, SDK hook property, otomatik `*.csproj.user`/default veya artifacts-redirected project-extension wildcard import, applicable `Directory.Build.targets`/`Directory.Build.rsp`, nested `Directory.Build.props`/`Directory.Solution.props`, shared multi-architecture override, eksik ya da exclusive-lock altındaki asset, production lock'a yeni LibVLC package adı ve alternatif install-root discovery yüzeylerini fail-closed mutation'larla doğruladı.
 - Architecture suite: `50/50 PASS`.
 - Full quality gate: dış sandbox, normal Windows kullanıcı bağlamında `567/567 × 2 PASS`; iki koşunun test seti, fixture determinism, sentinel, scanner ve canary kontrolleri geçti.
 - [Run #219 (`32871431008`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32871431008), nested Windows PowerShell 5.1 denetiminde iki denemede de generic `ProjectContractsFailed` verdi; package/DPAPI işleri doğru biçimde skip edildi. `INFERENCE`: Stage içindeki tek çıplak dış cmdlet olan `Get-FileHash`, local/CI host farkının en güçlü adayıdır; log exact inner exception taşımadığı için bu kesin kök neden sayılmaz. Takip commit'i bu çağrıyı owned .NET SHA-256 akışıyla değiştirdi, yalnız sharing/lock violation için toplam `150 ms` bounded retry ekledi ve ham exception yerine stable kodu kilitledi.
@@ -65,26 +65,35 @@ Statik teknik baseline şu mevcut sözleşmeleri doğrular:
 
 Windows PowerShell 5.1 adversarial self-test ve architecture suite `51/51` geçti. Hosted artifact taraması install path/root/handle sızıntısı bulmadı. Bu checkpoint, o exact package ve runner'daki gözlem penceresi için install-root'un değişmediğini kanıtlar; clean-machine, başka OS/package manager davranışları veya bütün olası filesystem write'ları hakkında evrensel iddia değildir.
 
+## Windows MVP release mimarisi kararı
+
+M15 release seti yalnız `x64` olarak sınırlandı. Release-readiness evidence schema v2, `releaseArchitectures=[x64]`, `arm64Disposition=DeferredUntilNativeArm64ChainAccepted`, `architectureImportSurfaceAuditVersion=1` ve `sourceControlledArchitectureImportSurfacePassed=true` değerlerini taşır; production project `Platforms=x64`, `PlatformTarget=x64`, `RuntimeIdentifier=win-x64` ve `AppxBundle=Never` invariant'larını korur. `RuntimeIdentifiers`, `AppxBundlePlatforms`, `win-arm64`, çoklu platform ve bundle açılımı fail-closed reddedilir.
+
+Kaynak-kontrollü MSBuild yüzeyi de karara bağlıdır: dört production project exact `Microsoft.NET.Sdk` kullanır; explicit `Import`/nested `Sdk`/`Target`/`UsingTask`, SDK import-hook veya artifacts-output redirect property, otomatik `*.csproj.user` ya da force-tracked project-extension wildcard import tanımlayamaz. İzin verilen iki generated project-extension adı yalnız NuGet'in `.nuget.g.props`/`.nuget.g.targets` çiftidir; başka mevcut wildcard eşleşmesi reddedilir ve tracked `obj` path denetimi case-insensitive'dir. Exact x64 property düğümleri ve taşıyan `PropertyGroup` koşulsuz/attributesız olmalıdır. Windows project ancestor zincirinde yalnız repository-root `Directory.Build.props` uygulanabilir, `Directory.Build.targets` ile otomatik CLI response dosyaları bulunamaz. Solution zincirinde yalnız root `Directory.Solution.props` uygulanabilir ve `Directory.Solution.targets` bulunamaz. Root `Directory.Build.props`, `Directory.Packages.props` ve `Directory.Solution.props` dosyaları architecture/bundle veya import-control property tanımlayamaz. Bu denetim source-controlled import yüzeyi içindir; dış command-line property, makine-geneli SDK/import veya değiştirilmiş build invocation kanıtı değildir. Release build documented locked komutla yürütülmelidir.
+
+Windows PowerShell 5.1 release-readiness self-test'i, architecture `51/51` ve normal Windows kullanıcı bağlamındaki full quality gate `568/568 × 2` geçti. Restricted sandbox token'ında iki HTTPS fixture PFX importu `Access denied` ile durdu; aynı değişiklik ve exact SDK ile normal kullanıcı bağlamında integration `158/158 × 2` geçtiğinden bu ürün/test assertion failure'ı değildir.
+
+Bu karar ARM64 desteği veya emulation acceptance'ı değildir. ARM64 ancak native build/package, gerçek ARM64 cihaz playback/lifecycle/resource ve Store zinciri ayrı acceptance ile geçerse yeniden açılır. Böyle bir kanıt olmadığı için Windows MVP'de doğrulanmamış ARM64 support sözü verilmez; `Arm64ReleaseDecisionPending` kapanır ve diğer blocker'lar etkilenmez.
+
 ## Exact açık blocker seti
 
-Aşağıdaki 16 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur:
+Aşağıdaki 15 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur:
 
-1. `Arm64ReleaseDecisionPending`
-2. `AssetProvenancePending`
-3. `CodecIpLegalReviewPending`
-4. `CveReviewPending`
-5. `LicenseFilePending`
-6. `NoticeFilePending`
-7. `PartnerCenterPrivateFlightPending`
-8. `PrivacyPolicyPending`
-9. `ProductionIdentityMigrationPending`
-10. `ProductionLifecycleMatrixPending`
-11. `ReleaseSigningPending`
-12. `ReviewerServiceAndRehearsalPending`
-13. `SbomPending`
-14. `StoreListingPending`
-15. `SupportUrlPending`
-16. `WackPending`
+1. `AssetProvenancePending`
+2. `CodecIpLegalReviewPending`
+3. `CveReviewPending`
+4. `LicenseFilePending`
+5. `NoticeFilePending`
+6. `PartnerCenterPrivateFlightPending`
+7. `PrivacyPolicyPending`
+8. `ProductionIdentityMigrationPending`
+9. `ProductionLifecycleMatrixPending`
+10. `ReleaseSigningPending`
+11. `ReviewerServiceAndRehearsalPending`
+12. `SbomPending`
+13. `StoreListingPending`
+14. `SupportUrlPending`
+15. `WackPending`
 
 ## Non-claims ve sonraki kabul sınırı
 
@@ -92,6 +101,7 @@ Aşağıdaki 16 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur
 - Exact 23-package inventory teknik dependency drift guard'ıdır; SBOM, root `LICENSE`/`NOTICE`, asset provenance, CVE sonucu, redistribution kabulü veya codec/IP hukuk görüşü değildir.
 - Development identity ile mevcut disposable lifecycle kanıtları production identity/PFN, signing lineage, previous-package migration, repair veya private-flight sonucu değildir.
 - WACK, Partner Center private submission, privacy/support URL, Store listing/rating/reviewer notes ve geliştirici-owned reviewer service henüz kabul edilmemiştir.
-- ARM64 bu checkpoint'te açılmamıştır; Windows release target'ı x64 kalır.
+- ARM64 Windows MVP release setinde yoktur; deferred disposition gelecekte native ARM64 acceptance yapılmadan destek iddiasına dönüştürülemez.
+- Source-controlled MSBuild audit'i dış command-line/global-machine import yüzeyini doğrulamaz; release build invocation ve clean runner ayrıca bağlanmalıdır.
 
 Bu nedenle M15 `IN PROGRESS / BLOCKED` durumundadır. Bu belge teknik baseline checkpoint'ini kaydeder; M15 completion veya Store release kararı değildir.

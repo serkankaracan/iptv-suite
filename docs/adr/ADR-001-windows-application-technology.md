@@ -47,6 +47,8 @@ Domain, application, provider ve player sözleşmeleri WinUI tiplerine bağıml�
 
 İlk engineering target **x64 Windows 11, minimum build `10.0.26100`**'dır. ARM64, seçilen native player zinciri M10 ve M15'i geçerse aynı ürün kapsamında sunulur; emulation başarı kriteri sayılmaz. Bu M1 engineering alt sınırı nihai pazar/support sözü değildir; ürün minimumu kullanıcı/Store verisi ve clean-device matrisiyle M15'te yeniden doğrulanır.
 
+**M15 release-architecture disposition, 2026-08-25:** Windows MVP release seti yalnız `x64`tır. Production project `Platforms=x64`, `PlatformTarget=x64`, `RuntimeIdentifier=win-x64` ve `AppxBundle=Never` olarak kalır. ARM64 desteği iptal edilmiş bir gelecek özelliği değildir; native ARM64 build/package, gerçek ARM64 cihaz playback/lifecycle/resource ve Store zinciri ayrı bir acceptance ile geçene kadar `DeferredUntilNativeArm64ChainAccepted` durumunda ertelenmiştir. x64 emulation sonucu ARM64 desteği sayılmaz. Bu karar yeni mimari veya bundle eklemez; doğrulanmamış ARM64 support iddiasını Windows MVP kapsamından çıkarır.
+
 M1 implementation, ayrı `.wapproj` içermeyen single-project, framework-dependent MSIX kullanır. `IptvSuite.LocalDev.6f0d9a64` identity'si yalnız disposable local lineage'dır; Partner Center/Store association ve dev→Store in-place migration garantisi yoktur.
 
 ## Consequences and trade-offs
@@ -73,6 +75,7 @@ M1 implementation, ayrı `.wapproj` içermeyen single-project, framework-depende
 - M9: 50.000 sentetik kanalda virtualization, arama, focus ve accessibility.
 - M10: gerçek player surface ile resize, fullscreen, DPI, multi-monitor, overlay, minimize/restore ve soak.
 - M15: framework-dependent MSIX, clean install/update/uninstall, x64/ARM64 kararı, WACK ve private Store preflight.
+- M15 architecture disposition — **DECIDED, 2026-08-25:** Windows MVP yalnız x64; ARM64 ayrı native acceptance'a kadar deferred. Validator schema v2, exact tek üyeli `releaseArchitectures=[x64]`, stable disposition, multi-RID/bundle reddi ve version 1 source-controlled MSBuild import-surface denetimini fail-closed kilitler.
 - WinUI blocker bulunursa aynı `IPlaybackEngine` sözleşmesiyle en küçük WPF shell karşılaştırması.
 
 ## Revisit triggers
@@ -81,6 +84,7 @@ M1 implementation, ayrı `.wapproj` içermeyen single-project, framework-depende
 - WPF spike'ının aynı motorla ölçülebilir biçimde daha kararlı olması.
 - Seçilen Windows App SDK family servicing sonundan 90 gün önce.
 - Store/packaging politikasının packaged WinUI modelini engellemesi.
+- Fonlanmış ARM64 hedefi ile native ARM64 playback/package/device acceptance planının onaylanması.
 - Fonlanmış macOS/mobile yol haritasının ölçülmüş ciddi UI paylaşım getirisi oluşturması.
 
 ## References

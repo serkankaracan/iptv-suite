@@ -197,7 +197,7 @@ function Read-AndAssertEvidence {
             "packageInventoryPolicy",
             "blockers") `
         -Message "evidence root schema changed."
-    Assert-TestCondition ($evidence.schemaVersion -eq 1) "schemaVersion must be 1."
+    Assert-TestCondition ($evidence.schemaVersion -eq 2) "schemaVersion must be 2."
     Assert-TestCondition ($evidence.result -ceq "blocked") "result must remain blocked."
     Assert-TestCondition `
         ($evidence.technicalBaselinePassed -is [bool] -and $evidence.technicalBaselinePassed) `
@@ -208,6 +208,35 @@ function Read-AndAssertEvidence {
     Assert-TestCondition (@($evidence.assets).Count -eq 8) "the exact eight production assets were not inventoried."
     Assert-TestCondition (@($evidence.lockfiles).Count -eq 4) "the exact four production lockfiles were not inventoried."
     Assert-TestCondition (@($evidence.packageInventory).Count -eq 23) "the exact production package inventory changed."
+    Assert-ExactStringSet `
+        -Actual @($evidence.packaging.PSObject.Properties.Name) `
+        -Expected @(
+            "architecture",
+            "runtimeIdentifier",
+            "releaseArchitectures",
+            "arm64Disposition",
+            "architectureImportSurfaceAuditVersion",
+            "sourceControlledArchitectureImportSurfacePassed",
+            "selfContained",
+            "windowsAppSdkSelfContained",
+            "appxBundle",
+            "executionLevel",
+            "uiAccess",
+            "dpiAwareness") `
+        -Message "the packaging evidence schema changed."
+    Assert-ExactStringSet `
+        -Actual @($evidence.packaging.releaseArchitectures | ForEach-Object { [string]$_ }) `
+        -Expected @("x64") `
+        -Message "the Windows MVP release architecture set changed."
+    Assert-TestCondition `
+        ($evidence.packaging.architecture -ceq "x64" -and
+         $evidence.packaging.runtimeIdentifier -ceq "win-x64" -and
+         $evidence.packaging.arm64Disposition -ceq "DeferredUntilNativeArm64ChainAccepted" -and
+         $evidence.packaging.architectureImportSurfaceAuditVersion -eq 1 -and
+         $evidence.packaging.sourceControlledArchitectureImportSurfacePassed -is [bool] -and
+         $evidence.packaging.sourceControlledArchitectureImportSurfacePassed -and
+         $evidence.packaging.appxBundle -ceq "Never") `
+        "the x64-only Windows MVP release disposition changed."
     Assert-ExactStringSet `
         -Actual @($evidence.storage.PSObject.Properties.Name) `
         -Expected @(
@@ -232,7 +261,6 @@ function Read-AndAssertEvidence {
         "the exact package-inventory policy changed."
 
     $expectedBlockers = @(
-        "Arm64ReleaseDecisionPending",
         "AssetProvenancePending",
         "CodecIpLegalReviewPending",
         "CveReviewPending",
@@ -286,6 +314,9 @@ function Initialize-IsolatedFixture {
 
     $requiredFiles = @(
         "global.json",
+        "Directory.Build.props",
+        "Directory.Packages.props",
+        "Directory.Solution.props",
         "apps\windows\src\IptvSuite.Domain\IptvSuite.Domain.csproj",
         "apps\windows\src\IptvSuite.Domain\packages.lock.json",
         "apps\windows\src\IptvSuite.Application\IptvSuite.Application.csproj",
@@ -408,7 +439,214 @@ try {
         -EvidencePath (Join-Path $fixtureEvidenceRoot "arm64-rid.json") `
         -ExpectedMessage "M15TechnicalInvariant:WindowsProjectPropertyInvalid" `
         -AllowBlockedInventory
+
+    $conditionalRidProject = $originalWindowsProject.Replace(
+        '<RuntimeIdentifier>win-x64</RuntimeIdentifier>',
+        '<RuntimeIdentifier Condition="''1'' == ''0''">win-x64</RuntimeIdentifier>')
+    Assert-TestCondition `
+        ($conditionalRidProject -cne $originalWindowsProject) `
+        "conditional RID mutation was not applied."
+    Write-TestText -Path $windowsProjectPath -Value $conditionalRidProject
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "conditional-rid.json") `
+        -ExpectedMessage "M15TechnicalInvariant:WindowsProjectPropertyInvalid" `
+        -AllowBlockedInventory
+
+    $arm64PlatformsProject = $originalWindowsProject.Replace(
+        '<Platforms>x64</Platforms>',
+        '<Platforms>x64;ARM64</Platforms>')
+    Assert-TestCondition `
+        ($arm64PlatformsProject -cne $originalWindowsProject) `
+        "ARM64 Platforms mutation was not applied."
+    Write-TestText -Path $windowsProjectPath -Value $arm64PlatformsProject
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "arm64-platforms.json") `
+        -ExpectedMessage "M15TechnicalInvariant:WindowsProjectPropertyInvalid" `
+        -AllowBlockedInventory
+
+    $bundleProject = $originalWindowsProject.Replace(
+        '<AppxBundle>Never</AppxBundle>',
+        '<AppxBundle>Always</AppxBundle>')
+    Assert-TestCondition ($bundleProject -cne $originalWindowsProject) "bundle mutation was not applied."
+    Write-TestText -Path $windowsProjectPath -Value $bundleProject
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "appx-bundle.json") `
+        -ExpectedMessage "M15TechnicalInvariant:WindowsProjectPropertyInvalid" `
+        -AllowBlockedInventory
+
+    $pluralRidProject = $originalWindowsProject.Replace(
+        '<RuntimeIdentifier>win-x64</RuntimeIdentifier>',
+        "<RuntimeIdentifier>win-x64</RuntimeIdentifier>`r`n    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>")
+    Assert-TestCondition `
+        ($pluralRidProject -cne $originalWindowsProject) `
+        "plural RID mutation was not applied."
+    Write-TestText -Path $windowsProjectPath -Value $pluralRidProject
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "plural-rid.json") `
+        -ExpectedMessage "M15TechnicalInvariant:WindowsProjectPropertyInvalid" `
+        -AllowBlockedInventory
+
+    $bundlePlatformsProject = $originalWindowsProject.Replace(
+        '<AppxBundle>Never</AppxBundle>',
+        "<AppxBundle>Never</AppxBundle>`r`n    <AppxBundlePlatforms>x64|ARM64</AppxBundlePlatforms>")
+    Assert-TestCondition `
+        ($bundlePlatformsProject -cne $originalWindowsProject) `
+        "bundle-platforms mutation was not applied."
+    Write-TestText -Path $windowsProjectPath -Value $bundlePlatformsProject
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "bundle-platforms.json") `
+        -ExpectedMessage "M15TechnicalInvariant:WindowsProjectPropertyInvalid" `
+        -AllowBlockedInventory
+
+    $explicitImportProject = $originalWindowsProject.Replace(
+        '<Project Sdk="Microsoft.NET.Sdk">',
+        "<Project Sdk=`"Microsoft.NET.Sdk`">`r`n  <Import Project=`"architecture.targets`" />")
+    Assert-TestCondition `
+        ($explicitImportProject -cne $originalWindowsProject) `
+        "explicit import mutation was not applied."
+    Write-TestText -Path $windowsProjectPath -Value $explicitImportProject
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "explicit-import.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
     Write-TestText -Path $windowsProjectPath -Value $originalWindowsProject
+
+    $windowsProjectUserPath = $windowsProjectPath + ".user"
+    Write-TestText `
+        -Path $windowsProjectUserPath `
+        -Value '<Project><PropertyGroup><RuntimeIdentifier>win-arm64</RuntimeIdentifier></PropertyGroup></Project>'
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "project-user-import.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Remove-Item -LiteralPath $windowsProjectUserPath -Force
+
+    $projectExtensionAttackPath = Join-Path `
+        ([System.IO.Path]::GetDirectoryName($windowsProjectPath)) `
+        "obj\IptvSuite.Windows.csproj.attack.targets"
+    Write-TestText `
+        -Path $projectExtensionAttackPath `
+        -Value '<Project><PropertyGroup><RuntimeIdentifier>win-arm64</RuntimeIdentifier></PropertyGroup></Project>'
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "project-extension-import.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Remove-Item -LiteralPath $projectExtensionAttackPath -Force
+
+    $directoryBuildTargetsPath = Join-Path $script:fixtureRoot "Directory.Build.targets"
+    Write-TestText `
+        -Path $directoryBuildTargetsPath `
+        -Value '<Project><PropertyGroup><RuntimeIdentifier>win-arm64</RuntimeIdentifier></PropertyGroup></Project>'
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "directory-build-targets.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Remove-Item -LiteralPath $directoryBuildTargetsPath -Force
+
+    $nestedDirectoryBuildPropsPath = Join-Path `
+        $script:fixtureRoot `
+        "apps\windows\src\IptvSuite.Windows\Directory.Build.props"
+    Write-TestText -Path $nestedDirectoryBuildPropsPath -Value '<Project />'
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "nested-directory-build-props.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Remove-Item -LiteralPath $nestedDirectoryBuildPropsPath -Force
+
+    $directoryBuildResponsePath = Join-Path $script:fixtureRoot "Directory.Build.rsp"
+    Write-TestText `
+        -Path $directoryBuildResponsePath `
+        -Value '-p:RuntimeIdentifier=win-arm64'
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "directory-build-response.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Remove-Item -LiteralPath $directoryBuildResponsePath -Force
+
+    $nestedDirectorySolutionPropsPath = Join-Path `
+        $script:fixtureRoot `
+        "apps\windows\Directory.Solution.props"
+    Write-TestText `
+        -Path $nestedDirectorySolutionPropsPath `
+        -Value '<Project><PropertyGroup><Platform>ARM64</Platform></PropertyGroup></Project>'
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "nested-directory-solution-props.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Remove-Item -LiteralPath $nestedDirectorySolutionPropsPath -Force
+
+    $directoryBuildPropsPath = Join-Path $script:fixtureRoot "Directory.Build.props"
+    $originalDirectoryBuildProps = [System.IO.File]::ReadAllText($directoryBuildPropsPath)
+    $architectureOverrideProps = $originalDirectoryBuildProps.Replace(
+        '<LangVersion>14.0</LangVersion>',
+        "<LangVersion>14.0</LangVersion>`r`n    <AppxBundlePlatforms>x64|ARM64</AppxBundlePlatforms>")
+    Assert-TestCondition `
+        ($architectureOverrideProps -cne $originalDirectoryBuildProps) `
+        "shared architecture override mutation was not applied."
+    Write-TestText -Path $directoryBuildPropsPath -Value $architectureOverrideProps
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "shared-architecture-override.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Write-TestText -Path $directoryBuildPropsPath -Value $originalDirectoryBuildProps
+
+    $architectureHookTargetPath = Join-Path $script:fixtureRoot "architecture-hook.targets"
+    Write-TestText `
+        -Path $architectureHookTargetPath `
+        -Value '<Project><PropertyGroup><RuntimeIdentifier>win-arm64</RuntimeIdentifier></PropertyGroup></Project>'
+    $architectureHookProps = $originalDirectoryBuildProps.Replace(
+        '<LangVersion>14.0</LangVersion>',
+        "<LangVersion>14.0</LangVersion>`r`n    <CustomAfterDirectoryBuildTargets>architecture-hook.targets</CustomAfterDirectoryBuildTargets>")
+    Assert-TestCondition `
+        ($architectureHookProps -cne $originalDirectoryBuildProps) `
+        "shared architecture hook mutation was not applied."
+    Write-TestText -Path $directoryBuildPropsPath -Value $architectureHookProps
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "shared-architecture-hook.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Write-TestText -Path $directoryBuildPropsPath -Value $originalDirectoryBuildProps
+    Remove-Item -LiteralPath $architectureHookTargetPath -Force
+
+    $redirectedExtensionPath = Join-Path `
+        ([System.IO.Path]::GetDirectoryName($windowsProjectPath)) `
+        "architecture-hooks\obj\IptvSuite.Windows.csproj.attack.targets"
+    Write-TestText `
+        -Path $redirectedExtensionPath `
+        -Value '<Project><PropertyGroup><RuntimeIdentifier>win-arm64</RuntimeIdentifier></PropertyGroup></Project>'
+    $redirectedExtensionProps = $originalDirectoryBuildProps.Replace(
+        '<LangVersion>14.0</LangVersion>',
+        "<LangVersion>14.0</LangVersion>`r`n    <ArtifactsPath>architecture-hooks</ArtifactsPath>`r`n    <UseArtifactsOutput>true</UseArtifactsOutput>")
+    Assert-TestCondition `
+        ($redirectedExtensionProps -cne $originalDirectoryBuildProps) `
+        "redirected project-extension mutation was not applied."
+    Write-TestText -Path $directoryBuildPropsPath -Value $redirectedExtensionProps
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "redirected-project-extension.json") `
+        -ExpectedMessage "M15TechnicalInvariant:MsBuildArchitectureImportSurfaceInvalid" `
+        -AllowBlockedInventory
+    Write-TestText -Path $directoryBuildPropsPath -Value $originalDirectoryBuildProps
+    Remove-Item `
+        -LiteralPath (Join-Path `
+            ([System.IO.Path]::GetDirectoryName($windowsProjectPath)) `
+            "architecture-hooks") `
+        -Recurse `
+        -Force
 
     $assetRelativePath = "apps\windows\src\IptvSuite.Windows\Assets\StoreLogo.png"
     $assetPath = Join-Path $script:fixtureRoot $assetRelativePath

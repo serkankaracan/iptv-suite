@@ -196,7 +196,18 @@ function Get-SingleProjectProperty {
     $matches = @($Project.SelectNodes(
         "/*[local-name()='Project']/*[local-name()='PropertyGroup']/*[local-name()='$Name']"))
     Assert-Condition ($matches.Count -eq 1) $Code
-    return $matches[0].InnerText.Trim()
+    $propertyNode = $matches[0]
+    Assert-Condition ($propertyNode.Attributes.Count -eq 0) $Code
+    Assert-Condition `
+        ($propertyNode.ParentNode.LocalName -ceq "PropertyGroup" -and
+         $propertyNode.ParentNode.Attributes.Count -eq 0 -and
+         $propertyNode.ParentNode.ParentNode.LocalName -ceq "Project") `
+        $Code
+    Assert-Condition `
+        ($propertyNode.ChildNodes.Count -eq 1 -and
+         $propertyNode.ChildNodes[0].NodeType -eq [System.Xml.XmlNodeType]::Text) `
+        $Code
+    return $propertyNode.InnerText.Trim()
 }
 
 function Get-OrdinalSortedStrings {
@@ -328,12 +339,23 @@ function Assert-NoReparseDirectoryChain {
         [string]$DirectoryPath
     )
 
-    Assert-Condition (Test-PathContainedByRoot -Path $DirectoryPath -Root $Root) "EvidencePathOutsideRepository"
+    $isRepositoryRoot = $DirectoryPath.Equals(
+        $Root,
+        [System.StringComparison]::OrdinalIgnoreCase)
+    Assert-Condition `
+        ($isRepositoryRoot -or
+         (Test-PathContainedByRoot -Path $DirectoryPath -Root $Root)) `
+        "EvidencePathOutsideRepository"
     $rootWithSeparator = $Root.TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
         [System.IO.Path]::AltDirectorySeparatorChar) +
         [System.IO.Path]::DirectorySeparatorChar
-    $relative = $DirectoryPath.Substring($rootWithSeparator.Length)
+    $relative = if ($isRepositoryRoot) {
+        ""
+    }
+    else {
+        $DirectoryPath.Substring($rootWithSeparator.Length)
+    }
     $current = $Root
     foreach ($part in @($relative.Split(@('\', '/'), [System.StringSplitOptions]::RemoveEmptyEntries))) {
         $current = Join-Path $current $part
@@ -569,6 +591,66 @@ try {
     Assert-Condition ($storeAssociations.Count -eq 0) "StoreAssociationUnexpected"
 
     $script:technicalStage = "ProjectContracts"
+    $architecturePropertyNames = @(
+        "Platform",
+        "Platforms",
+        "PlatformTarget",
+        "ProcessorArchitecture",
+        "ProcessorArchitectureAsPlatform",
+        "RuntimeIdentifier",
+        "RuntimeIdentifiers",
+        "RuntimeIdentifierGraphPath",
+        "AppxBundle",
+        "AppxBundlePlatforms",
+        "AppxPackageArchitecture",
+        "AppxPackagePlatforms")
+    $importControlPropertyNames = @(
+        "DirectoryBuildPropsPath",
+        "DirectoryBuildTargetsPath",
+        "ImportDirectoryBuildProps",
+        "ImportDirectoryBuildTargets",
+        "_DirectoryBuildPropsFile",
+        "_DirectoryBuildPropsBasePath",
+        "_DirectoryBuildTargetsFile",
+        "_DirectoryBuildTargetsBasePath",
+        "CustomBeforeDirectoryBuildProps",
+        "CustomAfterDirectoryBuildProps",
+        "CustomBeforeDirectoryBuildTargets",
+        "CustomAfterDirectoryBuildTargets",
+        "CustomBeforeMicrosoftCommonProps",
+        "CustomAfterMicrosoftCommonProps",
+        "CustomBeforeMicrosoftCommonTargets",
+        "CustomAfterMicrosoftCommonTargets",
+        "MSBuildExtensionsPath",
+        "MSBuildExtensionsPath32",
+        "MSBuildExtensionsPath64",
+        "MSBuildUserExtensionsPath",
+        "MSBuildSDKsPath",
+        "MSBuildToolsPath",
+        "MSBuildToolsVersion",
+        "MSBuildProjectExtensionsPath",
+        "BaseIntermediateOutputPath",
+        "_InitialBaseIntermediateOutputPath",
+        "_InitialMSBuildProjectExtensionsPath",
+        "ArtifactsPath",
+        "UseArtifactsOutput",
+        "UseArtifactsIntermediateOutput",
+        "ArtifactsProjectName",
+        "IncludeProjectNameInArtifactsPaths",
+        "_ArtifactsPathSetEarly",
+        "ProjectToOverrideProjectExtensionsPath",
+        "ProjectExtensionsPathForSpecifiedProject",
+        "ImportProjectExtensionProps",
+        "ImportProjectExtensionTargets",
+        "ImportUserLocationsByWildcardBeforeMicrosoftCommonProps",
+        "ImportByWildcardBeforeMicrosoftCommonProps",
+        "ImportUserLocationsByWildcardAfterMicrosoftCommonProps",
+        "ImportByWildcardAfterMicrosoftCommonProps",
+        "ImportUserLocationsByWildcardBeforeMicrosoftCommonTargets",
+        "ImportByWildcardBeforeMicrosoftCommonTargets",
+        "ImportUserLocationsByWildcardAfterMicrosoftCommonTargets",
+        "ImportByWildcardAfterMicrosoftCommonTargets")
+    $importControlPropertyNamePattern = '(?i)(?:props|targets)(?:file|basepath|path)?$'
     $projectContracts = @(
         [ordered]@{
             path = "apps\windows\src\IptvSuite.Domain\IptvSuite.Domain.csproj"
@@ -605,6 +687,101 @@ try {
             -Text (Read-StrictUtf8Text -File $projectFile -Code "ProductionProjectEncodingInvalid") `
             -Code "ProductionProjectXmlInvalid"
         $projects[$contract.path] = $project
+
+        $projectRoot = Get-SingleNode `
+            -Node $project `
+            -XPath "/*[local-name()='Project']" `
+            -Code "MsBuildArchitectureImportSurfaceInvalid"
+        Assert-Condition `
+            ($projectRoot.Attributes.Count -eq 1 -and
+             $projectRoot.GetAttribute("Sdk") -ceq "Microsoft.NET.Sdk") `
+            "MsBuildArchitectureImportSurfaceInvalid"
+        Assert-Condition `
+            (@($project.SelectNodes("//*[local-name()='Import' or local-name()='Sdk' or local-name()='Target' or local-name()='UsingTask']")).Count -eq 0) `
+            "MsBuildArchitectureImportSurfaceInvalid"
+        Assert-Condition `
+            (-not (Test-Path -LiteralPath ($projectFile.FullName + ".user"))) `
+            "MsBuildArchitectureImportSurfaceInvalid"
+
+        $projectExtensionsDirectory = Join-Path $projectFile.DirectoryName "obj"
+        if (Test-Path -LiteralPath $projectExtensionsDirectory) {
+            $projectExtensionsDirectoryItem = Get-Item `
+                -LiteralPath $projectExtensionsDirectory `
+                -Force
+            Assert-Condition `
+                ($projectExtensionsDirectoryItem.PSIsContainer -and
+                 ($projectExtensionsDirectoryItem.Attributes -band
+                  [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
+                "MsBuildArchitectureImportSurfaceInvalid"
+            $allowedProjectExtensionNames = @(
+                ($projectFile.Name + ".nuget.g.props")
+                ($projectFile.Name + ".nuget.g.targets"))
+            $projectExtensionFiles = @(Get-ChildItem `
+                -LiteralPath $projectExtensionsDirectory `
+                -File `
+                -Force | Where-Object {
+                    $_.Name.StartsWith(
+                        $projectFile.Name + ".",
+                        [System.StringComparison]::OrdinalIgnoreCase) -and
+                    ($_.Name.EndsWith(
+                        ".props",
+                        [System.StringComparison]::OrdinalIgnoreCase) -or
+                     $_.Name.EndsWith(
+                        ".targets",
+                        [System.StringComparison]::OrdinalIgnoreCase))
+                })
+            foreach ($projectExtensionFile in $projectExtensionFiles) {
+                $isAllowedProjectExtension = $false
+                foreach ($allowedProjectExtensionName in $allowedProjectExtensionNames) {
+                    if ($projectExtensionFile.Name.Equals(
+                        $allowedProjectExtensionName,
+                        [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $isAllowedProjectExtension = $true
+                        break
+                    }
+                }
+                Assert-Condition `
+                    ($isAllowedProjectExtension -and
+                     ($projectExtensionFile.Attributes -band
+                      [System.IO.FileAttributes]::ReparsePoint) -eq 0 -and
+                     $projectExtensionFile.Length -gt 0 -and
+                     $projectExtensionFile.Length -le $script:maximumSourceFileBytes) `
+                    "MsBuildArchitectureImportSurfaceInvalid"
+            }
+        }
+
+        if (Test-Path -LiteralPath (Join-Path $resolvedRepositoryRoot ".git")) {
+            $projectDirectoryRelativePath = [System.IO.Path]::GetDirectoryName(
+                $contract.path).Replace('\', '/')
+            $trackedProjectExtensionPathspec = `
+                ":(icase)" + $projectDirectoryRelativePath + "/obj/**"
+            $trackedProjectExtensions = (& git `
+                -C $resolvedRepositoryRoot `
+                ls-files `
+                -- `
+                $trackedProjectExtensionPathspec 2>$null | Out-String)
+            Assert-Condition `
+                ($LASTEXITCODE -eq 0 -and
+                 [string]::IsNullOrWhiteSpace($trackedProjectExtensions)) `
+                "MsBuildArchitectureImportSurfaceInvalid"
+        }
+
+        foreach ($importControlPropertyName in $importControlPropertyNames) {
+            $matchingNodes = @($project.SelectNodes("//*") | Where-Object {
+                $_.LocalName.Equals(
+                    $importControlPropertyName,
+                    [System.StringComparison]::OrdinalIgnoreCase)
+            })
+            Assert-Condition `
+                ($matchingNodes.Count -eq 0) `
+                "MsBuildArchitectureImportSurfaceInvalid"
+        }
+        $patternImportControlNodes = @($project.SelectNodes("//*") | Where-Object {
+            $_.LocalName -match $importControlPropertyNamePattern
+        })
+        Assert-Condition `
+            ($patternImportControlNodes.Count -eq 0) `
+            "MsBuildArchitectureImportSurfaceInvalid"
 
         $actualReferences = @(
             $project.SelectNodes("/*[local-name()='Project']/*[local-name()='ItemGroup']/*[local-name()='ProjectReference']") |
@@ -645,6 +822,202 @@ try {
             -Code "WindowsProjectPropertyInvalid"
         Assert-Condition ($actual -ceq $property.Value) "WindowsProjectPropertyInvalid"
     }
+    foreach ($unsupportedMultiArchitectureProperty in @("RuntimeIdentifiers", "AppxBundlePlatforms")) {
+        $unsupportedNodes = @($windowsProject.SelectNodes(
+            "/*[local-name()='Project']/*[local-name()='PropertyGroup']/*[local-name()='$unsupportedMultiArchitectureProperty']"))
+        Assert-Condition ($unsupportedNodes.Count -eq 0) "WindowsProjectPropertyInvalid"
+    }
+
+    foreach ($architecturePropertyName in $architecturePropertyNames) {
+        $matchingNodes = @($windowsProject.SelectNodes("//*") | Where-Object {
+            $_.LocalName.Equals(
+                $architecturePropertyName,
+                [System.StringComparison]::OrdinalIgnoreCase)
+        })
+        $expectedCount = if ($architecturePropertyName -in @(
+            "Platforms",
+            "PlatformTarget",
+            "RuntimeIdentifier",
+            "AppxBundle")) { 1 } else { 0 }
+        Assert-Condition `
+            ($matchingNodes.Count -eq $expectedCount) `
+            "MsBuildArchitectureImportSurfaceInvalid"
+    }
+    $windowsProjectDirectory = [System.IO.Path]::GetDirectoryName(
+        (Join-Path $resolvedRepositoryRoot "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"))
+    $applicableDirectoryBuildProps = @()
+    $applicableDirectoryBuildTargets = @()
+    $applicableDirectoryBuildResponseFiles = @()
+    $applicableMsBuildResponseFiles = @()
+    $currentDirectory = Get-Item -LiteralPath $windowsProjectDirectory -Force
+    while ($true) {
+        foreach ($sharedBuildFileName in @(
+            "Directory.Build.props",
+            "Directory.Build.targets",
+            "Directory.Build.rsp",
+            "MSBuild.rsp")) {
+            $sharedBuildCandidate = Join-Path $currentDirectory.FullName $sharedBuildFileName
+            if (Test-Path -LiteralPath $sharedBuildCandidate) {
+                $relativeSharedBuildPath = Get-RelativeEvidencePath `
+                    -Root $resolvedRepositoryRoot `
+                    -FullPath ([System.IO.Path]::GetFullPath($sharedBuildCandidate))
+                $sharedBuildFile = Resolve-RegularRepositoryFile `
+                    -Root $resolvedRepositoryRoot `
+                    -RelativePath $relativeSharedBuildPath `
+                    -Code "MsBuildArchitectureImportSurfaceInvalid"
+                if ($sharedBuildFileName -ceq "Directory.Build.props") {
+                    $applicableDirectoryBuildProps += $sharedBuildFile
+                }
+                elseif ($sharedBuildFileName -ceq "Directory.Build.targets") {
+                    $applicableDirectoryBuildTargets += $sharedBuildFile
+                }
+                elseif ($sharedBuildFileName -ceq "Directory.Build.rsp") {
+                    $applicableDirectoryBuildResponseFiles += $sharedBuildFile
+                }
+                else {
+                    $applicableMsBuildResponseFiles += $sharedBuildFile
+                }
+            }
+        }
+
+        if ($currentDirectory.FullName.Equals(
+            $resolvedRepositoryRoot,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+            break
+        }
+
+        Assert-Condition ($null -ne $currentDirectory.Parent) "MsBuildArchitectureImportSurfaceInvalid"
+        $currentDirectory = $currentDirectory.Parent
+        Assert-Condition `
+            ($currentDirectory.FullName.Equals(
+                $resolvedRepositoryRoot,
+                [System.StringComparison]::OrdinalIgnoreCase) -or
+             (Test-PathContainedByRoot `
+                -Path $currentDirectory.FullName `
+                -Root $resolvedRepositoryRoot)) `
+            "MsBuildArchitectureImportSurfaceInvalid"
+    }
+
+    $rootDirectoryBuildProps = Resolve-RegularRepositoryFile `
+        -Root $resolvedRepositoryRoot `
+        -RelativePath "Directory.Build.props" `
+        -Code "MsBuildArchitectureImportSurfaceInvalid"
+    Assert-Condition `
+        ($applicableDirectoryBuildProps.Count -eq 1 -and
+         $applicableDirectoryBuildProps[0].FullName.Equals(
+            $rootDirectoryBuildProps.FullName,
+            [System.StringComparison]::OrdinalIgnoreCase)) `
+        "MsBuildArchitectureImportSurfaceInvalid"
+    Assert-Condition `
+        ($applicableDirectoryBuildTargets.Count -eq 0) `
+        "MsBuildArchitectureImportSurfaceInvalid"
+    Assert-Condition `
+        ($applicableDirectoryBuildResponseFiles.Count -eq 0 -and
+         $applicableMsBuildResponseFiles.Count -eq 0) `
+        "MsBuildArchitectureImportSurfaceInvalid"
+
+    $solutionDirectory = Get-Item `
+        -LiteralPath (Join-Path $resolvedRepositoryRoot "apps\windows") `
+        -Force
+    $applicableDirectorySolutionProps = @()
+    $applicableDirectorySolutionTargets = @()
+    $currentDirectory = $solutionDirectory
+    while ($true) {
+        foreach ($solutionBuildFileName in @(
+            "Directory.Solution.props",
+            "Directory.Solution.targets")) {
+            $solutionBuildCandidate = Join-Path $currentDirectory.FullName $solutionBuildFileName
+            if (Test-Path -LiteralPath $solutionBuildCandidate) {
+                $relativeSolutionBuildPath = Get-RelativeEvidencePath `
+                    -Root $resolvedRepositoryRoot `
+                    -FullPath ([System.IO.Path]::GetFullPath($solutionBuildCandidate))
+                $solutionBuildFile = Resolve-RegularRepositoryFile `
+                    -Root $resolvedRepositoryRoot `
+                    -RelativePath $relativeSolutionBuildPath `
+                    -Code "MsBuildArchitectureImportSurfaceInvalid"
+                if ($solutionBuildFileName -ceq "Directory.Solution.props") {
+                    $applicableDirectorySolutionProps += $solutionBuildFile
+                }
+                else {
+                    $applicableDirectorySolutionTargets += $solutionBuildFile
+                }
+            }
+        }
+
+        if ($currentDirectory.FullName.Equals(
+            $resolvedRepositoryRoot,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+            break
+        }
+
+        Assert-Condition ($null -ne $currentDirectory.Parent) "MsBuildArchitectureImportSurfaceInvalid"
+        $currentDirectory = $currentDirectory.Parent
+        Assert-Condition `
+            ($currentDirectory.FullName.Equals(
+                $resolvedRepositoryRoot,
+                [System.StringComparison]::OrdinalIgnoreCase) -or
+             (Test-PathContainedByRoot `
+                -Path $currentDirectory.FullName `
+                -Root $resolvedRepositoryRoot)) `
+            "MsBuildArchitectureImportSurfaceInvalid"
+    }
+
+    $rootDirectorySolutionProps = Resolve-RegularRepositoryFile `
+        -Root $resolvedRepositoryRoot `
+        -RelativePath "Directory.Solution.props" `
+        -Code "MsBuildArchitectureImportSurfaceInvalid"
+    Assert-Condition `
+        ($applicableDirectorySolutionProps.Count -eq 1 -and
+         $applicableDirectorySolutionProps[0].FullName.Equals(
+            $rootDirectorySolutionProps.FullName,
+            [System.StringComparison]::OrdinalIgnoreCase) -and
+         $applicableDirectorySolutionTargets.Count -eq 0) `
+        "MsBuildArchitectureImportSurfaceInvalid"
+
+    foreach ($sharedBuildRelativePath in @(
+        "Directory.Build.props",
+        "Directory.Packages.props",
+        "Directory.Solution.props")) {
+        $sharedBuildFile = Resolve-RegularRepositoryFile `
+            -Root $resolvedRepositoryRoot `
+            -RelativePath $sharedBuildRelativePath `
+            -Code "MsBuildArchitectureImportSurfaceInvalid"
+        $sharedBuildProject = Read-SafeXml `
+            -Text (Read-StrictUtf8Text `
+                -File $sharedBuildFile `
+                -Code "MsBuildArchitectureImportSurfaceInvalid") `
+            -Code "MsBuildArchitectureImportSurfaceInvalid"
+        $sharedBuildRoot = Get-SingleNode `
+            -Node $sharedBuildProject `
+            -XPath "/*[local-name()='Project']" `
+            -Code "MsBuildArchitectureImportSurfaceInvalid"
+        Assert-Condition `
+            ($sharedBuildRoot.Attributes.Count -eq 0) `
+            "MsBuildArchitectureImportSurfaceInvalid"
+        Assert-Condition `
+            (@($sharedBuildProject.SelectNodes("//*[local-name()='Import' or local-name()='Sdk' or local-name()='Target' or local-name()='UsingTask']")).Count -eq 0) `
+            "MsBuildArchitectureImportSurfaceInvalid"
+
+        foreach ($protectedPropertyName in @(
+            $architecturePropertyNames + $importControlPropertyNames)) {
+            $matchingNodes = @($sharedBuildProject.SelectNodes("//*") | Where-Object {
+                $_.LocalName.Equals(
+                    $protectedPropertyName,
+                    [System.StringComparison]::OrdinalIgnoreCase)
+            })
+            Assert-Condition `
+                ($matchingNodes.Count -eq 0) `
+                "MsBuildArchitectureImportSurfaceInvalid"
+        }
+        $patternImportControlNodes = @($sharedBuildProject.SelectNodes("//*") | Where-Object {
+            $_.LocalName -match $importControlPropertyNamePattern
+        })
+        Assert-Condition `
+            ($patternImportControlNodes.Count -eq 0) `
+            "MsBuildArchitectureImportSurfaceInvalid"
+    }
+
+    $sourceControlledArchitectureImportSurfacePassed = $true
     Assert-Condition `
         ($identity.GetAttribute("Version") -ceq ($expectedWindowsProperties.Version + ".0")) `
         "ProjectManifestVersionMismatch"
@@ -927,7 +1300,6 @@ try {
 
     $script:technicalStage = "EvidenceComposition"
     $blockers = Get-OrdinalSortedStrings -Values @(
-        "Arm64ReleaseDecisionPending",
         "AssetProvenancePending",
         "CodecIpLegalReviewPending",
         "CveReviewPending",
@@ -946,7 +1318,7 @@ try {
     )
 
     $summary = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         result = "blocked"
         technicalBaselinePassed = $true
         releaseReady = $false
@@ -964,6 +1336,10 @@ try {
         packaging = [ordered]@{
             architecture = "x64"
             runtimeIdentifier = "win-x64"
+            releaseArchitectures = @("x64")
+            arm64Disposition = "DeferredUntilNativeArm64ChainAccepted"
+            architectureImportSurfaceAuditVersion = 1
+            sourceControlledArchitectureImportSurfacePassed = $sourceControlledArchitectureImportSurfacePassed
             selfContained = $false
             windowsAppSdkSelfContained = $false
             appxBundle = "Never"
