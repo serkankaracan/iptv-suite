@@ -4260,6 +4260,63 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M15WindowsReleaseReadinessContractPassesItsPowerShell51SelfTest()
+    {
+        string validator = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Test-WindowsReleaseReadiness.ps1");
+        string selfTest = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ArchitectureTests",
+            "Test-WindowsReleaseReadiness.ps1");
+        Assert.IsTrue(File.Exists(validator), "The M15 release-readiness validator is missing.");
+        Assert.IsTrue(File.Exists(selfTest), "The M15 release-readiness self-test is missing.");
+
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(
+            File.Exists(windowsPowerShell),
+            "Windows PowerShell 5.1 is required for the M15 release-readiness contract.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(selfTest);
+
+        using Process contractProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The M15 release-readiness self-test could not start.");
+        bool contractCompleted = contractProcess.WaitForExit(120_000);
+        if (!contractCompleted)
+        {
+            contractProcess.Kill(entireProcessTree: true);
+            contractProcess.WaitForExit();
+        }
+
+        string contractOutput = contractProcess.StandardOutput.ReadToEnd();
+        string contractError = contractProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            contractCompleted && contractProcess.ExitCode == 0,
+            $"M15 release-readiness contract failed.{Environment.NewLine}{contractOutput}{contractError}");
+    }
+
+    [TestMethod]
     public void M8CatalogCrashHarnessIsIsolatedAndKillsOnlyItsTrackedProcess()
     {
         string harness = File.ReadAllText(Path.Combine(
