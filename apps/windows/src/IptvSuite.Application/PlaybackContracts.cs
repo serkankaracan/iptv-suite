@@ -60,6 +60,7 @@ public enum PlaybackState
     Buffering,
     Playing,
     Paused,
+    Reconnecting,
     Stopping,
     Failed,
 }
@@ -104,12 +105,13 @@ public sealed record PlaybackEngineSnapshot
             throw new ArgumentException("An active playback session identifier is required.", nameof(sessionId));
         }
 
-        if (state is PlaybackState.Closed or PlaybackState.Failed || !Enum.IsDefined(state))
+        if (state is PlaybackState.Closed or PlaybackState.Reconnecting or PlaybackState.Failed ||
+            !Enum.IsDefined(state))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(state),
                 state,
-                "The state is not an active playback engine state.");
+                "The state is not an engine-owned active playback state.");
         }
 
         return new PlaybackEngineSnapshot(sessionId, state, null);
@@ -230,13 +232,32 @@ public sealed record PlaybackSessionSnapshot
         SourceId? sourceId,
         ChannelId? channelId,
         PlaybackState state,
-        DomainError? error)
+        DomainError? error,
+        PlaybackReconnectSnapshot? reconnect)
     {
+        if (!Enum.IsDefined(state))
+        {
+            throw new ArgumentOutOfRangeException(nameof(state));
+        }
+
+        bool reconnecting = state == PlaybackState.Reconnecting;
+        bool activeReconnect = reconnect?.Phase is PlaybackReconnectPhase.Evaluating or
+            PlaybackReconnectPhase.Waiting or
+            PlaybackReconnectPhase.Attempting;
+        if (reconnecting != activeReconnect ||
+            reconnecting && error is not null ||
+            !reconnecting && reconnect is not null)
+        {
+            throw new ArgumentException(
+                "Reconnect progress is required only for an active reconnecting session.");
+        }
+
         SessionId = sessionId;
         SourceId = sourceId;
         ChannelId = channelId;
         State = state;
         Error = error;
+        Reconnect = reconnect;
     }
 
     public PlaybackSessionId SessionId { get; }
@@ -249,20 +270,94 @@ public sealed record PlaybackSessionSnapshot
 
     public DomainError? Error { get; }
 
+    public PlaybackReconnectSnapshot? Reconnect { get; }
+
     internal static PlaybackSessionSnapshot Closed() =>
-        new(default, null, null, PlaybackState.Closed, null);
+        new(default, null, null, PlaybackState.Closed, null, reconnect: null);
 
     internal static PlaybackSessionSnapshot Active(
         PlaybackSessionId sessionId,
         PlaybackSelection selection,
-        PlaybackState state) =>
-        new(sessionId, selection.SourceId, selection.ChannelId, state, null);
+        PlaybackState state)
+    {
+        if (sessionId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "An active playback session identifier is required.",
+                nameof(sessionId));
+        }
+
+        ArgumentNullException.ThrowIfNull(selection);
+        if (state is PlaybackState.Closed or PlaybackState.Reconnecting or PlaybackState.Failed ||
+            !Enum.IsDefined(state))
+        {
+            throw new ArgumentOutOfRangeException(nameof(state));
+        }
+
+        return new PlaybackSessionSnapshot(
+            sessionId,
+            selection.SourceId,
+            selection.ChannelId,
+            state,
+            error: null,
+            reconnect: null);
+    }
+
+    internal static PlaybackSessionSnapshot Reconnecting(
+        PlaybackSessionId sessionId,
+        PlaybackSelection selection,
+        PlaybackReconnectSnapshot reconnect)
+    {
+        if (sessionId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A reconnecting playback session identifier is required.",
+                nameof(sessionId));
+        }
+
+        ArgumentNullException.ThrowIfNull(selection);
+        ArgumentNullException.ThrowIfNull(reconnect);
+        if (reconnect.Phase is not (
+            PlaybackReconnectPhase.Evaluating or
+            PlaybackReconnectPhase.Waiting or
+            PlaybackReconnectPhase.Attempting))
+        {
+            throw new ArgumentException(
+                "A reconnecting session requires active reconnect progress.",
+                nameof(reconnect));
+        }
+
+        return new PlaybackSessionSnapshot(
+            sessionId,
+            selection.SourceId,
+            selection.ChannelId,
+            PlaybackState.Reconnecting,
+            error: null,
+            reconnect);
+    }
 
     internal static PlaybackSessionSnapshot Failed(
         PlaybackSessionId sessionId,
         PlaybackSelection selection,
-        DomainError error) =>
-        new(sessionId, selection.SourceId, selection.ChannelId, PlaybackState.Failed, error);
+        DomainError error)
+    {
+        if (sessionId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A failed playback session identifier is required.",
+                nameof(sessionId));
+        }
+
+        ArgumentNullException.ThrowIfNull(selection);
+        ArgumentNullException.ThrowIfNull(error);
+        return new PlaybackSessionSnapshot(
+            sessionId,
+            selection.SourceId,
+            selection.ChannelId,
+            PlaybackState.Failed,
+            error,
+            reconnect: null);
+    }
 
     public override string ToString() => Error is null
         ? $"[PLAYBACK-SESSION:{State}:{SessionId}]"
