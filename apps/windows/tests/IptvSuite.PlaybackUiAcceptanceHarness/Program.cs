@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -36,8 +37,19 @@ internal static class Program
     private const string DeletionFaultReadyTicketName = "delete-failure-ready.json";
     private const string PendingVerificationSignalName = "verify-pending.signal";
     private const string PendingVerificationTicketName = "pending-result.json";
+    private const string StreamFaultArmSignalName = "arm-stream-fault.signal";
+    private const string StreamFaultReadyTicketName = "stream-fault-ready.json";
+    private const string StreamAbortSignalName = "abort-stream.signal";
+    private const string StreamAbortResultTicketName = "stream-abort-result.json";
+    private const string StreamRestoreSignalName = "restore-stream.signal";
+    private const string StreamRestoreResultTicketName = "stream-restore-result.json";
+    private const string StreamCancelArmSignalName = "abort-stream-for-cancel.signal";
+    private const string StreamCancelReadyTicketName = "stream-cancel-ready.json";
+    private const string StreamCancelVerificationSignalName = "verify-stream-cancel.signal";
+    private const string StreamCancelResultTicketName = "stream-cancel-result.json";
     private const string PublicCertificateName = "loopback.cer";
     private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan NoLaterStreamOpenObservation = TimeSpan.FromSeconds(31);
     private static readonly JsonSerializerOptions TicketJsonOptions = new()
     {
         PropertyNamingPolicy = null,
@@ -114,8 +126,18 @@ internal static class Program
         bool targetProtectedRecordsDeleted = false;
         bool tombstoneBindingCompleted = false;
         bool siblingCatalogRetained = false;
+        bool streamRecoveryVerified = false;
+        bool streamCancelVerified = false;
+        bool streamNoLaterOpenVerified = false;
+        long streamNoLaterOpenObservationMilliseconds = 0;
+        int streamNoLaterOpenRequestCountAtReady = 0;
+        int streamNoLaterOpenRequestCountAfterObservation = 0;
+        ControlledFixtureStreamSnapshot? normalStreamSnapshot = null;
+        ControlledFixtureStreamSnapshot? faultStreamSnapshot = null;
         SeedContext? seedContext = null;
         FileStream? deletionFaultLease = null;
+        ControlledFixtureStreamControl? normalStreamControl = null;
+        ControlledFixtureStreamControl? faultStreamControl = null;
         int exitCode = 0;
 
         try
@@ -144,6 +166,13 @@ internal static class Program
                 CryptographicOperations.ZeroMemory(fixture);
             }
 
+            normalStreamControl = server.EnableControlledStream(
+                MediaRouteA,
+                new ControlledFixtureStreamOptions
+                {
+                    MaximumRequestOrdinals = 64,
+                });
+
             X509Certificate2 certificate = server.Certificate ??
                 throw new InvalidOperationException("The loopback certificate is unavailable.");
             certificateThumbprint = NormalizeThumbprint(certificate.Thumbprint);
@@ -164,12 +193,294 @@ internal static class Program
                 paths.ReadyTicketPath);
             readyPublished = true;
 
+            bool streamFaultArmSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.StreamFaultArmSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!streamFaultArmSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before stream-fault arming.");
+            }
+
+            faultStreamControl = server.EnableControlledStream(
+                MediaRouteB,
+                new ControlledFixtureStreamOptions
+                {
+                    MaximumRequestOrdinals = 3,
+                });
+            ControlledFixtureStreamSnapshot faultReady = faultStreamControl.Snapshot;
+            if (faultReady.Mode != ControlledFixtureStreamMode.Enabled ||
+                faultReady.LastAssignedRequestOrdinal != 0 ||
+                faultReady.ActiveRequestOrdinal != 0 ||
+                faultReady.CurrentHeldRequestCount != 0)
+            {
+                throw new InvalidDataException("The controlled stream did not begin in the exact ready state.");
+            }
+
+            WriteJsonAtomically(
+                new StreamFaultReadyTicket(
+                    IsReady: true,
+                    MaximumRequestOrdinals: 3),
+                paths.StreamFaultReadyTicketPath);
+
+            bool streamAbortSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.StreamAbortSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!streamAbortSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before recovery interruption.");
+            }
+
+            await WaitForControlledStreamSnapshotAsync(
+                paths,
+                faultStreamControl,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                ],
+                snapshot =>
+                    snapshot.Mode == ControlledFixtureStreamMode.Enabled &&
+                    snapshot.LastAssignedRequestOrdinal == 1 &&
+                    snapshot.ActiveRequestOrdinal == 1 &&
+                    snapshot.CurrentHeldRequestCount == 0,
+                cancellationToken).ConfigureAwait(false);
+            faultStreamControl.HoldSubsequentRequests();
+            if (!faultStreamControl.TryAbortActive(1))
+            {
+                throw new InvalidDataException("The exact first controlled stream could not be interrupted.");
+            }
+
+            ControlledFixtureStreamSnapshot firstInterrupted = await WaitForControlledStreamSnapshotAsync(
+                paths,
+                faultStreamControl,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                ],
+                snapshot =>
+                    snapshot.Mode == ControlledFixtureStreamMode.Holding &&
+                    snapshot.LastAssignedRequestOrdinal == 2 &&
+                    snapshot.ActiveRequestOrdinal == 0 &&
+                    snapshot.CurrentHeldRequestCount == 1 &&
+                    snapshot.ExpectedAbortCount == 1 &&
+                    snapshot.LastExpectedAbortOrdinal == 1,
+                cancellationToken).ConfigureAwait(false);
+            WriteJsonAtomically(
+                new StreamAbortResultTicket(
+                    IsVerified: true,
+                    LastAssignedRequestOrdinal: firstInterrupted.LastAssignedRequestOrdinal,
+                    ActiveRequestOrdinal: firstInterrupted.ActiveRequestOrdinal,
+                    CurrentHeldRequestCount: firstInterrupted.CurrentHeldRequestCount,
+                    ExpectedAbortCount: firstInterrupted.ExpectedAbortCount,
+                    LastExpectedAbortOrdinal: firstInterrupted.LastExpectedAbortOrdinal),
+                paths.StreamAbortResultTicketPath);
+
+            bool streamRestoreSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.StreamRestoreSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                    StreamAbortResultTicketName,
+                    StreamRestoreSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!streamRestoreSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before stream recovery.");
+            }
+
+            faultStreamControl.Restore();
+            ControlledFixtureStreamSnapshot restoredStream = await WaitForControlledStreamSnapshotAsync(
+                paths,
+                faultStreamControl,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                    StreamAbortResultTicketName,
+                    StreamRestoreSignalName,
+                ],
+                snapshot =>
+                    snapshot.Mode == ControlledFixtureStreamMode.Enabled &&
+                    snapshot.LastAssignedRequestOrdinal == 2 &&
+                    snapshot.ActiveRequestOrdinal == 2 &&
+                    snapshot.CurrentHeldRequestCount == 0 &&
+                    snapshot.ExpectedAbortCount == 1,
+                cancellationToken).ConfigureAwait(false);
+            WriteJsonAtomically(
+                new StreamRestoreResultTicket(
+                    IsVerified: true,
+                    LastAssignedRequestOrdinal: restoredStream.LastAssignedRequestOrdinal,
+                    ActiveRequestOrdinal: restoredStream.ActiveRequestOrdinal,
+                    CurrentHeldRequestCount: restoredStream.CurrentHeldRequestCount,
+                    ExpectedAbortCount: restoredStream.ExpectedAbortCount),
+                paths.StreamRestoreResultTicketPath);
+            streamRecoveryVerified = true;
+
+            bool streamCancelArmSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.StreamCancelArmSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                    StreamAbortResultTicketName,
+                    StreamRestoreSignalName,
+                    StreamRestoreResultTicketName,
+                    StreamCancelArmSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!streamCancelArmSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before cancel interruption.");
+            }
+
+            faultStreamControl.HoldSubsequentRequests();
+            if (!faultStreamControl.TryAbortActive(2))
+            {
+                throw new InvalidDataException("The exact recovered controlled stream could not be interrupted.");
+            }
+
+            ControlledFixtureStreamSnapshot cancelReady = await WaitForControlledStreamSnapshotAsync(
+                paths,
+                faultStreamControl,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                    StreamAbortResultTicketName,
+                    StreamRestoreSignalName,
+                    StreamRestoreResultTicketName,
+                    StreamCancelArmSignalName,
+                ],
+                snapshot =>
+                    snapshot.Mode == ControlledFixtureStreamMode.Holding &&
+                    snapshot.LastAssignedRequestOrdinal == 3 &&
+                    snapshot.ActiveRequestOrdinal == 0 &&
+                    snapshot.CurrentHeldRequestCount == 1 &&
+                    snapshot.ExpectedAbortCount == 2 &&
+                    snapshot.LastExpectedAbortOrdinal == 2,
+                cancellationToken).ConfigureAwait(false);
+            streamNoLaterOpenRequestCountAtReady = server.RequestCount;
+            WriteJsonAtomically(
+                new StreamCancelReadyTicket(
+                    IsVerified: true,
+                    LastAssignedRequestOrdinal: cancelReady.LastAssignedRequestOrdinal,
+                    ActiveRequestOrdinal: cancelReady.ActiveRequestOrdinal,
+                    CurrentHeldRequestCount: cancelReady.CurrentHeldRequestCount,
+                    ExpectedAbortCount: cancelReady.ExpectedAbortCount,
+                    LastExpectedAbortOrdinal: cancelReady.LastExpectedAbortOrdinal,
+                    RequestCountAtReady: streamNoLaterOpenRequestCountAtReady),
+                paths.StreamCancelReadyTicketPath);
+
+            bool streamCancelVerificationSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.StreamCancelVerificationSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                    StreamAbortResultTicketName,
+                    StreamRestoreSignalName,
+                    StreamRestoreResultTicketName,
+                    StreamCancelArmSignalName,
+                    StreamCancelReadyTicketName,
+                    StreamCancelVerificationSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!streamCancelVerificationSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before cancel verification.");
+            }
+
+            StreamCancelResultTicket streamCancelResult = await VerifyNoLaterStreamOpenAsync(
+                paths,
+                server,
+                faultStreamControl,
+                streamNoLaterOpenRequestCountAtReady,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    StreamFaultArmSignalName,
+                    StreamFaultReadyTicketName,
+                    StreamAbortSignalName,
+                    StreamAbortResultTicketName,
+                    StreamRestoreSignalName,
+                    StreamRestoreResultTicketName,
+                    StreamCancelArmSignalName,
+                    StreamCancelReadyTicketName,
+                    StreamCancelVerificationSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            WriteJsonAtomically(streamCancelResult, paths.StreamCancelResultTicketPath);
+            streamCancelVerified = streamCancelResult.IsVerified;
+            streamNoLaterOpenVerified = streamCancelResult.IsVerified;
+            streamNoLaterOpenObservationMilliseconds = streamCancelResult.ObservationMilliseconds;
+            streamNoLaterOpenRequestCountAfterObservation = streamCancelResult.RequestCountAfterObservation;
+            faultStreamSnapshot = faultStreamControl.Snapshot;
+
+            string[] completedStreamProtocolNames =
+            [
+                StreamFaultArmSignalName,
+                StreamFaultReadyTicketName,
+                StreamAbortSignalName,
+                StreamAbortResultTicketName,
+                StreamRestoreSignalName,
+                StreamRestoreResultTicketName,
+                StreamCancelArmSignalName,
+                StreamCancelReadyTicketName,
+                StreamCancelVerificationSignalName,
+                StreamCancelResultTicketName,
+            ];
+
             bool cancelSignalObserved = await WaitForPhaseSignalAsync(
                 paths,
                 paths.CancelVerificationSignalPath,
                 [
                     ReadyTicketName,
                     PublicCertificateName,
+                    .. completedStreamProtocolNames,
                     CancelVerificationSignalName,
                     StopSignalName,
                 ],
@@ -197,6 +508,7 @@ internal static class Program
                 [
                     ReadyTicketName,
                     PublicCertificateName,
+                    .. completedStreamProtocolNames,
                     CancelVerificationSignalName,
                     CancelVerificationTicketName,
                     DialogCloseVerificationSignalName,
@@ -226,6 +538,7 @@ internal static class Program
                 [
                     ReadyTicketName,
                     PublicCertificateName,
+                    .. completedStreamProtocolNames,
                     CancelVerificationSignalName,
                     CancelVerificationTicketName,
                     DialogCloseVerificationSignalName,
@@ -251,6 +564,7 @@ internal static class Program
                 [
                     ReadyTicketName,
                     PublicCertificateName,
+                    .. completedStreamProtocolNames,
                     CancelVerificationSignalName,
                     CancelVerificationTicketName,
                     DialogCloseVerificationSignalName,
@@ -298,6 +612,7 @@ internal static class Program
                 [
                     ReadyTicketName,
                     PublicCertificateName,
+                    .. completedStreamProtocolNames,
                     CancelVerificationSignalName,
                     CancelVerificationTicketName,
                     DialogCloseVerificationSignalName,
@@ -322,6 +637,57 @@ internal static class Program
             if (!deletionOracle.IsVerified)
             {
                 throw new InvalidDataException("The source-deletion oracle failed.");
+            }
+
+            string[] finalControlNames =
+            [
+                ReadyTicketName,
+                PublicCertificateName,
+                .. completedStreamProtocolNames,
+                CancelVerificationSignalName,
+                CancelVerificationTicketName,
+                DialogCloseVerificationSignalName,
+                DialogCloseVerificationTicketName,
+                DeletionFaultArmSignalName,
+                DeletionFaultReadyTicketName,
+                PendingVerificationSignalName,
+                PendingVerificationTicketName,
+                StopSignalName,
+            ];
+            normalStreamSnapshot = await WaitForControlledStreamSnapshotAsync(
+                paths,
+                normalStreamControl,
+                finalControlNames,
+                snapshot =>
+                    snapshot.Mode == ControlledFixtureStreamMode.Enabled &&
+                    snapshot.LastAssignedRequestOrdinal is > 0 and <= 64 &&
+                    snapshot.ActiveRequestOrdinal == 0 &&
+                    snapshot.CurrentHeldRequestCount == 0 &&
+                    snapshot.PeakActiveRequestCount == 1 &&
+                    snapshot.OverlapViolationCount == 0 &&
+                    snapshot.ExpectedAbortCount == 0 &&
+                    snapshot.LastExpectedAbortOrdinal == 0 &&
+                    snapshot.ExpectedRejectCount == 0 &&
+                    snapshot.LastExpectedRejectOrdinal == 0 &&
+                    snapshot.ClientDetachCount == snapshot.LastAssignedRequestOrdinal &&
+                    snapshot.LastClientDetachOrdinal == snapshot.LastAssignedRequestOrdinal &&
+                    snapshot.DisabledFallbackCount == 0 &&
+                    snapshot.LastDisabledFallbackOrdinal == 0 &&
+                    snapshot.CapacityRejectCount == 0 &&
+                    snapshot.UnexpectedFailureCount == 0 &&
+                    snapshot.LastUnexpectedFailureOrdinal == 0,
+                cancellationToken).ConfigureAwait(false);
+            faultStreamSnapshot = faultStreamControl.Snapshot;
+            if (!IsExactFaultStreamFinalSnapshot(faultStreamSnapshot) ||
+                !streamRecoveryVerified ||
+                !streamCancelVerified ||
+                !streamNoLaterOpenVerified ||
+                server.FailureCount != 0 ||
+                server.CompletedResponseCount + normalStreamSnapshot.ClientDetachCount +
+                    faultStreamSnapshot.ExpectedAbortCount + faultStreamSnapshot.ClientDetachCount !=
+                    server.RequestCount)
+            {
+                throw new InvalidDataException("The final controlled playback accounting is invalid.");
             }
 
             await server.DisposeAsync().ConfigureAwait(false);
@@ -366,6 +732,10 @@ internal static class Program
             try
             {
                 IReadOnlyList<FixtureHttpRequest> requests = server?.Requests ?? [];
+                ControlledFixtureStreamSnapshot? normalResultSnapshot =
+                    normalStreamSnapshot ?? normalStreamControl?.Snapshot;
+                ControlledFixtureStreamSnapshot? faultResultSnapshot =
+                    faultStreamSnapshot ?? faultStreamControl?.Snapshot;
                 WriteJsonAtomically(
                     new ResultTicket(
                         ReadyPublished: readyPublished,
@@ -392,7 +762,86 @@ internal static class Program
                         TargetCatalogDeleted: targetCatalogDeleted,
                         TargetProtectedRecordsDeleted: targetProtectedRecordsDeleted,
                         TombstoneBindingCompleted: tombstoneBindingCompleted,
-                        SiblingCatalogRetained: siblingCatalogRetained),
+                        SiblingCatalogRetained: siblingCatalogRetained,
+                        StreamRecoveryVerified: streamRecoveryVerified,
+                        StreamCancelVerified: streamCancelVerified,
+                        StreamNoLaterOpenVerified: streamNoLaterOpenVerified,
+                        StreamNoLaterOpenObservationMilliseconds:
+                            streamNoLaterOpenObservationMilliseconds,
+                        StreamNoLaterOpenRequestCountAtReady:
+                            streamNoLaterOpenRequestCountAtReady,
+                        StreamNoLaterOpenRequestCountAfterObservation:
+                            streamNoLaterOpenRequestCountAfterObservation,
+                        NormalStreamLastAssignedRequestOrdinal:
+                            normalResultSnapshot?.LastAssignedRequestOrdinal ?? 0,
+                        NormalStreamActiveRequestOrdinal:
+                            normalResultSnapshot?.ActiveRequestOrdinal ?? 0,
+                        NormalStreamCurrentHeldRequestCount:
+                            normalResultSnapshot?.CurrentHeldRequestCount ?? 0,
+                        NormalStreamPeakHeldRequestCount:
+                            normalResultSnapshot?.PeakHeldRequestCount ?? 0,
+                        NormalStreamPeakActiveRequestCount:
+                            normalResultSnapshot?.PeakActiveRequestCount ?? 0,
+                        NormalStreamOverlapViolationCount:
+                            normalResultSnapshot?.OverlapViolationCount ?? 0,
+                        NormalStreamExpectedAbortCount:
+                            normalResultSnapshot?.ExpectedAbortCount ?? 0,
+                        NormalStreamLastExpectedAbortOrdinal:
+                            normalResultSnapshot?.LastExpectedAbortOrdinal ?? 0,
+                        NormalStreamExpectedRejectCount:
+                            normalResultSnapshot?.ExpectedRejectCount ?? 0,
+                        NormalStreamLastExpectedRejectOrdinal:
+                            normalResultSnapshot?.LastExpectedRejectOrdinal ?? 0,
+                        NormalStreamClientDetachCount:
+                            normalResultSnapshot?.ClientDetachCount ?? 0,
+                        NormalStreamLastClientDetachOrdinal:
+                            normalResultSnapshot?.LastClientDetachOrdinal ?? 0,
+                        NormalStreamDisabledFallbackCount:
+                            normalResultSnapshot?.DisabledFallbackCount ?? 0,
+                        NormalStreamLastDisabledFallbackOrdinal:
+                            normalResultSnapshot?.LastDisabledFallbackOrdinal ?? 0,
+                        NormalStreamCapacityRejectCount:
+                            normalResultSnapshot?.CapacityRejectCount ?? 0,
+                        NormalStreamUnexpectedFailureCount:
+                            normalResultSnapshot?.UnexpectedFailureCount ?? 0,
+                        NormalStreamLastUnexpectedFailureOrdinal:
+                            normalResultSnapshot?.LastUnexpectedFailureOrdinal ?? 0,
+                        FaultStreamHolding:
+                            faultResultSnapshot?.Mode == ControlledFixtureStreamMode.Holding,
+                        FaultStreamLastAssignedRequestOrdinal:
+                            faultResultSnapshot?.LastAssignedRequestOrdinal ?? 0,
+                        FaultStreamActiveRequestOrdinal:
+                            faultResultSnapshot?.ActiveRequestOrdinal ?? 0,
+                        FaultStreamCurrentHeldRequestCount:
+                            faultResultSnapshot?.CurrentHeldRequestCount ?? 0,
+                        FaultStreamPeakHeldRequestCount:
+                            faultResultSnapshot?.PeakHeldRequestCount ?? 0,
+                        FaultStreamPeakActiveRequestCount:
+                            faultResultSnapshot?.PeakActiveRequestCount ?? 0,
+                        FaultStreamOverlapViolationCount:
+                            faultResultSnapshot?.OverlapViolationCount ?? 0,
+                        FaultStreamExpectedAbortCount:
+                            faultResultSnapshot?.ExpectedAbortCount ?? 0,
+                        FaultStreamLastExpectedAbortOrdinal:
+                            faultResultSnapshot?.LastExpectedAbortOrdinal ?? 0,
+                        FaultStreamExpectedRejectCount:
+                            faultResultSnapshot?.ExpectedRejectCount ?? 0,
+                        FaultStreamLastExpectedRejectOrdinal:
+                            faultResultSnapshot?.LastExpectedRejectOrdinal ?? 0,
+                        FaultStreamClientDetachCount:
+                            faultResultSnapshot?.ClientDetachCount ?? 0,
+                        FaultStreamLastClientDetachOrdinal:
+                            faultResultSnapshot?.LastClientDetachOrdinal ?? 0,
+                        FaultStreamDisabledFallbackCount:
+                            faultResultSnapshot?.DisabledFallbackCount ?? 0,
+                        FaultStreamLastDisabledFallbackOrdinal:
+                            faultResultSnapshot?.LastDisabledFallbackOrdinal ?? 0,
+                        FaultStreamCapacityRejectCount:
+                            faultResultSnapshot?.CapacityRejectCount ?? 0,
+                        FaultStreamUnexpectedFailureCount:
+                            faultResultSnapshot?.UnexpectedFailureCount ?? 0,
+                        FaultStreamLastUnexpectedFailureOrdinal:
+                            faultResultSnapshot?.LastUnexpectedFailureOrdinal ?? 0),
                     paths.ResultTicketPath);
             }
             catch
@@ -1325,6 +1774,16 @@ internal static class Program
             Path.Combine(controlPath, DeletionFaultReadyTicketName),
             Path.Combine(controlPath, PendingVerificationSignalName),
             Path.Combine(controlPath, PendingVerificationTicketName),
+            Path.Combine(controlPath, StreamFaultArmSignalName),
+            Path.Combine(controlPath, StreamFaultReadyTicketName),
+            Path.Combine(controlPath, StreamAbortSignalName),
+            Path.Combine(controlPath, StreamAbortResultTicketName),
+            Path.Combine(controlPath, StreamRestoreSignalName),
+            Path.Combine(controlPath, StreamRestoreResultTicketName),
+            Path.Combine(controlPath, StreamCancelArmSignalName),
+            Path.Combine(controlPath, StreamCancelReadyTicketName),
+            Path.Combine(controlPath, StreamCancelVerificationSignalName),
+            Path.Combine(controlPath, StreamCancelResultTicketName),
             Path.Combine(controlPath, PublicCertificateName));
     }
 
@@ -1388,6 +1847,151 @@ internal static class Program
             CryptographicOperations.ZeroMemory(publicCertificate);
         }
     }
+
+    private static async Task<ControlledFixtureStreamSnapshot> WaitForControlledStreamSnapshotAsync(
+        HarnessPaths paths,
+        ControlledFixtureStreamControl control,
+        IReadOnlyCollection<string> allowedNames,
+        Func<ControlledFixtureStreamSnapshot, bool> predicate,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        ArgumentNullException.ThrowIfNull(predicate);
+        string[] allowedWithStop = allowedNames.Contains(StopSignalName, StringComparer.Ordinal)
+            ? [.. allowedNames]
+            : [.. allowedNames, StopSignalName];
+        Stopwatch deadline = Stopwatch.StartNew();
+        while (deadline.Elapsed < PhaseTimeout)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AssertAllowedControlEntries(paths.ControlDirectory, allowedWithStop);
+            if (TryValidateSignal(paths.StopSignalPath))
+            {
+                throw new InvalidDataException("The acceptance protocol stopped during stream verification.");
+            }
+
+            ControlledFixtureStreamSnapshot snapshot = control.Snapshot;
+            if (predicate(snapshot))
+            {
+                return snapshot;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        throw new TimeoutException("The bounded controlled-stream phase timed out.");
+    }
+
+    private static async Task<StreamCancelResultTicket> VerifyNoLaterStreamOpenAsync(
+        HarnessPaths paths,
+        LocalHttpFixtureServer server,
+        ControlledFixtureStreamControl control,
+        int requestCountAtReady,
+        IReadOnlyCollection<string> allowedNames,
+        CancellationToken cancellationToken)
+    {
+        await WaitForControlledStreamSnapshotAsync(
+            paths,
+            control,
+            allowedNames,
+            snapshot =>
+                snapshot.Mode == ControlledFixtureStreamMode.Holding &&
+                IsExactFaultStreamAccounting(snapshot),
+            cancellationToken).ConfigureAwait(false);
+        if (server.RequestCount != requestCountAtReady || server.FailureCount != 0)
+        {
+            throw new InvalidDataException("A request escaped the exact reconnect-cancel boundary.");
+        }
+
+        string[] allowedWithStop = allowedNames.Contains(StopSignalName, StringComparer.Ordinal)
+            ? [.. allowedNames]
+            : [.. allowedNames, StopSignalName];
+        Stopwatch observation = Stopwatch.StartNew();
+        while (observation.Elapsed < NoLaterStreamOpenObservation)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AssertAllowedControlEntries(paths.ControlDirectory, allowedWithStop);
+            if (TryValidateSignal(paths.StopSignalPath))
+            {
+                throw new InvalidDataException("The acceptance protocol stopped during no-later-open verification.");
+            }
+
+            ControlledFixtureStreamSnapshot current = control.Snapshot;
+            if (current.Mode != ControlledFixtureStreamMode.Holding ||
+                !IsExactFaultStreamAccounting(current) ||
+                server.RequestCount != requestCountAtReady ||
+                server.FailureCount != 0)
+            {
+                throw new InvalidDataException("Playback reopened after reconnect cancellation.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (observation.Elapsed < NoLaterStreamOpenObservation ||
+            server.RequestCount != requestCountAtReady ||
+            server.FailureCount != 0)
+        {
+            throw new InvalidDataException("The no-later-open observation is incomplete.");
+        }
+
+        ControlledFixtureStreamSnapshot final = control.Snapshot;
+        if (!IsExactFaultStreamFinalSnapshot(final))
+        {
+            throw new InvalidDataException("The controlled fault stream did not remain held exactly.");
+        }
+
+        return new StreamCancelResultTicket(
+            IsVerified: true,
+            IsHolding: true,
+            ObservationMilliseconds: observation.ElapsedMilliseconds,
+            RequestCountAtReady: requestCountAtReady,
+            RequestCountAfterObservation: server.RequestCount,
+            LastAssignedRequestOrdinal: final.LastAssignedRequestOrdinal,
+            ActiveRequestOrdinal: final.ActiveRequestOrdinal,
+            CurrentHeldRequestCount: final.CurrentHeldRequestCount,
+            PeakHeldRequestCount: final.PeakHeldRequestCount,
+            PeakActiveRequestCount: final.PeakActiveRequestCount,
+            OverlapViolationCount: final.OverlapViolationCount,
+            ExpectedAbortCount: final.ExpectedAbortCount,
+            LastExpectedAbortOrdinal: final.LastExpectedAbortOrdinal,
+            ExpectedRejectCount: final.ExpectedRejectCount,
+            LastExpectedRejectOrdinal: final.LastExpectedRejectOrdinal,
+            ClientDetachCount: final.ClientDetachCount,
+            LastClientDetachOrdinal: final.LastClientDetachOrdinal,
+            DisabledFallbackCount: final.DisabledFallbackCount,
+            LastDisabledFallbackOrdinal: final.LastDisabledFallbackOrdinal,
+            CapacityRejectCount: final.CapacityRejectCount,
+            UnexpectedFailureCount: final.UnexpectedFailureCount,
+            LastUnexpectedFailureOrdinal: final.LastUnexpectedFailureOrdinal);
+    }
+
+    private static bool IsExactFaultStreamFinalSnapshot(
+        ControlledFixtureStreamSnapshot snapshot) =>
+        snapshot.Mode == ControlledFixtureStreamMode.Holding &&
+        IsExactFaultStreamAccounting(snapshot);
+
+    private static bool IsExactFaultStreamAccounting(
+        ControlledFixtureStreamSnapshot snapshot) =>
+        snapshot.LastAssignedRequestOrdinal == 3 &&
+        snapshot.ActiveRequestOrdinal == 0 &&
+        snapshot.CurrentHeldRequestCount == 0 &&
+        snapshot.PeakHeldRequestCount == 1 &&
+        snapshot.PeakActiveRequestCount == 1 &&
+        snapshot.OverlapViolationCount == 0 &&
+        snapshot.ExpectedAbortCount == 2 &&
+        snapshot.LastExpectedAbortOrdinal == 2 &&
+        snapshot.ExpectedRejectCount == 0 &&
+        snapshot.LastExpectedRejectOrdinal == 0 &&
+        snapshot.ClientDetachCount == 1 &&
+        snapshot.LastClientDetachOrdinal == 3 &&
+        snapshot.DisabledFallbackCount == 0 &&
+        snapshot.LastDisabledFallbackOrdinal == 0 &&
+        snapshot.CapacityRejectCount == 0 &&
+        snapshot.UnexpectedFailureCount == 0 &&
+        snapshot.LastUnexpectedFailureOrdinal == 0;
 
     private static async Task<bool> WaitForPhaseSignalAsync(
         HarnessPaths paths,
@@ -1531,6 +2135,16 @@ internal static class Program
         string DeletionFaultReadyTicketPath,
         string PendingVerificationSignalPath,
         string PendingVerificationTicketPath,
+        string StreamFaultArmSignalPath,
+        string StreamFaultReadyTicketPath,
+        string StreamAbortSignalPath,
+        string StreamAbortResultTicketPath,
+        string StreamRestoreSignalPath,
+        string StreamRestoreResultTicketPath,
+        string StreamCancelArmSignalPath,
+        string StreamCancelReadyTicketPath,
+        string StreamCancelVerificationSignalPath,
+        string StreamCancelResultTicketPath,
         string PublicCertificatePath);
 
     private sealed record SeedBaseline(
@@ -1635,7 +2249,48 @@ internal static class Program
         bool TargetCatalogDeleted,
         bool TargetProtectedRecordsDeleted,
         bool TombstoneBindingCompleted,
-        bool SiblingCatalogRetained);
+        bool SiblingCatalogRetained,
+        bool StreamRecoveryVerified,
+        bool StreamCancelVerified,
+        bool StreamNoLaterOpenVerified,
+        long StreamNoLaterOpenObservationMilliseconds,
+        int StreamNoLaterOpenRequestCountAtReady,
+        int StreamNoLaterOpenRequestCountAfterObservation,
+        long NormalStreamLastAssignedRequestOrdinal,
+        long NormalStreamActiveRequestOrdinal,
+        int NormalStreamCurrentHeldRequestCount,
+        int NormalStreamPeakHeldRequestCount,
+        int NormalStreamPeakActiveRequestCount,
+        int NormalStreamOverlapViolationCount,
+        int NormalStreamExpectedAbortCount,
+        long NormalStreamLastExpectedAbortOrdinal,
+        int NormalStreamExpectedRejectCount,
+        long NormalStreamLastExpectedRejectOrdinal,
+        int NormalStreamClientDetachCount,
+        long NormalStreamLastClientDetachOrdinal,
+        int NormalStreamDisabledFallbackCount,
+        long NormalStreamLastDisabledFallbackOrdinal,
+        int NormalStreamCapacityRejectCount,
+        int NormalStreamUnexpectedFailureCount,
+        long NormalStreamLastUnexpectedFailureOrdinal,
+        bool FaultStreamHolding,
+        long FaultStreamLastAssignedRequestOrdinal,
+        long FaultStreamActiveRequestOrdinal,
+        int FaultStreamCurrentHeldRequestCount,
+        int FaultStreamPeakHeldRequestCount,
+        int FaultStreamPeakActiveRequestCount,
+        int FaultStreamOverlapViolationCount,
+        int FaultStreamExpectedAbortCount,
+        long FaultStreamLastExpectedAbortOrdinal,
+        int FaultStreamExpectedRejectCount,
+        long FaultStreamLastExpectedRejectOrdinal,
+        int FaultStreamClientDetachCount,
+        long FaultStreamLastClientDetachOrdinal,
+        int FaultStreamDisabledFallbackCount,
+        long FaultStreamLastDisabledFallbackOrdinal,
+        int FaultStreamCapacityRejectCount,
+        int FaultStreamUnexpectedFailureCount,
+        long FaultStreamLastUnexpectedFailureOrdinal);
 
     private sealed record PreservationOracleResult(
         bool IsVerified,
@@ -1645,6 +2300,58 @@ internal static class Program
         bool SiblingCatalogRetained);
 
     private sealed record DeletionFaultReadyTicket(bool IsReady);
+
+    private sealed record StreamFaultReadyTicket(
+        bool IsReady,
+        int MaximumRequestOrdinals);
+
+    private sealed record StreamAbortResultTicket(
+        bool IsVerified,
+        long LastAssignedRequestOrdinal,
+        long ActiveRequestOrdinal,
+        int CurrentHeldRequestCount,
+        int ExpectedAbortCount,
+        long LastExpectedAbortOrdinal);
+
+    private sealed record StreamRestoreResultTicket(
+        bool IsVerified,
+        long LastAssignedRequestOrdinal,
+        long ActiveRequestOrdinal,
+        int CurrentHeldRequestCount,
+        int ExpectedAbortCount);
+
+    private sealed record StreamCancelReadyTicket(
+        bool IsVerified,
+        long LastAssignedRequestOrdinal,
+        long ActiveRequestOrdinal,
+        int CurrentHeldRequestCount,
+        int ExpectedAbortCount,
+        long LastExpectedAbortOrdinal,
+        int RequestCountAtReady);
+
+    private sealed record StreamCancelResultTicket(
+        bool IsVerified,
+        bool IsHolding,
+        long ObservationMilliseconds,
+        int RequestCountAtReady,
+        int RequestCountAfterObservation,
+        long LastAssignedRequestOrdinal,
+        long ActiveRequestOrdinal,
+        int CurrentHeldRequestCount,
+        int PeakHeldRequestCount,
+        int PeakActiveRequestCount,
+        int OverlapViolationCount,
+        int ExpectedAbortCount,
+        long LastExpectedAbortOrdinal,
+        int ExpectedRejectCount,
+        long LastExpectedRejectOrdinal,
+        int ClientDetachCount,
+        long LastClientDetachOrdinal,
+        int DisabledFallbackCount,
+        long LastDisabledFallbackOrdinal,
+        int CapacityRejectCount,
+        int UnexpectedFailureCount,
+        long LastUnexpectedFailureOrdinal);
 
     private sealed record PendingVerificationTicket(
         bool IsVerified,

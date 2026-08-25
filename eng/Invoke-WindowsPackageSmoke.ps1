@@ -619,6 +619,27 @@ $playbackDeletionFaultArmSignalPath = Join-Path $playbackControlDirectory "arm-d
 $playbackDeletionFaultReadyTicketPath = Join-Path $playbackControlDirectory "delete-failure-ready.json"
 $playbackPendingVerificationSignalPath = Join-Path $playbackControlDirectory "verify-pending.signal"
 $playbackPendingVerificationTicketPath = Join-Path $playbackControlDirectory "pending-result.json"
+$playbackStreamFaultArmSignalPath = Join-Path $playbackControlDirectory "arm-stream-fault.signal"
+$playbackStreamFaultReadyTicketPath = Join-Path $playbackControlDirectory "stream-fault-ready.json"
+$playbackStreamAbortSignalPath = Join-Path $playbackControlDirectory "abort-stream.signal"
+$playbackStreamAbortResultTicketPath = Join-Path $playbackControlDirectory "stream-abort-result.json"
+$playbackStreamRestoreSignalPath = Join-Path $playbackControlDirectory "restore-stream.signal"
+$playbackStreamRestoreResultTicketPath = Join-Path $playbackControlDirectory "stream-restore-result.json"
+$playbackStreamCancelArmSignalPath = Join-Path $playbackControlDirectory "abort-stream-for-cancel.signal"
+$playbackStreamCancelReadyTicketPath = Join-Path $playbackControlDirectory "stream-cancel-ready.json"
+$playbackStreamCancelVerificationSignalPath = Join-Path $playbackControlDirectory "verify-stream-cancel.signal"
+$playbackStreamCancelResultTicketPath = Join-Path $playbackControlDirectory "stream-cancel-result.json"
+$playbackStreamProtocolControlNames = @(
+    "arm-stream-fault.signal",
+    "stream-fault-ready.json",
+    "abort-stream.signal",
+    "stream-abort-result.json",
+    "restore-stream.signal",
+    "stream-restore-result.json",
+    "abort-stream-for-cancel.signal",
+    "stream-cancel-ready.json",
+    "verify-stream-cancel.signal",
+    "stream-cancel-result.json")
 $playbackPublicCertificatePath = Join-Path $playbackControlDirectory "loopback.cer"
 $publicCertificatePath = Join-Path $artifactRoot "$runId.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
@@ -707,6 +728,18 @@ $playbackUiCompletedResponseCount = 0
 $playbackUiCompletedBodyBytes = 0L
 $playbackChannelARequestCount = 0
 $playbackChannelBRequestCount = 0
+$playbackReconnectRecoveryVerified = $false
+$playbackReconnectCancelVerified = $false
+$playbackReconnectCancelBudgetMilliseconds = 1000.0
+$playbackReconnectCancelElapsedMilliseconds = 0.0
+$playbackReconnectNoLaterOpenVerified = $false
+$playbackReconnectNoLaterOpenObservationMilliseconds = 0L
+$playbackReconnectNoLaterOpenRequestCountAtReady = 0
+$playbackReconnectNoLaterOpenRequestCountAfterObservation = 0
+$normalStreamLastAssignedRequestOrdinal = 0L
+$normalStreamClientDetachCount = 0
+$faultStreamExpectedAbortCount = 0
+$faultStreamClientDetachCount = 0
 $windowsAppRuntimeDisposition = "NotStarted"
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $msBuildEnvironment = @{
@@ -1287,7 +1320,12 @@ function Read-StrictPlaybackJsonTicket {
         [System.IO.Path]::GetFullPath($playbackCancelVerificationTicketPath),
         [System.IO.Path]::GetFullPath($playbackDialogCloseVerificationTicketPath),
         [System.IO.Path]::GetFullPath($playbackDeletionFaultReadyTicketPath),
-        [System.IO.Path]::GetFullPath($playbackPendingVerificationTicketPath)
+        [System.IO.Path]::GetFullPath($playbackPendingVerificationTicketPath),
+        [System.IO.Path]::GetFullPath($playbackStreamFaultReadyTicketPath),
+        [System.IO.Path]::GetFullPath($playbackStreamAbortResultTicketPath),
+        [System.IO.Path]::GetFullPath($playbackStreamRestoreResultTicketPath),
+        [System.IO.Path]::GetFullPath($playbackStreamCancelReadyTicketPath),
+        [System.IO.Path]::GetFullPath($playbackStreamCancelResultTicketPath)
     )
     if ($allowedPaths -notcontains $resolvedPath -or
         -not [System.IO.Directory]::GetParent($resolvedPath).FullName.Equals(
@@ -1828,6 +1866,48 @@ function Wait-PackagedPlaybackSelection {
     throw "The packaged playback switch did not reach the expected channel-bound state."
 }
 
+function Wait-PackagedPlaybackStoppedWithinBudget {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$StatusElement,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$ChannelElement,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$StopButtonElement,
+
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Stopwatch]$Timer,
+
+        [Parameter(Mandatory)]
+        [double]$BudgetMilliseconds
+    )
+
+    do {
+        Assert-PackagedProcessAlive -Process $Process
+        if ($StatusElement.Current.Name -ceq "Playback stopped." -and
+            $ChannelElement.Current.Name -ceq "No channel selected." -and
+            $StopButtonElement.Current.Name -ceq "Stop channel" -and
+            -not $StopButtonElement.Current.IsEnabled) {
+            $Timer.Stop()
+            if ($Timer.Elapsed.TotalMilliseconds -gt $BudgetMilliseconds) {
+                break
+            }
+
+            return [double]$Timer.Elapsed.TotalMilliseconds
+        }
+
+        Start-Sleep -Milliseconds 25
+    } while ($Timer.Elapsed.TotalMilliseconds -le $BudgetMilliseconds)
+
+    $Timer.Stop()
+    throw "Reconnect cancellation did not stop packaged playback within the exact budget."
+}
+
 function Invoke-PackagedPlaybackChannelItem {
     param(
         [Parameter(Mandatory)]
@@ -1988,6 +2068,11 @@ function New-ExactPlaybackControlSignal {
         [System.IO.Path]::GetFullPath($playbackDialogCloseVerificationSignalPath),
         [System.IO.Path]::GetFullPath($playbackDeletionFaultArmSignalPath),
         [System.IO.Path]::GetFullPath($playbackPendingVerificationSignalPath),
+        [System.IO.Path]::GetFullPath($playbackStreamFaultArmSignalPath),
+        [System.IO.Path]::GetFullPath($playbackStreamAbortSignalPath),
+        [System.IO.Path]::GetFullPath($playbackStreamRestoreSignalPath),
+        [System.IO.Path]::GetFullPath($playbackStreamCancelArmSignalPath),
+        [System.IO.Path]::GetFullPath($playbackStreamCancelVerificationSignalPath),
         [System.IO.Path]::GetFullPath($playbackStopSignalPath)
     )
     if ($allowedPaths -notcontains $resolvedPath -or
@@ -2003,6 +2088,43 @@ function New-ExactPlaybackControlSignal {
         [System.IO.FileAccess]::Write,
         [System.IO.FileShare]::None)
     $signalStream.Dispose()
+}
+
+function Wait-PlaybackStreamTicket {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$HarnessProcess,
+
+        [Parameter(Mandatory)]
+        [string]$TicketPath,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedControlNames,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedProperties,
+
+        [ValidateRange(1, 120)]
+        [int]$TimeoutSeconds = 30
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $HarnessProcess.Refresh()
+        if ($HarnessProcess.HasExited) {
+            throw "The playback acceptance harness exited during stream verification."
+        }
+        if (Test-Path -LiteralPath $TicketPath -PathType Leaf) {
+            Assert-ExactPlaybackControlEntries -AllowedNames $AllowedControlNames
+            return Read-StrictPlaybackJsonTicket `
+                -Path $TicketPath `
+                -AllowedProperties $AllowedProperties
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The playback stream result was not published before the deadline."
 }
 
 function Wait-PlaybackPreservationTicket {
@@ -3624,6 +3746,17 @@ try {
     $playbackRapidSwitchCount = $rapidSwitchSamples.Count
     $playbackRapidSwitchVerified = $playbackRapidSwitchCount -eq 25
 
+    Invoke-PackagedPlaybackChannelItem `
+        -Process $launchedProcess `
+        -ChannelItem $playbackChannelItemA `
+        -WindowHandle $playbackWindowHandle `
+        -ExpectedProcessId ([uint32]$playbackActivationProcessId)
+    Wait-PackagedPlaybackSelection `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelAName
+
     $playbackSurfaceElement = Get-AutomationElementById `
         $playbackAutomationRoot `
         "PlaybackSurface"
@@ -3655,7 +3788,7 @@ try {
             -Process $launchedProcess `
             -StatusElement $playbackStatusElement `
             -ChannelElement $playbackCurrentChannelElement `
-            -ExpectedChannelName $expectedPlaybackChannelBName
+            -ExpectedChannelName $expectedPlaybackChannelAName
     }
     if ($playbackWindowResizeCount -ne 2) {
         throw "The packaged playback window resize count is invalid."
@@ -3703,7 +3836,7 @@ try {
         -Process $launchedProcess `
         -StatusElement $playbackStatusElement `
         -ChannelElement $playbackCurrentChannelElement `
-        -ExpectedChannelName $expectedPlaybackChannelBName
+        -ExpectedChannelName $expectedPlaybackChannelAName
     $null = Wait-PackagedPlaybackSurfaceBounds `
         -Process $launchedProcess `
         -Element $playbackSurfaceElement `
@@ -3759,6 +3892,282 @@ try {
     }
     $playbackResourceBudgetVerified = $true
 
+    $streamBaseControlNames = @("loopback.cer", "ready.json")
+    New-ExactPlaybackControlSignal -Path $playbackStreamFaultArmSignalPath
+    $streamFaultReadyTicket = Wait-PlaybackStreamTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -TicketPath $playbackStreamFaultReadyTicketPath `
+        -AllowedControlNames ($streamBaseControlNames + @(
+                "arm-stream-fault.signal",
+                "stream-fault-ready.json")) `
+        -AllowedProperties @("IsReady", "MaximumRequestOrdinals")
+    if ($streamFaultReadyTicket.IsReady -isnot [bool] -or
+        -not $streamFaultReadyTicket.IsReady -or
+        $streamFaultReadyTicket.MaximumRequestOrdinals -isnot [int] -or
+        [int]$streamFaultReadyTicket.MaximumRequestOrdinals -ne 3) {
+        throw "The playback stream-fault readiness result is invalid."
+    }
+
+    Invoke-PackagedPlaybackChannelItem `
+        -Process $launchedProcess `
+        -ChannelItem $playbackChannelItemB `
+        -WindowHandle $playbackWindowHandle `
+        -ExpectedProcessId ([uint32]$playbackActivationProcessId)
+    Wait-PackagedPlaybackSelection `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelBName
+
+    New-ExactPlaybackControlSignal -Path $playbackStreamAbortSignalPath
+    $streamAbortResultTicket = Wait-PlaybackStreamTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -TicketPath $playbackStreamAbortResultTicketPath `
+        -AllowedControlNames ($streamBaseControlNames + @(
+                "arm-stream-fault.signal",
+                "stream-fault-ready.json",
+                "abort-stream.signal",
+                "stream-abort-result.json")) `
+        -AllowedProperties @(
+            "IsVerified",
+            "LastAssignedRequestOrdinal",
+            "ActiveRequestOrdinal",
+            "CurrentHeldRequestCount",
+            "ExpectedAbortCount",
+            "LastExpectedAbortOrdinal")
+    $streamAbortExpected = [ordered]@{
+        LastAssignedRequestOrdinal = 2L
+        ActiveRequestOrdinal = 0L
+        CurrentHeldRequestCount = 1L
+        ExpectedAbortCount = 1L
+        LastExpectedAbortOrdinal = 1L
+    }
+    if ($streamAbortResultTicket.IsVerified -isnot [bool] -or
+        -not $streamAbortResultTicket.IsVerified) {
+        throw "The first playback stream interruption was not verified."
+    }
+    foreach ($propertyName in $streamAbortExpected.Keys) {
+        $actualValue = $streamAbortResultTicket.$propertyName
+        if (($actualValue -isnot [int] -and $actualValue -isnot [long]) -or
+            [long]$actualValue -ne [long]$streamAbortExpected[$propertyName]) {
+            throw "The first playback stream interruption result is invalid."
+        }
+    }
+    Wait-PackagedPlaybackStatus `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Reconnect attempt 1 of 3 is starting." `
+        -TimeoutSeconds 10
+    $cancelReconnectButtonElement = Wait-PackagedAutomationElementByName `
+        -Process $launchedProcess `
+        -Root $playbackAutomationRoot `
+        -AutomationId "PlaybackStopButton" `
+        -ControlType ([System.Windows.Automation.ControlType]::Button) `
+        -ExpectedName "Cancel reconnect" `
+        -TimeoutSeconds 10
+
+    New-ExactPlaybackControlSignal -Path $playbackStreamRestoreSignalPath
+    $streamRestoreResultTicket = Wait-PlaybackStreamTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -TicketPath $playbackStreamRestoreResultTicketPath `
+        -AllowedControlNames ($streamBaseControlNames + @(
+                "arm-stream-fault.signal",
+                "stream-fault-ready.json",
+                "abort-stream.signal",
+                "stream-abort-result.json",
+                "restore-stream.signal",
+                "stream-restore-result.json")) `
+        -AllowedProperties @(
+            "IsVerified",
+            "LastAssignedRequestOrdinal",
+            "ActiveRequestOrdinal",
+            "CurrentHeldRequestCount",
+            "ExpectedAbortCount")
+    $streamRestoreExpected = [ordered]@{
+        LastAssignedRequestOrdinal = 2L
+        ActiveRequestOrdinal = 2L
+        CurrentHeldRequestCount = 0L
+        ExpectedAbortCount = 1L
+    }
+    if ($streamRestoreResultTicket.IsVerified -isnot [bool] -or
+        -not $streamRestoreResultTicket.IsVerified) {
+        throw "The playback stream recovery was not verified."
+    }
+    foreach ($propertyName in $streamRestoreExpected.Keys) {
+        $actualValue = $streamRestoreResultTicket.$propertyName
+        if (($actualValue -isnot [int] -and $actualValue -isnot [long]) -or
+            [long]$actualValue -ne [long]$streamRestoreExpected[$propertyName]) {
+            throw "The playback stream recovery result is invalid."
+        }
+    }
+    Wait-PackagedPlaybackSelection `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -ExpectedChannelName $expectedPlaybackChannelBName `
+        -TimeoutMilliseconds 10000
+    $playbackReconnectRecoveryVerified = $true
+
+    New-ExactPlaybackControlSignal -Path $playbackStreamCancelArmSignalPath
+    $streamCancelReadyTicket = Wait-PlaybackStreamTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -TicketPath $playbackStreamCancelReadyTicketPath `
+        -AllowedControlNames ($streamBaseControlNames + @(
+                "arm-stream-fault.signal",
+                "stream-fault-ready.json",
+                "abort-stream.signal",
+                "stream-abort-result.json",
+                "restore-stream.signal",
+                "stream-restore-result.json",
+                "abort-stream-for-cancel.signal",
+                "stream-cancel-ready.json")) `
+        -AllowedProperties @(
+            "IsVerified",
+            "LastAssignedRequestOrdinal",
+            "ActiveRequestOrdinal",
+            "CurrentHeldRequestCount",
+            "ExpectedAbortCount",
+            "LastExpectedAbortOrdinal",
+            "RequestCountAtReady")
+    $streamCancelReadyExpected = [ordered]@{
+        LastAssignedRequestOrdinal = 3L
+        ActiveRequestOrdinal = 0L
+        CurrentHeldRequestCount = 1L
+        ExpectedAbortCount = 2L
+        LastExpectedAbortOrdinal = 2L
+    }
+    if ($streamCancelReadyTicket.IsVerified -isnot [bool] -or
+        -not $streamCancelReadyTicket.IsVerified) {
+        throw "The reconnect-cancel stream boundary was not prepared."
+    }
+    foreach ($propertyName in $streamCancelReadyExpected.Keys) {
+        $actualValue = $streamCancelReadyTicket.$propertyName
+        if (($actualValue -isnot [int] -and $actualValue -isnot [long]) -or
+            [long]$actualValue -ne [long]$streamCancelReadyExpected[$propertyName]) {
+            throw "The reconnect-cancel stream boundary is invalid."
+        }
+    }
+    if (($streamCancelReadyTicket.RequestCountAtReady -isnot [int] -and
+            $streamCancelReadyTicket.RequestCountAtReady -isnot [long]) -or
+        [long]$streamCancelReadyTicket.RequestCountAtReady -le 0) {
+        throw "The reconnect-cancel request baseline is invalid."
+    }
+    $playbackReconnectNoLaterOpenRequestCountAtReady =
+        [int]$streamCancelReadyTicket.RequestCountAtReady
+    Wait-PackagedPlaybackStatus `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ExpectedStatus "Reconnect attempt 1 of 3 is starting." `
+        -TimeoutSeconds 10
+    $cancelReconnectButtonElement = Wait-PackagedAutomationElementByName `
+        -Process $launchedProcess `
+        -Root $playbackAutomationRoot `
+        -AutomationId "PlaybackStopButton" `
+        -ControlType ([System.Windows.Automation.ControlType]::Button) `
+        -ExpectedName "Cancel reconnect" `
+        -TimeoutSeconds 10
+
+    $playbackReconnectCancelTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    Invoke-PackagedPlaybackControlButton `
+        -Process $launchedProcess `
+        -ButtonElement $cancelReconnectButtonElement
+    $playbackReconnectCancelElapsedMilliseconds = Wait-PackagedPlaybackStoppedWithinBudget `
+        -Process $launchedProcess `
+        -StatusElement $playbackStatusElement `
+        -ChannelElement $playbackCurrentChannelElement `
+        -StopButtonElement $cancelReconnectButtonElement `
+        -Timer $playbackReconnectCancelTimer `
+        -BudgetMilliseconds $playbackReconnectCancelBudgetMilliseconds
+    if ($playbackReconnectCancelElapsedMilliseconds -gt
+        $playbackReconnectCancelBudgetMilliseconds) {
+        throw "Packaged reconnect cancellation exceeded the exact budget."
+    }
+    $playbackReconnectCancelVerified = $true
+
+    New-ExactPlaybackControlSignal -Path $playbackStreamCancelVerificationSignalPath
+    $streamCancelResultProperties = @(
+        "IsVerified",
+        "IsHolding",
+        "ObservationMilliseconds",
+        "RequestCountAtReady",
+        "RequestCountAfterObservation",
+        "LastAssignedRequestOrdinal",
+        "ActiveRequestOrdinal",
+        "CurrentHeldRequestCount",
+        "PeakHeldRequestCount",
+        "PeakActiveRequestCount",
+        "OverlapViolationCount",
+        "ExpectedAbortCount",
+        "LastExpectedAbortOrdinal",
+        "ExpectedRejectCount",
+        "LastExpectedRejectOrdinal",
+        "ClientDetachCount",
+        "LastClientDetachOrdinal",
+        "DisabledFallbackCount",
+        "LastDisabledFallbackOrdinal",
+        "CapacityRejectCount",
+        "UnexpectedFailureCount",
+        "LastUnexpectedFailureOrdinal")
+    $streamCancelResultTicket = Wait-PlaybackStreamTicket `
+        -HarnessProcess $playbackHarnessProcess `
+        -TicketPath $playbackStreamCancelResultTicketPath `
+        -AllowedControlNames ($streamBaseControlNames + $playbackStreamProtocolControlNames) `
+        -AllowedProperties $streamCancelResultProperties `
+        -TimeoutSeconds 60
+    $streamCancelFinalExpected = [ordered]@{
+        LastAssignedRequestOrdinal = 3L
+        ActiveRequestOrdinal = 0L
+        CurrentHeldRequestCount = 0L
+        PeakHeldRequestCount = 1L
+        PeakActiveRequestCount = 1L
+        OverlapViolationCount = 0L
+        ExpectedAbortCount = 2L
+        LastExpectedAbortOrdinal = 2L
+        ExpectedRejectCount = 0L
+        LastExpectedRejectOrdinal = 0L
+        ClientDetachCount = 1L
+        LastClientDetachOrdinal = 3L
+        DisabledFallbackCount = 0L
+        LastDisabledFallbackOrdinal = 0L
+        CapacityRejectCount = 0L
+        UnexpectedFailureCount = 0L
+        LastUnexpectedFailureOrdinal = 0L
+    }
+    if ($streamCancelResultTicket.IsVerified -isnot [bool] -or
+        $streamCancelResultTicket.IsHolding -isnot [bool] -or
+        -not $streamCancelResultTicket.IsVerified -or
+        -not $streamCancelResultTicket.IsHolding) {
+        throw "The reconnect-cancel verification result is invalid."
+    }
+    foreach ($propertyName in $streamCancelFinalExpected.Keys) {
+        $actualValue = $streamCancelResultTicket.$propertyName
+        if (($actualValue -isnot [int] -and $actualValue -isnot [long]) -or
+            [long]$actualValue -ne [long]$streamCancelFinalExpected[$propertyName]) {
+            throw "The reconnect-cancel controlled-stream accounting is invalid."
+        }
+    }
+    foreach ($propertyName in @(
+            "ObservationMilliseconds",
+            "RequestCountAtReady",
+            "RequestCountAfterObservation")) {
+        $actualValue = $streamCancelResultTicket.$propertyName
+        if ($actualValue -isnot [int] -and $actualValue -isnot [long]) {
+            throw "The reconnect-cancel bounded result is invalid."
+        }
+    }
+    if ([long]$streamCancelResultTicket.ObservationMilliseconds -lt 31000 -or
+        [long]$streamCancelResultTicket.RequestCountAtReady -ne
+            [long]$streamCancelResultTicket.RequestCountAfterObservation -or
+        [long]$streamCancelResultTicket.RequestCountAtReady -ne
+            [long]$streamCancelReadyTicket.RequestCountAtReady) {
+        throw "Playback reopened after reconnect cancellation."
+    }
+    $playbackReconnectNoLaterOpenObservationMilliseconds =
+        [long]$streamCancelResultTicket.ObservationMilliseconds
+    $playbackReconnectNoLaterOpenRequestCountAfterObservation =
+        [int]$streamCancelResultTicket.RequestCountAfterObservation
+    $playbackReconnectNoLaterOpenVerified = $true
+
     Invoke-PackagedPlaybackChannelItem `
         -Process $launchedProcess `
         -ChannelItem $playbackChannelItemA `
@@ -3799,11 +4208,9 @@ try {
     Wait-PlaybackPreservationTicket `
         -HarnessProcess $playbackHarnessProcess `
         -TicketPath $playbackCancelVerificationTicketPath `
-        -AllowedControlNames @(
-            "loopback.cer",
-            "ready.json",
+        -AllowedControlNames ($streamBaseControlNames + $playbackStreamProtocolControlNames + @(
             "verify-cancel.signal",
-            "cancel-result.json")
+            "cancel-result.json"))
     $sourceDeletionCancelNoMutationVerified = $true
 
     Invoke-PackagedPlaybackControlButton `
@@ -3844,27 +4251,23 @@ try {
     Wait-PlaybackPreservationTicket `
         -HarnessProcess $playbackHarnessProcess `
         -TicketPath $playbackDialogCloseVerificationTicketPath `
-        -AllowedControlNames @(
-            "loopback.cer",
-            "ready.json",
+        -AllowedControlNames ($streamBaseControlNames + $playbackStreamProtocolControlNames + @(
             "verify-cancel.signal",
             "cancel-result.json",
             "verify-dialog-close.signal",
-            "dialog-close-result.json")
+            "dialog-close-result.json"))
     $sourceDeletionDialogCloseNoMutationVerified = $true
 
     New-ExactPlaybackControlSignal -Path $playbackDeletionFaultArmSignalPath
     Wait-PlaybackDeletionFaultReadyTicket `
         -HarnessProcess $playbackHarnessProcess `
-        -AllowedControlNames @(
-            "loopback.cer",
-            "ready.json",
+        -AllowedControlNames ($streamBaseControlNames + $playbackStreamProtocolControlNames + @(
             "verify-cancel.signal",
             "cancel-result.json",
             "verify-dialog-close.signal",
             "dialog-close-result.json",
             "arm-delete-failure.signal",
-            "delete-failure-ready.json")
+            "delete-failure-ready.json"))
 
     $deleteInstance = Start-PackagedPlaybackApplicationInstance
     $launchedProcess = $deleteInstance.Process
@@ -3915,9 +4318,7 @@ try {
     New-ExactPlaybackControlSignal -Path $playbackPendingVerificationSignalPath
     $pendingTicket = Wait-PlaybackPendingDeletionTicket `
         -HarnessProcess $playbackHarnessProcess `
-        -AllowedControlNames @(
-            "loopback.cer",
-            "ready.json",
+        -AllowedControlNames ($streamBaseControlNames + $playbackStreamProtocolControlNames + @(
             "verify-cancel.signal",
             "cancel-result.json",
             "verify-dialog-close.signal",
@@ -3925,7 +4326,7 @@ try {
             "arm-delete-failure.signal",
             "delete-failure-ready.json",
             "verify-pending.signal",
-            "pending-result.json")
+            "pending-result.json"))
     $sourceDeletionPendingCatalogPreserved = $pendingTicket.TargetCatalogPreserved
     $sourceDeletionPendingConfigurationRecordPreserved =
         $pendingTicket.ConfigurationRecordPreserved
@@ -3991,9 +4392,7 @@ try {
     }
 
     Assert-ExactPlaybackControlEntries `
-        -AllowedNames @(
-            "loopback.cer",
-            "ready.json",
+        -AllowedNames ($streamBaseControlNames + $playbackStreamProtocolControlNames + @(
             "verify-cancel.signal",
             "cancel-result.json",
             "verify-dialog-close.signal",
@@ -4003,7 +4402,7 @@ try {
             "verify-pending.signal",
             "pending-result.json",
             "result.json",
-            "stop.signal")
+            "stop.signal"))
     $resultTicket = Read-StrictPlaybackJsonTicket `
         -Path $playbackResultPath `
         -AllowedProperties @(
@@ -4029,7 +4428,128 @@ try {
             "TargetCatalogDeleted",
             "TargetProtectedRecordsDeleted",
             "TombstoneBindingCompleted",
-            "SiblingCatalogRetained")
+            "SiblingCatalogRetained",
+            "StreamRecoveryVerified",
+            "StreamCancelVerified",
+            "StreamNoLaterOpenVerified",
+            "StreamNoLaterOpenObservationMilliseconds",
+            "StreamNoLaterOpenRequestCountAtReady",
+            "StreamNoLaterOpenRequestCountAfterObservation",
+            "NormalStreamLastAssignedRequestOrdinal",
+            "NormalStreamActiveRequestOrdinal",
+            "NormalStreamCurrentHeldRequestCount",
+            "NormalStreamPeakHeldRequestCount",
+            "NormalStreamPeakActiveRequestCount",
+            "NormalStreamOverlapViolationCount",
+            "NormalStreamExpectedAbortCount",
+            "NormalStreamLastExpectedAbortOrdinal",
+            "NormalStreamExpectedRejectCount",
+            "NormalStreamLastExpectedRejectOrdinal",
+            "NormalStreamClientDetachCount",
+            "NormalStreamLastClientDetachOrdinal",
+            "NormalStreamDisabledFallbackCount",
+            "NormalStreamLastDisabledFallbackOrdinal",
+            "NormalStreamCapacityRejectCount",
+            "NormalStreamUnexpectedFailureCount",
+            "NormalStreamLastUnexpectedFailureOrdinal",
+            "FaultStreamHolding",
+            "FaultStreamLastAssignedRequestOrdinal",
+            "FaultStreamActiveRequestOrdinal",
+            "FaultStreamCurrentHeldRequestCount",
+            "FaultStreamPeakHeldRequestCount",
+            "FaultStreamPeakActiveRequestCount",
+            "FaultStreamOverlapViolationCount",
+            "FaultStreamExpectedAbortCount",
+            "FaultStreamLastExpectedAbortOrdinal",
+            "FaultStreamExpectedRejectCount",
+            "FaultStreamLastExpectedRejectOrdinal",
+            "FaultStreamClientDetachCount",
+            "FaultStreamLastClientDetachOrdinal",
+            "FaultStreamDisabledFallbackCount",
+            "FaultStreamLastDisabledFallbackOrdinal",
+            "FaultStreamCapacityRejectCount",
+            "FaultStreamUnexpectedFailureCount",
+            "FaultStreamLastUnexpectedFailureOrdinal")
+    $streamBooleanResultProperties = @(
+        "StreamRecoveryVerified",
+        "StreamCancelVerified",
+        "StreamNoLaterOpenVerified",
+        "FaultStreamHolding")
+    foreach ($propertyName in $streamBooleanResultProperties) {
+        if ($resultTicket.$propertyName -isnot [bool] -or
+            -not $resultTicket.$propertyName) {
+            throw "The playback stream Boolean result is invalid."
+        }
+    }
+    $streamIntegralResultProperties = @(
+        "StreamNoLaterOpenObservationMilliseconds",
+        "StreamNoLaterOpenRequestCountAtReady",
+        "StreamNoLaterOpenRequestCountAfterObservation",
+        "NormalStreamLastAssignedRequestOrdinal",
+        "NormalStreamActiveRequestOrdinal",
+        "NormalStreamCurrentHeldRequestCount",
+        "NormalStreamPeakHeldRequestCount",
+        "NormalStreamPeakActiveRequestCount",
+        "NormalStreamOverlapViolationCount",
+        "NormalStreamExpectedAbortCount",
+        "NormalStreamLastExpectedAbortOrdinal",
+        "NormalStreamExpectedRejectCount",
+        "NormalStreamLastExpectedRejectOrdinal",
+        "NormalStreamClientDetachCount",
+        "NormalStreamLastClientDetachOrdinal",
+        "NormalStreamDisabledFallbackCount",
+        "NormalStreamLastDisabledFallbackOrdinal",
+        "NormalStreamCapacityRejectCount",
+        "NormalStreamUnexpectedFailureCount",
+        "NormalStreamLastUnexpectedFailureOrdinal",
+        "FaultStreamLastAssignedRequestOrdinal",
+        "FaultStreamActiveRequestOrdinal",
+        "FaultStreamCurrentHeldRequestCount",
+        "FaultStreamPeakHeldRequestCount",
+        "FaultStreamPeakActiveRequestCount",
+        "FaultStreamOverlapViolationCount",
+        "FaultStreamExpectedAbortCount",
+        "FaultStreamLastExpectedAbortOrdinal",
+        "FaultStreamExpectedRejectCount",
+        "FaultStreamLastExpectedRejectOrdinal",
+        "FaultStreamClientDetachCount",
+        "FaultStreamLastClientDetachOrdinal",
+        "FaultStreamDisabledFallbackCount",
+        "FaultStreamLastDisabledFallbackOrdinal",
+        "FaultStreamCapacityRejectCount",
+        "FaultStreamUnexpectedFailureCount",
+        "FaultStreamLastUnexpectedFailureOrdinal")
+    foreach ($propertyName in $streamIntegralResultProperties) {
+        if ($resultTicket.$propertyName -isnot [int] -and
+            $resultTicket.$propertyName -isnot [long]) {
+            throw "The playback stream scalar result is invalid."
+        }
+    }
+    $faultStreamFinalExpected = [ordered]@{
+        FaultStreamLastAssignedRequestOrdinal = 3L
+        FaultStreamActiveRequestOrdinal = 0L
+        FaultStreamCurrentHeldRequestCount = 0L
+        FaultStreamPeakHeldRequestCount = 1L
+        FaultStreamPeakActiveRequestCount = 1L
+        FaultStreamOverlapViolationCount = 0L
+        FaultStreamExpectedAbortCount = 2L
+        FaultStreamLastExpectedAbortOrdinal = 2L
+        FaultStreamExpectedRejectCount = 0L
+        FaultStreamLastExpectedRejectOrdinal = 0L
+        FaultStreamClientDetachCount = 1L
+        FaultStreamLastClientDetachOrdinal = 3L
+        FaultStreamDisabledFallbackCount = 0L
+        FaultStreamLastDisabledFallbackOrdinal = 0L
+        FaultStreamCapacityRejectCount = 0L
+        FaultStreamUnexpectedFailureCount = 0L
+        FaultStreamLastUnexpectedFailureOrdinal = 0L
+    }
+    foreach ($propertyName in $faultStreamFinalExpected.Keys) {
+        if ([long]$resultTicket.$propertyName -ne
+            [long]$faultStreamFinalExpected[$propertyName]) {
+            throw "The final playback fault-stream accounting is invalid."
+        }
+    }
     if ($resultTicket.ReadyPublished -isnot [bool] -or
         $resultTicket.SeedCompleted -isnot [bool] -or
         $resultTicket.StopObserved -isnot [bool] -or
@@ -4061,7 +4581,10 @@ try {
         $resultTicket.CertificateThumbprint -cne
             $playbackLoopbackCertificateThumbprint -or
         [int]$resultTicket.RequestCount -lt 27 -or
-        [int]$resultTicket.CompletedResponseCount -ne
+        [int]$resultTicket.CompletedResponseCount +
+            [int]$resultTicket.NormalStreamClientDetachCount +
+            [int]$resultTicket.FaultStreamExpectedAbortCount +
+            [int]$resultTicket.FaultStreamClientDetachCount -ne
             [int]$resultTicket.RequestCount -or
         [long]$resultTicket.CompletedBodyBytes -le 0 -or
         [int]$resultTicket.FailureCount -ne 0 -or
@@ -4079,6 +4602,30 @@ try {
         -not $resultTicket.TargetProtectedRecordsDeleted -or
         -not $resultTicket.TombstoneBindingCompleted -or
         -not $resultTicket.SiblingCatalogRetained -or
+        [long]$resultTicket.StreamNoLaterOpenObservationMilliseconds -lt 31000 -or
+        [long]$resultTicket.StreamNoLaterOpenRequestCountAtReady -ne
+            [long]$resultTicket.StreamNoLaterOpenRequestCountAfterObservation -or
+        [long]$resultTicket.StreamNoLaterOpenRequestCountAtReady -ne
+            [long]$streamCancelResultTicket.RequestCountAtReady -or
+        [long]$resultTicket.NormalStreamLastAssignedRequestOrdinal -le 0 -or
+        [long]$resultTicket.NormalStreamLastAssignedRequestOrdinal -gt 64 -or
+        [long]$resultTicket.NormalStreamActiveRequestOrdinal -ne 0 -or
+        [int]$resultTicket.NormalStreamCurrentHeldRequestCount -ne 0 -or
+        [int]$resultTicket.NormalStreamPeakActiveRequestCount -ne 1 -or
+        [int]$resultTicket.NormalStreamOverlapViolationCount -ne 0 -or
+        [int]$resultTicket.NormalStreamExpectedAbortCount -ne 0 -or
+        [long]$resultTicket.NormalStreamLastExpectedAbortOrdinal -ne 0 -or
+        [int]$resultTicket.NormalStreamExpectedRejectCount -ne 0 -or
+        [long]$resultTicket.NormalStreamLastExpectedRejectOrdinal -ne 0 -or
+        [int]$resultTicket.NormalStreamClientDetachCount -ne
+            [long]$resultTicket.NormalStreamLastAssignedRequestOrdinal -or
+        [long]$resultTicket.NormalStreamLastClientDetachOrdinal -ne
+            [long]$resultTicket.NormalStreamLastAssignedRequestOrdinal -or
+        [int]$resultTicket.NormalStreamDisabledFallbackCount -ne 0 -or
+        [long]$resultTicket.NormalStreamLastDisabledFallbackOrdinal -ne 0 -or
+        [int]$resultTicket.NormalStreamCapacityRejectCount -ne 0 -or
+        [int]$resultTicket.NormalStreamUnexpectedFailureCount -ne 0 -or
+        [long]$resultTicket.NormalStreamLastUnexpectedFailureOrdinal -ne 0 -or
         ([int]$resultTicket.ChannelARequestCount +
             [int]$resultTicket.ChannelBRequestCount) -ne
             [int]$resultTicket.RequestCount) {
@@ -4090,6 +4637,20 @@ try {
     $playbackUiCompletedBodyBytes = [long]$resultTicket.CompletedBodyBytes
     $playbackChannelARequestCount = [int]$resultTicket.ChannelARequestCount
     $playbackChannelBRequestCount = [int]$resultTicket.ChannelBRequestCount
+    $playbackReconnectRecoveryVerified = [bool]$resultTicket.StreamRecoveryVerified
+    $playbackReconnectCancelVerified = [bool]$resultTicket.StreamCancelVerified
+    $playbackReconnectNoLaterOpenVerified = [bool]$resultTicket.StreamNoLaterOpenVerified
+    $playbackReconnectNoLaterOpenObservationMilliseconds =
+        [long]$resultTicket.StreamNoLaterOpenObservationMilliseconds
+    $playbackReconnectNoLaterOpenRequestCountAtReady =
+        [int]$resultTicket.StreamNoLaterOpenRequestCountAtReady
+    $playbackReconnectNoLaterOpenRequestCountAfterObservation =
+        [int]$resultTicket.StreamNoLaterOpenRequestCountAfterObservation
+    $normalStreamLastAssignedRequestOrdinal =
+        [long]$resultTicket.NormalStreamLastAssignedRequestOrdinal
+    $normalStreamClientDetachCount = [int]$resultTicket.NormalStreamClientDetachCount
+    $faultStreamExpectedAbortCount = [int]$resultTicket.FaultStreamExpectedAbortCount
+    $faultStreamClientDetachCount = [int]$resultTicket.FaultStreamClientDetachCount
     $sourceDeletionPendingCatalogPreserved = $resultTicket.PendingTargetCatalogPreserved
     $sourceDeletionPendingConfigurationRecordPreserved =
         $resultTicket.PendingConfigurationRecordPreserved
@@ -4187,6 +4748,31 @@ try {
         PlaybackFinalThreadCount = $playbackFinalThreadCount
         PlaybackThreadCountDelta = $playbackThreadCountDelta
         PlaybackActiveCloseVerified = $playbackActiveCloseVerified
+        PlaybackReconnectRecoveryVerified = $playbackReconnectRecoveryVerified
+        PlaybackReconnectCancelVerified = $playbackReconnectCancelVerified
+        PlaybackReconnectCancelBudgetMilliseconds = $playbackReconnectCancelBudgetMilliseconds
+        PlaybackReconnectCancelElapsedMilliseconds = [Math]::Round(
+            $playbackReconnectCancelElapsedMilliseconds,
+            3)
+        PlaybackReconnectNoLaterOpenVerified = $playbackReconnectNoLaterOpenVerified
+        PlaybackReconnectNoLaterOpenObservationMilliseconds =
+            $playbackReconnectNoLaterOpenObservationMilliseconds
+        PlaybackReconnectNoLaterOpenRequestCountAtReady =
+            $playbackReconnectNoLaterOpenRequestCountAtReady
+        PlaybackReconnectNoLaterOpenRequestCountAfterObservation =
+            $playbackReconnectNoLaterOpenRequestCountAfterObservation
+        NormalStreamLastAssignedRequestOrdinal = $normalStreamLastAssignedRequestOrdinal
+        NormalStreamPeakHeldRequestCount = [int]$resultTicket.NormalStreamPeakHeldRequestCount
+        NormalStreamClientDetachCount = $normalStreamClientDetachCount
+        NormalStreamCapacityRejectCount = [int]$resultTicket.NormalStreamCapacityRejectCount
+        NormalStreamUnexpectedFailureCount = [int]$resultTicket.NormalStreamUnexpectedFailureCount
+        FaultStreamHolding = [bool]$resultTicket.FaultStreamHolding
+        FaultStreamLastAssignedRequestOrdinal =
+            [long]$resultTicket.FaultStreamLastAssignedRequestOrdinal
+        FaultStreamExpectedAbortCount = $faultStreamExpectedAbortCount
+        FaultStreamClientDetachCount = $faultStreamClientDetachCount
+        FaultStreamCapacityRejectCount = [int]$resultTicket.FaultStreamCapacityRejectCount
+        FaultStreamUnexpectedFailureCount = [int]$resultTicket.FaultStreamUnexpectedFailureCount
         SourceDeletionCancelNoMutationVerified = $sourceDeletionCancelNoMutationVerified
         SourceDeletionDialogCloseNoMutationVerified = $sourceDeletionDialogCloseNoMutationVerified
         SourceDeletionPendingFailureVerified = $sourceDeletionPendingFailureVerified

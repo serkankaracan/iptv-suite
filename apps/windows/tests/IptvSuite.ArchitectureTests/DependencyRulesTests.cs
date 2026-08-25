@@ -4921,6 +4921,335 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M13SignedPackagedRecoveryCancellationIsExactBoundedAndPayloadFree()
+    {
+        string harness = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.PlaybackUiAcceptanceHarness",
+            "Program.cs"));
+        string packageSmoke = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1"));
+
+        string[] exactStreamProtocolNames =
+        [
+            "arm-stream-fault.signal",
+            "stream-fault-ready.json",
+            "abort-stream.signal",
+            "stream-abort-result.json",
+            "restore-stream.signal",
+            "stream-restore-result.json",
+            "abort-stream-for-cancel.signal",
+            "stream-cancel-ready.json",
+            "verify-stream-cancel.signal",
+            "stream-cancel-result.json",
+        ];
+        foreach (string protocolName in exactStreamProtocolNames)
+        {
+            StringAssert.Contains(harness, protocolName);
+            StringAssert.Contains(packageSmoke, protocolName);
+        }
+
+        const string streamProtocolPattern =
+            "\"(?<name>(?:(?:arm|abort|restore|verify)-stream[^\"]*\\.signal|" +
+            "stream-[^\"]*\\.json))\"";
+        string[] harnessProtocolNames = Regex.Matches(
+                harness,
+                streamProtocolPattern,
+                RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["name"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        string[] packageProtocolNames = Regex.Matches(
+                packageSmoke,
+                streamProtocolPattern,
+                RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["name"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        CollectionAssert.AreEquivalent(exactStreamProtocolNames, harnessProtocolNames);
+        CollectionAssert.AreEquivalent(exactStreamProtocolNames, packageProtocolNames);
+
+        Match normalStream = Regex.Match(
+            harness,
+            @"normalStreamControl\s*=\s*server\.EnableControlledStream\(\s*" +
+            @"MediaRouteA\s*,\s*new ControlledFixtureStreamOptions\s*\{" +
+            @"(?<options>[\s\S]*?)\}\s*\);",
+            RegexOptions.CultureInvariant);
+        Match faultStream = Regex.Match(
+            harness,
+            @"faultStreamControl\s*=\s*server\.EnableControlledStream\(\s*" +
+            @"MediaRouteB\s*,\s*new ControlledFixtureStreamOptions\s*\{" +
+            @"(?<options>[\s\S]*?)\}\s*\);",
+            RegexOptions.CultureInvariant);
+        Assert.IsTrue(normalStream.Success, "Channel A must use the controlled infinite response.");
+        Assert.IsTrue(faultStream.Success, "Only channel B may own the bounded fault sequence.");
+        StringAssert.Matches(
+            normalStream.Groups["options"].Value,
+            new Regex(@"MaximumRequestOrdinals\s*=\s*64\b", RegexOptions.CultureInvariant));
+        StringAssert.Matches(
+            faultStream.Groups["options"].Value,
+            new Regex(@"MaximumRequestOrdinals\s*=\s*3\b", RegexOptions.CultureInvariant));
+        int readyTicketIndex = harness.IndexOf("new ReadyTicket(", StringComparison.Ordinal);
+        Assert.IsTrue(
+            normalStream.Index >= 0 &&
+            readyTicketIndex > normalStream.Index &&
+            faultStream.Index > readyTicketIndex,
+            "The normal stream must be infinite before ready; fault B is armed only by its exact phase.");
+        foreach (string streamControl in new[] { "normalStreamControl", "faultStreamControl" })
+        {
+            Assert.IsFalse(
+                Regex.IsMatch(
+                    harness,
+                    $@"\b{streamControl}\s*\.\s*Disable\s*\(",
+                    RegexOptions.CultureInvariant),
+                $"{streamControl} must remain fail-closed until final server disposal.");
+        }
+
+        int normalFinalOracleStart = harness.IndexOf(
+            "normalStreamSnapshot = await WaitForControlledStreamSnapshotAsync(",
+            StringComparison.Ordinal);
+        int faultFinalOracleStart = harness.IndexOf(
+            "faultStreamSnapshot = faultStreamControl.Snapshot;",
+            normalFinalOracleStart,
+            StringComparison.Ordinal);
+        Assert.IsTrue(normalFinalOracleStart >= 0 && faultFinalOracleStart > normalFinalOracleStart);
+        string normalFinalOracle = harness[normalFinalOracleStart..faultFinalOracleStart];
+        foreach (string hardNormalInvariant in new[]
+                 {
+                     "snapshot.ActiveRequestOrdinal == 0",
+                     "snapshot.CurrentHeldRequestCount == 0",
+                     "snapshot.ClientDetachCount == snapshot.LastAssignedRequestOrdinal",
+                     "snapshot.LastClientDetachOrdinal == snapshot.LastAssignedRequestOrdinal",
+                     "snapshot.OverlapViolationCount == 0",
+                     "snapshot.ExpectedAbortCount == 0",
+                     "snapshot.ExpectedRejectCount == 0",
+                     "snapshot.DisabledFallbackCount == 0",
+                     "snapshot.CapacityRejectCount == 0",
+                     "snapshot.UnexpectedFailureCount == 0",
+                 })
+        {
+            StringAssert.Contains(normalFinalOracle, hardNormalInvariant);
+        }
+        Assert.IsFalse(
+            normalFinalOracle.Contains("snapshot.PeakHeldRequestCount", StringComparison.Ordinal),
+            "Normal-stream peak-held is bounded evidence, not a hard acceptance predicate.");
+        StringAssert.Contains(harness, "NormalStreamPeakHeldRequestCount:");
+
+        int exactFaultFinalStart = harness.IndexOf(
+            "private static bool IsExactFaultStreamFinalSnapshot(",
+            StringComparison.Ordinal);
+        int exactFaultAccountingStart = harness.IndexOf(
+            "private static bool IsExactFaultStreamAccounting(",
+            exactFaultFinalStart,
+            StringComparison.Ordinal);
+        Assert.IsTrue(exactFaultFinalStart >= 0 && exactFaultAccountingStart > exactFaultFinalStart);
+        string exactFaultFinal = harness[exactFaultFinalStart..exactFaultAccountingStart];
+        StringAssert.Contains(
+            exactFaultFinal,
+            "snapshot.Mode == ControlledFixtureStreamMode.Holding");
+        Assert.IsFalse(
+            exactFaultFinal.Contains("ControlledFixtureStreamMode.Disabled", StringComparison.Ordinal));
+        StringAssert.Contains(harness, "FaultStreamHolding:");
+        StringAssert.Contains(harness, "bool FaultStreamHolding");
+        Assert.IsFalse(
+            Regex.IsMatch(harness, @"\bFaultStreamDisabled\b", RegexOptions.CultureInvariant));
+
+        string[] absoluteFaultSequence =
+        [
+            "snapshot.LastAssignedRequestOrdinal == 1",
+            "snapshot.ActiveRequestOrdinal == 1",
+            "faultStreamControl.TryAbortActive(1)",
+            "snapshot.LastAssignedRequestOrdinal == 2",
+            "faultStreamControl.Restore()",
+            "snapshot.ActiveRequestOrdinal == 2",
+            "faultStreamControl.TryAbortActive(2)",
+            "snapshot.LastAssignedRequestOrdinal == 3",
+            "snapshot.ExpectedAbortCount == 2",
+            "snapshot.LastExpectedAbortOrdinal == 2",
+            "snapshot.ClientDetachCount == 1",
+            "snapshot.LastClientDetachOrdinal == 3",
+        ];
+        int previousFaultSequenceIndex = -1;
+        foreach (string exactStep in absoluteFaultSequence)
+        {
+            int currentFaultSequenceIndex = harness.IndexOf(
+                exactStep,
+                previousFaultSequenceIndex + 1,
+                StringComparison.Ordinal);
+            Assert.IsTrue(
+                currentFaultSequenceIndex > previousFaultSequenceIndex,
+                $"The signed-package fault sequence lost exact step '{exactStep}'.");
+            previousFaultSequenceIndex = currentFaultSequenceIndex;
+        }
+        StringAssert.Contains(harness, "WaitForControlledStreamSnapshotAsync");
+        StringAssert.Contains(harness, "VerifyNoLaterStreamOpenAsync");
+        StringAssert.Matches(
+            harness,
+            new Regex(@"TimeSpan\.FromSeconds\(\s*31\s*\)", RegexOptions.CultureInvariant));
+
+        foreach (string exactMetric in new[]
+                 {
+                     "LastAssignedRequestOrdinal",
+                     "LastExpectedAbortOrdinal",
+                     "ExpectedAbortCount",
+                     "LastClientDetachOrdinal",
+                     "ClientDetachCount",
+                 })
+        {
+            Assert.IsFalse(
+                Regex.IsMatch(
+                    harness,
+                    $@"\b{exactMetric}\b\s*(?:<=|>=)",
+                    RegexOptions.CultureInvariant),
+                $"The exact {exactMetric} oracle must not be weakened to a bound.");
+        }
+
+        StringAssert.Contains(
+            packageSmoke,
+            "$playbackReconnectCancelBudgetMilliseconds = 1000.0");
+        StringAssert.Contains(
+            packageSmoke,
+            "$playbackReconnectCancelTimer = [System.Diagnostics.Stopwatch]::StartNew()");
+        StringAssert.Contains(
+            packageSmoke,
+            "-Timer $playbackReconnectCancelTimer");
+        StringAssert.Contains(
+            packageSmoke,
+            "return [double]$Timer.Elapsed.TotalMilliseconds");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                packageSmoke,
+                @"\$playbackReconnectCancelElapsedMilliseconds\s+-gt\s+" +
+                @"\$playbackReconnectCancelBudgetMilliseconds",
+                RegexOptions.CultureInvariant));
+        Assert.IsTrue(
+            Regex.IsMatch(
+                packageSmoke,
+                @"\[long\]\$streamCancelResultTicket\.ObservationMilliseconds\s+" +
+                @"-lt\s+31_?000\b",
+                RegexOptions.CultureInvariant));
+        Assert.IsTrue(
+            Regex.IsMatch(
+                packageSmoke,
+                @"\[(?:int|long)\]\$streamCancelResultTicket\.RequestCountAtReady\s+" +
+                @"-ne\s+\[(?:int|long)\]\$streamCancelResultTicket\.RequestCountAfterObservation",
+                RegexOptions.CultureInvariant));
+        StringAssert.Contains(packageSmoke, "$streamCancelResultTicket.IsHolding");
+        StringAssert.Contains(packageSmoke, "$resultTicket.FaultStreamHolding");
+        Assert.IsFalse(
+            Regex.IsMatch(packageSmoke, @"\bFaultStreamDisabled\b", RegexOptions.CultureInvariant));
+
+        const string exactAccountingPattern =
+            @"\[int\]\$resultTicket\.CompletedResponseCount\s*\+\s*" +
+            @"\[int\]\$resultTicket\.NormalStreamClientDetachCount\s*\+\s*" +
+            @"\[int\]\$resultTicket\.FaultStreamExpectedAbortCount\s*\+\s*" +
+            @"\[int\]\$resultTicket\.FaultStreamClientDetachCount\s*" +
+            @"-ne\s*\[int\]\$resultTicket\.RequestCount";
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                packageSmoke,
+                exactAccountingPattern,
+                RegexOptions.CultureInvariant),
+            "Every request must have one exact completed, normal-detach, fault-abort, or fault-detach owner.");
+        foreach (string exactResultMetric in new[]
+                 {
+                     "FaultStreamLastAssignedRequestOrdinal",
+                     "FaultStreamExpectedAbortCount",
+                     "FaultStreamLastExpectedAbortOrdinal",
+                     "FaultStreamClientDetachCount",
+                     "FaultStreamLastClientDetachOrdinal",
+                 })
+        {
+            Assert.IsFalse(
+                Regex.IsMatch(
+                    packageSmoke,
+                    $@"\$resultTicket\.{exactResultMetric}\s+-(?:le|ge)\b",
+                    RegexOptions.CultureInvariant | RegexOptions.IgnoreCase),
+                $"The final {exactResultMetric} ticket oracle must remain exact.");
+        }
+
+        string[] streamTicketTypes =
+        [
+            "StreamFaultReadyTicket",
+            "StreamAbortResultTicket",
+            "StreamRestoreResultTicket",
+            "StreamCancelReadyTicket",
+            "StreamCancelResultTicket",
+        ];
+        foreach (string ticketType in streamTicketTypes)
+        {
+            Match ticket = Regex.Match(
+                harness,
+                $@"private sealed record {ticketType}\((?<fields>[\s\S]*?)\);",
+                RegexOptions.CultureInvariant);
+            Assert.IsTrue(ticket.Success, $"The exact {ticketType} contract is missing.");
+            foreach (string forbiddenField in new[]
+                     {
+                         "Uri",
+                         "Url",
+                         "Route",
+                         "Path",
+                         "Port",
+                         "Host",
+                         "Locator",
+                         "Credential",
+                         "Header",
+                         "Exception",
+                     })
+            {
+                Assert.IsFalse(
+                    ticket.Groups["fields"].Value.Contains(
+                        forbiddenField,
+                        StringComparison.OrdinalIgnoreCase),
+                    $"The {ticketType} contract exposes forbidden payload field {forbiddenField}.");
+            }
+        }
+
+        Match finalCancelTicket = Regex.Match(
+            harness,
+            @"private sealed record StreamCancelResultTicket\((?<fields>[\s\S]*?)\);",
+            RegexOptions.CultureInvariant);
+        string[] exactFinalCancelFields =
+        [
+            "IsVerified",
+            "IsHolding",
+            "ObservationMilliseconds",
+            "RequestCountAtReady",
+            "RequestCountAfterObservation",
+            "LastAssignedRequestOrdinal",
+            "ActiveRequestOrdinal",
+            "CurrentHeldRequestCount",
+            "PeakHeldRequestCount",
+            "PeakActiveRequestCount",
+            "OverlapViolationCount",
+            "ExpectedAbortCount",
+            "LastExpectedAbortOrdinal",
+            "ExpectedRejectCount",
+            "LastExpectedRejectOrdinal",
+            "ClientDetachCount",
+            "LastClientDetachOrdinal",
+            "DisabledFallbackCount",
+            "LastDisabledFallbackOrdinal",
+            "CapacityRejectCount",
+            "UnexpectedFailureCount",
+            "LastUnexpectedFailureOrdinal",
+        ];
+        string[] actualFinalCancelFields = Regex.Matches(
+                finalCancelTicket.Groups["fields"].Value,
+                @"\b(?:bool|int|long|double)\s+(?<field>[A-Za-z][A-Za-z0-9]*)",
+                RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["field"].Value)
+            .ToArray();
+        CollectionAssert.AreEquivalent(exactFinalCancelFields, actualFinalCancelFields);
+    }
+
+    [TestMethod]
     public void M11PlaybackUiDelegatesToCoordinatorAndClosesNativeLifetimeFirst()
     {
         string windowsRoot = Path.Combine(
