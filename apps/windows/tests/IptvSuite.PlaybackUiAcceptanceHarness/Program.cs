@@ -698,7 +698,8 @@ internal static class Program
                     snapshot.CapacityRejectCount == 0 &&
                     snapshot.UnexpectedFailureCount == 0 &&
                     snapshot.LastUnexpectedFailureOrdinal == 0,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                stopSignalIsExpected: true).ConfigureAwait(false);
             faultStreamSnapshot = faultStreamControl.Snapshot;
             if (!IsExactFaultStreamFinalSnapshot(faultStreamSnapshot) ||
                 !streamRecoveryVerified ||
@@ -1883,7 +1884,8 @@ internal static class Program
         ControlledFixtureStreamControl control,
         IReadOnlyCollection<string> allowedNames,
         Func<ControlledFixtureStreamSnapshot, bool> predicate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool stopSignalIsExpected = false)
     {
         ArgumentNullException.ThrowIfNull(control);
         ArgumentNullException.ThrowIfNull(predicate);
@@ -1895,9 +1897,13 @@ internal static class Program
         {
             cancellationToken.ThrowIfCancellationRequested();
             AssertAllowedControlEntries(paths.ControlDirectory, allowedWithStop);
-            if (TryValidateSignal(paths.StopSignalPath))
+            bool stopSignalObserved = TryValidateSignal(paths.StopSignalPath);
+            if (stopSignalObserved != stopSignalIsExpected)
             {
-                throw new InvalidDataException("The acceptance protocol stopped during stream verification.");
+                throw new InvalidDataException(
+                    stopSignalIsExpected
+                        ? "The acceptance protocol stop signal was missing during final stream verification."
+                        : "The acceptance protocol stopped during stream verification.");
             }
 
             ControlledFixtureStreamSnapshot snapshot = control.Snapshot;

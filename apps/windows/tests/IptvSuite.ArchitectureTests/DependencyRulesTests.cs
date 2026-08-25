@@ -5106,6 +5106,18 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             harness.Contains("TryAbortActive(", StringComparison.Ordinal),
             "Signed recovery/cancel evidence must use clean EOF, not transport aborts.");
+        StringAssert.Contains(
+            harness,
+            "stopSignalIsExpected: true",
+            "Final stream accounting must accept the already-observed protocol stop signal.");
+        StringAssert.Contains(
+            harness,
+            "bool stopSignalObserved = TryValidateSignal(paths.StopSignalPath);",
+            "Every stream phase must strictly validate the protocol stop signal.");
+        StringAssert.Contains(
+            harness,
+            "if (stopSignalObserved != stopSignalIsExpected)",
+            "Pre-final phases must reject stop while final accounting requires it.");
         Assert.AreEqual(
             2,
             Regex.Count(
