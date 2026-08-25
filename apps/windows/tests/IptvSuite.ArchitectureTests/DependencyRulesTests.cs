@@ -4250,6 +4250,7 @@ public sealed class DependencyRulesTests
                      "cancel-result.json",
                      "verify-dialog-close.signal",
                      "dialog-close-result.json",
+                     "arm-delete-failure.signal",
                      "delete-failure-ready.json",
                      "verify-pending.signal",
                      "pending-result.json",
@@ -4384,9 +4385,13 @@ public sealed class DependencyRulesTests
             "New-ExactPlaybackControlSignal -Path $playbackDialogCloseVerificationSignalPath",
             cancelInvoke,
             StringComparison.Ordinal);
+        int deletionFaultArm = packageSmoke.IndexOf(
+            "New-ExactPlaybackControlSignal -Path $playbackDeletionFaultArmSignalPath",
+            dialogCloseSignal,
+            StringComparison.Ordinal);
         int deletionFaultReady = packageSmoke.IndexOf(
             "Wait-PlaybackDeletionFaultReadyTicket",
-            dialogCloseSignal,
+            deletionFaultArm,
             StringComparison.Ordinal);
         int confirmedDelete = packageSmoke.IndexOf(
             "$confirmDeleteButtonElement = Wait-PackagedSourceDeletionDialogButton",
@@ -4420,7 +4425,8 @@ public sealed class DependencyRulesTests
             resourceGuard >= 0 &&
             cancelInvoke > resourceGuard &&
             dialogCloseSignal > cancelInvoke &&
-            deletionFaultReady > dialogCloseSignal &&
+            deletionFaultArm > dialogCloseSignal &&
+            deletionFaultReady > deletionFaultArm &&
             confirmedDelete > deletionFaultReady &&
             pendingFailure > confirmedDelete &&
             pendingRestartBlocked > pendingFailure &&

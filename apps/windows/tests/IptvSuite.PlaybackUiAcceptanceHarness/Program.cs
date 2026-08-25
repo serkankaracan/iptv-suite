@@ -32,6 +32,7 @@ internal static class Program
     private const string CancelVerificationTicketName = "cancel-result.json";
     private const string DialogCloseVerificationSignalName = "verify-dialog-close.signal";
     private const string DialogCloseVerificationTicketName = "dialog-close-result.json";
+    private const string DeletionFaultArmSignalName = "arm-delete-failure.signal";
     private const string DeletionFaultReadyTicketName = "delete-failure-ready.json";
     private const string PendingVerificationSignalName = "verify-pending.signal";
     private const string PendingVerificationTicketName = "pending-result.json";
@@ -219,6 +220,26 @@ internal static class Program
                 throw new InvalidDataException("The dialog-close preservation oracle failed.");
             }
 
+            bool deletionFaultArmSignalObserved = await WaitForPhaseSignalAsync(
+                paths,
+                paths.DeletionFaultArmSignalPath,
+                [
+                    ReadyTicketName,
+                    PublicCertificateName,
+                    CancelVerificationSignalName,
+                    CancelVerificationTicketName,
+                    DialogCloseVerificationSignalName,
+                    DialogCloseVerificationTicketName,
+                    DeletionFaultArmSignalName,
+                    StopSignalName,
+                ],
+                cancellationToken).ConfigureAwait(false);
+            if (!deletionFaultArmSignalObserved)
+            {
+                stopObserved = true;
+                throw new InvalidDataException("The acceptance protocol stopped before arming deletion failure.");
+            }
+
             deletionFaultLease = OpenDeletionFaultLease(paths, seedContext);
             WriteJsonAtomically(
                 new DeletionFaultReadyTicket(IsReady: true),
@@ -234,6 +255,7 @@ internal static class Program
                     CancelVerificationTicketName,
                     DialogCloseVerificationSignalName,
                     DialogCloseVerificationTicketName,
+                    DeletionFaultArmSignalName,
                     DeletionFaultReadyTicketName,
                     PendingVerificationSignalName,
                     StopSignalName,
@@ -280,6 +302,7 @@ internal static class Program
                     CancelVerificationTicketName,
                     DialogCloseVerificationSignalName,
                     DialogCloseVerificationTicketName,
+                    DeletionFaultArmSignalName,
                     DeletionFaultReadyTicketName,
                     PendingVerificationSignalName,
                     PendingVerificationTicketName,
@@ -1298,6 +1321,7 @@ internal static class Program
             Path.Combine(controlPath, CancelVerificationTicketName),
             Path.Combine(controlPath, DialogCloseVerificationSignalName),
             Path.Combine(controlPath, DialogCloseVerificationTicketName),
+            Path.Combine(controlPath, DeletionFaultArmSignalName),
             Path.Combine(controlPath, DeletionFaultReadyTicketName),
             Path.Combine(controlPath, PendingVerificationSignalName),
             Path.Combine(controlPath, PendingVerificationTicketName),
@@ -1503,6 +1527,7 @@ internal static class Program
         string CancelVerificationTicketPath,
         string DialogCloseVerificationSignalPath,
         string DialogCloseVerificationTicketPath,
+        string DeletionFaultArmSignalPath,
         string DeletionFaultReadyTicketPath,
         string PendingVerificationSignalPath,
         string PendingVerificationTicketPath,

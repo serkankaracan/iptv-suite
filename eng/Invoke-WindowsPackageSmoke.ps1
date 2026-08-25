@@ -615,6 +615,7 @@ $playbackCancelVerificationSignalPath = Join-Path $playbackControlDirectory "ver
 $playbackCancelVerificationTicketPath = Join-Path $playbackControlDirectory "cancel-result.json"
 $playbackDialogCloseVerificationSignalPath = Join-Path $playbackControlDirectory "verify-dialog-close.signal"
 $playbackDialogCloseVerificationTicketPath = Join-Path $playbackControlDirectory "dialog-close-result.json"
+$playbackDeletionFaultArmSignalPath = Join-Path $playbackControlDirectory "arm-delete-failure.signal"
 $playbackDeletionFaultReadyTicketPath = Join-Path $playbackControlDirectory "delete-failure-ready.json"
 $playbackPendingVerificationSignalPath = Join-Path $playbackControlDirectory "verify-pending.signal"
 $playbackPendingVerificationTicketPath = Join-Path $playbackControlDirectory "pending-result.json"
@@ -1985,6 +1986,7 @@ function New-ExactPlaybackControlSignal {
     $allowedPaths = @(
         [System.IO.Path]::GetFullPath($playbackCancelVerificationSignalPath),
         [System.IO.Path]::GetFullPath($playbackDialogCloseVerificationSignalPath),
+        [System.IO.Path]::GetFullPath($playbackDeletionFaultArmSignalPath),
         [System.IO.Path]::GetFullPath($playbackPendingVerificationSignalPath),
         [System.IO.Path]::GetFullPath($playbackStopSignalPath)
     )
@@ -3851,6 +3853,7 @@ try {
             "dialog-close-result.json")
     $sourceDeletionDialogCloseNoMutationVerified = $true
 
+    New-ExactPlaybackControlSignal -Path $playbackDeletionFaultArmSignalPath
     Wait-PlaybackDeletionFaultReadyTicket `
         -HarnessProcess $playbackHarnessProcess `
         -AllowedControlNames @(
@@ -3860,6 +3863,7 @@ try {
             "cancel-result.json",
             "verify-dialog-close.signal",
             "dialog-close-result.json",
+            "arm-delete-failure.signal",
             "delete-failure-ready.json")
 
     $deleteInstance = Start-PackagedPlaybackApplicationInstance
@@ -3918,6 +3922,7 @@ try {
             "cancel-result.json",
             "verify-dialog-close.signal",
             "dialog-close-result.json",
+            "arm-delete-failure.signal",
             "delete-failure-ready.json",
             "verify-pending.signal",
             "pending-result.json")
@@ -3993,6 +3998,7 @@ try {
             "cancel-result.json",
             "verify-dialog-close.signal",
             "dialog-close-result.json",
+            "arm-delete-failure.signal",
             "delete-failure-ready.json",
             "verify-pending.signal",
             "pending-result.json",
