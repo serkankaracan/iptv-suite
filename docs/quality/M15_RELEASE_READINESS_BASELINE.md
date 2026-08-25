@@ -1,6 +1,6 @@
 # M15 MSIX ve Store release-readiness teknik baseline'i
 
-**Durum:** `IN PROGRESS / BLOCKED — technicalBaselinePassed=true; releaseReady=false, 2026-08-25`
+**Durum:** `IN PROGRESS / BLOCKED — technicalBaselinePassed=true; releaseReady=false, 2026-08-26`
 
 ## Checkpoint kararı
 
@@ -67,7 +67,7 @@ Windows PowerShell 5.1 adversarial self-test ve architecture suite `51/51` geçt
 
 ## Windows MVP release mimarisi kararı
 
-M15 release seti yalnız `x64` olarak sınırlandı. Release-readiness evidence schema v2, `releaseArchitectures=[x64]`, `arm64Disposition=DeferredUntilNativeArm64ChainAccepted`, `architectureImportSurfaceAuditVersion=1` ve `sourceControlledArchitectureImportSurfacePassed=true` değerlerini taşır; production project `Platforms=x64`, `PlatformTarget=x64`, `RuntimeIdentifier=win-x64` ve `AppxBundle=Never` invariant'larını korur. `RuntimeIdentifiers`, `AppxBundlePlatforms`, `win-arm64`, çoklu platform ve bundle açılımı fail-closed reddedilir.
+M15 release seti yalnız `x64` olarak sınırlandı. Schema v2 ile kaydedilen x64 disposition güncel release-readiness evidence schema v3'te de `releaseArchitectures=[x64]`, `arm64Disposition=DeferredUntilNativeArm64ChainAccepted`, `architectureImportSurfaceAuditVersion=1` ve `sourceControlledArchitectureImportSurfacePassed=true` değerlerini taşır; production project `Platforms=x64`, `PlatformTarget=x64`, `RuntimeIdentifier=win-x64` ve `AppxBundle=Never` invariant'larını korur. `RuntimeIdentifiers`, `AppxBundlePlatforms`, `win-arm64`, çoklu platform ve bundle açılımı fail-closed reddedilir.
 
 Kaynak-kontrollü MSBuild yüzeyi de karara bağlıdır: dört production project exact `Microsoft.NET.Sdk` kullanır; explicit `Import`/nested `Sdk`/`Target`/`UsingTask`, SDK import-hook veya artifacts-output redirect property, otomatik `*.csproj.user` ya da force-tracked project-extension wildcard import tanımlayamaz. İzin verilen iki generated project-extension adı yalnız NuGet'in `.nuget.g.props`/`.nuget.g.targets` çiftidir; başka mevcut wildcard eşleşmesi reddedilir ve tracked `obj` path denetimi case-insensitive'dir. Exact x64 property düğümleri ve taşıyan `PropertyGroup` koşulsuz/attributesız olmalıdır. Windows project ancestor zincirinde yalnız repository-root `Directory.Build.props` uygulanabilir, `Directory.Build.targets` ile otomatik CLI response dosyaları bulunamaz. Solution zincirinde yalnız root `Directory.Solution.props` uygulanabilir ve `Directory.Solution.targets` bulunamaz. Root `Directory.Build.props`, `Directory.Packages.props` ve `Directory.Solution.props` dosyaları architecture/bundle veya import-control property tanımlayamaz. Bu denetim source-controlled import yüzeyi içindir; dış command-line property, makine-geneli SDK/import veya değiştirilmiş build invocation kanıtı değildir. Release build documented locked komutla yürütülmelidir.
 
@@ -75,15 +75,30 @@ Windows PowerShell 5.1 release-readiness self-test'i, architecture `51/51` ve no
 
 Bu karar ARM64 desteği veya emulation acceptance'ı değildir. ARM64 ancak native build/package, gerçek ARM64 cihaz playback/lifecycle/resource ve Store zinciri ayrı acceptance ile geçerse yeniden açılır. Böyle bir kanıt olmadığı için Windows MVP'de doğrulanmamış ARM64 support sözü verilmez; `Arm64ReleaseDecisionPending` kapanır ve diğer blocker'lar etkilenmez.
 
-## Package-bound SBOM ilk checkpoint'i
+## Package-bound SBOM hosted kabul checkpoint'i
 
 Package-bound SBOM akışı, exact pin'li `Microsoft.Sbom.DotNetTool 4.1.5` ile signed application MSIX ve exact Windows App Runtime `x64` dependency MSIX'ini tek release setine bağlayan companion SPDX `2.2` üretir. Nupkg, shim ve çalıştırılan extracted tool payload'ı birebir bağlıdır; iki MSIX imzası fail-closed doğrulanır. Resmî aracın dokunulmamış çıktısı önce doğrulanır; ardından iki MSIX'in identity/hash bağları, exact production component seti ve gerekli release-set ilişkileri repository-owned sıkı doğrulamayla zenginleştirilip yeniden denetlenir.
 
-Gerçek araçla iki sentetik MSIX kullanan local uçtan uca prova `PASS`, architecture suite `52/52 PASS` ve full quality gate `569/569 × 2 PASS` sonucundadır. Bu sonuç exact hosted signed package çıktısının üretildiğini veya artifact olarak kabul edildiğini kanıtlamaz; package-smoke lane'indeki hosted acceptance hâlâ beklemektedir. Bu nedenle `SbomPending` dahil aşağıdaki 15 blocker aynen açıktır. Companion SPDX; root `LICENSE`/`NOTICE`, redistribution kararı, CVE sonucu veya codec/IP hukuk incelemesini kapatmaz.
+Gerçek araçla iki sentetik MSIX kullanan local uçtan uca prova `PASS`, architecture suite `52/52 PASS` ve full quality gate `569/569 × 2 PASS` sonucundadır. Ardından clean commit `12b1e95e8c3df04c42482daa52bdabd81abe1701` için [run `#226` (`32897767622`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32897767622) ve package job `97966018579`, signed application MSIX + exact x64 Windows App Runtime release setinin üretim, resmî doğrulama, sıkı doğrulama ve sanitized artifact upload zincirini `PASS` tamamladı. İndirilen artifact ile iç üyelerin hash'leri doğrulandı; source-controlled schema-v1 acceptance ledger'ı bu exact hosted sonucu release-readiness evidence schema v3'e bağladı. Producer summary'sindeki tarihsel `HostedAcceptancePending` / `SbomPending=true` candidate durumu değiştirilmedi; ayrı ledger yalnız bu run için `SbomPending` blocker'ını kapatır.
+
+| Kabul alanı | Exact değer |
+|---|---|
+| Run / kaynak | `#226` / `32897767622`; commit `12b1e95e8c3df04c42482daa52bdabd81abe1701` |
+| Package job | `97966018579` — `Packaged install and launch smoke`, `success` |
+| Artifact | ID `9582332831`; `windows-msix-smoke-evidence`; SHA-256 `342fad95524b3624de842889428d4e2921ef3a481d3e8dd0b13ace27d932f106` |
+| İç SBOM | SPDX `2.2`; SHA-256 `97d7e4aebedffbaae95a2d4e36f01bf1efff79dfe34cf001e7c787d637bffd39` |
+| Summary / package evidence | SHA-256 `d1bc7587ad3b5cbca42c78baad4c49a44f54199826f404b6b0849cf18435c5cd` / `63644f96edb507be86980fb983fa69feef116652ea9f03d29da5f600414c3b04` |
+| Araç / validation | `Microsoft.Sbom.DotNetTool 4.1.5`; official `true`; strict `true` |
+| Exact sayaçlar | file/component/package/relationship = `2/24/27/43` |
+| Acceptance ledger | SHA-256 `853f1c702b9acc5e500d232688a22322aaeb6c3ff3f497a2fff269abc83fb904`; kapatılan tek blocker `SbomPending` |
+| Package-producing snapshot | Beş kök build girdisi + solution + `apps/windows/src` altındaki bütün production girdileri, exact `111` dosya; SHA-256 `465b2a74eba4f6c45871d57e4e042772a5a30024ff7e45ac7b9563571f101d9d` |
+| Contract source seti | Workflow, tool config ve package/SBOM/install-root scriptlerinden exact `7` dosya; SHA-256 `2b9cfe5d859ed070c47e2e74591b5567a5a8bc3a2006d2a5d775428f8a54c9ce` |
+
+Snapshot metin girdilerini strict UTF-8/LF, PNG/ICO asset'lerini ham byte olarak canonicalize eder; bounded exact file reads, lazy bounded traversal ve yayımdan önce ikinci snapshot doğrulaması kullanır. Dosya ekleme, silme, içerik değişimi, daha yakın central-package importu, reparse veya sınır aşımı eski hosted kabulü fail-closed geçersiz kılar. Ledger duplicate JSON property'lerini reddeder ve workflow tamamlanma zamanını yalnız `runCompletedAtUtc` olarak adlandırır. Bu teknik package-bound companion SPDX kabulü root `LICENSE`/`NOTICE`, redistribution kararı, asset provenance, CVE sonucu, codec/IP hukuk incelemesi, production signing veya Store kabulü değildir. Bu kapılar aşağıdaki 14 blocker içinde açık kalır.
 
 ## Exact açık blocker seti
 
-Aşağıdaki 15 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur:
+Aşağıdaki 14 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur:
 
 1. `AssetProvenancePending`
 2. `CodecIpLegalReviewPending`
@@ -96,15 +111,14 @@ Aşağıdaki 15 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur
 9. `ProductionLifecycleMatrixPending`
 10. `ReleaseSigningPending`
 11. `ReviewerServiceAndRehearsalPending`
-12. `SbomPending`
-13. `StoreListingPending`
-14. `SupportUrlPending`
-15. `WackPending`
+12. `StoreListingPending`
+13. `SupportUrlPending`
+14. `WackPending`
 
 ## Non-claims ve sonraki kabul sınırı
 
 - Known-pattern source taraması ile exact installed-package runtime audit'i geçti. Runtime sonucu yalnız exact hosted package gözlem penceresindeki deterministic pre/post eşitliğini ve watcher'ın mutation görmediğini kanıtlar; clean VM'de install/update/reset/uninstall matrisi ve bütün olası write yolları ayrıca geçmelidir.
-- Exact 23-package inventory teknik dependency drift guard'ıdır ve tek başına SBOM değildir. Local package-bound companion SPDX checkpoint'i de hosted signed-package acceptance, root `LICENSE`/`NOTICE`, asset provenance, CVE sonucu, redistribution kabulü veya codec/IP hukuk görüşü değildir.
+- Exact 23-package inventory teknik dependency drift guard'ıdır ve tek başına SBOM değildir. Hosted kabul edilmiş package-bound companion SPDX de root `LICENSE`/`NOTICE`, asset provenance, CVE sonucu, redistribution kabulü veya codec/IP hukuk görüşü değildir.
 - Development identity ile mevcut disposable lifecycle kanıtları production identity/PFN, signing lineage, previous-package migration, repair veya private-flight sonucu değildir.
 - WACK, Partner Center private submission, privacy/support URL, Store listing/rating/reviewer notes ve geliştirici-owned reviewer service henüz kabul edilmemiştir.
 - ARM64 Windows MVP release setinde yoktur; deferred disposition gelecekte native ARM64 acceptance yapılmadan destek iddiasına dönüştürülemez.

@@ -195,9 +195,10 @@ function Read-AndAssertEvidence {
             "lockfiles",
             "packageInventory",
             "packageInventoryPolicy",
+            "packageSbomAcceptance",
             "blockers") `
         -Message "evidence root schema changed."
-    Assert-TestCondition ($evidence.schemaVersion -eq 2) "schemaVersion must be 2."
+    Assert-TestCondition ($evidence.schemaVersion -eq 3) "schemaVersion must be 3."
     Assert-TestCondition ($evidence.result -ceq "blocked") "result must remain blocked."
     Assert-TestCondition `
         ($evidence.technicalBaselinePassed -is [bool] -and $evidence.technicalBaselinePassed) `
@@ -260,6 +261,156 @@ function Read-AndAssertEvidence {
          -not $evidence.packageInventoryPolicy.legalSbomComplete) `
         "the exact package-inventory policy changed."
 
+    $packageSbomAcceptance = $evidence.packageSbomAcceptance
+    Assert-ExactStringSet `
+        -Actual @($packageSbomAcceptance.PSObject.Properties.Name) `
+        -Expected @(
+            "decision",
+            "scope",
+            "runCompletedAtUtc",
+            "repository",
+            "workflowPath",
+            "workflowName",
+            "runId",
+            "runNumber",
+            "runAttempt",
+            "runEvent",
+            "runBranch",
+            "runHeadSha",
+            "runConclusion",
+            "packageJobId",
+            "packageJobName",
+            "packageJobConclusion",
+            "artifactId",
+            "artifactName",
+            "artifactSizeBytes",
+            "artifactDigestSha256",
+            "lastSuccessMemberName",
+            "lastSuccessMemberLength",
+            "lastSuccessMemberSha256",
+            "sbomSummaryMemberName",
+            "sbomSummaryMemberLength",
+            "sbomSummaryMemberSha256",
+            "sbomMemberName",
+            "sbomMemberLength",
+            "sbomMemberSha256",
+            "configuration",
+            "dotNetSdk",
+            "sbomFormat",
+            "toolPackageId",
+            "toolVersion",
+            "toolNupkgSha256",
+            "toolShimSha256",
+            "officialValidationPassed",
+            "strictValidationPassed",
+            "productionInputCount",
+            "productionInputSetCanonicalSha256",
+            "contractSourceCount",
+            "contractSourceSetCanonicalSha256",
+            "packageProducingSnapshotFileCount",
+            "packageProducingSnapshotSha256",
+            "applicationPackageFile",
+            "applicationPackageLength",
+            "applicationPackageSha256",
+            "applicationIdentityName",
+            "applicationVersion",
+            "applicationSignatureStatus",
+            "runtimePackageFile",
+            "runtimePackageLength",
+            "runtimePackageSha256",
+            "runtimeIdentityName",
+            "runtimeVersion",
+            "runtimeSignatureStatus",
+            "architecture",
+            "fileCount",
+            "componentCount",
+            "packageCount",
+            "relationshipCount",
+            "producerBlockerDisposition",
+            "producerSbomPending",
+            "closedBlocker",
+            "legalSbomComplete") `
+        -Message "the package SBOM acceptance evidence schema changed."
+    Assert-TestCondition `
+        ($packageSbomAcceptance.decision -ceq "AcceptTechnicalPackageBoundSbom" -and
+         $packageSbomAcceptance.scope -ceq "TechnicalPackageBoundSbomOnly" -and
+         $packageSbomAcceptance.runCompletedAtUtc -ceq "2026-08-25T21:05:53Z" -and
+         $packageSbomAcceptance.repository -ceq "serkankaracan/iptv-suite" -and
+         $packageSbomAcceptance.workflowPath -ceq ".github/workflows/windows-quality.yml" -and
+         $packageSbomAcceptance.workflowName -ceq "Windows quality" -and
+         $packageSbomAcceptance.runId -eq 32897767622 -and
+         $packageSbomAcceptance.runNumber -eq 226 -and
+         $packageSbomAcceptance.runAttempt -eq 1 -and
+         $packageSbomAcceptance.runEvent -ceq "push" -and
+         $packageSbomAcceptance.runBranch -ceq "main" -and
+         $packageSbomAcceptance.runHeadSha -ceq "12b1e95e8c3df04c42482daa52bdabd81abe1701" -and
+         $packageSbomAcceptance.runConclusion -ceq "success" -and
+         $packageSbomAcceptance.packageJobId -eq 97966018579 -and
+         $packageSbomAcceptance.packageJobName -ceq "Packaged install and launch smoke" -and
+         $packageSbomAcceptance.packageJobConclusion -ceq "success" -and
+         $packageSbomAcceptance.artifactId -eq 9582332831 -and
+         $packageSbomAcceptance.artifactName -ceq "windows-msix-smoke-evidence" -and
+         $packageSbomAcceptance.artifactSizeBytes -eq 7649 -and
+         $packageSbomAcceptance.artifactDigestSha256 -ceq "342fad95524b3624de842889428d4e2921ef3a481d3e8dd0b13ace27d932f106") `
+        "the hosted package SBOM workflow evidence changed."
+    Assert-TestCondition `
+        ($packageSbomAcceptance.lastSuccessMemberName -ceq "last-success.json" -and
+         $packageSbomAcceptance.lastSuccessMemberLength -eq 17714 -and
+         $packageSbomAcceptance.lastSuccessMemberSha256 -ceq "63644f96edb507be86980fb983fa69feef116652ea9f03d29da5f600414c3b04" -and
+         $packageSbomAcceptance.sbomSummaryMemberName -ceq "package-sbom-summary.json" -and
+         $packageSbomAcceptance.sbomSummaryMemberLength -eq 1985 -and
+         $packageSbomAcceptance.sbomSummaryMemberSha256 -ceq "d1bc7587ad3b5cbca42c78baad4c49a44f54199826f404b6b0849cf18435c5cd" -and
+         $packageSbomAcceptance.sbomMemberName -ceq "package-sbom.spdx.json" -and
+         $packageSbomAcceptance.sbomMemberLength -eq 50566 -and
+         $packageSbomAcceptance.sbomMemberSha256 -ceq "97d7e4aebedffbaae95a2d4e36f01bf1efff79dfe34cf001e7c787d637bffd39") `
+        "the hosted package SBOM artifact member evidence changed."
+    Assert-TestCondition `
+        ($packageSbomAcceptance.configuration -ceq "Release" -and
+         $packageSbomAcceptance.dotNetSdk -ceq "10.0.302" -and
+         $packageSbomAcceptance.sbomFormat -ceq "SPDX-2.2" -and
+         $packageSbomAcceptance.toolPackageId -ceq "microsoft.sbom.dotnettool" -and
+         $packageSbomAcceptance.toolVersion -ceq "4.1.5" -and
+         $packageSbomAcceptance.toolNupkgSha256 -ceq "00e1fb81c01f4e9ad7a9d00f365bb3f3776cde6fecdd15cc3adbbce1f83d14bb" -and
+         $packageSbomAcceptance.toolShimSha256 -ceq "c8e151612c03db7a5b8d680cd5ccdfd1d9676f36d43c33cec2a4397fb19ada55" -and
+         $packageSbomAcceptance.officialValidationPassed -is [bool] -and
+         $packageSbomAcceptance.officialValidationPassed -and
+         $packageSbomAcceptance.strictValidationPassed -is [bool] -and
+         $packageSbomAcceptance.strictValidationPassed -and
+         $packageSbomAcceptance.productionInputCount -eq 10 -and
+         $packageSbomAcceptance.productionInputSetCanonicalSha256 -ceq "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df" -and
+         $packageSbomAcceptance.contractSourceCount -eq 7 -and
+         $packageSbomAcceptance.contractSourceSetCanonicalSha256 -ceq "2b9cfe5d859ed070c47e2e74591b5567a5a8bc3a2006d2a5d775428f8a54c9ce" -and
+         $packageSbomAcceptance.packageProducingSnapshotFileCount -eq 111 -and
+         $packageSbomAcceptance.packageProducingSnapshotSha256 -ceq "465b2a74eba4f6c45871d57e4e042772a5a30024ff7e45ac7b9563571f101d9d") `
+        "the package SBOM tool or source binding evidence changed."
+    Assert-TestCondition `
+        ($packageSbomAcceptance.applicationPackageFile -ceq "IptvSuite.Windows_0.1.0.0_x64.msix" -and
+         $packageSbomAcceptance.applicationPackageLength -eq 29828560 -and
+         $packageSbomAcceptance.applicationPackageSha256 -ceq "c826581b4fc1a74eed8147ed0b44bb0570f06a0464284ab292ebdf597723e679" -and
+         $packageSbomAcceptance.applicationIdentityName -ceq "IptvSuite.LocalDev.6f0d9a64" -and
+         $packageSbomAcceptance.applicationVersion -ceq "0.1.0.0" -and
+         $packageSbomAcceptance.applicationSignatureStatus -ceq "Valid" -and
+         $packageSbomAcceptance.runtimePackageFile -ceq "Microsoft.WindowsAppRuntime.2.msix" -and
+         $packageSbomAcceptance.runtimePackageLength -eq 46787781 -and
+         $packageSbomAcceptance.runtimePackageSha256 -ceq "a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf" -and
+         $packageSbomAcceptance.runtimeIdentityName -ceq "Microsoft.WindowsAppRuntime.2" -and
+         $packageSbomAcceptance.runtimeVersion -ceq "2.4.0.0" -and
+         $packageSbomAcceptance.runtimeSignatureStatus -ceq "Valid" -and
+         $packageSbomAcceptance.architecture -ceq "x64" -and
+         $packageSbomAcceptance.fileCount -eq 2 -and
+         $packageSbomAcceptance.componentCount -eq 24 -and
+         $packageSbomAcceptance.packageCount -eq 27 -and
+         $packageSbomAcceptance.relationshipCount -eq 43) `
+        "the accepted signed release-set evidence changed."
+    Assert-TestCondition `
+        ($packageSbomAcceptance.producerBlockerDisposition -ceq "HostedAcceptancePending" -and
+         $packageSbomAcceptance.producerSbomPending -is [bool] -and
+         $packageSbomAcceptance.producerSbomPending -and
+         $packageSbomAcceptance.closedBlocker -ceq "SbomPending" -and
+         $packageSbomAcceptance.legalSbomComplete -is [bool] -and
+         -not $packageSbomAcceptance.legalSbomComplete) `
+        "the bounded package SBOM acceptance disposition changed."
+
     $expectedBlockers = @(
         "AssetProvenancePending",
         "CodecIpLegalReviewPending",
@@ -272,7 +423,6 @@ function Read-AndAssertEvidence {
         "ProductionLifecycleMatrixPending",
         "ReleaseSigningPending",
         "ReviewerServiceAndRehearsalPending",
-        "SbomPending",
         "StoreListingPending",
         "SupportUrlPending",
         "WackPending")
@@ -313,37 +463,53 @@ function Initialize-IsolatedFixture {
     [System.IO.Directory]::CreateDirectory((Join-Path $script:fixtureRoot "eng")) | Out-Null
 
     $requiredFiles = @(
+        ".config\dotnet-tools.json",
+        ".github\workflows\windows-quality.yml",
         "global.json",
+        "NuGet.config",
         "Directory.Build.props",
         "Directory.Packages.props",
         "Directory.Solution.props",
-        "apps\windows\src\IptvSuite.Domain\IptvSuite.Domain.csproj",
-        "apps\windows\src\IptvSuite.Domain\packages.lock.json",
-        "apps\windows\src\IptvSuite.Application\IptvSuite.Application.csproj",
-        "apps\windows\src\IptvSuite.Application\packages.lock.json",
-        "apps\windows\src\IptvSuite.Infrastructure\IptvSuite.Infrastructure.csproj",
-        "apps\windows\src\IptvSuite.Infrastructure\packages.lock.json",
-        "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj",
-        "apps\windows\src\IptvSuite.Windows\packages.lock.json",
-        "apps\windows\src\IptvSuite.Windows\Package.appxmanifest",
-        "apps\windows\src\IptvSuite.Windows\app.manifest",
-        "apps\windows\src\IptvSuite.Windows\WindowsSecretStoreFactory.cs",
-        "apps\windows\src\IptvSuite.Windows\WindowsCatalogBrowserFactory.cs",
-        "apps\windows\src\IptvSuite.Windows\MainWindow.xaml.cs",
-        "apps\windows\src\IptvSuite.Windows\Assets\AppIcon.ico",
-        "apps\windows\src\IptvSuite.Windows\Assets\SplashScreen.scale-200.png",
-        "apps\windows\src\IptvSuite.Windows\Assets\Square150x150Logo.scale-200.png",
-        "apps\windows\src\IptvSuite.Windows\Assets\Square44x44Logo.scale-200.png",
-        "apps\windows\src\IptvSuite.Windows\Assets\Square44x44Logo.targetsize-24_altform-unplated.png",
-        "apps\windows\src\IptvSuite.Windows\Assets\Square44x44Logo.targetsize-48_altform-lightunplated.png",
-        "apps\windows\src\IptvSuite.Windows\Assets\StoreLogo.png",
-        "apps\windows\src\IptvSuite.Windows\Assets\Wide310x150Logo.scale-200.png")
+        "apps\windows\IptvSuite.Windows.sln",
+        "eng\Invoke-WindowsPackageSbom.ps1",
+        "eng\Invoke-WindowsPackageSmoke.ps1",
+        "eng\WindowsPackageInstallRootAudit.ps1",
+        "eng\WindowsPackageSbom.ps1",
+        "eng\windows-package-sbom-acceptance.json",
+        "eng\windows-package-sbom-tool.json")
     foreach ($relativePath in $requiredFiles) {
+        Copy-TestFile -RelativePath $relativePath
+    }
+
+    $productionSourceRoot = Join-Path $script:repositoryRoot "apps\windows\src"
+    $productionSourceFiles = @(
+        Get-ChildItem -LiteralPath $productionSourceRoot -Recurse -Force -File |
+            Where-Object {
+                $_.FullName -notmatch '[\\/](?:bin|obj)[\\/]'
+            })
+    Assert-TestCondition ($productionSourceFiles.Count -eq 105) `
+        "the exact package-producing source fixture count changed."
+    foreach ($sourceFile in $productionSourceFiles) {
+        $relativePath = $sourceFile.FullName.Substring(
+            $script:repositoryRoot.Length + 1)
         Copy-TestFile -RelativePath $relativePath
     }
 }
 
 Assert-TestCondition (Test-Path -LiteralPath $script:validatorPath -PathType Leaf) "validator script is missing."
+$validatorText = [System.IO.File]::ReadAllText($script:validatorPath)
+Assert-TestCondition `
+    ($validatorText.Contains(
+        '$packageProducingSnapshot = Get-PackageProducingSnapshot -Root $Root') -and
+     $validatorText.Contains(
+        '$publicationPackageProducingSnapshot = Get-PackageProducingSnapshot') -and
+     $validatorText.Contains(
+        '$publicationPackageProducingSnapshot.CanonicalBytes -eq') -and
+     $validatorText.Contains(
+        '$validatedPackageProducingSnapshot.CanonicalBytes') -and
+     $validatorText.Contains(
+        '[System.IO.Directory]::EnumerateFileSystemEntries(')) `
+    "the bounded two-pass package-producing snapshot contract changed."
 
 try {
     [System.IO.Directory]::CreateDirectory($script:actualEvidenceRoot) | Out-Null
@@ -365,6 +531,118 @@ try {
     Read-AndAssertEvidence `
         -EvidencePath $fixtureEvidencePath `
         -ForbiddenRoot $script:fixtureRoot | Out-Null
+
+    $acceptanceRelativePath = "eng\windows-package-sbom-acceptance.json"
+    $acceptancePath = Join-Path $script:fixtureRoot $acceptanceRelativePath
+    Remove-Item -LiteralPath $acceptancePath -Force
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "missing-sbom-acceptance.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $acceptanceRelativePath
+
+    $acceptanceText = [System.IO.File]::ReadAllText($acceptancePath)
+    $duplicateAcceptanceText = $acceptanceText.Replace(
+        '  "decision": "AcceptTechnicalPackageBoundSbom",',
+        ('  "duplicateProbe": { "value": 1, "value": 2 },' + "`n" +
+         '  "decision": "AcceptTechnicalPackageBoundSbom",'))
+    Assert-TestCondition `
+        ($duplicateAcceptanceText -cne $acceptanceText) `
+        "nested duplicate package SBOM acceptance mutation was not applied."
+    Write-TestText -Path $acceptancePath -Value $duplicateAcceptanceText
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "duplicate-sbom-acceptance.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceDuplicateProperty" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $acceptanceRelativePath
+
+    $tamperedAcceptanceText = $acceptanceText.Replace(
+        '"officialValidationPassed": true',
+        '"officialValidationPassed": false')
+    Assert-TestCondition `
+        ($tamperedAcceptanceText -cne $acceptanceText) `
+        "package SBOM acceptance Boolean mutation was not applied."
+    Write-TestText -Path $acceptancePath -Value $tamperedAcceptanceText
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "tampered-sbom-acceptance.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $acceptanceRelativePath
+
+    $contractSourceRelativePath = ".github\workflows\windows-quality.yml"
+    $contractSourcePath = Join-Path $script:fixtureRoot $contractSourceRelativePath
+    $contractSourceText = [System.IO.File]::ReadAllText($contractSourcePath)
+    Write-TestText `
+        -Path $contractSourcePath `
+        -Value ($contractSourceText + "`n# package SBOM acceptance mutation")
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "tampered-sbom-source-scope.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $contractSourceRelativePath
+
+    $packageSourceRelativePath = "apps\windows\src\IptvSuite.Domain\AssemblyMarker.cs"
+    $packageSourcePath = Join-Path $script:fixtureRoot $packageSourceRelativePath
+    $packageSourceText = [System.IO.File]::ReadAllText($packageSourcePath)
+    Write-TestText `
+        -Path $packageSourcePath `
+        -Value ($packageSourceText + "`n// package-producing snapshot mutation")
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "tampered-package-source-snapshot.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $packageSourceRelativePath
+
+    $addedPackageSourcePath = Join-Path `
+        $script:fixtureRoot `
+        "apps\windows\src\IptvSuite.Windows\UnexpectedAcceptanceInput.xaml"
+    Write-TestText -Path $addedPackageSourcePath -Value '<Page />'
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "added-package-source-snapshot.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Remove-Item -LiteralPath $addedPackageSourcePath -Force
+
+    $removedPackageSourceRelativePath = `
+        "apps\windows\src\IptvSuite.Application\AssemblyMarker.cs"
+    $removedPackageSourcePath = Join-Path `
+        $script:fixtureRoot `
+        $removedPackageSourceRelativePath
+    Remove-Item -LiteralPath $removedPackageSourcePath -Force
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "removed-package-source-snapshot.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $removedPackageSourceRelativePath
+
+    $forbiddenNearestPackageOverrides = @(
+        "apps\Directory.Packages.props",
+        "apps\windows\Directory.Packages.props",
+        "apps\windows\src\Directory.Packages.props",
+        "apps\windows\src\IptvSuite.Application\Directory.Packages.props",
+        "apps\windows\src\IptvSuite.Domain\Directory.Packages.props",
+        "apps\windows\src\IptvSuite.Infrastructure\Directory.Packages.props",
+        "apps\windows\src\IptvSuite.Windows\Directory.Packages.props")
+    for ($overrideIndex = 0; $overrideIndex -lt $forbiddenNearestPackageOverrides.Count; $overrideIndex++) {
+        $overrideRelativePath = $forbiddenNearestPackageOverrides[$overrideIndex]
+        $overridePath = Join-Path $script:fixtureRoot $overrideRelativePath
+        Write-TestText -Path $overridePath -Value '<Project />'
+        Assert-AuditFailure `
+            -Root $script:fixtureRoot `
+            -EvidencePath (Join-Path `
+                $fixtureEvidenceRoot `
+                ("nearest-package-override-{0}.json" -f $overrideIndex)) `
+            -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
+            -AllowBlockedInventory
+        Remove-Item -LiteralPath $overridePath -Force
+    }
 
     Assert-AuditFailure `
         -Root $script:fixtureRoot `

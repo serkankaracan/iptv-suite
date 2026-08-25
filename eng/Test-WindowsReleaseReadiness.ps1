@@ -12,9 +12,20 @@ $ErrorActionPreference = "Stop"
 
 $script:maximumEvidenceBytes = 1MB
 $script:maximumSourceFileBytes = 2MB
+$script:maximumPackageSbomAcceptanceBytes = 16KB
+$script:maximumPackageProducingSnapshotFiles = 256
+$script:maximumPackageProducingSnapshotDirectories = 128
+$script:maximumPackageProducingSnapshotBytes = 64MB
 $script:technicalStage = "Initialization"
 $script:utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
 $script:utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$script:packageSbomAcceptanceRelativePath = "eng/windows-package-sbom-acceptance.json"
+$script:packageSbomAcceptanceSha256 = "853f1c702b9acc5e500d232688a22322aaeb6c3ff3f497a2fff269abc83fb904"
+$script:packageSbomContractSourceCount = 7
+$script:packageSbomContractSourceSetSha256 = "2b9cfe5d859ed070c47e2e74591b5567a5a8bc3a2006d2a5d775428f8a54c9ce"
+$script:packageSbomProductionInputSetSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
+$script:packageProducingSnapshotFileCount = 111
+$script:packageProducingSnapshotSha256 = "465b2a74eba4f6c45871d57e4e042772a5a30024ff7e45ac7b9563571f101d9d"
 
 function Fail-TechnicalInvariant {
     param(
@@ -91,10 +102,12 @@ function Resolve-RegularRepositoryFile {
     return $item
 }
 
-function Read-StrictUtf8Text {
+function Read-BoundedRegularFileBytes {
     param(
         [Parameter(Mandatory = $true)]
         [System.IO.FileInfo]$File,
+
+        [long]$MaximumBytes = $script:maximumSourceFileBytes,
 
         [string]$Code = "RepositoryTextInvalid"
     )
@@ -104,24 +117,61 @@ function Read-StrictUtf8Text {
             $File.FullName,
             [System.IO.FileMode]::Open,
             [System.IO.FileAccess]::Read,
-            [System.IO.FileShare]::Read)
+            [System.IO.FileShare]::None)
         try {
-            $reader = New-Object System.IO.StreamReader(
-                $stream,
-                $script:utf8Strict,
-                $false,
-                4096,
-                $true)
-            try {
-                return $reader.ReadToEnd()
+            Assert-Condition `
+                ($MaximumBytes -gt 0 -and
+                 $MaximumBytes -le [int]::MaxValue -and
+                 $stream.Length -gt 0 -and
+                 $stream.Length -le $MaximumBytes) `
+                $Code
+            $bytes = New-Object byte[] ([int]$stream.Length)
+            $offset = 0
+            while ($offset -lt $bytes.Length) {
+                $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+                Assert-Condition ($read -gt 0) $Code
+                $offset += $read
             }
-            finally {
-                $reader.Dispose()
-            }
+            Assert-Condition ($stream.ReadByte() -eq -1) $Code
+            return ,$bytes
         }
         finally {
             $stream.Dispose()
         }
+    }
+    catch {
+        if ($_.Exception.Message -match '^M15TechnicalInvariant:[A-Za-z][A-Za-z0-9]+$') {
+            throw $_.Exception.Message
+        }
+
+        Fail-TechnicalInvariant -Code $Code
+    }
+}
+
+function Read-StrictUtf8Text {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.FileInfo]$File,
+
+        [long]$MaximumBytes = $script:maximumSourceFileBytes,
+
+        [string]$Code = "RepositoryTextInvalid"
+    )
+
+    [byte[]]$bytes = Read-BoundedRegularFileBytes `
+        -File $File `
+        -MaximumBytes $MaximumBytes `
+        -Code $Code
+    $offset = 0
+    if ($bytes.Length -ge 3 -and
+        $bytes[0] -eq 0xef -and
+        $bytes[1] -eq 0xbb -and
+        $bytes[2] -eq 0xbf) {
+        $offset = 3
+    }
+
+    try {
+        return $script:utf8Strict.GetString($bytes, $offset, $bytes.Length - $offset)
     }
     catch {
         Fail-TechnicalInvariant -Code $Code
@@ -328,6 +378,661 @@ function Get-LowerSha256 {
     }
 
     Fail-TechnicalInvariant -Code "RepositoryFileHashInvalid"
+}
+
+function Get-LowerSha256ForBytes {
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes
+    )
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($Bytes))).Replace(
+            "-",
+            "").ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
+
+function Get-CanonicalTextSourceSetSha256 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$RelativePaths
+    )
+
+    Assert-Condition ($RelativePaths.Count -gt 0 -and $RelativePaths.Count -le 32) `
+        "PackageSbomAcceptanceInvalid"
+    $records = @()
+    foreach ($relativePath in $RelativePaths) {
+        Assert-Condition `
+            ($relativePath -cmatch '\A[A-Za-z0-9._/-]+\z' -and
+             -not [System.IO.Path]::IsPathRooted($relativePath) -and
+             $relativePath -notmatch '(?:^|/)\.\.(?:/|$)') `
+            "PackageSbomAcceptanceInvalid"
+        $file = Resolve-RegularRepositoryFile `
+            -Root $Root `
+            -RelativePath ($relativePath.Replace('/', '\')) `
+            -MaximumBytes $script:maximumSourceFileBytes `
+            -Code "PackageSbomAcceptanceInvalid"
+        $text = Read-StrictUtf8Text `
+            -File $file `
+            -Code "PackageSbomAcceptanceInvalid"
+        $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+        $normalizedBytes = $script:utf8NoBom.GetBytes($normalized)
+        Assert-Condition ($normalizedBytes.Length -gt 0) "PackageSbomAcceptanceInvalid"
+        $records += (
+            "$relativePath`0$($normalizedBytes.Length)`0" +
+            (Get-LowerSha256ForBytes -Bytes $normalizedBytes))
+    }
+
+    $bindingBytes = $script:utf8NoBom.GetBytes(($records -join "`n"))
+    return Get-LowerSha256ForBytes -Bytes $bindingBytes
+}
+
+function Get-CanonicalPackageSnapshotRecord {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath
+    )
+
+    Assert-Condition `
+        ($RelativePath -cmatch '\A[A-Za-z0-9._/-]+\z' -and
+         -not [System.IO.Path]::IsPathRooted($RelativePath) -and
+         $RelativePath -notmatch '(?:^|/)\.\.(?:/|$)') `
+        "PackageSbomAcceptanceInvalid"
+    $file = Resolve-RegularRepositoryFile `
+        -Root $Root `
+        -RelativePath ($RelativePath.Replace('/', '\')) `
+        -MaximumBytes $script:maximumSourceFileBytes `
+        -Code "PackageSbomAcceptanceInvalid"
+    $extension = [System.IO.Path]::GetExtension($file.Name)
+    $isBinary =
+        $extension.Equals('.ico', [System.StringComparison]::OrdinalIgnoreCase) -or
+        $extension.Equals('.png', [System.StringComparison]::OrdinalIgnoreCase)
+    if ($isBinary) {
+        [byte[]]$canonicalBytes = Read-BoundedRegularFileBytes `
+            -File $file `
+            -MaximumBytes $script:maximumSourceFileBytes `
+            -Code "PackageSbomAcceptanceInvalid"
+        $canonicalLength = [long]$canonicalBytes.Length
+        $canonicalSha256 = Get-LowerSha256ForBytes -Bytes $canonicalBytes
+        $kind = 'binary'
+    }
+    else {
+        $text = Read-StrictUtf8Text `
+            -File $file `
+            -Code "PackageSbomAcceptanceInvalid"
+        $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+        $canonicalBytes = $script:utf8NoBom.GetBytes($normalized)
+        Assert-Condition ($canonicalBytes.Length -gt 0) "PackageSbomAcceptanceInvalid"
+        $canonicalLength = [long]$canonicalBytes.Length
+        $canonicalSha256 = Get-LowerSha256ForBytes -Bytes $canonicalBytes
+        $kind = 'text-lf'
+    }
+
+    return [pscustomobject]@{
+        Record = "$RelativePath`0$kind`0$canonicalLength`0$canonicalSha256"
+        CanonicalLength = $canonicalLength
+    }
+}
+
+function Assert-NoNearestPackageVersionOverrides {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $forbiddenRelativePaths = @(
+        "apps/Directory.Packages.props",
+        "apps/windows/Directory.Packages.props",
+        "apps/windows/src/Directory.Packages.props",
+        "apps/windows/src/IptvSuite.Application/Directory.Packages.props",
+        "apps/windows/src/IptvSuite.Domain/Directory.Packages.props",
+        "apps/windows/src/IptvSuite.Infrastructure/Directory.Packages.props",
+        "apps/windows/src/IptvSuite.Windows/Directory.Packages.props")
+    foreach ($relativePath in $forbiddenRelativePaths) {
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $Root $relativePath))
+        Assert-Condition (Test-PathContainedByRoot -Path $candidate -Root $Root) `
+            "PackageSbomAcceptanceInvalid"
+        Assert-NoReparseDirectoryChain `
+            -Root $Root `
+            -DirectoryPath ([System.IO.Path]::GetDirectoryName($candidate))
+        Assert-Condition (-not (Test-Path -LiteralPath $candidate)) `
+            "PackageSbomAcceptanceInvalid"
+    }
+}
+
+function Get-PackageProducingSnapshot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $fixedRootBuildInputs = @(
+        "global.json",
+        "NuGet.config",
+        "Directory.Build.props",
+        "Directory.Packages.props",
+        "Directory.Solution.props",
+        "apps/windows/IptvSuite.Windows.sln")
+    $records = [System.Collections.Generic.List[string]]::new()
+    $seenPaths = New-Object 'System.Collections.Generic.HashSet[string]' `
+        ([System.StringComparer]::OrdinalIgnoreCase)
+    [long]$totalCanonicalBytes = 0
+
+    foreach ($relativePath in $fixedRootBuildInputs) {
+        Assert-Condition ($seenPaths.Add($relativePath)) "PackageSbomAcceptanceInvalid"
+        $record = Get-CanonicalPackageSnapshotRecord `
+            -Root $Root `
+            -RelativePath $relativePath
+        $records.Add([string]$record.Record)
+        $totalCanonicalBytes += [long]$record.CanonicalLength
+        Assert-Condition `
+            ($records.Count -le $script:maximumPackageProducingSnapshotFiles -and
+             $totalCanonicalBytes -le $script:maximumPackageProducingSnapshotBytes) `
+            "PackageSbomAcceptanceInvalid"
+    }
+
+    $sourceRoot = [System.IO.Path]::GetFullPath((Join-Path $Root "apps\windows\src"))
+    Assert-Condition (Test-PathContainedByRoot -Path $sourceRoot -Root $Root) `
+        "PackageSbomAcceptanceInvalid"
+    Assert-NoReparseDirectoryChain -Root $Root -DirectoryPath $sourceRoot
+    $sourceRootItem = Get-Item -LiteralPath $sourceRoot -Force
+    Assert-Condition `
+        ($sourceRootItem.PSIsContainer -and
+         ($sourceRootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
+        "PackageSbomAcceptanceInvalid"
+
+    $pendingDirectories = [System.Collections.Generic.Queue[System.IO.DirectoryInfo]]::new()
+    $pendingDirectories.Enqueue($sourceRootItem)
+    $seenDirectories = New-Object 'System.Collections.Generic.HashSet[string]' `
+        ([System.StringComparer]::OrdinalIgnoreCase)
+    Assert-Condition ($seenDirectories.Add($sourceRootItem.FullName)) `
+        "PackageSbomAcceptanceInvalid"
+    while ($pendingDirectories.Count -gt 0) {
+        $directory = $pendingDirectories.Dequeue()
+        $entryEnumerator = [System.IO.Directory]::EnumerateFileSystemEntries(
+            $directory.FullName).GetEnumerator()
+        try {
+            while ($entryEnumerator.MoveNext()) {
+                $entryPath = [System.IO.Path]::GetFullPath([string]$entryEnumerator.Current)
+                Assert-Condition (Test-PathContainedByRoot -Path $entryPath -Root $Root) `
+                    "PackageSbomAcceptanceInvalid"
+                $entry = Get-Item -LiteralPath $entryPath -Force
+                if ($entry.PSIsContainer) {
+                    if ($entry.Name -ieq 'bin' -or $entry.Name -ieq 'obj') {
+                        continue
+                    }
+
+                    Assert-Condition `
+                        (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
+                        "PackageSbomAcceptanceInvalid"
+                    Assert-Condition ($seenDirectories.Add($entry.FullName)) `
+                        "PackageSbomAcceptanceInvalid"
+                    Assert-Condition `
+                        ($seenDirectories.Count -le $script:maximumPackageProducingSnapshotDirectories) `
+                        "PackageSbomAcceptanceInvalid"
+                    $pendingDirectories.Enqueue($entry)
+                    continue
+                }
+
+                Assert-Condition `
+                    ($records.Count -lt $script:maximumPackageProducingSnapshotFiles) `
+                    "PackageSbomAcceptanceInvalid"
+                $relativePath = Get-RelativeEvidencePath `
+                    -Root $Root `
+                    -FullPath $entry.FullName
+                Assert-Condition `
+                    ($relativePath.StartsWith(
+                        "apps/windows/src/",
+                        [System.StringComparison]::Ordinal) -and
+                     $seenPaths.Add($relativePath)) `
+                    "PackageSbomAcceptanceInvalid"
+                $record = Get-CanonicalPackageSnapshotRecord `
+                    -Root $Root `
+                    -RelativePath $relativePath
+                $records.Add([string]$record.Record)
+                $totalCanonicalBytes += [long]$record.CanonicalLength
+                Assert-Condition `
+                    ($totalCanonicalBytes -le $script:maximumPackageProducingSnapshotBytes) `
+                    "PackageSbomAcceptanceInvalid"
+            }
+        }
+        finally {
+            if ($entryEnumerator -is [System.IDisposable]) {
+                $entryEnumerator.Dispose()
+            }
+        }
+    }
+
+    Assert-Condition ($records.Count -gt $fixedRootBuildInputs.Count) `
+        "PackageSbomAcceptanceInvalid"
+    $orderedRecords = [string[]]$records.ToArray()
+    [System.Array]::Sort($orderedRecords, [System.StringComparer]::Ordinal)
+    $bindingBytes = $script:utf8NoBom.GetBytes(($orderedRecords -join "`n"))
+    return [pscustomobject]@{
+        FileCount = [int]$orderedRecords.Count
+        CanonicalBytes = $totalCanonicalBytes
+        Sha256 = Get-LowerSha256ForBytes -Bytes $bindingBytes
+    }
+}
+
+function Assert-NoDuplicateJsonProperties {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Text
+    )
+
+    $objectPropertySets = [System.Collections.Stack]::new()
+    $index = 0
+    while ($index -lt $Text.Length) {
+        $character = $Text[$index]
+        if ($character -eq [char]0x7b) {
+            $properties = New-Object 'System.Collections.Generic.HashSet[string]' `
+                ([System.StringComparer]::OrdinalIgnoreCase)
+            $objectPropertySets.Push($properties)
+            $index++
+            continue
+        }
+        if ($character -eq [char]0x7d) {
+            Assert-Condition ($objectPropertySets.Count -gt 0) `
+                "PackageSbomAcceptanceInvalid"
+            [void]$objectPropertySets.Pop()
+            $index++
+            continue
+        }
+        if ($character -ne [char]0x22) {
+            $index++
+            continue
+        }
+
+        $index++
+        $builder = [System.Text.StringBuilder]::new()
+        $closed = $false
+        while ($index -lt $Text.Length) {
+            $stringCharacter = $Text[$index]
+            if ($stringCharacter -eq [char]0x22) {
+                $closed = $true
+                $index++
+                break
+            }
+            if ($stringCharacter -eq [char]0x5c) {
+                $index++
+                Assert-Condition ($index -lt $Text.Length) "PackageSbomAcceptanceInvalid"
+                $escapeCharacter = $Text[$index]
+                switch ($escapeCharacter) {
+                    '"' { [void]$builder.Append([char]0x22) }
+                    '\' { [void]$builder.Append([char]0x5c) }
+                    '/' { [void]$builder.Append([char]0x2f) }
+                    'b' { [void]$builder.Append([char]0x08) }
+                    'f' { [void]$builder.Append([char]0x0c) }
+                    'n' { [void]$builder.Append([char]0x0a) }
+                    'r' { [void]$builder.Append([char]0x0d) }
+                    't' { [void]$builder.Append([char]0x09) }
+                    'u' {
+                        Assert-Condition (($index + 4) -lt $Text.Length) `
+                            "PackageSbomAcceptanceInvalid"
+                        $hex = $Text.Substring($index + 1, 4)
+                        Assert-Condition ($hex -cmatch '\A[0-9A-Fa-f]{4}\z') `
+                            "PackageSbomAcceptanceInvalid"
+                        [void]$builder.Append([char][Convert]::ToInt32($hex, 16))
+                        $index += 4
+                    }
+                    default {
+                        Fail-TechnicalInvariant -Code "PackageSbomAcceptanceInvalid"
+                    }
+                }
+                $index++
+                continue
+            }
+
+            Assert-Condition ([int]$stringCharacter -ge 0x20) `
+                "PackageSbomAcceptanceInvalid"
+            [void]$builder.Append($stringCharacter)
+            $index++
+        }
+
+        Assert-Condition $closed "PackageSbomAcceptanceInvalid"
+        $lookAhead = $index
+        while ($lookAhead -lt $Text.Length -and [char]::IsWhiteSpace($Text[$lookAhead])) {
+            $lookAhead++
+        }
+        if ($lookAhead -lt $Text.Length -and $Text[$lookAhead] -eq [char]0x3a) {
+            Assert-Condition ($objectPropertySets.Count -gt 0) `
+                "PackageSbomAcceptanceInvalid"
+            $propertyName = $builder.ToString()
+            if (-not $objectPropertySets.Peek().Add($propertyName)) {
+                Fail-TechnicalInvariant -Code "PackageSbomAcceptanceDuplicateProperty"
+            }
+        }
+    }
+
+    Assert-Condition ($objectPropertySets.Count -eq 0) "PackageSbomAcceptanceInvalid"
+}
+
+function Read-PackageSbomAcceptance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    try {
+        Assert-NoNearestPackageVersionOverrides -Root $Root
+        $packageProducingSnapshot = Get-PackageProducingSnapshot -Root $Root
+        Assert-Condition `
+            ($packageProducingSnapshot.FileCount -eq
+                $script:packageProducingSnapshotFileCount -and
+             $packageProducingSnapshot.Sha256 -ceq
+                $script:packageProducingSnapshotSha256) `
+            "PackageSbomAcceptanceInvalid"
+
+        $ledgerFile = Resolve-RegularRepositoryFile `
+            -Root $Root `
+            -RelativePath ($script:packageSbomAcceptanceRelativePath.Replace('/', '\')) `
+            -MaximumBytes $script:maximumPackageSbomAcceptanceBytes `
+            -Code "PackageSbomAcceptanceInvalid"
+        $ledgerStream = [System.IO.File]::Open(
+            $ledgerFile.FullName,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::None)
+        try {
+            Assert-Condition `
+                ($ledgerStream.Length -gt 0 -and
+                 $ledgerStream.Length -le $script:maximumPackageSbomAcceptanceBytes) `
+                "PackageSbomAcceptanceInvalid"
+            $ledgerBytes = New-Object byte[] ([int]$ledgerStream.Length)
+            $offset = 0
+            while ($offset -lt $ledgerBytes.Length) {
+                $read = $ledgerStream.Read(
+                    $ledgerBytes,
+                    $offset,
+                    $ledgerBytes.Length - $offset)
+                Assert-Condition ($read -gt 0) "PackageSbomAcceptanceInvalid"
+                $offset += $read
+            }
+            Assert-Condition ($ledgerStream.ReadByte() -eq -1) `
+                "PackageSbomAcceptanceInvalid"
+        }
+        finally {
+            $ledgerStream.Dispose()
+        }
+        try {
+            $ledgerText = $script:utf8Strict.GetString($ledgerBytes)
+        }
+        catch {
+            Fail-TechnicalInvariant -Code "PackageSbomAcceptanceInvalid"
+        }
+        Assert-NoDuplicateJsonProperties -Text $ledgerText
+        Assert-Condition `
+            ((Get-LowerSha256ForBytes -Bytes $ledgerBytes) -ceq
+             $script:packageSbomAcceptanceSha256) `
+            "PackageSbomAcceptanceInvalid"
+        try {
+            $acceptance = $ledgerText | ConvertFrom-Json
+        }
+        catch {
+            Fail-TechnicalInvariant -Code "PackageSbomAcceptanceInvalid"
+        }
+
+        Assert-Condition ($null -ne $acceptance) "PackageSbomAcceptanceInvalid"
+        Assert-ExactStringSet `
+            -Actual @($acceptance.PSObject.Properties.Name) `
+            -Expected @(
+                "schemaVersion",
+                "decision",
+                "scope",
+                "runCompletedAtUtc",
+                "repository",
+                "repositoryId",
+                "workflowPath",
+                "workflowName",
+                "runId",
+                "runNumber",
+                "runAttempt",
+                "runEvent",
+                "runBranch",
+                "runHeadSha",
+                "runConclusion",
+                "packageJobId",
+                "packageJobName",
+                "packageJobConclusion",
+                "artifactId",
+                "artifactName",
+                "artifactSizeBytes",
+                "artifactDigestSha256",
+                "lastSuccessMemberName",
+                "lastSuccessMemberLength",
+                "lastSuccessMemberSha256",
+                "sbomSummaryMemberName",
+                "sbomSummaryMemberLength",
+                "sbomSummaryMemberSha256",
+                "sbomMemberName",
+                "sbomMemberLength",
+                "sbomMemberSha256",
+                "configuration",
+                "dotNetSdk",
+                "sbomFormat",
+                "documentNamespace",
+                "toolPackageId",
+                "toolVersion",
+                "toolNupkgSha256",
+                "toolShimSha256",
+                "officialValidationPassed",
+                "strictValidationPassed",
+                "productionInputCount",
+                "productionInputSetCanonicalSha256",
+                "contractSourceCount",
+                "contractSourceSetCanonicalSha256",
+                "packageProducingSnapshotFileCount",
+                "packageProducingSnapshotSha256",
+                "applicationPackageFile",
+                "applicationPackageLength",
+                "applicationPackageSha256",
+                "applicationIdentityName",
+                "applicationVersion",
+                "applicationSignatureStatus",
+                "runtimePackageFile",
+                "runtimePackageLength",
+                "runtimePackageSha256",
+                "runtimeIdentityName",
+                "runtimeVersion",
+                "runtimeSignatureStatus",
+                "architecture",
+                "fileCount",
+                "componentCount",
+                "packageCount",
+                "relationshipCount",
+                "producerBlockerDisposition",
+                "producerSbomPending",
+                "closedBlocker",
+                "remainingBlockers",
+                "legalSbomComplete") `
+            -Code "PackageSbomAcceptanceInvalid"
+
+        $expectedStrings = [ordered]@{
+            decision = "AcceptTechnicalPackageBoundSbom"
+            scope = "TechnicalPackageBoundSbomOnly"
+            runCompletedAtUtc = "2026-08-25T21:05:53Z"
+            repository = "serkankaracan/iptv-suite"
+            workflowPath = ".github/workflows/windows-quality.yml"
+            workflowName = "Windows quality"
+            runEvent = "push"
+            runBranch = "main"
+            runHeadSha = "12b1e95e8c3df04c42482daa52bdabd81abe1701"
+            runConclusion = "success"
+            packageJobName = "Packaged install and launch smoke"
+            packageJobConclusion = "success"
+            artifactName = "windows-msix-smoke-evidence"
+            artifactDigestSha256 = "342fad95524b3624de842889428d4e2921ef3a481d3e8dd0b13ace27d932f106"
+            lastSuccessMemberName = "last-success.json"
+            lastSuccessMemberSha256 = "63644f96edb507be86980fb983fa69feef116652ea9f03d29da5f600414c3b04"
+            sbomSummaryMemberName = "package-sbom-summary.json"
+            sbomSummaryMemberSha256 = "d1bc7587ad3b5cbca42c78baad4c49a44f54199826f404b6b0849cf18435c5cd"
+            sbomMemberName = "package-sbom.spdx.json"
+            sbomMemberSha256 = "97d7e4aebedffbaae95a2d4e36f01bf1efff79dfe34cf001e7c787d637bffd39"
+            configuration = "Release"
+            dotNetSdk = "10.0.302"
+            sbomFormat = "SPDX-2.2"
+            documentNamespace = "https://github.com/serkankaracan/iptv-suite/sbom/IptvSuite.Windows.ReleaseSet/0.1.0.0/12b1e95e8c3df04c42482daa52bdabd81abe1701-c826581b4fc1a74eed8147ed0b44bb0570f06a0464284ab292ebdf597723e679-a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf"
+            toolPackageId = "microsoft.sbom.dotnettool"
+            toolVersion = "4.1.5"
+            toolNupkgSha256 = "00e1fb81c01f4e9ad7a9d00f365bb3f3776cde6fecdd15cc3adbbce1f83d14bb"
+            toolShimSha256 = "c8e151612c03db7a5b8d680cd5ccdfd1d9676f36d43c33cec2a4397fb19ada55"
+            productionInputSetCanonicalSha256 = $script:packageSbomProductionInputSetSha256
+            contractSourceSetCanonicalSha256 = $script:packageSbomContractSourceSetSha256
+            packageProducingSnapshotSha256 = $script:packageProducingSnapshotSha256
+            applicationPackageFile = "IptvSuite.Windows_0.1.0.0_x64.msix"
+            applicationPackageSha256 = "c826581b4fc1a74eed8147ed0b44bb0570f06a0464284ab292ebdf597723e679"
+            applicationIdentityName = "IptvSuite.LocalDev.6f0d9a64"
+            applicationVersion = "0.1.0.0"
+            applicationSignatureStatus = "Valid"
+            runtimePackageFile = "Microsoft.WindowsAppRuntime.2.msix"
+            runtimePackageSha256 = "a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf"
+            runtimeIdentityName = "Microsoft.WindowsAppRuntime.2"
+            runtimeVersion = "2.4.0.0"
+            runtimeSignatureStatus = "Valid"
+            architecture = "x64"
+            producerBlockerDisposition = "HostedAcceptancePending"
+            closedBlocker = "SbomPending"
+        }
+        foreach ($expected in $expectedStrings.GetEnumerator()) {
+            Assert-Condition `
+                ($acceptance.PSObject.Properties[$expected.Key].Value -is [string] -and
+                 [string]$acceptance.PSObject.Properties[$expected.Key].Value -ceq
+                    [string]$expected.Value) `
+                "PackageSbomAcceptanceInvalid"
+        }
+
+        $expectedInt32 = [ordered]@{
+            schemaVersion = 1
+            repositoryId = 1328998460
+            runNumber = 226
+            runAttempt = 1
+            artifactSizeBytes = 7649
+            lastSuccessMemberLength = 17714
+            sbomSummaryMemberLength = 1985
+            sbomMemberLength = 50566
+            productionInputCount = 10
+            contractSourceCount = $script:packageSbomContractSourceCount
+            packageProducingSnapshotFileCount = $script:packageProducingSnapshotFileCount
+            applicationPackageLength = 29828560
+            runtimePackageLength = 46787781
+            fileCount = 2
+            componentCount = 24
+            packageCount = 27
+            relationshipCount = 43
+        }
+        foreach ($expected in $expectedInt32.GetEnumerator()) {
+            Assert-Condition `
+                ($acceptance.PSObject.Properties[$expected.Key].Value -is [int] -and
+                 [int]$acceptance.PSObject.Properties[$expected.Key].Value -eq
+                    [int]$expected.Value) `
+                "PackageSbomAcceptanceInvalid"
+        }
+
+        $expectedInt64 = [ordered]@{
+            runId = [long]32897767622
+            packageJobId = [long]97966018579
+            artifactId = [long]9582332831
+        }
+        foreach ($expected in $expectedInt64.GetEnumerator()) {
+            Assert-Condition `
+                ($acceptance.PSObject.Properties[$expected.Key].Value -is [long] -and
+                 [long]$acceptance.PSObject.Properties[$expected.Key].Value -eq
+                    [long]$expected.Value) `
+                "PackageSbomAcceptanceInvalid"
+        }
+
+        Assert-Condition `
+            ($acceptance.officialValidationPassed -is [bool] -and
+             $acceptance.officialValidationPassed -and
+             $acceptance.strictValidationPassed -is [bool] -and
+             $acceptance.strictValidationPassed -and
+             $acceptance.producerSbomPending -is [bool] -and
+             $acceptance.producerSbomPending -and
+             $acceptance.legalSbomComplete -is [bool] -and
+             -not $acceptance.legalSbomComplete) `
+            "PackageSbomAcceptanceInvalid"
+
+        $expectedRemainingBlockers = @(
+            "AssetProvenancePending",
+            "CodecIpLegalReviewPending",
+            "CveReviewPending",
+            "LicenseFilePending",
+            "NoticeFilePending",
+            "PartnerCenterPrivateFlightPending",
+            "PrivacyPolicyPending",
+            "ProductionIdentityMigrationPending",
+            "ProductionLifecycleMatrixPending",
+            "ReleaseSigningPending",
+            "ReviewerServiceAndRehearsalPending",
+            "StoreListingPending",
+            "SupportUrlPending",
+            "WackPending")
+        Assert-Condition ($acceptance.remainingBlockers -is [System.Array]) `
+            "PackageSbomAcceptanceInvalid"
+        Assert-ExactStringSet `
+            -Actual @($acceptance.remainingBlockers | ForEach-Object { [string]$_ }) `
+            -Expected $expectedRemainingBlockers `
+            -Code "PackageSbomAcceptanceInvalid"
+
+        $contractSourcePaths = @(
+            ".config/dotnet-tools.json",
+            ".github/workflows/windows-quality.yml",
+            "eng/Invoke-WindowsPackageSbom.ps1",
+            "eng/Invoke-WindowsPackageSmoke.ps1",
+            "eng/WindowsPackageInstallRootAudit.ps1",
+            "eng/WindowsPackageSbom.ps1",
+            "eng/windows-package-sbom-tool.json")
+        $productionInputPaths = @(
+            "Directory.Packages.props",
+            "apps/windows/src/IptvSuite.Application/IptvSuite.Application.csproj",
+            "apps/windows/src/IptvSuite.Application/packages.lock.json",
+            "apps/windows/src/IptvSuite.Domain/IptvSuite.Domain.csproj",
+            "apps/windows/src/IptvSuite.Domain/packages.lock.json",
+            "apps/windows/src/IptvSuite.Infrastructure/IptvSuite.Infrastructure.csproj",
+            "apps/windows/src/IptvSuite.Infrastructure/packages.lock.json",
+            "apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj",
+            "apps/windows/src/IptvSuite.Windows/packages.lock.json",
+            "global.json")
+        Assert-Condition `
+            ($contractSourcePaths.Count -eq $script:packageSbomContractSourceCount) `
+            "PackageSbomAcceptanceInvalid"
+        Assert-Condition `
+            ((Get-CanonicalTextSourceSetSha256 `
+                -Root $Root `
+                -RelativePaths $contractSourcePaths) -ceq
+                $script:packageSbomContractSourceSetSha256) `
+            "PackageSbomAcceptanceInvalid"
+        Assert-Condition `
+            ((Get-CanonicalTextSourceSetSha256 `
+                -Root $Root `
+                -RelativePaths $productionInputPaths) -ceq
+                $script:packageSbomProductionInputSetSha256) `
+            "PackageSbomAcceptanceInvalid"
+        return [pscustomobject]@{
+            Acceptance = $acceptance
+            PackageProducingSnapshot = $packageProducingSnapshot
+        }
+    }
+    catch {
+        if ($_.Exception.Message -match
+            '^M15TechnicalInvariant:PackageSbomAcceptance(?:Invalid|DuplicateProperty)$') {
+            throw $_.Exception.Message
+        }
+
+        Fail-TechnicalInvariant -Code "PackageSbomAcceptanceInvalid"
+    }
 }
 
 function Assert-NoReparseDirectoryChain {
@@ -1298,6 +2003,13 @@ try {
             $allowedBaseDirectoryPattern).Count -eq 1) `
         "BaseDirectoryIconReadInvalid"
 
+    $script:technicalStage = "PackageSbomAcceptance"
+    $packageSbomAcceptanceValidation = Read-PackageSbomAcceptance `
+        -Root $resolvedRepositoryRoot
+    $packageSbomAcceptance = $packageSbomAcceptanceValidation.Acceptance
+    $validatedPackageProducingSnapshot =
+        $packageSbomAcceptanceValidation.PackageProducingSnapshot
+
     $script:technicalStage = "EvidenceComposition"
     $blockers = Get-OrdinalSortedStrings -Values @(
         "AssetProvenancePending",
@@ -1311,14 +2023,13 @@ try {
         "ProductionLifecycleMatrixPending",
         "ReleaseSigningPending",
         "ReviewerServiceAndRehearsalPending",
-        "SbomPending",
         "StoreListingPending",
         "SupportUrlPending",
         "WackPending"
     )
 
     $summary = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         result = "blocked"
         technicalBaselinePassed = $true
         releaseReady = $false
@@ -1363,8 +2074,88 @@ try {
             exactPackageNamesLocked = $true
             legalSbomComplete = $false
         }
+        packageSbomAcceptance = [ordered]@{
+            decision = $packageSbomAcceptance.decision
+            scope = $packageSbomAcceptance.scope
+            runCompletedAtUtc = $packageSbomAcceptance.runCompletedAtUtc
+            repository = $packageSbomAcceptance.repository
+            workflowPath = $packageSbomAcceptance.workflowPath
+            workflowName = $packageSbomAcceptance.workflowName
+            runId = $packageSbomAcceptance.runId
+            runNumber = $packageSbomAcceptance.runNumber
+            runAttempt = $packageSbomAcceptance.runAttempt
+            runEvent = $packageSbomAcceptance.runEvent
+            runBranch = $packageSbomAcceptance.runBranch
+            runHeadSha = $packageSbomAcceptance.runHeadSha
+            runConclusion = $packageSbomAcceptance.runConclusion
+            packageJobId = $packageSbomAcceptance.packageJobId
+            packageJobName = $packageSbomAcceptance.packageJobName
+            packageJobConclusion = $packageSbomAcceptance.packageJobConclusion
+            artifactId = $packageSbomAcceptance.artifactId
+            artifactName = $packageSbomAcceptance.artifactName
+            artifactSizeBytes = $packageSbomAcceptance.artifactSizeBytes
+            artifactDigestSha256 = $packageSbomAcceptance.artifactDigestSha256
+            lastSuccessMemberName = $packageSbomAcceptance.lastSuccessMemberName
+            lastSuccessMemberLength = $packageSbomAcceptance.lastSuccessMemberLength
+            lastSuccessMemberSha256 = $packageSbomAcceptance.lastSuccessMemberSha256
+            sbomSummaryMemberName = $packageSbomAcceptance.sbomSummaryMemberName
+            sbomSummaryMemberLength = $packageSbomAcceptance.sbomSummaryMemberLength
+            sbomSummaryMemberSha256 = $packageSbomAcceptance.sbomSummaryMemberSha256
+            sbomMemberName = $packageSbomAcceptance.sbomMemberName
+            sbomMemberLength = $packageSbomAcceptance.sbomMemberLength
+            sbomMemberSha256 = $packageSbomAcceptance.sbomMemberSha256
+            configuration = $packageSbomAcceptance.configuration
+            dotNetSdk = $packageSbomAcceptance.dotNetSdk
+            sbomFormat = $packageSbomAcceptance.sbomFormat
+            toolPackageId = $packageSbomAcceptance.toolPackageId
+            toolVersion = $packageSbomAcceptance.toolVersion
+            toolNupkgSha256 = $packageSbomAcceptance.toolNupkgSha256
+            toolShimSha256 = $packageSbomAcceptance.toolShimSha256
+            officialValidationPassed = $packageSbomAcceptance.officialValidationPassed
+            strictValidationPassed = $packageSbomAcceptance.strictValidationPassed
+            productionInputCount = $packageSbomAcceptance.productionInputCount
+            productionInputSetCanonicalSha256 = $packageSbomAcceptance.productionInputSetCanonicalSha256
+            contractSourceCount = $packageSbomAcceptance.contractSourceCount
+            contractSourceSetCanonicalSha256 = $packageSbomAcceptance.contractSourceSetCanonicalSha256
+            packageProducingSnapshotFileCount = $packageSbomAcceptance.packageProducingSnapshotFileCount
+            packageProducingSnapshotSha256 = $packageSbomAcceptance.packageProducingSnapshotSha256
+            applicationPackageFile = $packageSbomAcceptance.applicationPackageFile
+            applicationPackageLength = $packageSbomAcceptance.applicationPackageLength
+            applicationPackageSha256 = $packageSbomAcceptance.applicationPackageSha256
+            applicationIdentityName = $packageSbomAcceptance.applicationIdentityName
+            applicationVersion = $packageSbomAcceptance.applicationVersion
+            applicationSignatureStatus = $packageSbomAcceptance.applicationSignatureStatus
+            runtimePackageFile = $packageSbomAcceptance.runtimePackageFile
+            runtimePackageLength = $packageSbomAcceptance.runtimePackageLength
+            runtimePackageSha256 = $packageSbomAcceptance.runtimePackageSha256
+            runtimeIdentityName = $packageSbomAcceptance.runtimeIdentityName
+            runtimeVersion = $packageSbomAcceptance.runtimeVersion
+            runtimeSignatureStatus = $packageSbomAcceptance.runtimeSignatureStatus
+            architecture = $packageSbomAcceptance.architecture
+            fileCount = $packageSbomAcceptance.fileCount
+            componentCount = $packageSbomAcceptance.componentCount
+            packageCount = $packageSbomAcceptance.packageCount
+            relationshipCount = $packageSbomAcceptance.relationshipCount
+            producerBlockerDisposition = $packageSbomAcceptance.producerBlockerDisposition
+            producerSbomPending = $packageSbomAcceptance.producerSbomPending
+            closedBlocker = "SbomPending"
+            legalSbomComplete = $false
+        }
         blockers = @($blockers)
     }
+
+    $script:technicalStage = "PackageSbomAcceptanceStability"
+    Assert-NoNearestPackageVersionOverrides -Root $resolvedRepositoryRoot
+    $publicationPackageProducingSnapshot = Get-PackageProducingSnapshot `
+        -Root $resolvedRepositoryRoot
+    Assert-Condition `
+        ($publicationPackageProducingSnapshot.FileCount -eq
+            $validatedPackageProducingSnapshot.FileCount -and
+         $publicationPackageProducingSnapshot.CanonicalBytes -eq
+            $validatedPackageProducingSnapshot.CanonicalBytes -and
+         $publicationPackageProducingSnapshot.Sha256 -ceq
+            $validatedPackageProducingSnapshot.Sha256) `
+        "PackageSbomAcceptanceInvalid"
 
     $script:technicalStage = "EvidencePublication"
     Publish-BoundedEvidence `
