@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M1–M9 ve M11 completed; M10 conditional success; M12 partial verified; M13 automated/deterministic MVP acceptance completed; M14 sıradaki milestone
+**Durum:** M1–M9, M11, M13 ve M14 completed; M10 conditional success; M12 partial verified; M15 sıradaki milestone
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -745,6 +745,8 @@ Kontrollü kesilen sentetik yayının bounded geri sayımla toparlanması; auth/
 
 ## M14 — 50.000+ benchmark ve hot-path optimizasyonu
 
+**Implementation status:** `COMPLETED — 2026-08-25`
+
 ### Amaç
 
 Özellik eklemeden, M3U→protected SQLite→virtualized UI zincirinin ölçülmüş MVP bütçelerini geçmesini sağlamak.
@@ -788,6 +790,8 @@ Ortalamanın p95 stall/leak'i gizlemesi veya sentetik benchmark'a özel optimiza
 ### Demo çıktısı
 
 50k katalogda akıcı browse/search ile stage, memory ve UI budget'larının karşılaştırıldığı reproducible benchmark report.
+
+**Milestone disposition — `COMPLETED, 2026-08-25`:** Final kaynak checkpoint'i `912c25a661c08d2a693627f493fa1e2318061c7f` üzerinde Release x64 instrumentation-free 50k reference benchmark bütün absolute budget'ları geçti: parser p95 `65,1227 ms`, conservative normalize+protect+persist+index ve combined import p95 `1.350,5073 ms`, allocation maximum `146,3085 MiB`, peak working-set delta `3,0039 MiB`, cancellation p95 `15,6047 ms`, first/category/search/reopen p95 `9,4470 / 24,4343 / 26,5633 / 9,4185 ms`. Same-commit, same-declared-profile baseline/candidate regression sekiz p95 metriğinde `≤ +%10` eşiğini geçti; bu repeatability/gate-wiring kanıtıdır, cross-commit speedup değildir. [Run `32858287103`](https://github.com/serkankaracan/iptv-suite/actions/runs/32858287103) aynı committe `566/566 × 2` quality, signed package 50k UI/input/DWM/player-off working-set, DPAPI ve required gate zincirini geçti; instrumentation-off package input p95 `3,305 ms`, DWM proxy p95/max `15,625/31,250 ms`, drop proxy `%0`, realized `8` ve steady WS maximum `164.458.496 byte` idi. Ayrı opt-in ETW'de exact PID/marker penceresi `620` XAML Frame + `639` UpdateLayout event'i, Frame p95 `2,1269 ms`, maximum `9,6794 ms` ve `>200 ms` event `0` gösterdi. Runner identity yalnız caller-declared; cold cache flush, exact import sub-stage split, packaged logo-network/decode, gerçek provider/cihaz ve full-session stall yokluğu iddia edilmez. [M14 completion evidence](../quality/M14_COMPLETION_EVIDENCE.md).
 
 ## M15 — MSIX ve Microsoft Store readiness
 

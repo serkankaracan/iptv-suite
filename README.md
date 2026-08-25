@@ -1,6 +1,6 @@
 # IPTV Suite
 
-`IPTV Suite` henüz doğrulanmamış bir iç proje adıdır. **M1–M9 ve M11** tamamlanmış, **M10** `CONDITIONAL SUCCESS`, **M12** fiziksel cihaz matrisi nedeniyle `PARTIAL VERIFIED`, **M13** ise otomatik/deterministik MVP acceptance kapsamında tamamlanmıştır; sıradaki aktif dilim **M14 50.000+ benchmark ve hot-path optimizasyonu**dur. M13'ün signed production-package clean-EOF recovery, `≤1 s` cancel, `≥31 s` no-later-open ve exact session/request kanıtı [M13 completion evidence](docs/quality/M13_COMPLETION_EVIDENCE.md) belgesindedir. M10 relative-memory sapması ile fiziksel cihaz/Store/final-soak kapıları R15/M15/M16 kapsamında açık kalır.
+`IPTV Suite` henüz doğrulanmamış bir iç proje adıdır. **M1–M9, M11, M13 ve M14** tamamlanmış, **M10** `CONDITIONAL SUCCESS`, **M12** ise fiziksel cihaz matrisi nedeniyle `PARTIAL VERIFIED` durumundadır; sıradaki aktif dilim **M15 MSIX ve Microsoft Store readiness**tir. M14'ün 50k import/query bütçeleri, same-profile regression gate'i, signed package UI/working-set kabulü ve PID-bound XAML trace sonucu [M14 completion evidence](docs/quality/M14_COMPLETION_EVIDENCE.md) belgesindedir. M10 relative-memory sapması ile fiziksel cihaz/Store/legal/final-soak kapıları R15/M15/M16 kapsamında açık kalır.
 
 Aşağıdaki M4 comparative tarihçesindeki M8 `Proposed`/unimplemented ifadeleri tarihsel karar anını anlatır; güncel M8 `COMPLETED` ve ADR-003 `Accepted` kaydını geçersiz kılmaz.
 

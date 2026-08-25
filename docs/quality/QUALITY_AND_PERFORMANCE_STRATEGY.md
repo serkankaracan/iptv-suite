@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M2 quality infrastructure ile M3–M9 foundation/adapter/parser/persistence/query/UI gate'leri `COMPLETED`; M10 `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION`; M11 production player adapter `COMPLETED`; M12 playback UX/lifecycle `PARTIAL VERIFIED`
+**Durum:** M2 quality infrastructure ile M3–M9, M11, M13 ve M14 gate'leri `COMPLETED`; M10 `CONDITIONAL SUCCESS / ACCEPTED WITH KNOWN DEVIATION`; M12 playback UX/lifecycle `PARTIAL VERIFIED`; sıradaki milestone M15
 
 M8 completion kaydı, aşağıdaki tarihsel M4 comparative paragraflarındaki “M8 Proposed/uygulanmamış/açık” ifadelerini supersede eder. Güncel acceptance bağı [M8 completion evidence](M8_COMPLETION_EVIDENCE.md) belgesindedir.
 
@@ -310,10 +310,12 @@ Bunlar garanti değil, tasarım bütçesidir. İlk ölçüm bütçeyi geçerse s
 - En az 20 iteration; median, p90, p95, max ve coefficient of variation.
 - Outlier silinmez; açıklanır. Background process/power/thermal koşulu kaydedilir.
 - Baseline artifact saklanır; CI smoke threshold daha gevşek olabilir, M14 dedicated runner authoritative'dir.
-- Regression gate: aynı cihaz/baseline'a göre p95'te >%10 ve mutlak kullanıcı bütçesi ihlali review gerektirir.
+- Regression gate: aynı declared profile/baseline'a göre p95'te >%10 **veya** mutlak kullanıcı bütçesi ihlali fail/review gerektirir; profile etiketi fiziksel makine kimliğini bağımsız doğrulamaz.
 - ETW/.NET counters/profiler trace yalnız ihlali açıklamak için; benchmark sonucu instrumentation'sız tekrar doğrulanır.
-- Signed package smoke'un opt-in `-EmitM14TraceMarkers` modu, exact activation PID'li fixed WPR begin/end marker'larını yalnız input/search + iki scroll/proxy geçişi çevresinde üretir; player-off idle working-set örneklemesini marker aralığına katmaz. Normal CI bu switch'i kullanmaz. Marker üretimi trace PASS'i değildir: dışarıdan CPU + XAML activity/responsiveness kaydı alınır, WPA/ADK `10.1.26100.1+` ile exact PID ve marker aralığında frame/UI delay süreleri incelenir; authoritative bütçe koşusu instrumentation kapalı tekrar edilir [S127][S128].
+- Signed package smoke'un opt-in `-EmitM14TraceMarkers` modu, exact activation PID'li fixed WPR begin/end marker'larını yalnız input/search + iki scroll/proxy geçişi çevresinde üretir; player-off idle working-set örneklemesini marker aralığına katmaz. Normal CI bu switch'i kullanmaz. Marker üretimi trace PASS'i değildir: dışarıdan CPU + XAML activity/responsiveness kaydı alınır, WPA/ADK `10.1.26100.1+` ile exact PID ve marker aralığında frame/UI delay süreleri incelenir; authoritative bütçe koşusu instrumentation kapalı tekrar edilir [S133][S134].
 - Image görünür-pencere stresi; recycle edilen satırın per-row linked cancellation'ını, noncooperative dönüşün cache'e girmemesini, peak concurrency `4` ve `32 MiB / 128-entry` memory LRU sınırını deterministik doğrular. Durable disk image cache MVP'de kapalıdır; `200 MiB` yalnız gelecekte review ile açılabilecek hard üst sınırdır.
+
+`M14 COMPLETED — 2026-08-25`: Commit `912c25a661c08d2a693627f493fa1e2318061c7f` için instrumentation-free 50k reference benchmark parser `65,1227 ms`, conservative import upper bound `1.350,5073 ms`, allocation maximum `146,3085 MiB`, WS delta `3,0039 MiB`, cancellation `15,6047 ms` ve query/reopen `9,4470–26,5633 ms` p95 değerleriyle bütün mutlak bütçeleri geçti. Same-declared-profile baseline/candidate sekiz p95 regression kontrolünü geçti; aynı commit bağı repeatability kanıtıdır. Run `32858287103` normal trace-off package'ta input p95 `3,305 ms`, DWM proxy p95/max `15,625/31,250 ms`, drop proxy `%0`, realized `8` ve player-off WS maximum `164.458.496 byte` ile geçti. Ayrı PID-bound XAML marker penceresinde Frame p95 `2,1269 ms`, bütün XAML event'lerinde maximum `9,6794 ms` ve `>200 ms` event `0` idi. Runner profile fiziksel host kimliğini doğrulamaz; exact sub-stage split, OS-cache-flushed cold koşul ve packaged logo-network/decode acceptance iddia edilmez. [Exact kanıt](M14_COMPLETION_EVIDENCE.md).
 
 ## 6. Playback compatibility matrix
 
@@ -427,7 +429,7 @@ Hang watchdog process'i otomatik öldürmeden önce safe stack/metric snapshot a
 | M11 | `COMPLETED, 2026-08-24`: engine-neutral lifecycle/control, protected Remote-M3U ve Xtream JIT resolution, Windows-native adapter ve packaged WinUI playback tamamlandı. Local architecture `35/35`, unit `171/171`, integration `116/116`; run `32754184474` quality `354/354 ×2`, signed package playback/lifecycle, DPAPI ve required gate PASS. [Kanıt](M11_COMPLETION_EVIDENCE.md) |
 | M12 | `PARTIAL VERIFIED, 2026-08-25`: run `32764149667` playback UX zinciri PASS; run `32785306860` signed short-run resource guard'ını PASS etti; run `32792088083` production source-delete success yolunu PASS etti; run `32796910469` pending failure/restart admission block/manual retry/final cleanup zincirini PASS etti. Fiziksel DPI/multi-monitor/sleep/audio/Narrator `NOT RUN`. [Kanıt](M12_COMPLETION_EVIDENCE.md) |
 | M13 | `COMPLETED, 2026-08-25`: retry/reconnect deterministic fault suite ve signed production-package clean-EOF recovery/cancel acceptance PASS; cancel `22,087 ms ≤ 1000 ms`, no-later-open `31.009 ms`, request `60 → 60`; run `32839777516`, quality `553 × 2`. [Kanıt](M13_COMPLETION_EVIDENCE.md) |
-| M14 | Dedicated 50k budgets and traces |
+| M14 | `COMPLETED, 2026-08-25`: clean `912c25a` üzerinde 50k component absolute budgets ve 8/8 same-profile regression PASS; run `32858287103` quality `566 × 2` + signed package input/frame/realized/steady-WS PASS; PID-bound XAML marker penceresinde Frame p95 `2,1269 ms`, `>200 ms` event `0`. [Kanıt](M14_COMPLETION_EVIDENCE.md) |
 | M15 | WACK/private Store/install-update-uninstall/SBOM |
 | M16 | Full regression, 24h soak, secret/license/privacy gates |
 
@@ -445,11 +447,11 @@ Otomasyon şunların yerini tutmaz:
 
 ## 10. Açık kalemler
 
-- Per-record DPAPI bulk-locator layout'ı bütçeyi karşılamadı. Test-only immutable-container adayının clean-commit 5k–50k × 20 `Decision`ı tamamlandı ve comparative gate kapandı; container cross-file atomicity nedeniyle production `NO-GO`dur. M8'de tercih edilen aynı-SQLite-transaction tasarımının implementasyonu ile end-to-end/crash kanıtı açıktır.
+- Per-record DPAPI bulk-locator layout'ı bütçeyi karşılamadı. Test-only immutable-container comparative gate'i kapandı ve container cross-file atomicity nedeniyle production `NO-GO` kaldı. M8 same-SQLite-transaction implementation/crash acceptance'ı tamamlandı; M14 final 50k production-path benchmark'ı bütün mutlak bütçeleri geçti. M15 production identity/lifecycle ve M16 final hardening ayrı kalır.
 - Tier B hangi kombinasyonların marketing support matrix'ine gireceği M10 + hukuk sonucudur.
 - Engineering minimum M1'de Windows 11 build 10.0.26100/x64 olarak pinlendi; product support minimumu, ARM64 ve reference hardware M15'te kapanacak.
 - Player A/V sync için sayısal ölçüm düzeneği M10'da seçilecek; yalnız “gözle iyi” kabul değildir.
-- Signed package smoke M9'da Windows UI Automation ile basic catalog name/role, source→category→search Tab focus sırası, 50k status, ≤300 realized automation item ve input-call p95 kontrolünü fail-closed sınar. Ayrıca 240 PageUp/PageDown girdili kontrollü foreground scroll sırasında `DwmGetCompositionTimingInfo(NULL, ...)` ile sistem-compositor proxy frame p95/late-frame/max interval bütçelerini ölçer [S113]. Run `32443355378` bu zinciri hosted runner'da commit-bound `VERIFIED` yapmıştır. Bu proxy app-specific ETW/UI-thread attribution, Narrator exploratory acceptance, genel accessibility conformance veya cihaz matrisi değildir.
+- Signed package smoke, M9 UIA/focus/50k/virtualization kabulüne M14'te bounded input, DWM proxy, WM_NULL responsiveness proxy ve 30 saniyelik player-off steady working-set kontrolünü ekler. Run `32858287103` instrumentation-off hosted sonucu bu zinciri final M14 commit'inde geçmiştir. Ayrı opt-in trace exact PID/marker penceresinde XAML frame/layout event'lerini bağlar; DWM/WM_NULL proxy'lerini app-specific full-session ETW sonucu, Narrator/genel accessibility veya cihaz matrisi yapmaz.
 
 ## Kaynaklar
 

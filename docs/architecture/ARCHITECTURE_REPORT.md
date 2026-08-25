@@ -2,7 +2,9 @@
 
 **Tarih:** 2026-08-09
 
-**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi. Windows-native Tier A fallback M10→M11 geçişi için `Accepted with known deviation`; M11 production player/packaged playback `COMPLETED, 2026-08-24`; M12 playback UX/lifecycle `PARTIAL VERIFIED`; `%10` long-soak resource sapması ve kalan release matrix'i M15/M16'da açıktır.
+**Belge durumu:** Windows yönü ile M8 production SQLite transaction yerleşimi kabul edildi; M10 libVLC candidate'i license hard gate'inde reddedildi. Windows-native Tier A fallback `Accepted with known deviation`; M11 production player/packaged playback, M13 reconnect acceptance ve M14 50k performance acceptance `COMPLETED`; M12 playback UX/lifecycle `PARTIAL VERIFIED`; `%10` long-soak resource sapması ve kalan release matrix'i M15/M16'da açıktır.
+
+M14 completion kaydı; same-profile 50k regression, signed package input/frame/working-set ve PID-bound XAML marker kabulünü kapatır. Exact commit/run/artifact bağı [M14 completion evidence](../quality/M14_COMPLETION_EVIDENCE.md) belgesindedir.
 
 M11 completion kaydı, bu belgedeki tarihsel “production-package acceptance açık” ve “M11 başlamaz” ifadelerini supersede eder. Exact commit/run/artifact bağı [M11 completion evidence](../quality/M11_COMPLETION_EVIDENCE.md) belgesindedir.
 
