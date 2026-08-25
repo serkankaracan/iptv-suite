@@ -75,6 +75,12 @@ Windows PowerShell 5.1 release-readiness self-test'i, architecture `51/51` ve no
 
 Bu karar ARM64 desteği veya emulation acceptance'ı değildir. ARM64 ancak native build/package, gerçek ARM64 cihaz playback/lifecycle/resource ve Store zinciri ayrı acceptance ile geçerse yeniden açılır. Böyle bir kanıt olmadığı için Windows MVP'de doğrulanmamış ARM64 support sözü verilmez; `Arm64ReleaseDecisionPending` kapanır ve diğer blocker'lar etkilenmez.
 
+## Package-bound SBOM ilk checkpoint'i
+
+Package-bound SBOM akışı, exact pin'li `Microsoft.Sbom.DotNetTool 4.1.5` ile signed application MSIX ve exact Windows App Runtime `x64` dependency MSIX'ini tek release setine bağlayan companion SPDX `2.2` üretir. Nupkg, shim ve çalıştırılan extracted tool payload'ı birebir bağlıdır; iki MSIX imzası fail-closed doğrulanır. Resmî aracın dokunulmamış çıktısı önce doğrulanır; ardından iki MSIX'in identity/hash bağları, exact production component seti ve gerekli release-set ilişkileri repository-owned sıkı doğrulamayla zenginleştirilip yeniden denetlenir.
+
+Gerçek araçla iki sentetik MSIX kullanan local uçtan uca prova `PASS`, architecture suite `52/52 PASS` ve full quality gate `569/569 × 2 PASS` sonucundadır. Bu sonuç exact hosted signed package çıktısının üretildiğini veya artifact olarak kabul edildiğini kanıtlamaz; package-smoke lane'indeki hosted acceptance hâlâ beklemektedir. Bu nedenle `SbomPending` dahil aşağıdaki 15 blocker aynen açıktır. Companion SPDX; root `LICENSE`/`NOTICE`, redistribution kararı, CVE sonucu veya codec/IP hukuk incelemesini kapatmaz.
+
 ## Exact açık blocker seti
 
 Aşağıdaki 15 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur:
@@ -98,7 +104,7 @@ Aşağıdaki 15 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur
 ## Non-claims ve sonraki kabul sınırı
 
 - Known-pattern source taraması ile exact installed-package runtime audit'i geçti. Runtime sonucu yalnız exact hosted package gözlem penceresindeki deterministic pre/post eşitliğini ve watcher'ın mutation görmediğini kanıtlar; clean VM'de install/update/reset/uninstall matrisi ve bütün olası write yolları ayrıca geçmelidir.
-- Exact 23-package inventory teknik dependency drift guard'ıdır; SBOM, root `LICENSE`/`NOTICE`, asset provenance, CVE sonucu, redistribution kabulü veya codec/IP hukuk görüşü değildir.
+- Exact 23-package inventory teknik dependency drift guard'ıdır ve tek başına SBOM değildir. Local package-bound companion SPDX checkpoint'i de hosted signed-package acceptance, root `LICENSE`/`NOTICE`, asset provenance, CVE sonucu, redistribution kabulü veya codec/IP hukuk görüşü değildir.
 - Development identity ile mevcut disposable lifecycle kanıtları production identity/PFN, signing lineage, previous-package migration, repair veya private-flight sonucu değildir.
 - WACK, Partner Center private submission, privacy/support URL, Store listing/rating/reviewer notes ve geliştirici-owned reviewer service henüz kabul edilmemiştir.
 - ARM64 Windows MVP release setinde yoktur; deferred disposition gelecekte native ARM64 acceptance yapılmadan destek iddiasına dönüştürülemez.

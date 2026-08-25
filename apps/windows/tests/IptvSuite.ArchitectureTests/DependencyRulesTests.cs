@@ -16,6 +16,7 @@ public sealed class DependencyRulesTests
 
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string[] RequiredCapabilities = ["runFullTrust"];
+    private static readonly string[] SbomToolCommands = ["sbom-tool"];
     private static readonly int[] ProtectedCatalogSmokeRecordCounts = [1_000];
     private static readonly int[] ProtectedCatalogDecisionRecordCounts = [5_000, 10_000, 20_000, 50_000];
     private static readonly string[] SourceDeletionCapabilityOwners =
@@ -4314,6 +4315,165 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             contractCompleted && contractProcess.ExitCode == 0,
             $"M15 release-readiness contract failed.{Environment.NewLine}{contractOutput}{contractError}");
+    }
+
+    [TestMethod]
+    public void M15SignedReleaseSetProducesAPinnedFailClosedPackageSbom()
+    {
+        string helperPath = Path.Combine(RepositoryRoot, "eng", "WindowsPackageSbom.ps1");
+        string runnerPath = Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageSbom.ps1");
+        string configurationPath = Path.Combine(RepositoryRoot, "eng", "windows-package-sbom-tool.json");
+        string toolManifestPath = Path.Combine(RepositoryRoot, ".config", "dotnet-tools.json");
+        string selfTestPath = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ArchitectureTests",
+            "Test-WindowsPackageSbom.ps1");
+        string packageSmokePath = Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageSmoke.ps1");
+        string workflowPath = Path.Combine(RepositoryRoot, ".github", "workflows", "windows-quality.yml");
+
+        foreach (string requiredPath in new[]
+                 {
+                     helperPath,
+                     runnerPath,
+                     configurationPath,
+                     toolManifestPath,
+                     selfTestPath,
+                 })
+        {
+            Assert.IsTrue(File.Exists(requiredPath), $"The package SBOM contract file is missing: {requiredPath}");
+        }
+
+        using (JsonDocument toolManifest = JsonDocument.Parse(File.ReadAllText(toolManifestPath)))
+        {
+            JsonElement root = toolManifest.RootElement;
+            Assert.AreEqual(1, root.GetProperty("version").GetInt32());
+            Assert.IsTrue(root.GetProperty("isRoot").GetBoolean());
+            JsonElement tools = root.GetProperty("tools");
+            Assert.HasCount(1, tools.EnumerateObject().ToArray());
+            JsonElement tool = tools.GetProperty("microsoft.sbom.dotnettool");
+            Assert.AreEqual("4.1.5", tool.GetProperty("version").GetString());
+            CollectionAssert.AreEqual(
+                SbomToolCommands,
+                tool.GetProperty("commands").EnumerateArray().Select(value => value.GetString()).ToArray());
+        }
+
+        using (JsonDocument configuration = JsonDocument.Parse(File.ReadAllText(configurationPath)))
+        {
+            JsonElement root = configuration.RootElement;
+            Assert.AreEqual(1, root.GetProperty("schemaVersion").GetInt32());
+            Assert.AreEqual("microsoft.sbom.dotnettool", root.GetProperty("packageId").GetString());
+            Assert.AreEqual("4.1.5", root.GetProperty("version").GetString());
+            Assert.AreEqual("SPDX:2.2", root.GetProperty("manifestInfo").GetString());
+            Assert.AreEqual("apps/windows/src", root.GetProperty("componentPath").GetString());
+            Assert.AreEqual(
+                "00e1fb81c01f4e9ad7a9d00f365bb3f3776cde6fecdd15cc3adbbce1f83d14bb",
+                root.GetProperty("nupkgSha256").GetString());
+            Assert.AreEqual(
+                "c8e151612c03db7a5b8d680cd5ccdfd1d9676f36d43c33cec2a4397fb19ada55",
+                root.GetProperty("shimSha256").GetString());
+            Assert.HasCount(24, root.GetProperty("expectedComponents").EnumerateArray().ToArray());
+            Assert.AreEqual(256, root.GetProperty("limits").GetProperty("maximumPackages").GetInt32());
+            Assert.AreEqual(2048, root.GetProperty("limits").GetProperty("maximumRelationships").GetInt32());
+            Assert.AreEqual(300, root.GetProperty("limits").GetProperty("toolTimeoutSeconds").GetInt32());
+            Assert.AreEqual(2, root.GetProperty("parallelism").GetInt32());
+        }
+
+        string helper = File.ReadAllText(helperPath);
+        string runner = File.ReadAllText(runnerPath);
+        string packageSmoke = File.ReadAllText(packageSmokePath);
+        string workflow = File.ReadAllText(workflowPath).Replace("\r\n", "\n", StringComparison.Ordinal);
+        StringAssert.Contains(runner, ". (Join-Path $PSScriptRoot \"WindowsPackageSbom.ps1\")");
+        StringAssert.Contains(runner, "Assert-WindowsPackageSbomConfiguration");
+        StringAssert.Contains(runner, "ToolPackageHashMismatch");
+        StringAssert.Contains(runner, "ToolShimHashMismatch");
+        StringAssert.Contains(runner, "function Assert-ExactSbomToolPayload");
+        StringAssert.Contains(runner, "ToolPayloadMismatch");
+        int toolPayloadBinding = runner.IndexOf(
+            "    $toolPayload = Assert-ExactSbomToolPayload",
+            StringComparison.Ordinal);
+        int toolVersionProbe = runner.IndexOf(
+            "    $toolVersionResult = Invoke-ExactSbomTool",
+            StringComparison.Ordinal);
+        Assert.IsTrue(toolPayloadBinding >= 0 && toolVersionProbe > toolPayloadBinding);
+        StringAssert.Contains(runner, "'-P', [string]$configuration.parallelism");
+        StringAssert.Contains(runner, "OfficialValidationPassed = $true");
+        StringAssert.Contains(runner, "SbomPending = $true");
+        StringAssert.Contains(helper, "ForbiddenComponentDetected");
+        StringAssert.Contains(helper, "SpdxIdCollision");
+
+        int payloadGate = packageSmoke.IndexOf(
+            "    Assert-ProductionPackagePayload -PackagePath $packages[0].FullName",
+            StringComparison.Ordinal);
+        int sbomInvocation = packageSmoke.IndexOf(
+            "    $packageSbomResults = @(& (Join-Path $PSScriptRoot \"Invoke-WindowsPackageSbom.ps1\")",
+            StringComparison.Ordinal);
+        int firstMutationAfterSbom = packageSmoke.IndexOf(
+            "    Remove-ExactDevelopmentPackage",
+            sbomInvocation,
+            StringComparison.Ordinal);
+        Assert.IsTrue(payloadGate >= 0 && sbomInvocation > payloadGate && firstMutationAfterSbom > sbomInvocation);
+        StringAssert.Contains(packageSmoke, "PackageSbomOfficialValidationPassed");
+        StringAssert.Contains(packageSmoke, "PackageSbomRuntimePackageSha256");
+        StringAssert.Contains(packageSmoke, "$signature.Status.ToString() -cne \"Valid\"");
+        StringAssert.Contains(packageSmoke, "$runtimeDependencySignature.SignerCertificate.Subject -cne $expectedRuntimeDependencyPublisher");
+        StringAssert.Contains(packageSmoke, "$runtimeDependencySignature.Status.ToString() -cne \"Valid\"");
+        StringAssert.Contains(packageSmoke, "RuntimeDependencySignatureStatus = $runtimeDependencySignature.Status.ToString()");
+        Assert.IsFalse(
+            packageSmoke.Contains(
+                "$packageOutput\\package-sbom.spdx.json",
+                StringComparison.Ordinal),
+            "The companion SBOM must remain outside the signed package output to avoid a hash cycle.");
+
+        int toolInstall = workflow.IndexOf("      - name: Install exact package SBOM tool\n", StringComparison.Ordinal);
+        int packageBuild = workflow.IndexOf(
+            "      - name: Build, scan, install, launch, and remove signed MSIX\n",
+            StringComparison.Ordinal);
+        Assert.IsTrue(toolInstall >= 0 && packageBuild > toolInstall);
+        StringAssert.Contains(workflow, "dotnet tool install Microsoft.Sbom.DotNetTool\n");
+        StringAssert.Contains(workflow, "--version 4.1.5\n");
+        StringAssert.Contains(workflow, "--tool-path .\\.artifacts\\windows-package-sbom-tool\n");
+        StringAssert.Contains(workflow, ".artifacts/msix-smoke/package-sbom.spdx.json");
+        StringAssert.Contains(workflow, ".artifacts/msix-smoke/package-sbom-summary.json");
+
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(File.Exists(windowsPowerShell), "Windows PowerShell 5.1 is required for the package SBOM contract.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(selfTestPath);
+
+        using Process contractProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The package SBOM self-test could not start.");
+        bool contractCompleted = contractProcess.WaitForExit(120_000);
+        if (!contractCompleted)
+        {
+            contractProcess.Kill(entireProcessTree: true);
+            contractProcess.WaitForExit();
+        }
+
+        string contractOutput = contractProcess.StandardOutput.ReadToEnd();
+        string contractError = contractProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            contractCompleted && contractProcess.ExitCode == 0,
+            $"Package SBOM contract failed.{Environment.NewLine}{contractOutput}{contractError}");
     }
 
     [TestMethod]

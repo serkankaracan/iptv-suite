@@ -715,6 +715,8 @@ $playbackPublicCertificatePath = Join-Path $playbackControlDirectory "loopback.c
 $publicCertificatePath = Join-Path $artifactRoot "$runId.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
 $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
+$packageSbomPath = Join-Path $artifactRoot "package-sbom.spdx.json"
+$packageSbomSummaryPath = Join-Path $artifactRoot "package-sbom-summary.json"
 
 $certificate = $null
 $installedPackage = $null
@@ -733,6 +735,7 @@ $environmentBackup = @{}
 $primaryFailure = $null
 $successEvidence = $null
 $successMessage = $null
+$packageSbomResult = $null
 $protectedStoreDirectoryInitialized = $false
 $catalogUiaContractVerified = $false
 $catalogKeyboardFocusOrderVerified = $false
@@ -2815,7 +2818,11 @@ function Wait-PackagedDeletedSourceState {
 }
 
 try {
-    foreach ($staleEvidencePath in @($evidencePath, $failureEvidencePath)) {
+    foreach ($staleEvidencePath in @(
+        $evidencePath,
+        $failureEvidencePath,
+        $packageSbomPath,
+        $packageSbomSummaryPath)) {
         if (Test-Path -LiteralPath $staleEvidencePath) {
             Remove-Item -LiteralPath $staleEvidencePath -Force -ErrorAction Stop
         }
@@ -2923,16 +2930,37 @@ try {
     }
 
     $signature = Get-AuthenticodeSignature -FilePath $packages[0].FullName
-    if ($null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
-        throw "The generated MSIX signer does not match the ephemeral certificate."
+    if ($null -eq $signature.SignerCertificate -or
+        $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint -or
+        $signature.Status.ToString() -cne "Valid") {
+        throw "The generated MSIX signature validation failed."
     }
 
-    if ($signature.Status -in @("HashMismatch", "NotSigned")) {
-        throw "The generated MSIX signature failed integrity validation: $($signature.Status)."
+    $runtimeDependencySignature = Get-AuthenticodeSignature -FilePath $runtimeDependencies[0].FullName
+    if ($null -eq $runtimeDependencySignature.SignerCertificate -or
+        $runtimeDependencySignature.SignerCertificate.Subject -cne $expectedRuntimeDependencyPublisher -or
+        $runtimeDependencySignature.Status.ToString() -cne "Valid") {
+        throw "The Windows App Runtime dependency signature validation failed."
     }
 
     $packageSha256 = (Get-FileHash -LiteralPath $packages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-ProductionPackagePayload -PackagePath $packages[0].FullName
+
+    $packageSbomResults = @(& (Join-Path $PSScriptRoot "Invoke-WindowsPackageSbom.ps1") `
+        -PackagePath $packages[0].FullName `
+        -RuntimePackagePath $runtimeDependencies[0].FullName `
+        -DotNetPath $DotNetPath `
+        -RepositoryRoot $repositoryRoot)
+    if ($packageSbomResults.Count -ne 1) {
+        throw "The package-bound SBOM runner returned an invalid result."
+    }
+    $packageSbomResult = $packageSbomResults[0]
+    if ($packageSbomResult.Result -cne "Pass" -or
+        $packageSbomResult.OfficialValidationPassed -ne $true -or
+        $packageSbomResult.StrictValidationPassed -ne $true -or
+        $packageSbomResult.ApplicationPackageSha256 -cne $packageSha256) {
+        throw "The package-bound SBOM result is invalid."
+    }
 
     $runtimeDependencyPackagesBefore = @(Get-RuntimeDependencyPackages)
     $compatibleRuntimeDependencyRegistered = @($runtimeDependencyPackagesBefore |
@@ -5130,8 +5158,24 @@ try {
         Architecture      = "x64"
         Capabilities      = @("runFullTrust")
         SignatureStatus   = $signature.Status.ToString()
+        RuntimeDependencySignatureStatus = $runtimeDependencySignature.Status.ToString()
         WindowsAppRuntimeDisposition = $windowsAppRuntimeDisposition
         PayloadLeakGate   = $true
+        PackageSbomSchemaVersion = $packageSbomResult.SchemaVersion
+        PackageSbomFormat = $packageSbomResult.SbomFormat
+        PackageSbomFile = $packageSbomResult.SbomFile
+        PackageSbomSha256 = $packageSbomResult.SbomSha256
+        PackageSbomToolVersion = $packageSbomResult.ToolVersion
+        PackageSbomOfficialValidationPassed = $packageSbomResult.OfficialValidationPassed
+        PackageSbomStrictValidationPassed = $packageSbomResult.StrictValidationPassed
+        PackageSbomProductionInputSetSha256 = $packageSbomResult.ProductionInputSetSha256
+        PackageSbomApplicationPackageSha256 = $packageSbomResult.ApplicationPackageSha256
+        PackageSbomRuntimePackageSha256 = $packageSbomResult.RuntimePackageSha256
+        PackageSbomFileCount = $packageSbomResult.FileCount
+        PackageSbomComponentCount = $packageSbomResult.ComponentCount
+        PackageSbomPackageCount = $packageSbomResult.PackageCount
+        PackageSbomRelationshipCount = $packageSbomResult.RelationshipCount
+        PackageSbomBlockerDisposition = $packageSbomResult.BlockerDisposition
         PackageInstallRootAuditSchemaVersion = $packageInstallRootAuditResult.SchemaVersion
         PackageInstallRootAuditScope = $packageInstallRootAuditResult.Scope
         PackageInstallRootAuditExcludedEntryCount =
