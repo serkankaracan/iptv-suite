@@ -40,6 +40,61 @@ public sealed class ChannelLogoCacheTests
     }
 
     [TestMethod]
+    public async Task CacheHitMakesTheEntryMostRecentlyUsedBeforeCountEviction()
+    {
+        var provider = new CountingProvider();
+        using var cache = new ChannelLogoCache(provider);
+        SourceId sourceId = SourceId.Generate();
+        ChannelId touchedChannel = ChannelId.Generate();
+        ChannelId leastRecentlyUsedChannel = ChannelId.Generate();
+        ChannelLogoImage? touchedImage = await cache.GetAsync(sourceId, touchedChannel);
+        ChannelLogoImage? leastRecentlyUsedImage = await cache.GetAsync(sourceId, leastRecentlyUsedChannel);
+        for (int index = 2; index < ChannelLogoCache.MaximumEntries; index++)
+        {
+            await cache.GetAsync(sourceId, ChannelId.Generate());
+        }
+
+        Assert.AreSame(touchedImage, await cache.GetAsync(sourceId, touchedChannel));
+        await cache.GetAsync(sourceId, ChannelId.Generate());
+        int callsAfterOverflow = provider.Calls;
+
+        Assert.AreSame(touchedImage, await cache.GetAsync(sourceId, touchedChannel));
+        Assert.AreNotSame(leastRecentlyUsedImage, await cache.GetAsync(sourceId, leastRecentlyUsedChannel));
+        Assert.AreEqual(callsAfterOverflow + 1, provider.Calls);
+        Assert.AreEqual(ChannelLogoCache.MaximumEntries, ReadEntryCount(cache));
+    }
+
+    [TestMethod]
+    public async Task CacheEvictsLeastRecentlyUsedEntriesToStayWithinTheByteBudget()
+    {
+        SourceId sourceId = SourceId.Generate();
+        ChannelId twentyMebibyteChannel = ChannelId.Generate();
+        ChannelId twelveMebibyteChannel = ChannelId.Generate();
+        ChannelId oneByteChannel = ChannelId.Generate();
+        var provider = new SizedProvider(new Dictionary<ChannelId, int>
+        {
+            [twentyMebibyteChannel] = 20 * 1024 * 1024,
+            [twelveMebibyteChannel] = 12 * 1024 * 1024,
+            [oneByteChannel] = 1,
+        });
+        using var cache = new ChannelLogoCache(provider);
+
+        await cache.GetAsync(sourceId, twentyMebibyteChannel);
+        ChannelLogoImage? retained = await cache.GetAsync(sourceId, twelveMebibyteChannel);
+        Assert.AreEqual(ChannelLogoCache.MaximumCachedPayloadBytes, ReadCachedPayloadBytes(cache));
+
+        await cache.GetAsync(sourceId, oneByteChannel);
+        Assert.AreSame(retained, await cache.GetAsync(sourceId, twelveMebibyteChannel));
+        await cache.GetAsync(sourceId, twentyMebibyteChannel);
+
+        Assert.AreEqual(2, provider.GetCalls(twentyMebibyteChannel));
+        Assert.AreEqual(1, provider.GetCalls(twelveMebibyteChannel));
+        Assert.AreEqual(1, provider.GetCalls(oneByteChannel));
+        Assert.AreEqual(ChannelLogoCache.MaximumCachedPayloadBytes, ReadCachedPayloadBytes(cache));
+        Assert.AreEqual(2, ReadEntryCount(cache));
+    }
+
+    [TestMethod]
     public async Task SourceEvictionRemovesOnlyTheExactSourceEntries()
     {
         var provider = new CountingProvider();
@@ -84,7 +139,7 @@ public sealed class ChannelLogoCacheTests
     }
 
     [TestMethod]
-    public async Task ConcurrentSameKeyLoadsPreserveTheBoundedUniqueFifo()
+    public async Task ConcurrentSameKeyLoadsPreserveTheBoundedUniqueLru()
     {
         SourceId sourceId = SourceId.Generate();
         ChannelId repeatedChannel = ChannelId.Generate();
@@ -123,6 +178,66 @@ public sealed class ChannelLogoCacheTests
     }
 
     [TestMethod]
+    public async Task ProviderLoadsNeverExceedTheConcurrencyLimit()
+    {
+        var provider = new ConcurrencyTrackingProvider();
+        using var cache = new ChannelLogoCache(provider);
+        SourceId sourceId = SourceId.Generate();
+        Task<ChannelLogoImage?>[] loads = Enumerable.Range(0, 12)
+            .Select(_ => cache.GetAsync(sourceId, ChannelId.Generate()).AsTask())
+            .ToArray();
+
+        try
+        {
+            await provider.CapacityReached.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.AreEqual(4, provider.Calls);
+            Assert.AreEqual(4, provider.PeakConcurrency);
+        }
+        finally
+        {
+            provider.Release.TrySetResult(true);
+        }
+
+        ChannelLogoImage?[] results = await Task.WhenAll(loads).WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.IsTrue(results.All(image => image is not null));
+        Assert.AreEqual(12, provider.Calls);
+        Assert.AreEqual(4, provider.PeakConcurrency);
+    }
+
+    [TestMethod]
+    public async Task CancellationRemovesAQueuedFifthLoadWithoutCallingTheProvider()
+    {
+        var provider = new ConcurrencyTrackingProvider();
+        using var cache = new ChannelLogoCache(provider);
+        SourceId sourceId = SourceId.Generate();
+        Task<ChannelLogoImage?>[] occupyingLoads = Enumerable.Range(0, 4)
+            .Select(_ => cache.GetAsync(sourceId, ChannelId.Generate()).AsTask())
+            .ToArray();
+        await provider.CapacityReached.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        using var cancellation = new CancellationTokenSource();
+        Task<ChannelLogoImage?> queuedLoad = cache.GetAsync(
+            sourceId,
+            ChannelId.Generate(),
+            cancellation.Token).AsTask();
+
+        try
+        {
+            cancellation.Cancel();
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
+                await queuedLoad);
+            Assert.AreEqual(4, provider.Calls);
+            Assert.AreEqual(4, provider.PeakConcurrency);
+        }
+        finally
+        {
+            provider.Release.TrySetResult(true);
+        }
+
+        await Task.WhenAll(occupyingLoads).WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.AreEqual(4, provider.Calls);
+    }
+
+    [TestMethod]
     public async Task DisposeDefersSemaphoreCleanupAndRejectsReinsertion()
     {
         var provider = new BlockingProvider();
@@ -150,6 +265,12 @@ public sealed class ChannelLogoCacheTests
             .GetValue(cache)!;
         return (int)entries.GetType().GetProperty("Count")!.GetValue(entries)!;
     }
+
+    private static long ReadCachedPayloadBytes(ChannelLogoCache cache) =>
+        (long)typeof(ChannelLogoCache).GetField(
+            "_cachedPayloadBytes",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(cache)!;
 
     private sealed class CountingProvider : IChannelLogoProvider
     {
@@ -188,6 +309,83 @@ public sealed class ChannelLogoCacheTests
             }
 
             return new ChannelLogoImage(new byte[] { (byte)call }, ChannelLogoFormat.Png);
+        }
+    }
+
+    private sealed class SizedProvider(IReadOnlyDictionary<ChannelId, int> payloadBytes)
+        : IChannelLogoProvider
+    {
+        private readonly Dictionary<ChannelId, int> _calls = [];
+        private readonly IReadOnlyDictionary<ChannelId, int> _payloadBytes = payloadBytes;
+
+        internal int GetCalls(ChannelId channelId) => _calls.GetValueOrDefault(channelId);
+
+        public ValueTask<ChannelLogoImage?> LoadAsync(
+            SourceId sourceId,
+            ChannelId channelId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _calls[channelId] = checked(GetCalls(channelId) + 1);
+            return ValueTask.FromResult<ChannelLogoImage?>(new ChannelLogoImage(
+                new byte[_payloadBytes[channelId]],
+                ChannelLogoFormat.Png));
+        }
+    }
+
+    private sealed class ConcurrencyTrackingProvider : IChannelLogoProvider
+    {
+        private int _active;
+        private int _calls;
+        private int _peakConcurrency;
+
+        internal int Calls => Volatile.Read(ref _calls);
+
+        internal int PeakConcurrency => Volatile.Read(ref _peakConcurrency);
+
+        internal TaskCompletionSource<bool> CapacityReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal TaskCompletionSource<bool> Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask<ChannelLogoImage?> LoadAsync(
+            SourceId sourceId,
+            ChannelId channelId,
+            CancellationToken cancellationToken = default)
+        {
+            int calls = Interlocked.Increment(ref _calls);
+            int active = Interlocked.Increment(ref _active);
+            UpdatePeak(active);
+            if (calls == 4)
+            {
+                CapacityReached.TrySetResult(true);
+            }
+
+            try
+            {
+                await Release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                return new ChannelLogoImage(new byte[] { (byte)calls }, ChannelLogoFormat.Png);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _active);
+            }
+        }
+
+        private void UpdatePeak(int active)
+        {
+            int observed = Volatile.Read(ref _peakConcurrency);
+            while (active > observed)
+            {
+                int previous = Interlocked.CompareExchange(ref _peakConcurrency, active, observed);
+                if (previous == observed)
+                {
+                    return;
+                }
+
+                observed = previous;
+            }
         }
     }
 

@@ -752,6 +752,27 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "CatalogDwmFrameMaximumMilliseconds =");
         StringAssert.Contains(packageSmoke, "CatalogDwmDroppedFramePercent =");
         StringAssert.Contains(packageSmoke, "CatalogDwmFrameIntervalCount =");
+        StringAssert.Contains(packageSmoke, "SendMessageTimeoutW");
+        StringAssert.Contains(packageSmoke, "WindowMessageNull = 0x0000");
+        StringAssert.Contains(packageSmoke, "ExactUiThreadTimeoutMilliseconds = 200");
+        StringAssert.Contains(packageSmoke, "callError != 0 && callError != ErrorTimeout");
+        StringAssert.Contains(packageSmoke, "$catalogUiThreadResponsivenessProxyTimeoutCount -ne 0");
+        StringAssert.Contains(packageSmoke, "$catalogUiThreadResponsivenessProxyOverBudgetCount -ne 0");
+        StringAssert.Contains(packageSmoke, "$catalogUiThreadResponsivenessProxySampleLimit = 64");
+        StringAssert.Contains(packageSmoke, "$rapidScrollRealizedContainerCount -gt 300");
+        StringAssert.Contains(packageSmoke, "$catalogPlayerOffSteadyWorkingSetBudgetBytes = [long](350MB)");
+        StringAssert.Contains(packageSmoke, "$catalogPlayerOffSteadyWorkingSetSampleIntervalMilliseconds = 500");
+        StringAssert.Contains(packageSmoke, "$catalogPlayerOffSteadyWorkingSetSampleLimit = 60");
+        StringAssert.Contains(packageSmoke, "$catalogPlayerOffSteadyWorkingSetMaximumBytes -gt");
+        StringAssert.Contains(packageSmoke, "CatalogPlayerOffSteadyWorkingSetRawSamplesBytes =");
+        Assert.IsTrue(
+            packageSmoke.IndexOf(
+                "$frameResult = [IptvSuite.PackageSmoke.DwmFrameSampler]::Stop()",
+                StringComparison.Ordinal) <
+            packageSmoke.IndexOf(
+                "[IptvSuite.PackageSmoke.WindowInspector]::ProbeUiThreadResponsiveness(",
+                StringComparison.Ordinal),
+            "The app UI-thread proxy must not perturb the authoritative DWM frame pass.");
         StringAssert.Contains(packageSmoke, "Catalog50kSeedVerified = $catalog50kSeedVerified");
         StringAssert.Contains(packageSmoke, "CatalogRealizedContainerBoundVerified = $catalogRealizedContainerBoundVerified");
         Assert.IsFalse(
@@ -2188,6 +2209,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(wrapper, "MSBUILDDISABLENODEREUSE");
         StringAssert.Contains(wrapper, "IPTVSUITE_M14_CATALOG_BENCHMARK");
         StringAssert.Contains(wrapper, "IPTVSUITE_M14_CATALOG_VALIDATED_SDK");
+        StringAssert.Contains(wrapper, "[switch]$ReferenceMode");
+        StringAssert.Contains(wrapper, "exact -$($declaration.Parameter) $($declaration.Expected) declaration");
+        StringAssert.Contains(wrapper, "IPTVSUITE_M14_CATALOG_REFERENCE_MODE");
+        StringAssert.Contains(wrapper, "M14 catalog benchmark $mode mode passed");
         StringAssert.Contains(wrapper, "M14CatalogPerformanceBenchmarkTests.MeasureM14CatalogBenchmarkMatrix");
         StringAssert.Contains(wrapper, "$temporaryEvidencePath = $evidencePath + '.tmp'");
         StringAssert.Contains(wrapper, "evidence was not published atomically");
@@ -2196,6 +2221,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(wrapper, "retained a legacy transient corpus manifest");
 
         StringAssert.Contains(benchmarkTest, "private const int Iterations = 20;");
+        StringAssert.Contains(benchmarkTest, "private const int MinimumAuthoritativeWarmIterations = 20;");
+        StringAssert.Contains(benchmarkTest, "private const int ColdObservationsPerStage = 1;");
+        StringAssert.Contains(benchmarkTest, "NormalizeProtectPersistIndexBudgetMilliseconds = 3_000");
         StringAssert.Contains(benchmarkTest, "[100, 5_000, 10_000, 20_000, 50_000]");
         StringAssert.Contains(benchmarkTest, "100_000");
         StringAssert.Contains(benchmarkTest, "rawSamples");
@@ -2215,6 +2243,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(benchmarkTest, "platform = \"x64\"");
         StringAssert.Contains(benchmarkTest, "result = budgetEvaluation.AllPassed ? \"passed\" : \"failed\"");
         StringAssert.Contains(benchmarkTest, "const bool referenceEligible = false;");
+        StringAssert.Contains(benchmarkTest, "referenceModeRequested");
+        StringAssert.Contains(benchmarkTest, "operatingSystemCacheFlushPerformed = false");
+        StringAssert.Contains(benchmarkTest, "normalizeProtectPersistIndexConservativeUpperBoundP95");
+        StringAssert.Contains(benchmarkTest, "no exact stage split is measured or claimed");
         StringAssert.Contains(benchmarkTest, "Assert.IsFalse(gate.PeakWorkingSet.SampleCapacityReached);");
         StringAssert.Contains(benchmarkTest, "condition declaration is outside the closed vocabulary");
         StringAssert.Contains(benchmarkTest, "retained = false");
@@ -2243,6 +2275,19 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(importSink, "CryptographicOperations.ZeroMemory(_nonceBuffer);");
         StringAssert.Contains(importSink, "CryptographicOperations.ZeroMemory(_authenticationTagBuffer);");
         StringAssert.Contains(importSink, "CryptographicOperations.ZeroMemory(_aadBuffer);");
+
+        string logoCache = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "ChannelLogoContracts.cs"));
+        StringAssert.Contains(logoCache, "public const int MaximumCachedPayloadBytes = 32 * 1024 * 1024;");
+        StringAssert.Contains(logoCache, "private const int MaximumConcurrentLoads = 4;");
+        StringAssert.Contains(logoCache, "LinkedList<(SourceId SourceId, ChannelId ChannelId)>");
+        StringAssert.Contains(logoCache, "_cachedPayloadBytes + payloadBytes > MaximumCachedPayloadBytes");
+        StringAssert.Contains(logoCache, "GetSourceGeneration(sourceId) != sourceGeneration");
     }
 
     [TestMethod]

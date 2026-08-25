@@ -22,13 +22,15 @@ public interface IChannelLogoProvider
 public sealed class ChannelLogoCache : IDisposable
 {
     public const int MaximumEntries = 128;
+    public const int MaximumCachedPayloadBytes = 32 * 1024 * 1024;
     private const int MaximumConcurrentLoads = 4;
     private readonly IChannelLogoProvider _provider;
     private readonly SemaphoreSlim _concurrency = new(MaximumConcurrentLoads);
     private readonly object _sync = new();
-    private readonly Dictionary<(SourceId SourceId, ChannelId ChannelId), ChannelLogoImage> _entries = [];
+    private readonly Dictionary<(SourceId SourceId, ChannelId ChannelId), CacheEntry> _entries = [];
     private readonly Dictionary<SourceId, long> _sourceGenerations = [];
-    private readonly Queue<(SourceId SourceId, ChannelId ChannelId)> _insertionOrder = [];
+    private readonly LinkedList<(SourceId SourceId, ChannelId ChannelId)> _recency = [];
+    private long _cachedPayloadBytes;
     private int _activeOperations;
     private bool _disposed;
     private bool _semaphoreDisposed;
@@ -41,11 +43,13 @@ public sealed class ChannelLogoCache : IDisposable
         ChannelId channelId,
         CancellationToken cancellationToken = default)
     {
+        (SourceId SourceId, ChannelId ChannelId) key = (sourceId, channelId);
         long sourceGeneration;
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_entries.TryGetValue((sourceId, channelId), out ChannelLogoImage? cached)) return cached;
+            ChannelLogoImage? cached = GetCached(key);
+            if (cached is not null) return cached;
             sourceGeneration = GetSourceGeneration(sourceId);
             _activeOperations = checked(_activeOperations + 1);
         }
@@ -58,7 +62,8 @@ public sealed class ChannelLogoCache : IDisposable
             lock (_sync)
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
-                if (_entries.TryGetValue((sourceId, channelId), out ChannelLogoImage? cached)) return cached;
+                ChannelLogoImage? cached = GetCached(key);
+                if (cached is not null) return cached;
             }
 
             ChannelLogoImage? loaded = await _provider.LoadAsync(sourceId, channelId, cancellationToken)
@@ -71,21 +76,28 @@ public sealed class ChannelLogoCache : IDisposable
                     return loaded;
                 }
 
-                if (_entries.TryGetValue((sourceId, channelId), out ChannelLogoImage? cached))
+                ChannelLogoImage? cached = GetCached(key);
+                if (cached is not null)
                 {
                     return cached;
                 }
 
-                while (_entries.Count >= MaximumEntries)
+                int payloadBytes = loaded.Content.Length;
+                if (payloadBytes > MaximumCachedPayloadBytes)
                 {
-                    if (_entries.Remove(_insertionOrder.Dequeue()))
-                    {
-                        break;
-                    }
+                    return loaded;
                 }
 
-                _entries.Add((sourceId, channelId), loaded);
-                _insertionOrder.Enqueue((sourceId, channelId));
+                while (_entries.Count >= MaximumEntries ||
+                       _cachedPayloadBytes + payloadBytes > MaximumCachedPayloadBytes)
+                {
+                    RemoveEntry(_recency.First!.Value);
+                }
+
+                LinkedListNode<(SourceId SourceId, ChannelId ChannelId)> recencyNode =
+                    _recency.AddLast(key);
+                _entries.Add(key, new CacheEntry(loaded, recencyNode, payloadBytes));
+                _cachedPayloadBytes += payloadBytes;
             }
 
             return loaded;
@@ -122,17 +134,7 @@ public sealed class ChannelLogoCache : IDisposable
                          .Where(key => key.SourceId == sourceId)
                          .ToArray())
             {
-                _entries.Remove(key);
-            }
-
-            int queued = _insertionOrder.Count;
-            for (int index = 0; index < queued; index++)
-            {
-                (SourceId SourceId, ChannelId ChannelId) key = _insertionOrder.Dequeue();
-                if (key.SourceId != sourceId)
-                {
-                    _insertionOrder.Enqueue(key);
-                }
+                RemoveEntry(key);
             }
         }
     }
@@ -150,7 +152,8 @@ public sealed class ChannelLogoCache : IDisposable
             _disposed = true;
             _entries.Clear();
             _sourceGenerations.Clear();
-            _insertionOrder.Clear();
+            _recency.Clear();
+            _cachedPayloadBytes = 0;
             if (_activeOperations == 0)
             {
                 _semaphoreDisposed = true;
@@ -168,6 +171,29 @@ public sealed class ChannelLogoCache : IDisposable
 
     private long GetSourceGeneration(SourceId sourceId) =>
         _sourceGenerations.GetValueOrDefault(sourceId);
+
+    private ChannelLogoImage? GetCached((SourceId SourceId, ChannelId ChannelId) key)
+    {
+        if (!_entries.TryGetValue(key, out CacheEntry? entry))
+        {
+            return null;
+        }
+
+        _recency.Remove(entry.RecencyNode);
+        _recency.AddLast(entry.RecencyNode);
+        return entry.Image;
+    }
+
+    private void RemoveEntry((SourceId SourceId, ChannelId ChannelId) key)
+    {
+        if (!_entries.Remove(key, out CacheEntry? entry))
+        {
+            return;
+        }
+
+        _recency.Remove(entry.RecencyNode);
+        _cachedPayloadBytes -= entry.PayloadBytes;
+    }
 
     private void EndOperation()
     {
@@ -187,4 +213,9 @@ public sealed class ChannelLogoCache : IDisposable
             _concurrency.Dispose();
         }
     }
+
+    private sealed record CacheEntry(
+        ChannelLogoImage Image,
+        LinkedListNode<(SourceId SourceId, ChannelId ChannelId)> RecencyNode,
+        int PayloadBytes);
 }

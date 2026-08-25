@@ -2,7 +2,12 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$DotNetPath,
-    [switch]$AllowBenchmark
+    [switch]$AllowBenchmark,
+    [switch]$ReferenceMode,
+    [string]$CacheCondition,
+    [string]$PowerCondition,
+    [string]$ThermalCondition,
+    [string]$BackgroundCondition
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,6 +15,24 @@ Set-StrictMode -Version Latest
 
 if (-not $AllowBenchmark) {
     throw 'M14 catalog benchmark requires explicit -AllowBenchmark acknowledgement.'
+}
+
+$referenceDeclarations = @(
+    [pscustomobject]@{ Parameter = 'CacheCondition'; Value = $CacheCondition; Expected = 'Warm' },
+    [pscustomobject]@{ Parameter = 'PowerCondition'; Value = $PowerCondition; Expected = 'AcStable' },
+    [pscustomobject]@{ Parameter = 'ThermalCondition'; Value = $ThermalCondition; Expected = 'Nominal' },
+    [pscustomobject]@{ Parameter = 'BackgroundCondition'; Value = $BackgroundCondition; Expected = 'Controlled' }
+)
+foreach ($declaration in $referenceDeclarations) {
+    $isBound = $PSBoundParameters.ContainsKey([string]$declaration.Parameter)
+    if ($ReferenceMode -and
+        (-not $isBound -or [string]$declaration.Value -cne [string]$declaration.Expected)) {
+        throw "M14 reference mode requires exact -$($declaration.Parameter) $($declaration.Expected) declaration."
+    }
+
+    if (-not $ReferenceMode -and $isBound) {
+        throw "-$($declaration.Parameter) is valid only with explicit -ReferenceMode."
+    }
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
@@ -75,7 +98,12 @@ $environmentNames = @(
     'IPTVSUITE_M14_CATALOG_BENCHMARK',
     'IPTVSUITE_M14_CATALOG_EVIDENCE_ROOT',
     'IPTVSUITE_M14_CATALOG_COMMIT',
-    'IPTVSUITE_M14_CATALOG_VALIDATED_SDK'
+    'IPTVSUITE_M14_CATALOG_VALIDATED_SDK',
+    'IPTVSUITE_M14_CATALOG_REFERENCE_MODE',
+    'IPTVSUITE_M14_CATALOG_CACHE_CONDITION',
+    'IPTVSUITE_M14_CATALOG_POWER_CONDITION',
+    'IPTVSUITE_M14_CATALOG_THERMAL_CONDITION',
+    'IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION'
 )
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) {
@@ -89,6 +117,18 @@ try {
     $env:IPTVSUITE_M14_CATALOG_EVIDENCE_ROOT = [System.IO.Path]::GetFullPath($evidenceRoot)
     $env:IPTVSUITE_M14_CATALOG_COMMIT = $initialHead
     $env:IPTVSUITE_M14_CATALOG_VALIDATED_SDK = $expectedSdk
+    $env:IPTVSUITE_M14_CATALOG_REFERENCE_MODE = '0'
+    [Environment]::SetEnvironmentVariable('IPTVSUITE_M14_CATALOG_CACHE_CONDITION', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('IPTVSUITE_M14_CATALOG_POWER_CONDITION', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('IPTVSUITE_M14_CATALOG_THERMAL_CONDITION', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION', $null, 'Process')
+    if ($ReferenceMode) {
+        $env:IPTVSUITE_M14_CATALOG_REFERENCE_MODE = '1'
+        $env:IPTVSUITE_M14_CATALOG_CACHE_CONDITION = $CacheCondition
+        $env:IPTVSUITE_M14_CATALOG_POWER_CONDITION = $PowerCondition
+        $env:IPTVSUITE_M14_CATALOG_THERMAL_CONDITION = $ThermalCondition
+        $env:IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION = $BackgroundCondition
+    }
 
     & $dotnet test $project -c Release -p:Platform=x64 --no-restore `
         --filter 'FullyQualifiedName=IptvSuite.IntegrationTests.M14CatalogPerformanceBenchmarkTests.MeasureM14CatalogBenchmarkMatrix' `
@@ -124,7 +164,26 @@ catch {
 if ($evidenceText.IndexOf($initialHead, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
     throw 'M14 catalog benchmark evidence is not bound to the initial repository commit.'
 }
-if ([string]$evidence.result -ne 'passed' -or [bool]$evidence.referenceEligible) {
+if ($ReferenceMode) {
+    if ([string]$evidence.result -ne 'passed' -or
+        -not ([bool]$evidence.referenceModeRequested) -or
+        -not ([bool]$evidence.measurementIntegrityVerified) -or
+        -not ([bool]$evidence.conditionDeclarationsComplete) -or
+        -not ([bool]$evidence.referenceEligible) -or
+        [string]$evidence.conditions.cache.verification -cne 'Declared' -or
+        [string]$evidence.conditions.cache.value -cne 'Warm' -or
+        [string]$evidence.conditions.power.verification -cne 'Declared' -or
+        [string]$evidence.conditions.power.value -cne 'AcStable' -or
+        [string]$evidence.conditions.thermal.verification -cne 'Declared' -or
+        [string]$evidence.conditions.thermal.value -cne 'Nominal' -or
+        [string]$evidence.conditions.background.verification -cne 'Declared' -or
+        [string]$evidence.conditions.background.value -cne 'Controlled') {
+        throw 'M14 catalog benchmark reference evidence is not eligible.'
+    }
+}
+elseif ([string]$evidence.result -ne 'passed' -or
+    [bool]$evidence.referenceModeRequested -or
+    [bool]$evidence.referenceEligible) {
     throw 'M14 catalog benchmark evidence result or foundation eligibility is invalid.'
 }
 if ((Test-Path -LiteralPath $legacyManifestPath) -or
@@ -132,4 +191,5 @@ if ((Test-Path -LiteralPath $legacyManifestPath) -or
     throw 'M14 catalog benchmark retained a legacy transient corpus manifest.'
 }
 
-Write-Host "M14 catalog benchmark passed. Evidence: $evidencePath"
+$mode = if ($ReferenceMode) { 'reference' } else { 'foundation' }
+Write-Host "M14 catalog benchmark $mode mode passed. Evidence: $evidencePath"

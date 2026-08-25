@@ -19,13 +19,17 @@ public sealed class M14CatalogPerformanceBenchmarkTests
     private const string EvidenceRootVariable = "IPTVSUITE_M14_CATALOG_EVIDENCE_ROOT";
     private const string CommitVariable = "IPTVSUITE_M14_CATALOG_COMMIT";
     private const string ValidatedSdkVariable = "IPTVSUITE_M14_CATALOG_VALIDATED_SDK";
+    private const string ReferenceModeVariable = "IPTVSUITE_M14_CATALOG_REFERENCE_MODE";
     private const string CacheConditionVariable = "IPTVSUITE_M14_CATALOG_CACHE_CONDITION";
     private const string PowerConditionVariable = "IPTVSUITE_M14_CATALOG_POWER_CONDITION";
     private const string ThermalConditionVariable = "IPTVSUITE_M14_CATALOG_THERMAL_CONDITION";
     private const string BackgroundConditionVariable = "IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION";
     private const int Iterations = 20;
+    private const int MinimumAuthoritativeWarmIterations = 20;
+    private const int ColdObservationsPerStage = 1;
     private const int PeakWorkingSetSampleLimit = 512;
     private const double ParserBudgetMilliseconds = 2_000;
+    private const double NormalizeProtectPersistIndexBudgetMilliseconds = 3_000;
     private const double CombinedImportBudgetMilliseconds = 5_000;
     private const double ImportAllocationBudgetBytes = 150 * 1024 * 1024;
     private const long PeakWorkingSetBudgetBytes = 250L * 1024 * 1024;
@@ -61,6 +65,22 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         string sdkVersion = RequireValidatedSdk(
             repositoryRoot,
             Environment.GetEnvironmentVariable(ValidatedSdkVariable));
+        bool referenceModeRequested = ReadReferenceMode();
+        MetadataValue cacheCondition = ReadCondition(CacheConditionVariable, "Warm");
+        MetadataValue powerCondition = ReadCondition(PowerConditionVariable, "AcStable");
+        MetadataValue thermalCondition = ReadCondition(ThermalConditionVariable, "Nominal");
+        MetadataValue backgroundCondition = ReadCondition(BackgroundConditionVariable, "Controlled");
+        bool conditionDeclarationsComplete =
+            cacheCondition.IsDeclared &&
+            powerCondition.IsDeclared &&
+            thermalCondition.IsDeclared &&
+            backgroundCondition.IsDeclared;
+        if (referenceModeRequested && !conditionDeclarationsComplete)
+        {
+            throw new InvalidDataException(
+                "M14 reference mode requires all exact closed condition declarations.");
+        }
+
         Directory.CreateDirectory(evidenceRoot);
         string evidencePath = Path.Combine(evidenceRoot, "benchmark-summary.json");
         string temporaryEvidencePath = evidencePath + ".tmp";
@@ -101,6 +121,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
                 candidate.ChannelCount == scale &&
                 candidate.ExpectedOutcome == M14CatalogCorpusExpectedOutcome.Success);
 
+            MeasurementSample parserColdObservation = await MeasureParserAsync(corpus, iteration: 0);
             await WarmParserAsync(corpus);
             var parserSamples = new List<MeasurementSample>(Iterations);
             for (int iteration = 1; iteration <= Iterations; iteration++)
@@ -108,6 +129,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
                 parserSamples.Add(await MeasureParserAsync(corpus, iteration));
             }
 
+            MeasurementSample combinedColdObservation = await MeasureCombinedImportAsync(corpus, iteration: 0);
             await WarmCombinedImportAsync(corpus);
             var combinedSamples = new List<MeasurementSample>(Iterations);
             for (int iteration = 1; iteration <= Iterations; iteration++)
@@ -116,7 +138,13 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             }
 
             PeakWorkingSetPass workingSet = await MeasurePeakWorkingSetAsync(corpus);
-            scaleResults.Add(new ScaleBenchmark(corpus, parserSamples, combinedSamples, workingSet));
+            scaleResults.Add(new ScaleBenchmark(
+                corpus,
+                parserColdObservation,
+                parserSamples,
+                combinedColdObservation,
+                combinedSamples,
+                workingSet));
         }
 
         GeneratedM14CatalogCorpus fiftyThousand = generated.Corpora.Single(corpus =>
@@ -129,21 +157,20 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             corpus.ExpectedOutcome == M14CatalogCorpusExpectedOutcome.EntryLimitFailClosed);
         EntryLimitProbe entryLimitProbe = await MeasureEntryLimitProbeAsync(stress);
 
-        MetadataValue cacheCondition = ReadCondition(CacheConditionVariable, "Warm");
-        MetadataValue powerCondition = ReadCondition(PowerConditionVariable, "AcStable");
-        MetadataValue thermalCondition = ReadCondition(ThermalConditionVariable, "Nominal");
-        MetadataValue backgroundCondition = ReadCondition(BackgroundConditionVariable, "Controlled");
-        bool measurementIntegrityVerified = scaleResults.All(result =>
+        bool authoritativeWarmSampleCountVerified = scaleResults.All(result =>
+            result.ParserSamples.Count >= MinimumAuthoritativeWarmIterations &&
+            result.CombinedSamples.Count >= MinimumAuthoritativeWarmIterations);
+        bool measurementIntegrityVerified = authoritativeWarmSampleCountVerified && scaleResults.All(result =>
+            result.ParserColdObservation.ProcessIo.IsAvailable &&
             result.ParserSamples.All(sample => sample.ProcessIo.IsAvailable) &&
+            result.CombinedColdObservation.ProcessIo.IsAvailable &&
             result.CombinedSamples.All(sample => sample.ProcessIo.IsAvailable) &&
             !result.PeakWorkingSet.SampleCapacityReached);
-        bool conditionDeclarationsComplete =
-            cacheCondition.IsDeclared &&
-            powerCondition.IsDeclared &&
-            thermalCondition.IsDeclared &&
-            backgroundCondition.IsDeclared;
         const bool referenceEligible = false;
         BudgetEvaluation budgetEvaluation = EvaluateBudgets(scaleResults, query, cancellation);
+        bool effectiveReferenceEligible = referenceModeRequested
+            ? conditionDeclarationsComplete && measurementIntegrityVerified && budgetEvaluation.AllPassed
+            : referenceEligible;
 
         var evidence = new
         {
@@ -161,10 +188,21 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             processor = ReadProcessorMetadata(),
             logicalProcessorCount = Environment.ProcessorCount,
             iterations = Iterations,
+            authoritativeWarmIterations = Iterations,
+            minimumAuthoritativeWarmIterations = MinimumAuthoritativeWarmIterations,
+            coldObservationsPerStage = ColdObservationsPerStage,
             result = budgetEvaluation.AllPassed ? "passed" : "failed",
             measurementIntegrityVerified,
+            authoritativeWarmSampleCountVerified,
             conditionDeclarationsComplete,
-            referenceEligible,
+            referenceModeRequested,
+            referenceEligibilityRequirements = new
+            {
+                exactConditionDeclarations = conditionDeclarationsComplete,
+                measurementIntegrity = measurementIntegrityVerified,
+                passingBenchmarkResult = budgetEvaluation.AllPassed,
+            },
+            referenceEligible = effectiveReferenceEligible,
             conditions = new
             {
                 cache = cacheCondition,
@@ -199,14 +237,22 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             {
                 parserDiagnostic = "Production local-byte parser only; transport, persistence, query and UI are excluded.",
                 combinedImport = "Production loader plus local-file stream reads, parser, normalization, protected SQLite persistence and indexes; network download is excluded.",
+                coldObservation = "Exactly one bounded observation per stage and scale before that stage's explicit warm-up; no operating-system cache flush or verified cold-cache state is claimed.",
+                authoritativeTiming = "Budget predicates use at least 20 post-warm-up samples per stage and scale; cold observations are excluded.",
                 resourcePass = "Separate bounded working-set sampling pass; samples do not perturb authoritative timing iterations.",
             },
             scales = scaleResults.Select(result => new
             {
                 recordCount = result.Corpus.ChannelCount,
                 corpusId = result.Corpus.Id,
-                parserDiagnostic = StageEvidence(result.ParserSamples, includeDatabase: false),
-                combinedImport = StageEvidence(result.CombinedSamples, includeDatabase: true),
+                parserDiagnostic = StageEvidence(
+                    result.ParserColdObservation,
+                    result.ParserSamples,
+                    includeDatabase: false),
+                combinedImport = StageEvidence(
+                    result.CombinedColdObservation,
+                    result.CombinedSamples,
+                    includeDatabase: true),
                 peakWorkingSet = result.PeakWorkingSet,
             }).ToArray(),
             query50k = new
@@ -233,6 +279,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             budgets = new
             {
                 parserP95Milliseconds = ParserBudgetMilliseconds,
+                normalizeProtectPersistIndexP95Milliseconds = NormalizeProtectPersistIndexBudgetMilliseconds,
                 combinedImportP95Milliseconds = CombinedImportBudgetMilliseconds,
                 importAllocationMaximumBytes = ImportAllocationBudgetBytes,
                 peakWorkingSetDeltaBytes = PeakWorkingSetBudgetBytes,
@@ -243,12 +290,14 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             budgetEvaluation,
             nonClaims = new[]
             {
-                "Combined import does not claim an exact normalize/protect/persist split.",
+                "The full combined-import p95 is used only as a conservative upper bound for the normalize/protect/persist/index predicate; no exact stage split is measured or claimed.",
+                "Cold observations mean only pre-warm-up invocation order; no operating-system cache flush or verified cold-cache state is claimed.",
                 "File-backed synthetic corpora exclude network download time and real provider behavior.",
                 "This component benchmark does not claim WinUI input, frame, image-cache or physical-device acceptance.",
                 "Generated corpora and their aggregate manifest are transient and reproducible from the commit-bound specification; only bounded aggregate hashes are retained.",
                 "Machine-condition values are closed caller declarations, not dedicated-runner verification.",
-                "Foundation benchmark runs are not reference-baseline eligible.",
+                "Foundation mode is not reference eligible; reference mode requires exact declarations, measurement integrity and a passing result.",
+                "Reference eligibility does not perform a baseline comparison or establish a performance baseline.",
             },
         };
 
@@ -259,6 +308,10 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         File.Move(temporaryEvidencePath, evidencePath, overwrite: true);
 
         AssertBudgets(scaleResults, query, cancellation);
+        if (referenceModeRequested)
+        {
+            Assert.IsTrue(effectiveReferenceEligible);
+        }
     }
 
     private static async Task WarmParserAsync(GeneratedM14CatalogCorpus corpus)
@@ -655,12 +708,24 @@ public sealed class M14CatalogPerformanceBenchmarkTests
     }
 
     private static object StageEvidence(
+        MeasurementSample coldObservation,
         IReadOnlyList<MeasurementSample> samples,
         bool includeDatabase)
     {
         return new
         {
             iterations = Iterations,
+            sampleRole = "authoritative-warm",
+            minimumAuthoritativeWarmSamples = MinimumAuthoritativeWarmIterations,
+            coldObservation = new
+            {
+                sampleCount = ColdObservationsPerStage,
+                bounded = true,
+                authoritative = false,
+                capturedBeforeExplicitWarmUp = true,
+                operatingSystemCacheFlushPerformed = false,
+                rawSample = coldObservation,
+            },
             durationMilliseconds = Summary(samples.Select(sample => sample.DurationMilliseconds)),
             allocatedBytes = Summary(samples.Select(sample => (double)sample.AllocatedBytes)),
             processCpuMilliseconds = Summary(samples.Select(sample => sample.ProcessCpuMilliseconds)),
@@ -740,13 +805,18 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         CancellationBenchmark cancellation)
     {
         ScaleBenchmark gate = scaleResults.Single(result => result.Corpus.ChannelCount == 50_000);
+        double combinedImportP95 = Summary(
+            gate.CombinedSamples.Select(sample => sample.DurationMilliseconds)).Percentile95;
         Assert.IsFalse(gate.PeakWorkingSet.SampleCapacityReached);
         Assert.IsLessThanOrEqualTo(
             ParserBudgetMilliseconds,
             Summary(gate.ParserSamples.Select(sample => sample.DurationMilliseconds)).Percentile95);
         Assert.IsLessThanOrEqualTo(
+            NormalizeProtectPersistIndexBudgetMilliseconds,
+            combinedImportP95);
+        Assert.IsLessThanOrEqualTo(
             CombinedImportBudgetMilliseconds,
-            Summary(gate.CombinedSamples.Select(sample => sample.DurationMilliseconds)).Percentile95);
+            combinedImportP95);
         Assert.IsLessThanOrEqualTo(
             ImportAllocationBudgetBytes,
             Summary(gate.CombinedSamples.Select(sample => (double)sample.AllocatedBytes)).Maximum);
@@ -780,6 +850,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             gate.ParserSamples.Select(sample => sample.DurationMilliseconds)).Percentile95;
         double combinedImportP95 = Summary(
             gate.CombinedSamples.Select(sample => sample.DurationMilliseconds)).Percentile95;
+        double normalizeProtectPersistIndexConservativeUpperBoundP95 = combinedImportP95;
         double allocationMaximum = Summary(
             gate.CombinedSamples.Select(sample => (double)sample.AllocatedBytes)).Maximum;
         double cancellationP95 = Summary(
@@ -793,8 +864,12 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         double reopenP95 = Summary(
             query.RawSamples.Select(sample => sample.ReopenFirstVisibleMilliseconds)).Percentile95;
         bool peakSamplingComplete = !gate.PeakWorkingSet.SampleCapacityReached;
+        bool normalizeProtectPersistIndexPassed =
+            normalizeProtectPersistIndexConservativeUpperBoundP95 <=
+            NormalizeProtectPersistIndexBudgetMilliseconds;
         bool allPassed =
             parserP95 <= ParserBudgetMilliseconds &&
+            normalizeProtectPersistIndexPassed &&
             combinedImportP95 <= CombinedImportBudgetMilliseconds &&
             allocationMaximum <= ImportAllocationBudgetBytes &&
             gate.PeakWorkingSet.PeakDeltaBytes <= PeakWorkingSetBudgetBytes &&
@@ -806,6 +881,8 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             reopenP95 <= ReopenBudgetMilliseconds;
         return new BudgetEvaluation(
             parserP95,
+            normalizeProtectPersistIndexConservativeUpperBoundP95,
+            normalizeProtectPersistIndexPassed,
             combinedImportP95,
             allocationMaximum,
             gate.PeakWorkingSet.PeakDeltaBytes,
@@ -949,6 +1026,18 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         string configured = document.RootElement.GetProperty("sdk").GetProperty("version").GetString()!;
         Assert.AreEqual(configured, sdkVersion);
         return sdkVersion;
+    }
+
+    private static bool ReadReferenceMode()
+    {
+        string? value = Environment.GetEnvironmentVariable(ReferenceModeVariable);
+        return value switch
+        {
+            null or "0" => false,
+            "1" => true,
+            _ => throw new InvalidDataException(
+                "M14 benchmark reference mode is outside the closed vocabulary."),
+        };
     }
 
     private static MetadataValue ReadCondition(string variable, string expectedValue)
@@ -1255,7 +1344,9 @@ public sealed class M14CatalogPerformanceBenchmarkTests
 
     private sealed record ScaleBenchmark(
         GeneratedM14CatalogCorpus Corpus,
+        MeasurementSample ParserColdObservation,
         IReadOnlyList<MeasurementSample> ParserSamples,
+        MeasurementSample CombinedColdObservation,
         IReadOnlyList<MeasurementSample> CombinedSamples,
         PeakWorkingSetPass PeakWorkingSet);
 
@@ -1306,6 +1397,8 @@ public sealed class M14CatalogPerformanceBenchmarkTests
 
     private sealed record BudgetEvaluation(
         double ParserP95Milliseconds,
+        double NormalizeProtectPersistIndexConservativeUpperBoundP95Milliseconds,
+        bool NormalizeProtectPersistIndexPassed,
         double CombinedImportP95Milliseconds,
         double ImportAllocationMaximumBytes,
         long PeakWorkingSetDeltaBytes,

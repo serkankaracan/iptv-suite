@@ -121,6 +121,12 @@ namespace IptvSuite.PackageSmoke
         private const uint NoZOrder = 0x0004;
         private const uint NoActivate = 0x0010;
         private const uint AsyncWindowPosition = 0x4000;
+        private const uint WindowMessageNull = 0x0000;
+        private const uint SendMessageTimeoutBlock = 0x0001;
+        private const uint SendMessageTimeoutAbortIfHung = 0x0002;
+        private const uint SendMessageTimeoutErrorOnExit = 0x0020;
+        private const uint ExactUiThreadTimeoutMilliseconds = 200;
+        private const int ErrorTimeout = 1460;
         private const int ShowMinimized = 2;
         private const int ShowRestore = 9;
 
@@ -149,6 +155,13 @@ namespace IptvSuite.PackageSmoke
             public int Bottom { get; private set; }
             public int Width { get { return checked(Right - Left); } }
             public int Height { get { return checked(Bottom - Top); } }
+        }
+
+        public sealed class UiThreadResponsivenessProbeResult
+        {
+            public bool TimedOut { get; internal set; }
+            public double ElapsedMilliseconds { get; internal set; }
+            public uint TimeoutMilliseconds { get; internal set; }
         }
 
         [DllImport("user32.dll")]
@@ -191,6 +204,23 @@ namespace IptvSuite.PackageSmoke
         [DllImport("user32.dll", EntryPoint = "ShowWindowAsync", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool RequestWindowState(IntPtr windowHandle, int command);
+
+        [DllImport("kernel32.dll", EntryPoint = "SetLastError", ExactSpelling = true)]
+        private static extern void ResetLastError(uint errorCode);
+
+        [DllImport(
+            "user32.dll",
+            EntryPoint = "SendMessageTimeoutW",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr SendWindowMessageWithTimeout(
+            IntPtr windowHandle,
+            uint message,
+            UIntPtr wordParameter,
+            IntPtr longParameter,
+            uint flags,
+            uint timeoutMilliseconds,
+            out UIntPtr messageResult);
 
         public static WindowBounds GetWindowBounds(IntPtr windowHandle)
         {
@@ -244,6 +274,44 @@ namespace IptvSuite.PackageSmoke
         public static void RestoreWindow(IntPtr windowHandle)
         {
             RequestWindowStateChange(windowHandle, ShowRestore);
+        }
+
+        public static UiThreadResponsivenessProbeResult ProbeUiThreadResponsiveness(
+            IntPtr windowHandle)
+        {
+            ValidateWindowHandle(windowHandle);
+            UIntPtr messageResult;
+            ResetLastError(0);
+            System.Diagnostics.Stopwatch timer =
+                System.Diagnostics.Stopwatch.StartNew();
+            IntPtr callResult = SendWindowMessageWithTimeout(
+                windowHandle,
+                WindowMessageNull,
+                UIntPtr.Zero,
+                IntPtr.Zero,
+                SendMessageTimeoutBlock |
+                    SendMessageTimeoutAbortIfHung |
+                    SendMessageTimeoutErrorOnExit,
+                ExactUiThreadTimeoutMilliseconds,
+                out messageResult);
+            int callError = callResult == IntPtr.Zero
+                ? Marshal.GetLastWin32Error()
+                : 0;
+            timer.Stop();
+
+            bool timedOut = callResult == IntPtr.Zero;
+            if (timedOut && callError != 0 && callError != ErrorTimeout)
+            {
+                throw new InvalidOperationException(
+                    "The packaged UI-thread responsiveness proxy failed.");
+            }
+
+            return new UiThreadResponsivenessProbeResult
+            {
+                TimedOut = timedOut,
+                ElapsedMilliseconds = timer.Elapsed.TotalMilliseconds,
+                TimeoutMilliseconds = ExactUiThreadTimeoutMilliseconds,
+            };
         }
 
         private static void RequestWindowStateChange(IntPtr windowHandle, int command)
@@ -670,6 +738,31 @@ $catalogFrameP95Milliseconds = 0.0
 $catalogFrameMaximumMilliseconds = 0.0
 $catalogDroppedFramePercent = 0.0
 $catalogFrameIntervalCount = 0
+$catalogUiThreadResponsivenessProxyVerified = $false
+$catalogUiThreadResponsivenessProxyKind = "SendMessageTimeout(WM_NULL)"
+$catalogUiThreadResponsivenessProxyTimeoutMilliseconds = 200
+$catalogUiThreadResponsivenessProxySampleLimit = 64
+$catalogUiThreadResponsivenessProxySampleCount = 0
+$catalogUiThreadResponsivenessProxyTimeoutCount = 0
+$catalogUiThreadResponsivenessProxyOverBudgetCount = 0
+$catalogUiThreadResponsivenessProxyP95Milliseconds = 0.0
+$catalogUiThreadResponsivenessProxyMaximumMilliseconds = 0.0
+$catalogUiThreadResponsivenessProxyRawSamplesMilliseconds = @()
+$catalogPlayerOffStateVerified = $false
+$catalogPlayerOffSteadyWorkingSetVerified = $false
+$catalogPlayerOffSteadyWorkingSetProcessAliveVerified = $false
+$catalogPlayerOffSteadyWorkingSetBudgetBytes = [long](350MB)
+$catalogPlayerOffSteadyWorkingSetSettleMilliseconds = 5000
+$catalogPlayerOffSteadyWorkingSetSettleElapsedMilliseconds = 0.0
+$catalogPlayerOffSteadyWorkingSetSampleIntervalMilliseconds = 500
+$catalogPlayerOffSteadyWorkingSetSampleLimit = 60
+$catalogPlayerOffSteadyWorkingSetSamplingTargetMilliseconds = 30000
+$catalogPlayerOffSteadyWorkingSetSampleCount = 0
+$catalogPlayerOffSteadyWorkingSetSamplingElapsedMilliseconds = 0.0
+$catalogPlayerOffSteadyWorkingSetMinimumBytes = 0L
+$catalogPlayerOffSteadyWorkingSetAverageBytes = 0.0
+$catalogPlayerOffSteadyWorkingSetMaximumBytes = 0L
+$catalogPlayerOffSteadyWorkingSetRawSamplesBytes = @()
 $playbackUiAcceptanceVerified = $false
 $playbackVolumeControlVerified = $false
 $playbackMuteControlVerified = $false
@@ -3061,6 +3154,214 @@ try {
         throw "The packaged catalog DWM frame budget failed."
     }
 
+    # This app-window UI-thread proxy is intentionally a separate scroll pass.
+    # The existing DWM pass remains the authoritative system-compositor proxy.
+    Assert-PackagedWindowForeground $windowHandle ([uint32]$activationProcessId)
+    $responsivenessFocusItem = $channelListElement.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $listItemCondition)
+    if ($null -eq $responsivenessFocusItem) {
+        throw "The packaged catalog has no realized item for the UI-thread responsiveness proxy."
+    }
+    Assert-FocusedAutomationElement `
+        $responsivenessFocusItem `
+        "CatalogChannelList" `
+        -RequestFocus
+    $uiThreadResponsivenessSamples = [System.Collections.Generic.List[double]]::new()
+    $uiThreadResponsivenessSampleTarget = 60
+    if ($uiThreadResponsivenessSampleTarget -gt
+            $catalogUiThreadResponsivenessProxySampleLimit) {
+        throw "The packaged UI-thread responsiveness proxy sample target is unbounded."
+    }
+    for ($responsivenessInput = 0;
+        $responsivenessInput -lt $uiThreadResponsivenessSampleTarget;
+        $responsivenessInput++) {
+        Assert-PackagedProcessAlive -Process $launchedProcess
+        if (($responsivenessInput % 2) -eq 0) {
+            [IptvSuite.PackageSmoke.KeyboardInspector]::PressPageDown()
+        }
+        else {
+            [IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()
+        }
+
+        $uiThreadProbe =
+            [IptvSuite.PackageSmoke.WindowInspector]::ProbeUiThreadResponsiveness(
+                $windowHandle)
+        $uiThreadResponseMilliseconds = [double]$uiThreadProbe.ElapsedMilliseconds
+        if ([double]::IsNaN($uiThreadResponseMilliseconds) -or
+            [double]::IsInfinity($uiThreadResponseMilliseconds) -or
+            $uiThreadResponseMilliseconds -lt 0.0 -or
+            [uint32]$uiThreadProbe.TimeoutMilliseconds -ne
+                [uint32]$catalogUiThreadResponsivenessProxyTimeoutMilliseconds) {
+            throw "The packaged UI-thread responsiveness proxy sample is invalid."
+        }
+        if ([bool]$uiThreadProbe.TimedOut) {
+            $catalogUiThreadResponsivenessProxyTimeoutCount++
+        }
+        if ($uiThreadResponseMilliseconds -gt
+            [double]$catalogUiThreadResponsivenessProxyTimeoutMilliseconds) {
+            $catalogUiThreadResponsivenessProxyOverBudgetCount++
+        }
+        $uiThreadResponsivenessSamples.Add($uiThreadResponseMilliseconds)
+        Assert-PackagedProcessAlive -Process $launchedProcess
+        Start-Sleep -Milliseconds 16
+    }
+    $catalogUiThreadResponsivenessProxySampleCount =
+        $uiThreadResponsivenessSamples.Count
+    if ($catalogUiThreadResponsivenessProxySampleCount -ne
+            $uiThreadResponsivenessSampleTarget -or
+        $catalogUiThreadResponsivenessProxySampleCount -gt
+            $catalogUiThreadResponsivenessProxySampleLimit) {
+        throw "The packaged UI-thread responsiveness proxy sample count is invalid."
+    }
+    $catalogUiThreadResponsivenessProxyP95Milliseconds =
+        Get-Percentile95 $uiThreadResponsivenessSamples.ToArray()
+    $catalogUiThreadResponsivenessProxyMaximumMilliseconds = [double](
+        $uiThreadResponsivenessSamples |
+            Measure-Object -Maximum |
+            Select-Object -ExpandProperty Maximum)
+    $catalogUiThreadResponsivenessProxyRawSamplesMilliseconds = @(
+        $uiThreadResponsivenessSamples |
+            ForEach-Object { [Math]::Round([double]$_, 3) })
+    if ($catalogUiThreadResponsivenessProxyRawSamplesMilliseconds.Count -ne
+            $catalogUiThreadResponsivenessProxySampleCount -or
+        $catalogUiThreadResponsivenessProxyTimeoutCount -ne 0 -or
+        $catalogUiThreadResponsivenessProxyOverBudgetCount -ne 0 -or
+        $catalogUiThreadResponsivenessProxyMaximumMilliseconds -gt
+            [double]$catalogUiThreadResponsivenessProxyTimeoutMilliseconds) {
+        throw "The packaged catalog UI-thread responsiveness proxy budget failed."
+    }
+    $catalogUiThreadResponsivenessProxyVerified = $true
+
+    $rapidScrollRealizedItems = $channelListElement.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $listItemCondition)
+    $rapidScrollRealizedContainerCount = $rapidScrollRealizedItems.Count
+    if ($rapidScrollRealizedContainerCount -lt 1 -or
+        $rapidScrollRealizedContainerCount -gt 300) {
+        throw "The packaged catalog rapid-scroll realized-container bound failed."
+    }
+    $catalogRealizedContainerCount = [Math]::Max(
+        $catalogRealizedContainerCount,
+        $rapidScrollRealizedContainerCount)
+
+    $catalogPlayerOffStatusElement =
+        Get-AutomationElementById $automationRoot "PlaybackStatusText"
+    $catalogPlayerOffChannelElement =
+        Get-AutomationElementById $automationRoot "PlaybackChannelText"
+    if ($null -eq $catalogPlayerOffStatusElement -or
+        $catalogPlayerOffStatusElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Text -or
+        $catalogPlayerOffStatusElement.Current.Name -cne "Playback stopped." -or
+        $null -eq $catalogPlayerOffChannelElement -or
+        $catalogPlayerOffChannelElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Text -or
+        $catalogPlayerOffChannelElement.Current.Name -cne "No channel selected.") {
+        throw "The packaged catalog player-off state is invalid before working-set sampling."
+    }
+    $catalogPlayerOffStateVerified = $true
+
+    # Fixed bounded settling and process observation deliberately avoid forced
+    # GC or working-set trimming before the steady-state absolute measurement.
+    $catalogWorkingSetSettleTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($catalogWorkingSetSettleTimer.ElapsedMilliseconds -lt
+        $catalogPlayerOffSteadyWorkingSetSettleMilliseconds) {
+        Assert-PackagedProcessAlive -Process $launchedProcess
+        $settleRemainingMilliseconds =
+            $catalogPlayerOffSteadyWorkingSetSettleMilliseconds -
+            $catalogWorkingSetSettleTimer.ElapsedMilliseconds
+        Start-Sleep -Milliseconds ([Math]::Max(
+            1,
+            [Math]::Min(100, [int]$settleRemainingMilliseconds)))
+    }
+    $catalogWorkingSetSettleTimer.Stop()
+    $catalogPlayerOffSteadyWorkingSetSettleElapsedMilliseconds =
+        $catalogWorkingSetSettleTimer.Elapsed.TotalMilliseconds
+    Assert-PackagedProcessAlive -Process $launchedProcess
+
+    $catalogWorkingSetSamples = [System.Collections.Generic.List[long]]::new()
+    $catalogWorkingSetSampleTarget = 60
+    if ($catalogWorkingSetSampleTarget -gt
+        $catalogPlayerOffSteadyWorkingSetSampleLimit) {
+        throw "The packaged player-off working-set sample target is unbounded."
+    }
+    $catalogWorkingSetSamplingTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    for ($workingSetSample = 1;
+        $workingSetSample -le $catalogWorkingSetSampleTarget;
+        $workingSetSample++) {
+        $workingSetSampleDeadlineMilliseconds =
+            $workingSetSample *
+            $catalogPlayerOffSteadyWorkingSetSampleIntervalMilliseconds
+        while ($catalogWorkingSetSamplingTimer.ElapsedMilliseconds -lt
+            $workingSetSampleDeadlineMilliseconds) {
+            Assert-PackagedProcessAlive -Process $launchedProcess
+            $sampleRemainingMilliseconds =
+                $workingSetSampleDeadlineMilliseconds -
+                $catalogWorkingSetSamplingTimer.ElapsedMilliseconds
+            Start-Sleep -Milliseconds ([Math]::Max(
+                1,
+                [Math]::Min(100, [int]$sampleRemainingMilliseconds)))
+        }
+
+        Assert-PackagedProcessAlive -Process $launchedProcess
+        try {
+            $launchedProcess.Refresh()
+            $workingSetBytes = [long]$launchedProcess.WorkingSet64
+        }
+        catch {
+            throw "The packaged player-off working-set sample is unavailable."
+        }
+        if ($workingSetBytes -le 0L) {
+            throw "The packaged player-off working-set sample is invalid."
+        }
+        $catalogWorkingSetSamples.Add($workingSetBytes)
+    }
+    $catalogWorkingSetSamplingTimer.Stop()
+    $catalogPlayerOffSteadyWorkingSetSamplingElapsedMilliseconds =
+        $catalogWorkingSetSamplingTimer.Elapsed.TotalMilliseconds
+    $catalogPlayerOffSteadyWorkingSetSampleCount = $catalogWorkingSetSamples.Count
+    $catalogWorkingSetTargetDurationMilliseconds =
+        $catalogWorkingSetSampleTarget *
+        $catalogPlayerOffSteadyWorkingSetSampleIntervalMilliseconds
+    if ($catalogPlayerOffSteadyWorkingSetSampleCount -ne
+            $catalogWorkingSetSampleTarget -or
+        $catalogPlayerOffSteadyWorkingSetSampleCount -gt
+            $catalogPlayerOffSteadyWorkingSetSampleLimit -or
+        $catalogWorkingSetTargetDurationMilliseconds -ne
+            $catalogPlayerOffSteadyWorkingSetSamplingTargetMilliseconds -or
+        $catalogPlayerOffSteadyWorkingSetSamplingElapsedMilliseconds -lt
+            $catalogWorkingSetTargetDurationMilliseconds) {
+        throw "The packaged player-off working-set sampling interval is invalid."
+    }
+    Assert-PackagedProcessAlive -Process $launchedProcess
+    if ($catalogPlayerOffStatusElement.Current.Name -cne "Playback stopped." -or
+        $catalogPlayerOffChannelElement.Current.Name -cne "No channel selected.") {
+        throw "The packaged catalog player did not remain off during working-set sampling."
+    }
+    $catalogPlayerOffSteadyWorkingSetProcessAliveVerified = $true
+
+    $catalogPlayerOffSteadyWorkingSetMinimumBytes = [long](
+        $catalogWorkingSetSamples |
+            Measure-Object -Minimum |
+            Select-Object -ExpandProperty Minimum)
+    $catalogPlayerOffSteadyWorkingSetAverageBytes = [double](
+        $catalogWorkingSetSamples |
+            Measure-Object -Average |
+            Select-Object -ExpandProperty Average)
+    $catalogPlayerOffSteadyWorkingSetMaximumBytes = [long](
+        $catalogWorkingSetSamples |
+            Measure-Object -Maximum |
+            Select-Object -ExpandProperty Maximum)
+    $catalogPlayerOffSteadyWorkingSetRawSamplesBytes = @(
+        $catalogWorkingSetSamples | ForEach-Object { [long]$_ })
+    if ($catalogPlayerOffSteadyWorkingSetRawSamplesBytes.Count -ne
+            $catalogPlayerOffSteadyWorkingSetSampleCount -or
+        $catalogPlayerOffSteadyWorkingSetMaximumBytes -gt
+            $catalogPlayerOffSteadyWorkingSetBudgetBytes) {
+        throw "The packaged player-off steady catalog working-set budget failed."
+    }
+    $catalogPlayerOffSteadyWorkingSetVerified = $true
+
     Start-Sleep -Seconds 2
     $launchedProcess.Refresh()
     if ($launchedProcess.HasExited) {
@@ -4729,6 +5030,60 @@ try {
         CatalogDwmFrameMaximumMilliseconds = [Math]::Round($catalogFrameMaximumMilliseconds, 3)
         CatalogDwmDroppedFramePercent = [Math]::Round($catalogDroppedFramePercent, 3)
         CatalogDwmFrameIntervalCount = $catalogFrameIntervalCount
+        CatalogUiThreadResponsivenessProxyVerified =
+            $catalogUiThreadResponsivenessProxyVerified
+        CatalogUiThreadResponsivenessProxyKind =
+            $catalogUiThreadResponsivenessProxyKind
+        CatalogUiThreadResponsivenessProxyTimeoutMilliseconds =
+            $catalogUiThreadResponsivenessProxyTimeoutMilliseconds
+        CatalogUiThreadResponsivenessProxySampleLimit =
+            $catalogUiThreadResponsivenessProxySampleLimit
+        CatalogUiThreadResponsivenessProxySampleCount =
+            $catalogUiThreadResponsivenessProxySampleCount
+        CatalogUiThreadResponsivenessProxyTimeoutCount =
+            $catalogUiThreadResponsivenessProxyTimeoutCount
+        CatalogUiThreadResponsivenessProxyOverBudgetCount =
+            $catalogUiThreadResponsivenessProxyOverBudgetCount
+        CatalogUiThreadResponsivenessProxyP95Milliseconds = [Math]::Round(
+            $catalogUiThreadResponsivenessProxyP95Milliseconds,
+            3)
+        CatalogUiThreadResponsivenessProxyMaximumMilliseconds = [Math]::Round(
+            $catalogUiThreadResponsivenessProxyMaximumMilliseconds,
+            3)
+        CatalogUiThreadResponsivenessProxyRawSamplesMilliseconds =
+            $catalogUiThreadResponsivenessProxyRawSamplesMilliseconds
+        CatalogPlayerOffStateVerified = $catalogPlayerOffStateVerified
+        CatalogPlayerOffSteadyWorkingSetVerified =
+            $catalogPlayerOffSteadyWorkingSetVerified
+        CatalogPlayerOffSteadyWorkingSetProcessAliveVerified =
+            $catalogPlayerOffSteadyWorkingSetProcessAliveVerified
+        CatalogPlayerOffSteadyWorkingSetBudgetBytes =
+            $catalogPlayerOffSteadyWorkingSetBudgetBytes
+        CatalogPlayerOffSteadyWorkingSetSettleMilliseconds =
+            $catalogPlayerOffSteadyWorkingSetSettleMilliseconds
+        CatalogPlayerOffSteadyWorkingSetSettleElapsedMilliseconds = [Math]::Round(
+            $catalogPlayerOffSteadyWorkingSetSettleElapsedMilliseconds,
+            3)
+        CatalogPlayerOffSteadyWorkingSetSampleIntervalMilliseconds =
+            $catalogPlayerOffSteadyWorkingSetSampleIntervalMilliseconds
+        CatalogPlayerOffSteadyWorkingSetSampleLimit =
+            $catalogPlayerOffSteadyWorkingSetSampleLimit
+        CatalogPlayerOffSteadyWorkingSetSamplingTargetMilliseconds =
+            $catalogPlayerOffSteadyWorkingSetSamplingTargetMilliseconds
+        CatalogPlayerOffSteadyWorkingSetSampleCount =
+            $catalogPlayerOffSteadyWorkingSetSampleCount
+        CatalogPlayerOffSteadyWorkingSetSamplingElapsedMilliseconds = [Math]::Round(
+            $catalogPlayerOffSteadyWorkingSetSamplingElapsedMilliseconds,
+            3)
+        CatalogPlayerOffSteadyWorkingSetMinimumBytes =
+            $catalogPlayerOffSteadyWorkingSetMinimumBytes
+        CatalogPlayerOffSteadyWorkingSetAverageBytes = [Math]::Round(
+            $catalogPlayerOffSteadyWorkingSetAverageBytes,
+            3)
+        CatalogPlayerOffSteadyWorkingSetMaximumBytes =
+            $catalogPlayerOffSteadyWorkingSetMaximumBytes
+        CatalogPlayerOffSteadyWorkingSetRawSamplesBytes =
+            $catalogPlayerOffSteadyWorkingSetRawSamplesBytes
         PlaybackUiAcceptanceVerified = $playbackUiAcceptanceVerified
         PlaybackVolumeControlVerified = $playbackVolumeControlVerified
         PlaybackMuteControlVerified = $playbackMuteControlVerified
