@@ -593,7 +593,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
 
         if (callback is NativeCallback.SourceFailed or NativeCallback.MediaFailed)
         {
-            PlaybackEngineSnapshot? failed = SetNativeFailure(context);
+            PlaybackEngineSnapshot? failed = SetNativeFailure(context, callback);
             try
             {
                 ReleaseContextOnUiThread(context, preserveTerminalState: true);
@@ -743,8 +743,17 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         lock (_sync)
         {
             if (!ReferenceEquals(_active, context) || context.Retired ||
-                _current.State is PlaybackState.Closed or PlaybackState.Failed ||
-                !CanTransition(_current.State, state.Value))
+                _current.State is PlaybackState.Closed or PlaybackState.Failed)
+            {
+                return;
+            }
+
+            if (state.Value is PlaybackState.Playing or PlaybackState.Paused)
+            {
+                context.HasReachedPlayableState = true;
+            }
+
+            if (!CanTransition(_current.State, state.Value))
             {
                 return;
             }
@@ -756,7 +765,9 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         NotifyStateChanged(changed);
     }
 
-    private PlaybackEngineSnapshot? SetNativeFailure(SessionContext context)
+    private PlaybackEngineSnapshot? SetNativeFailure(
+        SessionContext context,
+        NativeCallback callback)
     {
         PlaybackEngineSnapshot? failed = null;
         lock (_sync)
@@ -767,7 +778,12 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                 return null;
             }
 
-            DomainErrorCode error = _current.State is PlaybackState.Playing or PlaybackState.Paused
+            bool isActiveMediaFailure =
+                callback == NativeCallback.MediaFailed &&
+                context.HasReachedPlayableState &&
+                _current.State is PlaybackState.Buffering or
+                    PlaybackState.Playing or PlaybackState.Paused;
+            DomainErrorCode error = isActiveMediaFailure
                 ? DomainErrorCode.StreamInterrupted
                 : DomainErrorCode.PlaybackStartFailed;
             failed = PlaybackEngineSnapshot.Failed(
@@ -1077,6 +1093,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             MediaFailedHandler { get; set; }
         internal TypedEventHandler<MediaPlaybackSession, object>?
             PlaybackStateChangedHandler { get; set; }
+        internal bool HasReachedPlayableState { get; set; }
         internal bool Retired { get; set; }
         internal bool SourceDisposed { get; set; }
     }

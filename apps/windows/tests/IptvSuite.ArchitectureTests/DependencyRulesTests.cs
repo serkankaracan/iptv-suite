@@ -4716,6 +4716,43 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M13WindowsNativeFailuresUseOnlySafePlaybackPhaseSignals()
+    {
+        string adapter = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows",
+            "WindowsNativePlaybackEngine.cs"));
+
+        StringAssert.Contains(adapter, "SetNativeFailure(context, callback)");
+        StringAssert.Contains(adapter, "callback == NativeCallback.MediaFailed");
+        StringAssert.Contains(adapter, "context.HasReachedPlayableState");
+        StringAssert.Contains(
+            adapter,
+            "_current.State is PlaybackState.Buffering or\n" +
+            "                    PlaybackState.Playing or PlaybackState.Paused;");
+        StringAssert.Contains(
+            adapter,
+            "? DomainErrorCode.StreamInterrupted\n" +
+            "                : DomainErrorCode.PlaybackStartFailed;");
+        StringAssert.Contains(
+            adapter,
+            "state.Value is PlaybackState.Playing or PlaybackState.Paused");
+        StringAssert.Contains(
+            adapter,
+            "context.SourceOpenHandler = (sender, args) => PostNativeCallback(");
+        StringAssert.Contains(
+            adapter,
+            "context.MediaFailedHandler = (_, _) => PostNativeCallback(");
+        Assert.IsFalse(adapter.Contains("ErrorMessage", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("ExtendedErrorCode", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("exception.Message", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("HResult", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void M11PlaybackUiDelegatesToCoordinatorAndClosesNativeLifetimeFirst()
     {
         string windowsRoot = Path.Combine(
