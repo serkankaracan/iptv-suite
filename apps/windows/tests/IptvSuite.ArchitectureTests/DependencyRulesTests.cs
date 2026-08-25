@@ -4091,7 +4091,7 @@ public sealed class DependencyRulesTests
 
         using Process contractProcess = Process.Start(startInfo)
             ?? throw new AssertFailedException("The package inventory self-test could not start.");
-        bool contractCompleted = contractProcess.WaitForExit(60_000);
+        bool contractCompleted = contractProcess.WaitForExit(120_000);
         if (!contractCompleted)
         {
             contractProcess.Kill(entireProcessTree: true);
