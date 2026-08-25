@@ -13,12 +13,19 @@ namespace IptvSuite.Infrastructure;
 [SupportedOSPlatform("windows")]
 internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDisposable
 {
+    private const int ImportCacheSizeKibibytes = 65_536;
+    private const int NonceByteLength = 12;
+    private const int AuthenticationTagByteLength = 16;
+    private const int AadByteLength = 81;
     private readonly string _databasePath;
     private readonly SqliteCatalogDatabase _database;
     private readonly bool _measureWriteAllocations;
     private readonly Dictionary<string, CategoryBinding> _categories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _stableKeyOccurrences = new(StringComparer.Ordinal);
     private readonly HashSet<Nonce96> _nonces = [];
+    private readonly byte[] _nonceBuffer = new byte[NonceByteLength];
+    private readonly byte[] _authenticationTagBuffer = new byte[AuthenticationTagByteLength];
+    private readonly byte[] _aadBuffer = new byte[AadByteLength];
     private SqliteConnection? _connection;
     private SqliteTransaction? _transaction;
     private SQLitePCL.sqlite3_stmt? _categoryInsert;
@@ -109,7 +116,9 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                 Pooling = false,
             }.ToString());
             await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync("PRAGMA foreign_keys = ON; PRAGMA synchronous = EXTRA; PRAGMA busy_timeout = 5000;", cancellationToken)
+            await ExecuteAsync(
+                $"PRAGMA foreign_keys = ON; PRAGMA synchronous = EXTRA; PRAGMA busy_timeout = 5000; PRAGMA cache_size = -{ImportCacheSizeKibibytes};",
+                cancellationToken)
                 .ConfigureAwait(false);
             _transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -480,13 +489,24 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         CancellationToken cancellationToken)
     {
         byte[] plaintext = Encoding.UTF8.GetBytes(plaintextText);
-        byte[] nonce = NewUniqueNonce();
-        byte[] tag = new byte[16];
         byte[] ciphertext = new byte[plaintext.Length];
-        byte[] aad = BuildAad(_source!.Id.Value, _snapshotId.Value, _keyGenerationId, channelId.Value, purpose, key.RecordIdentifier);
+        FillUniqueNonce();
+        FillAad(
+            _aadBuffer,
+            _source!.Id.Value,
+            _snapshotId.Value,
+            _keyGenerationId,
+            channelId.Value,
+            purpose,
+            key.RecordIdentifier);
         try
         {
-            _aes!.Encrypt(nonce, plaintext, ciphertext, tag, aad);
+            _aes!.Encrypt(
+                _nonceBuffer,
+                plaintext,
+                ciphertext,
+                _authenticationTagBuffer,
+                _aadBuffer);
             cancellationToken.ThrowIfCancellationRequested();
             BindText(_locatorInsert!, 1, referenceText);
             BindText(_locatorInsert!, 2, _snapshotText!);
@@ -494,18 +514,18 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
             BindInt(_locatorInsert!, 4, (int)ProtectedRecordOwnerKind.Channel);
             BindText(_locatorInsert!, 5, channelText);
             BindInt(_locatorInsert!, 6, (int)purpose);
-            BindBlob(_locatorInsert!, 7, nonce);
-            BindBlob(_locatorInsert!, 8, tag);
+            BindBlob(_locatorInsert!, 7, _nonceBuffer);
+            BindBlob(_locatorInsert!, 8, _authenticationTagBuffer);
             BindBlob(_locatorInsert!, 9, ciphertext);
             StepAndReset(_locatorInsert!);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(plaintext);
-            CryptographicOperations.ZeroMemory(nonce);
-            CryptographicOperations.ZeroMemory(tag);
             CryptographicOperations.ZeroMemory(ciphertext);
-            CryptographicOperations.ZeroMemory(aad);
+            CryptographicOperations.ZeroMemory(_nonceBuffer);
+            CryptographicOperations.ZeroMemory(_authenticationTagBuffer);
+            CryptographicOperations.ZeroMemory(_aadBuffer);
         }
     }
 
@@ -683,6 +703,9 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         _warnings = 0;
         Zero(_dek);
         Zero(_wrappedDek);
+        Zero(_nonceBuffer);
+        Zero(_authenticationTagBuffer);
+        Zero(_aadBuffer);
         _dek = null;
         _wrappedDek = null;
     }
@@ -723,14 +746,20 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         }
     }
 
-    private static byte[] BuildAad(Guid source, Guid snapshot, Guid generation, Guid channel, ProtectedValuePurpose purpose, Guid reference)
+    private static void FillAad(
+        byte[] aad,
+        Guid source,
+        Guid snapshot,
+        Guid generation,
+        Guid channel,
+        ProtectedValuePurpose purpose,
+        Guid reference)
     {
-        byte[] aad = new byte[81];
+        CryptographicOperations.ZeroMemory(aad);
         int offset = 0;
         WriteGuid(source); WriteGuid(snapshot); WriteGuid(generation); WriteGuid(channel);
         aad[offset++] = (byte)purpose;
         WriteGuid(reference);
-        return aad;
 
         void WriteGuid(Guid value)
         {
@@ -751,17 +780,17 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         return occurrence;
     }
 
-    private byte[] NewUniqueNonce()
+    private void FillUniqueNonce()
     {
         while (true)
         {
-            byte[] nonce = RandomNumberGenerator.GetBytes(12);
-            if (_nonces.Add(Nonce96.From(nonce)))
+            RandomNumberGenerator.Fill(_nonceBuffer);
+            if (_nonces.Add(Nonce96.From(_nonceBuffer)))
             {
-                return nonce;
+                return;
             }
 
-            CryptographicOperations.ZeroMemory(nonce);
+            CryptographicOperations.ZeroMemory(_nonceBuffer);
         }
     }
 

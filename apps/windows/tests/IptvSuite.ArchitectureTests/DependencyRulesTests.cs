@@ -2227,6 +2227,22 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(
             workflow.Contains("Invoke-WindowsCatalogBenchmark.ps1", StringComparison.Ordinal),
             "The normal hosted workflow must not run the opt-in M14 catalog benchmark.");
+
+        string importSink = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "SqliteRemoteM3uImportSink.cs"));
+        StringAssert.Contains(importSink, "private const int ImportCacheSizeKibibytes = 65_536;");
+        StringAssert.Contains(importSink, "PRAGMA synchronous = EXTRA;");
+        StringAssert.Contains(importSink, "PRAGMA cache_size = -{ImportCacheSizeKibibytes};");
+        StringAssert.Contains(importSink, "RandomNumberGenerator.Fill(_nonceBuffer);");
+        StringAssert.Contains(importSink, "_nonces.Add(Nonce96.From(_nonceBuffer))");
+        StringAssert.Contains(importSink, "CryptographicOperations.ZeroMemory(_nonceBuffer);");
+        StringAssert.Contains(importSink, "CryptographicOperations.ZeroMemory(_authenticationTagBuffer);");
+        StringAssert.Contains(importSink, "CryptographicOperations.ZeroMemory(_aadBuffer);");
     }
 
     [TestMethod]
