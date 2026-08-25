@@ -79,6 +79,8 @@
 
 `R29 hosted inventory update — PARTIAL VERIFIED, 2026-08-22`: Run #157 (`32563209337`) signed-MSIX inventory validator'ı geçti; native hard-maximum failure'ı success publication adımlarını atladığından kalıcı sanitized inventory artifact/digest bağı yine oluşmadı. Bu teknik geçiş root `LICENSE`/`NOTICE`, asset/corpus provenance, codec/patent uzman incelemesi, WACK veya dağıtım kabulünü kapatmaz. R29 **ACTIVE** kalır.
 
+`R15 M13 update — VERIFIED automated reconnect boundary, 2026-08-25`: Commit `90198c0595293cc6ed265f462f1c2cbb3c3c647a` için [run #211 (`32839777516`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32839777516), signed production package'ta clean EOF recovery'yi, exact single active-session/ordinal accounting'i, user cancel'i `22,087 ms ≤1000 ms` içinde ve `31.009 ms` boyunca request `60 → 60` no-later-open postcondition'ıyla geçti. Deterministik suite attempt/deadline/coalescing/replacement/source/app-close yarışlarını, localized safe error yüzeyini ve startup/rebuffer/Live EOF mapping'ini geçti. Böylece R15'in reconnect-storm, duplicate-session ve stopped-stream restart dilimi otomatik MVP sınırında azaltılmıştır. Bu sonuç gerçek cihaz/HW decode, OS audio/session quiescence, fiziksel network/sleep matrisi veya M10 relative-memory/8–24 saat hardening borcunu kapatmaz; R15 **ACTIVE** kalır. [Kanıt](../quality/M13_COMPLETION_EVIDENCE.md).
+
 ## Kabul edilen residual riskler
 
 | ID | Risk | Olasılık | Etki | Erken uyarı işareti | Kabul sınırı / reopen trigger | Owner veya karar |

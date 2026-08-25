@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** Phase 0 implementation plan; M1–M7 completed, M8 sıradaki milestone
+**Durum:** M1–M9 ve M11 completed; M10 conditional success; M12 partial verified; M13 automated/deterministic MVP acceptance completed; M14 sıradaki milestone
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -678,6 +678,8 @@ Channel browsing → playback → volume/mute → fullscreen → rapid switch �
 
 ## M13 — Error mapping, timeout, cancellation ve reconnect
 
+**Implementation status:** Completed, 2026-08-25 — automated/deterministic MVP acceptance PASS
+
 ### Amaç
 
 Geçici network/stream kesintisinde kontrollü toparlanmak; kalıcı hatada kullanıcıya güvenli ve uygulanabilir mesaj vermek.
@@ -738,6 +740,8 @@ Reconnect storm'un provider ban'i, duplicate player session veya kullanıcının
 ### Demo çıktısı
 
 Kontrollü kesilen sentetik yayının bounded geri sayımla toparlanması; auth/TLS gibi kalıcı hatanın retry edilmeden doğru mesaja dönüşmesi.
+
+**Milestone disposition — `COMPLETED, 2026-08-25`:** Commit `90198c0595293cc6ed265f462f1c2cbb3c3c647a` için [run #211 (`32839777516`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32839777516), exact SDK `10.0.302` ile `553/553 × 2` deterministik quality gate'i, signed production-package clean-EOF recovery/cancel/no-later-open akışını, DPAPI gerçek-user boundary'sini ve Required Windows gate'i geçti. Packaged evidence'ta recovery/cancel `true`, cancel `22,087 ms ≤ 1000 ms`, no-later-open `31.009 ms`, request count `60 → 60`, iki clean completion + bir cancellation detach ve exact `44 + 17 + 1 = 62` request partition kaydedildi; retry-storm/simultaneous-session ve raw diagnostic yasakları korunmuştur. Exact HTTP/TLS/DNS attribution production `MediaSource` yolunda iddia edilmez; gerçek provider/cihaz, M10 retention/uzun soak ve M15/M16 release kapıları ayrı kalır. [M13 completion evidence](../quality/M13_COMPLETION_EVIDENCE.md).
 
 ## M14 — 50.000+ benchmark ve hot-path optimizasyonu
 
