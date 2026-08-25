@@ -713,6 +713,8 @@ Infinite/background retry, provider ban aşma, provider-specific workaround coll
 - Network recover/reconnect success ve exhausted result.
 - Localized error mapping ve redaction.
 
+**Implementation status — `POLICY CHECKPOINT IMPLEMENTED, 2026-08-25`:** Saf Application reconnect policy'si otomatik eligibility ve budget kararını session/timer/UI/native/network orchestration'ından ayırır. Yalnız exact canonical `DomainRetryability.BoundedTransient`; en çok üç attempt, 30 saniyelik karar penceresi, exact `1 s / 2 s / 4 s` taban gecikme ve caller-injected bounded `0..250 ms` jitter ile ilerler. `Never`/`Manual`, bilinmeyen veya code/retryability/resource-key eşleşmesi bozuk hata, attempt cap, elapsed cap ya da yeni attempt'e pozitif süre bırakmayan delay fail-closed `DoNotRetry|Exhausted` üretir. Karar yüzeyi yalnız enum, attempt, süre ve güvenli terminal code taşır; raw URL/provider text/exception yoktur. HTTP `Retry-After` fetch katmanında kalır; nested transport attempt'lerinin reconnect bütçesine sayımı timer/session orchestration'ından önce uzlaştırılacaktır. Saf policy in-flight attempt runtime deadline'ını enforce etmez; monotonic `TimeProvider` ve deadline-linked cancellation sonraki checkpoint'tedir. Bu checkpoint countdown, timer, session açma, cancel/manual retry, channel/source change, offline hint veya packaged recovery kabulü iddia etmez.
+
 ### Ana risk
 
 Reconnect storm'un provider ban'i, duplicate player session veya kullanıcının durdurduğu içeriğin yeniden başlamasına yol açması.
