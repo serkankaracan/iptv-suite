@@ -4572,7 +4572,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(runner, "'--no-restore',");
         StringAssert.Contains(runner, "'--no-http-cache',");
         StringAssert.Contains(runner, "'-property:RestoreUseStaticGraphEvaluation=false'");
-        StringAssert.Contains(runner, "'-property:RestoreForceEvaluate=true'");
+        Assert.IsFalse(runner.Contains("'--force-evaluate'", StringComparison.Ordinal));
+        Assert.IsFalse(runner.Contains("RestoreForceEvaluate", StringComparison.Ordinal));
         StringAssert.Contains(runner, "'-property:RestoreLockedMode=true'");
         StringAssert.Contains(runner, "'-property:NuGetAuditMode=all'");
         StringAssert.Contains(runner, "'-property:NuGetAuditLevel=low'");
