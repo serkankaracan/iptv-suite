@@ -420,6 +420,22 @@ try {
         -AllowBlockedInventory
     Copy-TestFile -RelativePath $assetRelativePath
 
+    $lockedAsset = [System.IO.File]::Open(
+        $assetPath,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::None)
+    try {
+        Assert-AuditFailure `
+            -Root $script:fixtureRoot `
+            -EvidencePath (Join-Path $fixtureEvidenceRoot "locked-asset.json") `
+            -ExpectedMessage "M15TechnicalInvariant:RepositoryFileHashInvalid" `
+            -AllowBlockedInventory
+    }
+    finally {
+        $lockedAsset.Dispose()
+    }
+
     $lockPath = Join-Path `
         $script:fixtureRoot `
         "apps\windows\src\IptvSuite.Windows\packages.lock.json"

@@ -258,7 +258,65 @@ function Get-LowerSha256 {
         [System.IO.FileInfo]$File
     )
 
-    return (Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $maximumAttempts = 3
+    for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+        try {
+            $File.Refresh()
+            if (-not $File.Exists -or
+                ($File.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $File.Length -le 0) {
+                Fail-TechnicalInvariant -Code "RepositoryFileHashInvalid"
+            }
+
+            $beforeLength = [long]$File.Length
+            $beforeLastWriteTicks = [long]$File.LastWriteTimeUtc.Ticks
+            $stream = [System.IO.File]::Open(
+                $File.FullName,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::Read)
+            try {
+                $sha256 = [System.Security.Cryptography.SHA256]::Create()
+                try {
+                    $hash = $sha256.ComputeHash($stream)
+                }
+                finally {
+                    $sha256.Dispose()
+                }
+            }
+            finally {
+                $stream.Dispose()
+            }
+
+            $File.Refresh()
+            if (-not $File.Exists -or
+                ($File.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $File.Length -ne $beforeLength -or
+                $File.LastWriteTimeUtc.Ticks -ne $beforeLastWriteTicks) {
+                Fail-TechnicalInvariant -Code "RepositoryFileChangedDuringHash"
+            }
+
+            return ([System.BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant()
+        }
+        catch {
+            if ($_.Exception.Message -match '^M15TechnicalInvariant:[A-Za-z][A-Za-z0-9]+$') {
+                throw $_.Exception.Message
+            }
+
+            $nativeCode = $_.Exception.HResult -band 0xffff
+            $isTransientFileLock =
+                $_.Exception -is [System.IO.IOException] -and
+                ($nativeCode -eq 32 -or $nativeCode -eq 33)
+            if ($isTransientFileLock -and $attempt -lt $maximumAttempts) {
+                [System.Threading.Thread]::Sleep(50 * $attempt)
+                continue
+            }
+
+            Fail-TechnicalInvariant -Code "RepositoryFileHashInvalid"
+        }
+    }
+
+    Fail-TechnicalInvariant -Code "RepositoryFileHashInvalid"
 }
 
 function Assert-NoReparseDirectoryChain {
@@ -536,6 +594,7 @@ try {
         }
     )
 
+    $script:technicalStage = "ProductionProjectGraph"
     $projects = @{}
     foreach ($contract in $projectContracts) {
         $projectFile = Resolve-RegularRepositoryFile `
@@ -564,6 +623,7 @@ try {
             -Code "ProductionPackageReferencesInvalid"
     }
 
+    $script:technicalStage = "WindowsProjectContract"
     $windowsProject = $projects["apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"]
     $expectedWindowsProperties = [ordered]@{
         TargetFramework = "net10.0-windows10.0.26100.0"
@@ -589,6 +649,7 @@ try {
         ($identity.GetAttribute("Version") -ceq ($expectedWindowsProperties.Version + ".0")) `
         "ProjectManifestVersionMismatch"
 
+    $script:technicalStage = "ProductionAssetInventory"
     $expectedAssetIncludes = @(
         "Assets\AppIcon.ico",
         "Assets\SplashScreen.scale-200.png",
