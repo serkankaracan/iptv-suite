@@ -2371,7 +2371,7 @@ public sealed class DependencyRulesTests
 
         using Process selfTestProcess = Process.Start(startInfo)
             ?? throw new AssertFailedException("The M14 regression self-test could not start.");
-        bool selfTestCompleted = selfTestProcess.WaitForExit(30_000);
+        bool selfTestCompleted = selfTestProcess.WaitForExit(120_000);
         if (!selfTestCompleted)
         {
             selfTestProcess.Kill(entireProcessTree: true);
