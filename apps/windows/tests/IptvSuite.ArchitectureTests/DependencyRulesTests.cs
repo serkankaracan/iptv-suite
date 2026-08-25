@@ -4554,6 +4554,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(helper, "$packages.Count -eq 23");
         StringAssert.Contains(helper, "$windowsPackages.Count -eq 23");
         StringAssert.Contains(helper, "class BoundedProcessCapture");
+        StringAssert.Contains(helper, "GetUnresolvedProviderPathFromPSPath");
         StringAssert.Contains(helper, "state.OutputExceeded = true;");
         StringAssert.Contains(helper, "Stop(state);");
         StringAssert.Contains(helper, "EnumerateFileSystemEntries");
