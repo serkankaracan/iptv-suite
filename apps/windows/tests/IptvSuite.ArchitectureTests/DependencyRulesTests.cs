@@ -4753,6 +4753,126 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M13WindowsNativeWatchdogUsesBoundedSharedClockAndExactPhysicalOwnership()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string adapter = File.ReadAllText(Path.Combine(
+            windowsRoot,
+            "WindowsNativePlaybackEngine.cs"));
+        string window = File.ReadAllText(Path.Combine(
+            windowsRoot,
+            "MainWindow.xaml.cs"));
+
+        StringAssert.Contains(
+            adapter,
+            "new PlaybackFaultWatchdogOptions(\n" +
+            "                TimeSpan.FromSeconds(10),\n" +
+            "                TimeSpan.FromSeconds(5)),\n" +
+            "            TimeProvider.System);");
+        StringAssert.Contains(
+            window,
+            "new PlaybackReconnectPolicy(),\n" +
+            "                TimeProvider.System,\n" +
+            "                CreatePlaybackReconnectJitter);");
+
+        StringAssert.Contains(adapter, "private readonly PlaybackFaultWatchdog _faultWatchdog;");
+        StringAssert.Contains(adapter, "_faultWatchdog.Expired += FaultWatchdog_Expired;");
+        StringAssert.Contains(adapter, "if (!ReferenceEquals(sender, _faultWatchdog))");
+        StringAssert.Contains(adapter, "_active.Generation != _generation");
+        StringAssert.Contains(adapter, "_active.SessionId != eventArgs.SessionId");
+        StringAssert.Contains(adapter, "_current.SessionId != eventArgs.SessionId");
+        StringAssert.Contains(
+            adapter,
+            "if (!_dispatcherQueue.TryEnqueue(() =>\n" +
+            "                    ProcessFaultWatchdogExpiration(context, eventArgs)))");
+        StringAssert.Contains(
+            adapter,
+            "Dispatcher shutdown owns final native teardown; no terminal state is published.");
+        string expiryHandler = adapter[
+            adapter.IndexOf(
+                "private void FaultWatchdog_Expired(",
+                StringComparison.Ordinal)..
+            adapter.IndexOf(
+                "private void ProcessFaultWatchdogExpiration(",
+                StringComparison.Ordinal)];
+        StringAssert.Contains(
+            expiryHandler,
+            "catch (Exception exception) when (IsRecoverable(exception))");
+        Assert.IsFalse(expiryHandler.Contains("_mediaPlayer", StringComparison.Ordinal));
+        Assert.IsFalse(expiryHandler.Contains("NotifyStateChanged(", StringComparison.Ordinal));
+        Assert.IsFalse(expiryHandler.Contains("ReleaseContextOnUiThread(", StringComparison.Ordinal));
+        StringAssert.Contains(adapter, "!IsCurrentContext(context, source: null)");
+        StringAssert.Contains(
+            adapter,
+            "PlaybackFaultWatchdogFailureKind.StartupTimeout =>\n" +
+            "                DomainErrorCode.PlaybackStartFailed,");
+        StringAssert.Contains(
+            adapter,
+            "PlaybackFaultWatchdogFailureKind.RebufferTimeout =>\n" +
+            "                DomainErrorCode.StreamInterrupted,");
+        StringAssert.Contains(
+            adapter,
+            "PlaybackFaultWatchdogFailureKind.SchedulerFailure =>\n" +
+            "                DomainErrorCode.DomainInvariantViolation,");
+
+        string expiration = adapter[
+            adapter.IndexOf(
+                "private void ProcessFaultWatchdogExpiration(",
+                StringComparison.Ordinal)..
+            adapter.IndexOf(
+                "private bool IsCurrentContext(",
+                StringComparison.Ordinal)];
+        Assert.IsTrue(
+            expiration.IndexOf("SetWatchdogFailure(", StringComparison.Ordinal) <
+            expiration.IndexOf("ReleaseContextOnUiThread(", StringComparison.Ordinal));
+        Assert.IsTrue(
+            expiration.IndexOf("ReleaseContextOnUiThread(", StringComparison.Ordinal) <
+            expiration.IndexOf("NotifyStateChanged(failed);", StringComparison.Ordinal));
+
+        string release = adapter[
+            adapter.IndexOf(
+                "private void ReleaseContextOnUiThread(",
+                StringComparison.Ordinal)..
+            adapter.IndexOf(
+                "private void PublishNativeState(",
+                StringComparison.Ordinal)];
+        Assert.IsTrue(
+            release.IndexOf("_faultWatchdog.Cancel(context.SessionId);", StringComparison.Ordinal) <
+            release.IndexOf("context.Retired = true;", StringComparison.Ordinal));
+        Assert.IsTrue(
+            release.IndexOf("context.Retired = true;", StringComparison.Ordinal) <
+            release.IndexOf("DetachSessionHandlers(context);", StringComparison.Ordinal));
+
+        string notification = adapter[
+            adapter.IndexOf(
+                "private void NotifyStateChanged(",
+                StringComparison.Ordinal)..
+            adapter.IndexOf(
+                "private void UpdateControls(",
+                StringComparison.Ordinal)];
+        Assert.IsTrue(
+            notification.IndexOf("_faultWatchdog.Observe(snapshot);", StringComparison.Ordinal) <
+            notification.IndexOf("EventHandler<PlaybackEngineStateChangedEventArgs>? handlers", StringComparison.Ordinal));
+
+        string finalDispose = adapter[
+            adapter.IndexOf(
+                "private bool DisposeOnUiThread()",
+                StringComparison.Ordinal)..];
+        Assert.IsTrue(
+            finalDispose.IndexOf("_active = null;", StringComparison.Ordinal) <
+            finalDispose.IndexOf("_faultWatchdog.Expired -= FaultWatchdog_Expired;", StringComparison.Ordinal));
+        Assert.IsTrue(
+            finalDispose.IndexOf("_faultWatchdog.Expired -= FaultWatchdog_Expired;", StringComparison.Ordinal) <
+            finalDispose.IndexOf("_faultWatchdog.Dispose();", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("Task.Run", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void M11PlaybackUiDelegatesToCoordinatorAndClosesNativeLifetimeFirst()
     {
         string windowsRoot = Path.Combine(

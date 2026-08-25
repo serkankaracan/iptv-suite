@@ -21,6 +21,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
     private readonly MediaPlayerElement _surface;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly MediaPlayer _mediaPlayer;
+    private readonly PlaybackFaultWatchdog _faultWatchdog;
     private PlaybackEngineSnapshot _current = PlaybackEngineSnapshot.Closed();
     private PlaybackControlSnapshot _controls = PlaybackControlSnapshot.Idle(
         PlaybackVolume.FromPercent(100),
@@ -51,6 +52,12 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             RealTimePlayback = true,
         };
         _surface.SetMediaPlayer(_mediaPlayer);
+        _faultWatchdog = new PlaybackFaultWatchdog(
+            new PlaybackFaultWatchdogOptions(
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(5)),
+            TimeProvider.System);
+        _faultWatchdog.Expired += FaultWatchdog_Expired;
     }
 
     public event EventHandler<PlaybackEngineStateChangedEventArgs>? StateChanged;
@@ -624,6 +631,80 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         PublishNativeState(context, state);
     }
 
+    private void FaultWatchdog_Expired(
+        object? sender,
+        PlaybackFaultWatchdogExpiredEventArgs eventArgs)
+    {
+        ArgumentNullException.ThrowIfNull(eventArgs);
+        if (!ReferenceEquals(sender, _faultWatchdog))
+        {
+            return;
+        }
+
+        SessionContext context;
+        lock (_sync)
+        {
+            if (_disposeStarted ||
+                _active is null ||
+                _active.Retired ||
+                _active.Generation != _generation ||
+                _active.SessionId != eventArgs.SessionId ||
+                _current.SessionId != eventArgs.SessionId ||
+                _current.State is PlaybackState.Closed or PlaybackState.Failed)
+            {
+                return;
+            }
+
+            context = _active;
+        }
+
+        try
+        {
+            if (!_dispatcherQueue.TryEnqueue(() =>
+                    ProcessFaultWatchdogExpiration(context, eventArgs)))
+            {
+                // Dispatcher shutdown owns final native teardown; no terminal state is published.
+                return;
+            }
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            // Dispatcher shutdown owns final native teardown; no terminal state is published.
+        }
+    }
+
+    private void ProcessFaultWatchdogExpiration(
+        SessionContext context,
+        PlaybackFaultWatchdogExpiredEventArgs eventArgs)
+    {
+        if (context.SessionId != eventArgs.SessionId ||
+            !IsCurrentContext(context, source: null))
+        {
+            return;
+        }
+
+        PlaybackEngineSnapshot? failed = SetWatchdogFailure(
+            context,
+            eventArgs.FailureKind);
+        if (failed is null)
+        {
+            return;
+        }
+
+        try
+        {
+            ReleaseContextOnUiThread(context, preserveTerminalState: true);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            // Final disposal retries exact teardown.
+        }
+        finally
+        {
+            NotifyStateChanged(failed);
+        }
+    }
+
     private bool IsCurrentContext(SessionContext context, MediaSource? source)
     {
         lock (_sync)
@@ -643,6 +724,16 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         bool preserveTerminalState)
     {
         bool cleanupFailed = false;
+        lock (_sync)
+        {
+            if (!ReferenceEquals(_active, context))
+            {
+                return;
+            }
+        }
+
+        _faultWatchdog.Cancel(context.SessionId);
+
         lock (_sync)
         {
             if (!ReferenceEquals(_active, context))
@@ -795,6 +886,43 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         return failed;
     }
 
+    private PlaybackEngineSnapshot? SetWatchdogFailure(
+        SessionContext context,
+        PlaybackFaultWatchdogFailureKind failureKind)
+    {
+        DomainErrorCode error = failureKind switch
+        {
+            PlaybackFaultWatchdogFailureKind.StartupTimeout =>
+                DomainErrorCode.PlaybackStartFailed,
+            PlaybackFaultWatchdogFailureKind.RebufferTimeout =>
+                DomainErrorCode.StreamInterrupted,
+            PlaybackFaultWatchdogFailureKind.SchedulerFailure =>
+                DomainErrorCode.DomainInvariantViolation,
+            _ => DomainErrorCode.DomainInvariantViolation,
+        };
+
+        PlaybackEngineSnapshot? failed = null;
+        lock (_sync)
+        {
+            if (_disposeStarted ||
+                !ReferenceEquals(_active, context) ||
+                context.Retired ||
+                context.Generation != _generation ||
+                context.SessionId != _current.SessionId ||
+                _current.State is PlaybackState.Closed or PlaybackState.Failed)
+            {
+                return null;
+            }
+
+            failed = PlaybackEngineSnapshot.Failed(
+                context.SessionId,
+                DomainError.Create(error));
+            _current = failed;
+        }
+
+        return failed;
+    }
+
     private void RaiseIfCurrent(PlaybackEngineSnapshot snapshot)
     {
         lock (_sync)
@@ -810,6 +938,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
 
     private void NotifyStateChanged(PlaybackEngineSnapshot snapshot)
     {
+        _faultWatchdog.Observe(snapshot);
         EventHandler<PlaybackEngineStateChangedEventArgs>? handlers = StateChanged;
         if (handlers is null)
         {
@@ -1001,6 +1130,9 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                 _controls.IsMuted,
                 _controls.AspectMode);
         }
+
+        _faultWatchdog.Expired -= FaultWatchdog_Expired;
+        _faultWatchdog.Dispose();
 
         if (cleanupFailed)
         {
