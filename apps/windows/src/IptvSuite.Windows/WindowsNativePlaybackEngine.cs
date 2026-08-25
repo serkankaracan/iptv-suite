@@ -506,6 +506,17 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             NativeCallback.MediaFailed,
             playbackState: null,
             source: null);
+        context.MediaEndedHandler = (sender, _) =>
+        {
+            if (ReferenceEquals(sender, _mediaPlayer))
+            {
+                PostNativeCallback(
+                    context,
+                    NativeCallback.MediaEnded,
+                    playbackState: null,
+                    source: context.Source);
+            }
+        };
         context.PlaybackStateChangedHandler = (sender, _) => PostNativeCallback(
             context,
             NativeCallback.PlaybackStateChanged,
@@ -514,6 +525,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         context.Source.OpenOperationCompleted += context.SourceOpenHandler;
         _mediaPlayer.MediaOpened += context.MediaOpenedHandler;
         _mediaPlayer.MediaFailed += context.MediaFailedHandler;
+        _mediaPlayer.MediaEnded += context.MediaEndedHandler;
         _mediaPlayer.PlaybackSession.PlaybackStateChanged +=
             context.PlaybackStateChangedHandler;
     }
@@ -560,6 +572,19 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             }
         }
 
+        if (context.MediaEndedHandler is not null)
+        {
+            try
+            {
+                _mediaPlayer.MediaEnded -= context.MediaEndedHandler;
+                context.MediaEndedHandler = null;
+            }
+            catch (Exception exception) when (IsRecoverable(exception))
+            {
+                succeeded = false;
+            }
+        }
+
         if (context.PlaybackStateChangedHandler is not null)
         {
             try
@@ -598,7 +623,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             return;
         }
 
-        if (callback is NativeCallback.SourceFailed or NativeCallback.MediaFailed)
+        if (callback is NativeCallback.SourceFailed or
+            NativeCallback.MediaFailed or NativeCallback.MediaEnded)
         {
             PlaybackEngineSnapshot? failed = SetNativeFailure(context, callback);
             try
@@ -863,14 +889,18 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         PlaybackEngineSnapshot? failed = null;
         lock (_sync)
         {
-            if (!ReferenceEquals(_active, context) || context.Retired ||
+            if (_disposeStarted ||
+                !ReferenceEquals(_active, context) ||
+                context.Retired ||
+                context.Generation != _generation ||
+                context.SessionId != _current.SessionId ||
                 _current.State is PlaybackState.Closed or PlaybackState.Failed)
             {
                 return null;
             }
 
             bool isActiveMediaFailure =
-                callback == NativeCallback.MediaFailed &&
+                (callback is NativeCallback.MediaFailed or NativeCallback.MediaEnded) &&
                 context.HasReachedPlayableState &&
                 _current.State is PlaybackState.Buffering or
                     PlaybackState.Playing or PlaybackState.Paused;
@@ -1207,6 +1237,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         SourceFailed,
         MediaOpened,
         MediaFailed,
+        MediaEnded,
         PlaybackStateChanged,
     }
 
@@ -1223,6 +1254,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         internal TypedEventHandler<MediaPlayer, object>? MediaOpenedHandler { get; set; }
         internal TypedEventHandler<MediaPlayer, MediaPlayerFailedEventArgs>?
             MediaFailedHandler { get; set; }
+        internal TypedEventHandler<MediaPlayer, object>? MediaEndedHandler { get; set; }
         internal TypedEventHandler<MediaPlaybackSession, object>?
             PlaybackStateChangedHandler { get; set; }
         internal bool HasReachedPlayableState { get; set; }

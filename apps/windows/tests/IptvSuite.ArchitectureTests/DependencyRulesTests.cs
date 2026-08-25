@@ -4727,7 +4727,9 @@ public sealed class DependencyRulesTests
             "WindowsNativePlaybackEngine.cs"));
 
         StringAssert.Contains(adapter, "SetNativeFailure(context, callback)");
-        StringAssert.Contains(adapter, "callback == NativeCallback.MediaFailed");
+        StringAssert.Contains(
+            adapter,
+            "(callback is NativeCallback.MediaFailed or NativeCallback.MediaEnded)");
         StringAssert.Contains(adapter, "context.HasReachedPlayableState");
         StringAssert.Contains(
             adapter,
@@ -4746,6 +4748,52 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             adapter,
             "context.MediaFailedHandler = (_, _) => PostNativeCallback(");
+        StringAssert.Contains(adapter, "context.MediaEndedHandler = (sender, _) =>");
+        StringAssert.Contains(adapter, "ReferenceEquals(sender, _mediaPlayer)");
+        StringAssert.Contains(adapter, "NativeCallback.MediaEnded");
+        StringAssert.Contains(adapter, "source: context.Source);");
+        StringAssert.Contains(
+            adapter,
+            "_mediaPlayer.MediaEnded += context.MediaEndedHandler;");
+        StringAssert.Contains(
+            adapter,
+            "_mediaPlayer.MediaEnded -= context.MediaEndedHandler;");
+        StringAssert.Contains(adapter, "IsCurrentContext(context, source)");
+        StringAssert.Contains(adapter, "context.SessionId == _current.SessionId");
+        StringAssert.Contains(
+            adapter,
+            "(source is null || ReferenceEquals(source, context.Source))");
+
+        string terminalCallback = adapter[adapter.IndexOf(
+            "if (callback is NativeCallback.SourceFailed or",
+            StringComparison.Ordinal)..adapter.IndexOf(
+                "PlaybackState? state = callback switch",
+                StringComparison.Ordinal)];
+        StringAssert.Contains(
+            terminalCallback,
+            "ReleaseContextOnUiThread(context, preserveTerminalState: true);");
+        StringAssert.Contains(terminalCallback, "NotifyStateChanged(failed);");
+        Assert.IsTrue(
+            terminalCallback.IndexOf(
+                "ReleaseContextOnUiThread(context, preserveTerminalState: true);",
+                StringComparison.Ordinal) <
+            terminalCallback.IndexOf("NotifyStateChanged(failed);", StringComparison.Ordinal));
+
+        string nativeClassifier = adapter[adapter.IndexOf(
+            "private PlaybackEngineSnapshot? SetNativeFailure(",
+            StringComparison.Ordinal)..adapter.IndexOf(
+                "private PlaybackEngineSnapshot? SetWatchdogFailure(",
+                StringComparison.Ordinal)];
+        StringAssert.Contains(nativeClassifier, "if (_disposeStarted ||");
+        StringAssert.Contains(nativeClassifier, "context.Generation != _generation");
+        StringAssert.Contains(
+            nativeClassifier,
+            "context.SessionId != _current.SessionId");
+        Assert.IsFalse(nativeClassifier.Contains("Duration", StringComparison.Ordinal));
+        Assert.IsFalse(nativeClassifier.Contains("Position", StringComparison.Ordinal));
+        Assert.IsFalse(nativeClassifier.Contains("MediaPlaybackState.None", StringComparison.Ordinal));
+        Assert.IsFalse(nativeClassifier.Contains("Uri", StringComparison.Ordinal));
+        Assert.IsFalse(nativeClassifier.Contains("locator", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(adapter.Contains("ErrorMessage", StringComparison.Ordinal));
         Assert.IsFalse(adapter.Contains("ExtendedErrorCode", StringComparison.Ordinal));
         Assert.IsFalse(adapter.Contains("exception.Message", StringComparison.Ordinal));
