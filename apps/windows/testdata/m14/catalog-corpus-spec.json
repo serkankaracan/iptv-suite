@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "fixtureSetId": "m14-catalog-corpus-v1",
+  "generatorName": "IptvSuite.Testing.M14CatalogCorpusGenerator",
+  "generatorVersion": "1.0.0",
+  "algorithmVersion": 1,
+  "seed": 20260825,
+  "provenance": "synthetic",
+  "containsThirdPartyContent": false,
+  "containsPersonalData": false,
+  "containsRealCredentials": false,
+  "containsUnauthorizedMedia": false,
+  "license": {
+    "expression": "LicenseRef-IPTVSuite-Synthetic-Test-Only",
+    "status": "UNVERIFIED",
+    "file": "apps/windows/testdata/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt"
+  },
+  "corpora": [
+    {
+      "id": "small",
+      "channelCount": 100,
+      "categoryCount": 10,
+      "logoPercent": 50,
+      "expectedOutcome": "Success"
+    },
+    {
+      "id": "medium",
+      "channelCount": 5000,
+      "categoryCount": 100,
+      "logoPercent": 70,
+      "expectedOutcome": "Success"
+    },
+    {
+      "id": "large",
+      "channelCount": 10000,
+      "categoryCount": 200,
+      "logoPercent": 80,
+      "expectedOutcome": "Success"
+    },
+    {
+      "id": "very-large",
+      "channelCount": 20000,
+      "categoryCount": 300,
+      "logoPercent": 90,
+      "expectedOutcome": "Success"
+    },
+    {
+      "id": "mvp-gate",
+      "channelCount": 50000,
+      "categoryCount": 500,
+      "logoPercent": 100,
+      "expectedOutcome": "Success"
+    },
+    {
+      "id": "stress",
+      "channelCount": 100000,
+      "categoryCount": 1000,
+      "logoPercent": 100,
+      "expectedOutcome": "EntryLimitFailClosed"
+    }
+  ]
+}

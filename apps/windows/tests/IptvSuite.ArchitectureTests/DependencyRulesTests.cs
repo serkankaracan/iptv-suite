@@ -2152,6 +2152,84 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M14CatalogBenchmarkIsExactSdkCleanBoundAndExcludedFromNormalWorkflow()
+    {
+        string wrapper = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsCatalogBenchmark.ps1"));
+        string benchmarkTest = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.IntegrationTests",
+            "M14CatalogPerformanceBenchmarkTests.cs"));
+        string qualityGate = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsQualityGate.ps1"));
+        string workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-quality.yml"));
+
+        StringAssert.Contains(wrapper, "[switch]$AllowBenchmark");
+        StringAssert.Contains(wrapper, "if (-not $AllowBenchmark)");
+        StringAssert.Contains(wrapper, "global.json");
+        StringAssert.Contains(wrapper, "rollForward");
+        StringAssert.Contains(wrapper, "allowPrerelease");
+        StringAssert.Contains(wrapper, "& $dotnet --version");
+        StringAssert.Contains(wrapper, "status --porcelain=v1 --untracked-files=normal");
+        StringAssert.Contains(wrapper, "$finalHead -ne $initialHead");
+        StringAssert.Contains(wrapper, "$finalStatus.Count -ne 0");
+        StringAssert.Contains(wrapper, "DOTNET_CLI_USE_MSBUILD_SERVER");
+        StringAssert.Contains(wrapper, "MSBUILDDISABLENODEREUSE");
+        StringAssert.Contains(wrapper, "IPTVSUITE_M14_CATALOG_BENCHMARK");
+        StringAssert.Contains(wrapper, "IPTVSUITE_M14_CATALOG_VALIDATED_SDK");
+        StringAssert.Contains(wrapper, "M14CatalogPerformanceBenchmarkTests.MeasureM14CatalogBenchmarkMatrix");
+        StringAssert.Contains(wrapper, "$temporaryEvidencePath = $evidencePath + '.tmp'");
+        StringAssert.Contains(wrapper, "evidence was not published atomically");
+        StringAssert.Contains(wrapper, "[string]$evidence.result -ne 'passed'");
+        StringAssert.Contains(wrapper, "[bool]$evidence.referenceEligible");
+        StringAssert.Contains(wrapper, "retained a legacy transient corpus manifest");
+
+        StringAssert.Contains(benchmarkTest, "private const int Iterations = 20;");
+        StringAssert.Contains(benchmarkTest, "[100, 5_000, 10_000, 20_000, 50_000]");
+        StringAssert.Contains(benchmarkTest, "100_000");
+        StringAssert.Contains(benchmarkTest, "rawSamples");
+        StringAssert.Contains(benchmarkTest, "Percentile90");
+        StringAssert.Contains(benchmarkTest, "Percentile95");
+        StringAssert.Contains(benchmarkTest, "CoefficientOfVariation");
+        StringAssert.Contains(benchmarkTest, "garbageCollections");
+        StringAssert.Contains(benchmarkTest, "workingSet");
+        StringAssert.Contains(benchmarkTest, "processIo");
+        StringAssert.Contains(benchmarkTest, "parserDiagnostic");
+        StringAssert.Contains(benchmarkTest, "combinedImport");
+        StringAssert.Contains(benchmarkTest, "cancellation");
+        StringAssert.Contains(benchmarkTest, "operatingSystemBuild");
+        StringAssert.Contains(benchmarkTest, "commitSha");
+        StringAssert.Contains(benchmarkTest, "schemaVersion");
+        StringAssert.Contains(benchmarkTest, "configuration = \"Release\"");
+        StringAssert.Contains(benchmarkTest, "platform = \"x64\"");
+        StringAssert.Contains(benchmarkTest, "result = budgetEvaluation.AllPassed ? \"passed\" : \"failed\"");
+        StringAssert.Contains(benchmarkTest, "const bool referenceEligible = false;");
+        StringAssert.Contains(benchmarkTest, "Assert.IsFalse(gate.PeakWorkingSet.SampleCapacityReached);");
+        StringAssert.Contains(benchmarkTest, "condition declaration is outside the closed vocabulary");
+        StringAssert.Contains(benchmarkTest, "retained = false");
+        Assert.IsFalse(
+            benchmarkTest.Contains("CopyFileAsync", StringComparison.Ordinal),
+            "Transient corpus files and their path-bearing manifest must not be retained as evidence.");
+        Assert.IsFalse(
+            qualityGate.Contains("Invoke-WindowsCatalogBenchmark.ps1", StringComparison.Ordinal),
+            "The normal quality gate must not run the opt-in M14 catalog benchmark.");
+        Assert.IsFalse(
+            workflow.Contains("Invoke-WindowsCatalogBenchmark.ps1", StringComparison.Ordinal),
+            "The normal hosted workflow must not run the opt-in M14 catalog benchmark.");
+    }
+
+    [TestMethod]
     public void M10PlaybackCandidateDecisionPreservesTheExactLicenseBoundary()
     {
         string decision = File.ReadAllText(Path.Combine(
