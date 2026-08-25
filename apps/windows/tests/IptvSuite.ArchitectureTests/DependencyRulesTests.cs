@@ -4786,7 +4786,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "_playback.StateChanged += Playback_StateChanged;");
         StringAssert.Contains(codeBehind, "DispatcherQueue.TryEnqueue(() => ApplyPlaybackState(snapshot));");
         StringAssert.Contains(codeBehind, "PlaybackSessionSnapshot current = playback.Current;");
-        StringAssert.Contains(codeBehind, "if (current != snapshot)");
+        StringAssert.Contains(codeBehind, "if (!ReferenceEquals(current, snapshot))");
         StringAssert.Contains(codeBehind, "_playback.StateChanged -= Playback_StateChanged;");
         StringAssert.Contains(codeBehind, "PlaybackState.Failed => \"Playback is unavailable.\"");
         StringAssert.Contains(
@@ -4858,7 +4858,6 @@ public sealed class DependencyRulesTests
             "new Uri",
             "exception.Message",
             "HResult",
-            "snapshot.Error",
         ];
         foreach (string forbidden in forbiddenPageDependencies)
         {
@@ -5138,7 +5137,7 @@ public sealed class DependencyRulesTests
                 RegexOptions.CultureInvariant),
             "Per-second reconnect countdown updates must not be announced as a live region.");
 
-        StringAssert.Contains(codeBehind, "if (current != snapshot)");
+        StringAssert.Contains(codeBehind, "if (!ReferenceEquals(current, snapshot))");
         StringAssert.Contains(
             codeBehind,
             "bool canRetryReconnect = snapshot.State == PlaybackState.Failed &&");
@@ -5203,8 +5202,177 @@ public sealed class DependencyRulesTests
             apply.Contains("ChannelList.IsEnabled", StringComparison.Ordinal),
             "Reconnect progress must not disable choosing another channel.");
         Assert.IsFalse(codeBehind.Contains("Task.Delay", StringComparison.Ordinal));
-        Assert.IsFalse(codeBehind.Contains("snapshot.Error", StringComparison.Ordinal));
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                codeBehind,
+                @"\bsnapshot\.Error\b",
+                RegexOptions.CultureInvariant),
+            "The page may hand a terminal safe DomainError to the presenter exactly once.");
+        Assert.IsFalse(codeBehind.Contains("snapshot.Error.Code", StringComparison.Ordinal));
+        Assert.IsFalse(codeBehind.Contains("snapshot.Error.ResourceKey", StringComparison.Ordinal));
+        Assert.IsFalse(codeBehind.Contains("snapshot.Error.Retryability", StringComparison.Ordinal));
         Assert.IsFalse(codeBehind.Contains("exception.Message", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void M13DomainErrorPresentationIsLocalizedOpaqueAndConnectivityIsHintOnly()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string presenter = File.ReadAllText(Path.Combine(
+            windowsRoot,
+            "DomainErrorPresenter.cs"));
+        string connectivity = File.ReadAllText(Path.Combine(
+            windowsRoot,
+            "WindowsNetworkAvailabilityHintSource.cs"));
+        string page = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml"));
+        string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+        string window = File.ReadAllText(Path.Combine(windowsRoot, "MainWindow.xaml.cs"));
+        string project = File.ReadAllText(Path.Combine(
+            windowsRoot,
+            "IptvSuite.Windows.csproj"));
+
+        string[] requiredResources =
+        [
+            "Errors.Generic",
+            "Errors.Domain.InvariantViolation",
+            "Errors.Network.Unreachable",
+            "Errors.Authentication.Rejected",
+            "Errors.Playlist.DownloadFailed",
+            "Errors.Playlist.UnsupportedFormat",
+            "Errors.Network.RequestTimedOut",
+            "Errors.Network.TlsValidationFailed",
+            "Errors.Playback.StartFailed",
+            "Errors.Playback.ControlFailed",
+            "Errors.Playback.StreamInterrupted",
+            "Errors.Playback.ReconnectExhausted",
+            "Errors.Storage.Unavailable",
+            "Errors.Operation.Cancelled",
+            "Errors.Network.ResourceNotFound",
+            "Errors.Network.RequestRejected",
+            "Errors.Network.RateLimited",
+            "Errors.Network.ServiceUnavailable",
+            "Errors.Network.ResponseTooLarge",
+            "Diagnostics.OperationIdLabel",
+            "Connectivity.OfflineHint",
+            "Connectivity.OnlineHint",
+        ];
+
+        Dictionary<string, string> ReadResources(string language)
+        {
+            XDocument resources = XDocument.Load(Path.Combine(
+                windowsRoot,
+                "Strings",
+                language,
+                "Resources.resw"));
+            XElement[] data = resources.Root!.Elements("data").ToArray();
+            Assert.AreEqual(
+                data.Length,
+                data.Select(element => (string)element.Attribute("name")!)
+                    .Distinct(StringComparer.Ordinal)
+                    .Count(),
+                $"{language} resources must not contain duplicate names.");
+            return data.ToDictionary(
+                element => (string)element.Attribute("name")!,
+                element => element.Element("value")?.Value ?? string.Empty,
+                StringComparer.Ordinal);
+        }
+
+        Dictionary<string, string> english = ReadResources("en-US");
+        Dictionary<string, string> turkish = ReadResources("tr-TR");
+        CollectionAssert.AreEquivalent(english.Keys.ToArray(), turkish.Keys.ToArray());
+        foreach (string resource in requiredResources)
+        {
+            Assert.IsTrue(english.TryGetValue(resource, out string? englishValue));
+            Assert.IsTrue(turkish.TryGetValue(resource, out string? turkishValue));
+            Assert.IsFalse(string.IsNullOrWhiteSpace(englishValue));
+            Assert.IsFalse(string.IsNullOrWhiteSpace(turkishValue));
+        }
+
+        StringAssert.Contains(project, "<DefaultLanguage>en-US</DefaultLanguage>");
+        StringAssert.Contains(presenter, "new ResourceLoader()");
+        StringAssert.Contains(presenter, "DomainError.Create(error.Code)");
+        StringAssert.Contains(presenter, "canonical.ResourceKey");
+        StringAssert.Contains(presenter, "RandomNumberGenerator.GetBytes(ByteCount)");
+        StringAssert.Contains(presenter, "Convert.ToHexString");
+        StringAssert.Contains(presenter, "private const int ByteCount = 16;");
+        StringAssert.Contains(presenter, "[OPAQUE-OPERATION-ID]");
+        string[] forbiddenPresenterDetails =
+        [
+            "SourceId",
+            "ChannelId",
+            "PlaybackSessionId",
+            "ErrorMessage",
+            "ExtendedErrorCode",
+            "HResult",
+            "exception.Message",
+            "new Uri",
+        ];
+        foreach (string forbidden in forbiddenPresenterDetails)
+        {
+            Assert.IsFalse(
+                presenter.Contains(forbidden, StringComparison.Ordinal),
+                $"The presenter must not expose native or sensitive context: {forbidden}.");
+        }
+
+        StringAssert.Contains(
+            connectivity,
+            "NetworkInformation.GetInternetConnectionProfile()");
+        StringAssert.Contains(
+            connectivity,
+            "profile.GetNetworkConnectivityLevel()");
+        string[] forbiddenConnectivityAuthority =
+        [
+            "PlaybackSessionCoordinator",
+            "IPlaybackEngine",
+            "PlaybackReconnectPolicy",
+            "RetryReconnectAsync",
+            "StartAsync",
+            "PlayAsync",
+            "StateChanged",
+            "Task.Delay",
+        ];
+        foreach (string forbidden in forbiddenConnectivityAuthority)
+        {
+            Assert.IsFalse(
+                connectivity.Contains(forbidden, StringComparison.Ordinal),
+                $"Network availability must remain a read-only presentation hint: {forbidden}.");
+        }
+
+        StringAssert.Contains(
+            page,
+            "AutomationProperties.AutomationId=\"PlaybackOperationIdText\"");
+        StringAssert.Contains(
+            page,
+            "AutomationProperties.AutomationId=\"PlaybackConnectivityHintText\"");
+        StringAssert.Contains(
+            window,
+            "new WindowsNetworkAvailabilityHintSource()");
+        StringAssert.Contains(codeBehind, "GetOrCreateFailurePresentation(snapshot)");
+        StringAssert.Contains(codeBehind, "_domainErrorPresenter?.Present(error, hint)");
+        StringAssert.Contains(codeBehind, "if (!ReferenceEquals(current, snapshot))");
+        StringAssert.Contains(
+            codeBehind,
+            "ReferenceEquals(_presentedFailureSnapshot, snapshot)");
+        Assert.IsFalse(codeBehind.Contains("current != snapshot", StringComparison.Ordinal));
+        Assert.IsFalse(codeBehind.Contains("snapshot.Error.ToString", StringComparison.Ordinal));
+        Assert.IsFalse(codeBehind.Contains("exception.Message", StringComparison.Ordinal));
+
+        int retryAuthorityIndex = codeBehind.IndexOf(
+            "bool canRetryReconnect = snapshot.State == PlaybackState.Failed &&",
+            StringComparison.Ordinal);
+        int hintPresentationIndex = codeBehind.IndexOf(
+            "GetOrCreateFailurePresentation(snapshot)",
+            retryAuthorityIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            retryAuthorityIndex >= 0 && hintPresentationIndex > retryAuthorityIndex,
+            "Connectivity text must be evaluated only after coordinator-owned retry admission.");
     }
 
     [TestMethod]

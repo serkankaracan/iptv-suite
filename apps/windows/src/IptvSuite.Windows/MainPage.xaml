@@ -78,6 +78,13 @@
                         <TextBlock x:Name="PlaybackChannelText" AutomationProperties.AutomationId="PlaybackChannelText" AutomationProperties.LiveSetting="Polite" HorizontalAlignment="Right" Text="No channel selected." TextTrimming="CharacterEllipsis" />
                         <TextBlock x:Name="PlaybackStatusText" AutomationProperties.AutomationId="PlaybackStatusText" AutomationProperties.LiveSetting="Polite" HorizontalAlignment="Right" Text="Playback stopped." />
                         <TextBlock x:Name="PlaybackReconnectCountdownText" AutomationProperties.AutomationId="PlaybackReconnectCountdownText" AutomationProperties.LiveSetting="Off" HorizontalAlignment="Right" Visibility="Collapsed" />
+                        <StackPanel x:Name="PlaybackFailurePanel" HorizontalAlignment="Right" Visibility="Collapsed">
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="4">
+                                <TextBlock x:Name="PlaybackOperationIdLabelText" />
+                                <TextBlock x:Name="PlaybackOperationIdText" AutomationProperties.AutomationId="PlaybackOperationIdText" AutomationProperties.LiveSetting="Off" />
+                            </StackPanel>
+                            <TextBlock x:Name="PlaybackConnectivityHintText" AutomationProperties.AutomationId="PlaybackConnectivityHintText" AutomationProperties.LiveSetting="Off" HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap" Visibility="Collapsed" />
+                        </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Row="1" Grid.ColumnSpan="5" Orientation="Horizontal" Spacing="8">
                         <Button x:Name="VolumeDownButton" AutomationProperties.AcceleratorKey="Ctrl+Shift+Down" AutomationProperties.AutomationId="PlaybackVolumeDownButton" AutomationProperties.Name="Decrease playback volume" Click="VolumeDownButton_Click" Content="Volume −" IsEnabled="False" />

@@ -30,6 +30,8 @@ public sealed partial class MainPage : Page, IDisposable
     private CatalogBrowseCoordinator? _coordinator;
     private ChannelLogoCache? _logoCache;
     private PlaybackSessionCoordinator? _playback;
+    private DomainErrorPresenter? _domainErrorPresenter;
+    private INetworkAvailabilityHintSource? _networkAvailabilityHintSource;
     private Func<Task<SourceDeletionReconciliationResult>>? _retryPendingSourceCleanup;
     private Func<SourceId, CancellationToken, ValueTask<SourceDeletionResult>>? _deleteSource;
     private ChannelRow? _playbackChannel;
@@ -50,6 +52,8 @@ public sealed partial class MainPage : Page, IDisposable
     private TaskCompletionSource? _operationsDrained;
     private bool _sourceDeletionOperationPending;
     private bool _playbackControlGateDisposed;
+    private PlaybackSessionSnapshot? _presentedFailureSnapshot;
+    private DomainErrorPresentation? _presentedFailure;
 
     public MainPage()
     {
@@ -184,12 +188,16 @@ public sealed partial class MainPage : Page, IDisposable
     internal async Task InitializeAsync(
         ICatalogBrowser catalogBrowser,
         ChannelLogoCache logoCache,
-        PlaybackSessionCoordinator playback)
+        PlaybackSessionCoordinator playback,
+        DomainErrorPresenter domainErrorPresenter,
+        INetworkAvailabilityHintSource networkAvailabilityHintSource)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(catalogBrowser);
         ArgumentNullException.ThrowIfNull(logoCache);
         ArgumentNullException.ThrowIfNull(playback);
+        ArgumentNullException.ThrowIfNull(domainErrorPresenter);
+        ArgumentNullException.ThrowIfNull(networkAvailabilityHintSource);
         if (_coordinator is not null || _playback is not null)
         {
             throw new InvalidOperationException("The application page is already initialized.");
@@ -198,6 +206,8 @@ public sealed partial class MainPage : Page, IDisposable
         _coordinator = new CatalogBrowseCoordinator(catalogBrowser);
         _logoCache = logoCache;
         _playback = playback;
+        _domainErrorPresenter = domainErrorPresenter;
+        _networkAvailabilityHintSource = networkAvailabilityHintSource;
         _catalogAdmissionReady = true;
         ChannelList.IsEnabled = true;
         RetryPendingDeletionButton.Visibility = Visibility.Collapsed;
@@ -995,7 +1005,7 @@ public sealed partial class MainPage : Page, IDisposable
         }
 
         PlaybackSessionSnapshot current = playback.Current;
-        if (current != snapshot)
+        if (!ReferenceEquals(current, snapshot))
         {
             return;
         }
@@ -1015,7 +1025,10 @@ public sealed partial class MainPage : Page, IDisposable
 
         bool canRetryReconnect = snapshot.State == PlaybackState.Failed &&
             playback.CanRetryReconnect;
-        PlaybackStatusText.Text = GetPlaybackStatusText(snapshot, canRetryReconnect);
+        DomainErrorPresentation? failurePresentation =
+            GetOrCreateFailurePresentation(snapshot);
+        PlaybackStatusText.Text = failurePresentation?.Message ??
+            GetPlaybackStatusText(snapshot, canRetryReconnect);
         PlaybackReconnectSnapshot? reconnect = snapshot.Reconnect;
         bool waitingToReconnect = reconnect?.Phase == PlaybackReconnectPhase.Waiting;
         PlaybackReconnectCountdownText.Text = waitingToReconnect
@@ -1042,6 +1055,27 @@ public sealed partial class MainPage : Page, IDisposable
             ? Visibility.Visible
             : Visibility.Collapsed;
         RetryPlaybackButton.IsEnabled = canRetryReconnect;
+        bool failureVisible = failurePresentation is not null;
+        PlaybackFailurePanel.Visibility = failureVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PlaybackOperationIdLabelText.Text = failureVisible
+            ? $"{failurePresentation!.OperationIdLabel}:"
+            : string.Empty;
+        PlaybackOperationIdText.Text = failureVisible
+            ? failurePresentation!.OperationId.Value
+            : string.Empty;
+        AutomationProperties.SetName(
+            PlaybackOperationIdText,
+            failureVisible
+                ? $"{failurePresentation!.OperationIdLabel} " +
+                    failurePresentation.OperationId.Value
+                : string.Empty);
+        string connectivityHint = failurePresentation?.ConnectivityHint ?? string.Empty;
+        PlaybackConnectivityHintText.Text = connectivityHint;
+        PlaybackConnectivityHintText.Visibility = string.IsNullOrEmpty(connectivityHint)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
         PlaybackControlSnapshot controls = playback.CurrentControls;
         bool controlsEnabled = CanChangePlaybackControls(snapshot.State);
@@ -1065,6 +1099,42 @@ public sealed partial class MainPage : Page, IDisposable
 
     private static bool CanChangePlaybackControls(PlaybackState state) =>
         state is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused;
+
+    private DomainErrorPresentation? GetOrCreateFailurePresentation(
+        PlaybackSessionSnapshot snapshot)
+    {
+        if (snapshot.State != PlaybackState.Failed)
+        {
+            _presentedFailureSnapshot = null;
+            _presentedFailure = null;
+            return null;
+        }
+
+        if (ReferenceEquals(_presentedFailureSnapshot, snapshot))
+        {
+            return _presentedFailure;
+        }
+
+        DomainError error = snapshot.Error ??
+            DomainError.Create(DomainErrorCode.DomainInvariantViolation);
+        NetworkAvailabilityHint hint = ReadNetworkAvailabilityHint();
+        _presentedFailure = _domainErrorPresenter?.Present(error, hint);
+        _presentedFailureSnapshot = snapshot;
+        return _presentedFailure;
+    }
+
+    private NetworkAvailabilityHint ReadNetworkAvailabilityHint()
+    {
+        try
+        {
+            return _networkAvailabilityHintSource?.ReadCurrent() ??
+                NetworkAvailabilityHint.Unknown;
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            return NetworkAvailabilityHint.Unknown;
+        }
+    }
 
     private static string GetPlaybackStatusText(
         PlaybackSessionSnapshot snapshot,
@@ -1095,6 +1165,11 @@ public sealed partial class MainPage : Page, IDisposable
 
     private static int GetRemainingDelaySeconds(TimeSpan remainingDelay) =>
         Math.Max(1, checked((int)Math.Ceiling(remainingDelay.TotalSeconds)));
+
+    private static bool IsRecoverable(Exception exception) =>
+        exception is not OutOfMemoryException and
+        not StackOverflowException and
+        not AccessViolationException;
 
     private async void ChannelList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {

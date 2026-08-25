@@ -16,6 +16,8 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly MainPage _mainPage;
     private readonly PlaybackSessionCoordinator _playback;
+    private readonly DomainErrorPresenter _domainErrorPresenter;
+    private readonly INetworkAvailabilityHintSource _networkAvailabilityHintSource;
     private readonly SourceDeletionCoordinator _sourceDeletion;
     private readonly PlaybackPowerLifecycleCoordinator _powerLifecycle;
     private Task? _disposeTask;
@@ -61,6 +63,9 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
                 TimeProvider.System,
                 CreatePlaybackReconnectJitter);
             rollbackOwner = playback;
+            _domainErrorPresenter = new DomainErrorPresenter();
+            _networkAvailabilityHintSource =
+                new WindowsNetworkAvailabilityHintSource();
             var sourceDeletion = new SourceDeletionCoordinator(
                 new SqliteSourceDeletionLifecycle(
                     _catalogServices.DatabasePath,
@@ -190,7 +195,9 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
                     await _mainPage.InitializeAsync(
                         _catalogServices.Browser,
                         _catalogServices.LogoCache,
-                        _playback);
+                        _playback,
+                        _domainErrorPresenter,
+                        _networkAvailabilityHintSource);
                 }
 
                 catalogLoaded = true;

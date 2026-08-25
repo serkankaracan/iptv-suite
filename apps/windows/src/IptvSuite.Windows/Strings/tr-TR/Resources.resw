@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="Errors.Generic" xml:space="preserve"><value>İşlem güvenli bir şekilde tamamlanamadı.</value></data>
+  <data name="Errors.Domain.InvariantViolation" xml:space="preserve"><value>İşlem güvenli bir şekilde tamamlanamadı.</value></data>
+  <data name="Errors.Network.Unreachable" xml:space="preserve"><value>Kaynağa ulaşılamadı. Bağlantınızı denetleyip yeniden deneyin.</value></data>
+  <data name="Errors.Authentication.Rejected" xml:space="preserve"><value>Kaynak oturum açma bilgilerini reddetti. Bilgileri denetleyip yeniden deneyin.</value></data>
+  <data name="Errors.Playlist.DownloadFailed" xml:space="preserve"><value>Oynatma listesi indirilemedi. Yeniden deneyin.</value></data>
+  <data name="Errors.Playlist.UnsupportedFormat" xml:space="preserve"><value>Bu oynatma listesi biçimi desteklenmiyor.</value></data>
+  <data name="Errors.Network.RequestTimedOut" xml:space="preserve"><value>Kaynak zamanında yanıt vermedi. Yeniden deneyin.</value></data>
+  <data name="Errors.Network.TlsValidationFailed" xml:space="preserve"><value>Kaynakla güvenli bağlantı doğrulanamadı.</value></data>
+  <data name="Errors.Playback.StartFailed" xml:space="preserve"><value>Oynatma başlatılamadı. Yeniden deneyin.</value></data>
+  <data name="Errors.Playback.ControlFailed" xml:space="preserve"><value>Oynatma denetimi uygulanamadı. Yeniden deneyin.</value></data>
+  <data name="Errors.Playback.StreamInterrupted" xml:space="preserve"><value>Oynatma kesintiye uğradı.</value></data>
+  <data name="Errors.Playback.ReconnectExhausted" xml:space="preserve"><value>Oynatma yeniden bağlanamadı. Bağlantınızı denetleyip yeniden deneyin.</value></data>
+  <data name="Errors.Storage.Unavailable" xml:space="preserve"><value>Yerel uygulama verilerine erişilemiyor. Yeniden deneyin.</value></data>
+  <data name="Errors.Operation.Cancelled" xml:space="preserve"><value>İşlem iptal edildi.</value></data>
+  <data name="Errors.Network.ResourceNotFound" xml:space="preserve"><value>İstenen kaynak bulunamadı.</value></data>
+  <data name="Errors.Network.RequestRejected" xml:space="preserve"><value>Kaynak isteği reddetti.</value></data>
+  <data name="Errors.Network.RateLimited" xml:space="preserve"><value>Kaynak istekleri geçici olarak sınırlıyor. Daha sonra yeniden deneyin.</value></data>
+  <data name="Errors.Network.ServiceUnavailable" xml:space="preserve"><value>Kaynak geçici olarak kullanılamıyor. Yeniden deneyin.</value></data>
+  <data name="Errors.Network.ResponseTooLarge" xml:space="preserve"><value>Kaynak yanıtı güvenli boyut sınırını aşıyor.</value></data>
+  <data name="Diagnostics.OperationIdLabel" xml:space="preserve"><value>İşlem kimliği</value></data>
+  <data name="Connectivity.OfflineHint" xml:space="preserve"><value>Bu cihaz çevrimdışı görünüyor. Oynatma kullanılabilirliğini belirleyen kaynak yine oynatıcıdır.</value></data>
+  <data name="Connectivity.OnlineHint" xml:space="preserve"><value>Windows ağ erişimi bildiriyor ancak oynatma kaynağı yine de kullanılamıyor olabilir.</value></data>
+</root>
