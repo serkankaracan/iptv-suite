@@ -1012,10 +1012,12 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
             State: PlaybackState.Failed,
             Error.Code: DomainErrorCode.ReconnectExhausted,
         });
-        await WaitUntilAsync(() => engine.ActiveSessionCount == 0);
+        PlaybackSessionId drainedPhysical = await engine.ReconnectPhysicalStopCompleted.Task
+            .WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.IsTrue(terminalObserved);
         Assert.AreEqual(DomainErrorCode.ReconnectExhausted, coordinator.Current.Error?.Code);
+        Assert.AreEqual(freshPhysical, drainedPhysical);
         Assert.AreEqual(freshPhysical, engine.StopSessions.ToArray()[^1]);
         Assert.AreEqual(0, engine.ActiveSessionCount);
     }
@@ -1456,6 +1458,9 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         internal TaskCompletionSource<bool> ReleaseBlockedPlaySuccess { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        internal TaskCompletionSource<PlaybackSessionId> ReconnectPhysicalStopCompleted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         internal int DisposeCount => Volatile.Read(ref _disposeCount);
 
         internal int OpenCount => Volatile.Read(ref _openCount);
@@ -1680,6 +1685,11 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
                     _controls.Volume,
                     _controls.IsMuted,
                     _controls.AspectMode);
+            }
+
+            if (ordinal > 1)
+            {
+                ReconnectPhysicalStopCompleted.TrySetResult(sessionId);
             }
 
             return PlaybackEngineOperationResult.Succeeded();
