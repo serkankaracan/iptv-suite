@@ -4562,6 +4562,49 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M16ReleaseOperationsPlanIsFailClosedAndDoesNotClaimExternalApproval()
+    {
+        string qualityRoot = Path.Combine(RepositoryRoot, "docs", "quality");
+        string planPath = Path.Combine(qualityRoot, "M16_RELEASE_OPERATIONS_PLAN.md");
+        string baselinePath = Path.Combine(qualityRoot, "M16_RELEASE_CANDIDATE_BASELINE.md");
+        Assert.IsTrue(File.Exists(planPath), "The M16 release-operations plan is missing.");
+
+        string plan = File.ReadAllText(planPath);
+        string baseline = File.ReadAllText(baselinePath);
+        foreach (string invariant in new[]
+        {
+            "candidateReady=false",
+            "Promotion stop",
+            "Withdrawal request",
+            "## Dependency ve CVE response",
+            "## Incident ve known-issue triage",
+            "## Evidence retention ve veri minimizasyonu",
+            "## Support matrix sözleşmesi",
+            "## Release notes zorunlu şablonu",
+            "## Rol sahipliği",
+            "## Exact non-claims",
+            "Production identity",
+            "Partner Center",
+            "`PENDING`",
+            "Public submission",
+            "- [ ]",
+        })
+        {
+            StringAssert.Contains(plan, invariant);
+        }
+
+        Assert.IsFalse(
+            plan.Contains("- [x]", StringComparison.OrdinalIgnoreCase),
+            "The local plan must not mark external release actions complete.");
+        Assert.IsFalse(
+            Regex.IsMatch(plan, @"https?://", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase),
+            "Unapproved production/support/Store URLs must not be invented in the plan.");
+        StringAssert.Contains(baseline, "M16_RELEASE_OPERATIONS_PLAN.md");
+        StringAssert.Contains(baseline, "M16ReleaseOperationsPlanPending");
+        StringAssert.Contains(baseline, "schema-v1 aggregator'ın hard-coded blocked sonucu");
+    }
+
+    [TestMethod]
     public void M15DevelopmentIdentityWackPreflightIsStrictBoundedAndNonClosing()
     {
         string helperPath = Path.Combine(RepositoryRoot, "eng", "WindowsWack.ps1");

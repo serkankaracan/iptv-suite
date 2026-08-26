@@ -10,7 +10,9 @@ Default invocation, geçerli blocked evidence'ı atomik yayımladıktan sonra no
 
 ## Bounded final-artifact tarama primitive'i
 
-`PARTIAL VERIFIED — local automated primitive, 2026-08-26`: `IptvSuite.Testing scan-release-artifacts <root> <run-scope> <case-id>` yalnız sabit `M16ReleaseCandidate` profiliyle çalışır. Profil; depth `32`, entry `25.000`, tek dosya `4 GiB`, toplam `8 GiB`, finding `256` ve relative-path `4096` sınırlarını caller tarafından gevşetilemez biçimde uygular. Root/child reparse point, erişilemeyen dosya, limit aşımı ve iki-pass ordered inventory/SHA-256 uyuşmazlığı operational failure'dır; temiz yüzey exit `0`, canary finding exit `2`, scanner/contract hatası exit `1` üretir. Dokuz encoding tek stream geçişinde aranır ve bulgu yolları yalnız fingerprint olarak yayımlanır. Eski `scan-artifacts` yolu compatibility için değişmeden kalır.
+`PARTIAL VERIFIED — local automated primitive, 2026-08-26`: `IptvSuite.Testing scan-release-artifacts <root> <run-scope> <case-id>` yalnız sabit `M16ReleaseCandidate` profiliyle çalışır. Profil; depth `32`, entry `25.000`, tek dosya `4 GiB`, toplam `8 GiB`, finding `256` ve relative-path `4096` sınırlarını caller tarafından gevşetilemez biçimde uygular. Root/child reparse point, file/directory alternate data stream, invalid path encoding, erişilemeyen dosya, limit aşımı ve üç-pass ordered inventory/content SHA-256 uyuşmazlığı operational failure'dır. Temiz yüzey exit `0`, canary finding exit `2`, scanner/contract hatası exit `1`, usage hatası exit `64` üretir; dinamik CLI testi exact JSON alan setini ve raw root/path/canary yayımlanmadığını doğrular. Dokuz encoding tek stream geçişinde aranır, bulgu yolları yalnız fingerprint olarak yayımlanır ve aggregate rapor fixed canonical inventory digest'i taşır. Eski `scan-artifacts` yolu compatibility için değişmeden kalır.
+
+Bu primitive archive açıcı değildir: compressed MSIX/ZIP/support container üyelerindeki marker ancak caller container'ı zip-slip/symlink/duplicate/case-collision ve boyut sınırlarıyla güvenli biçimde açıp hem outer blob'u hem extracted üyeleri tararsa kapsanır. Mutable live root'ta atomik snapshot iddiası kurulmaz; final producer exact process kapanışı/frozen staging, same-build commit/package bağları ve atomik evidence publish sözleşmesini ayrıca sağlamalıdır. Bu katmanlar ve dört gerçek yüzey kanıtı tamamlanmadan `M16FinalSecurityArtifactScanPending` açık kalır.
 
 Bu primitive tek başına `M16FinalArtifactCanaryScanPending` blocker'ını kapatmaz. Aynı final commit/build için full log, owned app-data, exact package ve support-export yüzeylerinin sabit inventory ile taranması ve commit-bound sanitized evidence üretilmesi hâlâ gereklidir.
 
@@ -84,6 +86,12 @@ Blocked baseline aşağıdaki exact yedi M16 kapısını ayrıca açık tutar:
 5. `M16TwentyFourHourSoakPending`
 6. `M16PhysicalDeviceAccessibilityMatrixPending`
 7. `M16ReleaseOperationsPlanPending`
+
+## Release operasyonları plan kaydı
+
+`RECORDED LOCALLY / EXECUTION BLOCKED, 2026-08-26`: [M16 release operasyonları planı](M16_RELEASE_OPERATIONS_PLAN.md), rollback/withdrawal, dependency/CVE response, incident/known-issue triage, evidence retention, support matrix, release notes, rol sahipliği ve exact non-claim sınırlarını source-controlled karar modeli olarak kaydeder. Production identity/signing, WACK/Partner Center, privacy/support/listing URL'leri, hukuk/ülke girdileri ve dış publication/withdrawal sonuçları açıkça `PENDING` kalır; hiçbir kişi, URL, certificate, Store identity veya hukuki sonuç uydurulmaz.
+
+Bu local kayıt release yetkisi değildir ve schema-v1 aggregator'ın hard-coded blocked sonucunu değiştirmez. `M16ReleaseOperationsPlanPending`, planın clean commit-bound RC evidence/review zincirine bağlanıp kabul edilmesine kadar açık kalır; diğer M15/M16 blocker'ları da etkilenmez.
 
 ## Non-claims ve sonraki kabul sınırı
 
