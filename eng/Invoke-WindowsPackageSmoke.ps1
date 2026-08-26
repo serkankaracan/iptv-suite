@@ -5206,6 +5206,10 @@ try {
     $playbackRapidSwitchP95Milliseconds = Get-Percentile95 $rapidSwitchSamples.ToArray()
     $playbackRapidSwitchMaximumMilliseconds = [double](
         ($rapidSwitchSamples | Measure-Object -Maximum).Maximum)
+    Write-Output (
+        "Packaged playback rapid-switch diagnostic: count=$($rapidSwitchSamples.Count), " +
+        "p95=$([Math]::Round($playbackRapidSwitchP95Milliseconds, 4)), " +
+        "maximum=$([Math]::Round($playbackRapidSwitchMaximumMilliseconds, 4)).")
     if ($playbackRapidSwitchP95Milliseconds -gt 3000.0) {
         throw "The packaged playback rapid-switch p95 budget was exceeded."
     }

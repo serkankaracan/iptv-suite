@@ -8,6 +8,12 @@
 
 Default invocation, geçerli blocked evidence'ı atomik yayımladıktan sonra nonzero sonuçla durur. `-AllowBlockedCandidate` yalnız bu bilinen blocked sonucun evidence üretimi için sıfır exit code ile dönmesine izin verir; blocker kabulü, sapma onayı, release waiver'ı veya `candidateReady` değişikliği değildir. Input/schema/hash/path/commit ya da repository invariant'ı geçmezse allow switch sonucu değiştirmez ve yeni evidence yayımlanmaz.
 
+## Bounded final-artifact tarama primitive'i
+
+`PARTIAL VERIFIED — local automated primitive, 2026-08-26`: `IptvSuite.Testing scan-release-artifacts <root> <run-scope> <case-id>` yalnız sabit `M16ReleaseCandidate` profiliyle çalışır. Profil; depth `32`, entry `25.000`, tek dosya `4 GiB`, toplam `8 GiB`, finding `256` ve relative-path `4096` sınırlarını caller tarafından gevşetilemez biçimde uygular. Root/child reparse point, erişilemeyen dosya, limit aşımı ve iki-pass ordered inventory/SHA-256 uyuşmazlığı operational failure'dır; temiz yüzey exit `0`, canary finding exit `2`, scanner/contract hatası exit `1` üretir. Dokuz encoding tek stream geçişinde aranır ve bulgu yolları yalnız fingerprint olarak yayımlanır. Eski `scan-artifacts` yolu compatibility için değişmeden kalır.
+
+Bu primitive tek başına `M16FinalArtifactCanaryScanPending` blocker'ını kapatmaz. Aynı final commit/build için full log, owned app-data, exact package ve support-export yüzeylerinin sabit inventory ile taranması ve commit-bound sanitized evidence üretilmesi hâlâ gereklidir.
+
 Blocked baseline üretim çağrısı repository kökünden şöyledir:
 
 ```powershell

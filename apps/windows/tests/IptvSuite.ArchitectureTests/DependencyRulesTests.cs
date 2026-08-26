@@ -4433,6 +4433,61 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M16ReleaseArtifactCanaryScannerIsFixedBoundedAndNonBypassable()
+    {
+        string testingRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.Testing");
+        string scanner = File.ReadAllText(Path.Combine(
+            testingRoot,
+            "ArtifactCanaryScanner.cs"));
+        string program = File.ReadAllText(Path.Combine(testingRoot, "Program.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        foreach (string invariant in new[]
+        {
+            "ArtifactCanaryScanProfile.M16ReleaseCandidate",
+            "MaximumDirectoryDepth: 32",
+            "MaximumEntryCount: 25_000",
+            "MaximumSingleFileBytes: 4_294_967_296",
+            "MaximumTotalFileBytes: 8_589_934_592",
+            "MaximumFindingCount: 256",
+            "MaximumRelativePathLength: 4_096",
+            "M16ReleaseCandidateArtifactScan:ReparsePointRefused",
+            "M16ReleaseCandidateArtifactScan:InventoryChanged",
+            "M16ReleaseCandidateArtifactScan:ContentChanged",
+            "AssertDigestEquivalent(initialDigests, verificationDigests)",
+            "AssertInventoryEquivalent(verificationInventory, finalInventory)",
+            "FileShare.Read",
+            "CryptographicOperations.FixedTimeEquals(",
+            "[REDACTED-ARTIFACT-PATH:",
+        })
+        {
+            StringAssert.Contains(scanner, invariant);
+        }
+
+        string releaseCommand = ExtractRequiredBlock(
+            program,
+            "if (arguments is\n                [\n                    \"scan-release-artifacts\"",
+            "if (arguments is\n                [\n                    \"validate-native-playback-evidence\"");
+        StringAssert.Contains(
+            releaseCommand,
+            "ArtifactCanaryScanProfile.M16ReleaseCandidate");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                releaseCommand,
+                @"(?i)(?:maximum|limit|budget|skip|force|allow|profile)\s*=|TryParse|Parse\("),
+            "The M16 release-artifact CLI must not accept caller-controlled limits or bypasses.");
+        Assert.AreEqual(
+            2,
+            Regex.Count(program, "scan-release-artifacts", RegexOptions.CultureInvariant),
+            "The fixed M16 CLI command should appear only in dispatch and usage text.");
+    }
+
+    [TestMethod]
     public void M15DevelopmentIdentityWackPreflightIsStrictBoundedAndNonClosing()
     {
         string helperPath = Path.Combine(RepositoryRoot, "eng", "WindowsWack.ps1");
@@ -6897,6 +6952,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "PlaybackThreadCountDelta");
         StringAssert.Contains(packageSmoke, "PlaybackActiveCloseVerified");
         StringAssert.Contains(packageSmoke, "$switchOrdinal -le 25");
+        StringAssert.Contains(
+            packageSmoke,
+            "Packaged playback rapid-switch diagnostic: count=");
         StringAssert.Contains(packageSmoke, "$playbackRapidSwitchP95Milliseconds -gt 3000.0");
         StringAssert.Contains(packageSmoke, "Wait-PackagedPlaybackSelection");
         string playbackSelectionWait = ExtractRequiredBlock(

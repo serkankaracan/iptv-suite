@@ -23,11 +23,25 @@ internal static class TestTool
             {
                 TestCanary canary = TestCanary.Create(runScope, caseId);
                 IReadOnlyList<CanaryFinding> findings = ArtifactCanaryScanner.Scan(rootPath, canary);
-                foreach (CanaryFinding finding in findings)
-                {
-                    Console.Error.WriteLine(
-                        $"Test canary detected: {finding.RelativePath} ({finding.Encoding}, byte {finding.ByteOffset}).");
-                }
+                WriteFindings(findings);
+
+                return findings.Count == 0 ? 0 : 2;
+            }
+
+            if (arguments is
+                [
+                    "scan-release-artifacts",
+                    string releaseRootPath,
+                    string releaseRunScope,
+                    string releaseCaseId,
+                ])
+            {
+                TestCanary canary = TestCanary.Create(releaseRunScope, releaseCaseId);
+                IReadOnlyList<CanaryFinding> findings = ArtifactCanaryScanner.Scan(
+                    releaseRootPath,
+                    canary,
+                    ArtifactCanaryScanProfile.M16ReleaseCandidate);
+                WriteFindings(findings);
 
                 return findings.Count == 0 ? 0 : 2;
             }
@@ -53,6 +67,7 @@ internal static class TestTool
             Console.Error.WriteLine(
                 "Usage: generate-fixtures <specification> <output-directory> | " +
                 "scan-artifacts <root> <run-scope> <case-id> | " +
+                "scan-release-artifacts <root> <run-scope> <case-id> | " +
                 "validate-native-playback-evidence <evidence> <controller> <commit> <sdk>");
             return 64;
         }
@@ -60,6 +75,15 @@ internal static class TestTool
         {
             Console.Error.WriteLine($"Test tool failed: {exception.GetType().Name}: {exception.Message}");
             return 1;
+        }
+    }
+
+    private static void WriteFindings(IReadOnlyList<CanaryFinding> findings)
+    {
+        foreach (CanaryFinding finding in findings)
+        {
+            Console.Error.WriteLine(
+                $"Test canary detected: {finding.RelativePath} ({finding.Encoding}, byte {finding.ByteOffset}).");
         }
     }
 }

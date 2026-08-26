@@ -126,6 +126,163 @@ public sealed class FixtureAndCanaryTests
             !finding.RelativePath.Contains(TestCanary.Marker, StringComparison.Ordinal)));
     }
 
+    [TestMethod]
+    public void ReleaseCandidateCanaryScannerUsesOnlyTheFixedProfileAndFingerprintsPaths()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m16-canary-profile");
+        TestCanary canary = TestCanary.Create("M16", "FINAL_ARTIFACTS");
+        string contaminatedPath = Path.Combine(temporary.FullPath, "operator-visible-name.log");
+        using (FileStream stream = File.Create(contaminatedPath))
+        {
+            stream.Write(new byte[8191]);
+            canary.WriteTo(stream, TestCanaryEncoding.Utf8);
+        }
+
+        IReadOnlyList<CanaryFinding> findings = ArtifactCanaryScanner.Scan(
+            temporary.FullPath,
+            canary,
+            ArtifactCanaryScanProfile.M16ReleaseCandidate);
+
+        Assert.IsNotEmpty(findings);
+        Assert.IsTrue(findings.Any(finding => finding.ByteOffset == 8191));
+        Assert.IsTrue(findings.All(finding =>
+            finding.RelativePath.StartsWith(
+                "[REDACTED-ARTIFACT-PATH:",
+                StringComparison.Ordinal) &&
+            !finding.RelativePath.Contains("operator-visible-name", StringComparison.Ordinal) &&
+            !finding.RelativePath.Contains(TestCanary.Marker, StringComparison.Ordinal)));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => ArtifactCanaryScanner.Scan(
+            temporary.FullPath,
+            canary,
+            (ArtifactCanaryScanProfile)int.MaxValue));
+    }
+
+    [TestMethod]
+    public void ReleaseCandidateCanaryScannerFailsClosedAtEveryBound()
+    {
+        TestCanary canary = TestCanary.Create("M16", "BOUNDS");
+
+        using (TemporaryDirectory depth = TemporaryDirectory.Create("m16-canary-depth"))
+        {
+            Directory.CreateDirectory(Path.Combine(depth.FullPath, "child"));
+            AssertLimitFailure(
+                depth.FullPath,
+                canary,
+                Limits(maximumDirectoryDepth: 0),
+                "M16ReleaseCandidateArtifactScan:DepthLimitExceeded");
+        }
+
+        using (TemporaryDirectory entries = TemporaryDirectory.Create("m16-canary-entries"))
+        {
+            File.WriteAllBytes(Path.Combine(entries.FullPath, "a.bin"), [1]);
+            File.WriteAllBytes(Path.Combine(entries.FullPath, "b.bin"), [2]);
+            AssertLimitFailure(
+                entries.FullPath,
+                canary,
+                Limits(maximumEntryCount: 1),
+                "M16ReleaseCandidateArtifactScan:EntryLimitExceeded");
+        }
+
+        using (TemporaryDirectory fileSize = TemporaryDirectory.Create("m16-canary-file-size"))
+        {
+            File.WriteAllBytes(Path.Combine(fileSize.FullPath, "a.bin"), [1, 2]);
+            AssertLimitFailure(
+                fileSize.FullPath,
+                canary,
+                Limits(maximumSingleFileBytes: 1),
+                "M16ReleaseCandidateArtifactScan:FileSizeLimitExceeded");
+        }
+
+        using (TemporaryDirectory totalSize = TemporaryDirectory.Create("m16-canary-total-size"))
+        {
+            File.WriteAllBytes(Path.Combine(totalSize.FullPath, "a.bin"), [1]);
+            File.WriteAllBytes(Path.Combine(totalSize.FullPath, "b.bin"), [2]);
+            AssertLimitFailure(
+                totalSize.FullPath,
+                canary,
+                Limits(maximumSingleFileBytes: 1, maximumTotalFileBytes: 1),
+                "M16ReleaseCandidateArtifactScan:TotalSizeLimitExceeded");
+        }
+
+        using (TemporaryDirectory findings = TemporaryDirectory.Create("m16-canary-findings"))
+        {
+            using FileStream stream = File.Create(Path.Combine(findings.FullPath, "a.bin"));
+            canary.WriteTo(stream, TestCanaryEncoding.Utf8);
+            stream.Dispose();
+            AssertLimitFailure(
+                findings.FullPath,
+                canary,
+                Limits(maximumFindingCount: 1),
+                "M16ReleaseCandidateArtifactScan:FindingLimitExceeded");
+        }
+
+        using (TemporaryDirectory path = TemporaryDirectory.Create("m16-canary-path"))
+        {
+            File.WriteAllBytes(Path.Combine(path.FullPath, "ab"), [1]);
+            AssertLimitFailure(
+                path.FullPath,
+                canary,
+                Limits(maximumRelativePathLength: 1),
+                "M16ReleaseCandidateArtifactScan:PathLimitExceeded");
+        }
+    }
+
+    [TestMethod]
+    public void ReleaseCandidateCanaryScannerFailsClosedForMissingOrLockedInventory()
+    {
+        TestCanary canary = TestCanary.Create("M16", "INVENTORY");
+        string missingRoot = Path.Combine(Path.GetTempPath(), $"m16-missing-{Guid.NewGuid():N}");
+        DirectoryNotFoundException missing = Assert.ThrowsExactly<DirectoryNotFoundException>(() =>
+            ArtifactCanaryScanner.Scan(
+                missingRoot,
+                canary,
+                ArtifactCanaryScanProfile.M16ReleaseCandidate));
+        Assert.AreEqual("M16ReleaseCandidateArtifactScan:RootMissing", missing.Message);
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m16-canary-locked");
+        string lockedPath = Path.Combine(temporary.FullPath, "locked.bin");
+        File.WriteAllBytes(lockedPath, [1, 2, 3]);
+        using FileStream locked = new(
+            lockedPath,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+        IOException failure = Assert.ThrowsExactly<IOException>(() =>
+            ArtifactCanaryScanner.Scan(
+                temporary.FullPath,
+                canary,
+                ArtifactCanaryScanProfile.M16ReleaseCandidate));
+        Assert.AreEqual("M16ReleaseCandidateArtifactScan:FileReadFailed", failure.Message);
+        Assert.IsFalse(failure.Message.Contains(lockedPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static ArtifactCanaryScanLimits Limits(
+        int maximumDirectoryDepth = 8,
+        int maximumEntryCount = 32,
+        long maximumSingleFileBytes = 1024,
+        long maximumTotalFileBytes = 4096,
+        int maximumFindingCount = 16,
+        int maximumRelativePathLength = 256) =>
+        new(
+            maximumDirectoryDepth,
+            maximumEntryCount,
+            maximumSingleFileBytes,
+            maximumTotalFileBytes,
+            maximumFindingCount,
+            maximumRelativePathLength);
+
+    private static void AssertLimitFailure(
+        string root,
+        TestCanary canary,
+        ArtifactCanaryScanLimits limits,
+        string expectedMessage)
+    {
+        ArtifactCanaryScanLimitException failure =
+            Assert.ThrowsExactly<ArtifactCanaryScanLimitException>(() =>
+                ArtifactCanaryScanner.ScanBounded(root, canary, limits));
+        Assert.AreEqual(expectedMessage, failure.Message);
+    }
+
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
