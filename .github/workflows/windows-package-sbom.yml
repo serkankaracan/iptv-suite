@@ -1,0 +1,92 @@
+name: Windows package SBOM producer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-package-sbom-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  package-sbom:
+    name: Package-bound SBOM producer gate
+    runs-on: windows-2025
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install exact .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.302"
+          cache: true
+          cache-dependency-path: apps/windows/**/packages.lock.json
+
+      - name: Verify exact .NET SDK
+        shell: pwsh
+        run: |
+          $actualSdk = (dotnet --version).Trim()
+          if ($actualSdk -ne "10.0.302") {
+            throw "Expected .NET SDK 10.0.302, received '$actualSdk'."
+          }
+
+      - name: Restore locked dependencies
+        shell: pwsh
+        run: >-
+          dotnet restore .\apps\windows\IptvSuite.Windows.sln
+          --locked-mode
+          --configfile .\NuGet.config
+          -p:Platform=x64
+          --nologo
+
+      - name: Install exact package SBOM tool
+        shell: pwsh
+        run: >-
+          dotnet tool install Microsoft.Sbom.DotNetTool
+          --version 4.1.5
+          --tool-path .\.artifacts\windows-package-sbom-tool
+          --configfile .\NuGet.config
+
+      - name: Produce exact signed-package SBOM evidence
+        shell: powershell
+        run: .\eng\Invoke-WindowsPackageSmoke.ps1 -Configuration Release
+
+      - name: Scan sanitized package SBOM evidence
+        shell: pwsh
+        run: |
+          dotnet build .\apps\windows\tests\IptvSuite.Testing\IptvSuite.Testing.csproj `
+            -c Release `
+            --no-restore `
+            --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "The package SBOM evidence scanner build failed."
+          }
+          dotnet .\apps\windows\tests\IptvSuite.Testing\bin\Release\net10.0\IptvSuite.Testing.dll `
+            scan-artifacts .\.artifacts\msix-smoke M15 PACKAGE_SBOM_EVIDENCE
+          if ($LASTEXITCODE -ne 0) {
+            throw "The package SBOM evidence scan failed."
+          }
+
+      - name: Upload sanitized package SBOM evidence
+        if: ${{ success() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-msix-smoke-evidence
+          path: |
+            .artifacts/msix-smoke/last-success.json
+            .artifacts/msix-smoke/package-sbom.spdx.json
+            .artifacts/msix-smoke/package-sbom-summary.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7

@@ -4344,7 +4344,11 @@ public sealed class DependencyRulesTests
             "IptvSuite.ArchitectureTests",
             "Test-WindowsPackageSbom.ps1");
         string packageSmokePath = Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsPackageSmoke.ps1");
-        string workflowPath = Path.Combine(RepositoryRoot, ".github", "workflows", "windows-quality.yml");
+        string workflowPath = Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-package-sbom.yml");
 
         foreach (string requiredPath in new[]
                  {
@@ -4353,6 +4357,7 @@ public sealed class DependencyRulesTests
                      configurationPath,
                      toolManifestPath,
                      selfTestPath,
+                     workflowPath,
                  })
         {
             Assert.IsTrue(File.Exists(requiredPath), $"The package SBOM contract file is missing: {requiredPath}");
@@ -4397,6 +4402,20 @@ public sealed class DependencyRulesTests
         string runner = File.ReadAllText(runnerPath);
         string packageSmoke = File.ReadAllText(packageSmokePath);
         string workflow = File.ReadAllText(workflowPath).Replace("\r\n", "\n", StringComparison.Ordinal);
+        StringAssert.StartsWith(workflow, "name: Windows package SBOM producer\n\non:\n  workflow_dispatch:\n");
+        StringAssert.Contains(workflow, "permissions:\n  contents: read\n");
+        StringAssert.Contains(workflow, "name: Package-bound SBOM producer gate");
+        StringAssert.Contains(workflow, "runs-on: windows-2025");
+        StringAssert.Contains(workflow, "persist-credentials: false");
+        Assert.IsFalse(workflow.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(workflow.Contains("secrets.", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(workflow.Contains("pull_request_target", StringComparison.OrdinalIgnoreCase));
+        MatchCollection sbomWorkflowUses = Regex.Matches(workflow, @"(?m)^\s*uses:\s*");
+        MatchCollection pinnedSbomWorkflowUses = Regex.Matches(
+            workflow,
+            @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
+        Assert.HasCount(3, sbomWorkflowUses);
+        Assert.HasCount(3, pinnedSbomWorkflowUses);
         StringAssert.Contains(runner, ". (Join-Path $PSScriptRoot \"WindowsPackageSbom.ps1\")");
         StringAssert.Contains(runner, "Assert-WindowsPackageSbomConfiguration");
         StringAssert.Contains(runner, "ToolPackageHashMismatch");
@@ -4441,7 +4460,7 @@ public sealed class DependencyRulesTests
 
         int toolInstall = workflow.IndexOf("      - name: Install exact package SBOM tool\n", StringComparison.Ordinal);
         int packageBuild = workflow.IndexOf(
-            "      - name: Build, scan, install, launch, and remove signed MSIX\n",
+            "      - name: Produce exact signed-package SBOM evidence\n",
             StringComparison.Ordinal);
         Assert.IsTrue(toolInstall >= 0 && packageBuild > toolInstall);
         StringAssert.Contains(workflow, "dotnet tool install Microsoft.Sbom.DotNetTool\n");
@@ -4449,6 +4468,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(workflow, "--tool-path .\\.artifacts\\windows-package-sbom-tool\n");
         StringAssert.Contains(workflow, ".artifacts/msix-smoke/package-sbom.spdx.json");
         StringAssert.Contains(workflow, ".artifacts/msix-smoke/package-sbom-summary.json");
+        StringAssert.Contains(
+            workflow,
+            "scan-artifacts .\\.artifacts\\msix-smoke M15 PACKAGE_SBOM_EVIDENCE");
 
         string windowsPowerShell = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.System),
@@ -7398,15 +7420,6 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             workflow,
             "run_native_client:\n        description: Run the native Tier A smoke on an approved x64 Windows Client runner");
-        StringAssert.Contains(
-            workflow,
-            "renew_package_evidence:\n        description: Run package evidence after an acceptance-bound contract change");
-        StringAssert.Contains(
-            workflow,
-            "  package-smoke:\n    name: Packaged install and launch smoke\n" +
-            "    if: ${{ always() && (needs.quality.result == 'success' || " +
-            "(github.event_name == 'workflow_dispatch' && inputs.renew_package_evidence)) }}\n" +
-            "    needs: quality\n");
         StringAssert.Contains(workflow, "name: windows-native-playback-evidence");
         StringAssert.Contains(workflow, ".artifacts/native-playback-smoke/last-success.json");
         StringAssert.Contains(workflow, "timeout-minutes: 30");

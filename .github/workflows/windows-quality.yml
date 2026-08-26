@@ -13,11 +13,6 @@ on:
         required: false
         default: false
         type: boolean
-      renew_package_evidence:
-        description: Run package evidence after an acceptance-bound contract change
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -76,7 +71,6 @@ jobs:
 
   package-smoke:
     name: Packaged install and launch smoke
-    if: ${{ always() && (needs.quality.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.renew_package_evidence)) }}
     needs: quality
     runs-on: windows-2025
     timeout-minutes: 25
