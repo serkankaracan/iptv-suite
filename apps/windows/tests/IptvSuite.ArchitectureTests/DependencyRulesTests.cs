@@ -721,10 +721,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "[StructLayout(LayoutKind.Sequential, Pack = 1)]");
         StringAssert.Contains(packageSmoke, "Marshal.SizeOf(typeof(DwmTimingInfo)) != 292");
         StringAssert.Contains(packageSmoke, "timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo))");
-        StringAssert.Contains(packageSmoke, "timing.QpcVBlank > previousTimestamp");
+        StringAssert.Contains(packageSmoke, "timing.QpcVBlank <= previousTimestamp");
         StringAssert.Contains(packageSmoke, "IntervalsMilliseconds.Add(");
+        StringAssert.Contains(packageSmoke, "ExactIntervalsMilliseconds.Add(intervalMilliseconds)");
         StringAssert.Contains(packageSmoke, "System.Diagnostics.Stopwatch.Frequency /");
         StringAssert.Contains(packageSmoke, "refreshDelta);");
+        StringAssert.Contains(packageSmoke, "MaximumMilliseconds = exactIntervals[exactIntervals.Count - 1]");
+        StringAssert.Contains(packageSmoke, "The DWM timing counters were discontinuous.");
         StringAssert.Contains(packageSmoke, "timing.FramesLate - previousLate");
         StringAssert.Contains(packageSmoke, "failure.GetType().Name");
         StringAssert.Contains(packageSmoke, "unchecked((uint)failure.HResult)");
@@ -760,6 +763,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "CatalogDwmFrameMaximumMilliseconds =");
         StringAssert.Contains(packageSmoke, "CatalogDwmDroppedFramePercent =");
         StringAssert.Contains(packageSmoke, "CatalogDwmFrameIntervalCount =");
+        StringAssert.Contains(packageSmoke, "CatalogDwmExactFrameIntervalCount =");
+        StringAssert.Contains(packageSmoke, "CatalogDwmMultiRefreshSegmentCount =");
         StringAssert.Contains(packageSmoke, "SendMessageTimeoutW");
         StringAssert.Contains(packageSmoke, "WindowMessageNull = 0x0000");
         StringAssert.Contains(packageSmoke, "ExactUiThreadTimeoutMilliseconds = 200");

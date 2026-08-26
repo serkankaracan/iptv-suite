@@ -488,6 +488,8 @@ namespace IptvSuite.PackageSmoke
         public double MaximumMilliseconds { get; internal set; }
         public double DroppedPercent { get; internal set; }
         public int IntervalCount { get; internal set; }
+        public int ExactIntervalCount { get; internal set; }
+        public int MultiRefreshSegmentCount { get; internal set; }
     }
 
     public static class DwmFrameSampler
@@ -498,8 +500,12 @@ namespace IptvSuite.PackageSmoke
         private static Exception failure;
         private static readonly System.Collections.Generic.List<double> IntervalsMilliseconds =
             new System.Collections.Generic.List<double>();
+        private static readonly System.Collections.Generic.List<double> ExactIntervalsMilliseconds =
+            new System.Collections.Generic.List<double>();
         private static ulong displayed;
         private static ulong dropped;
+        private static int multiRefreshSegmentCount;
+        private static int discontinuityCount;
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmGetCompositionTimingInfo(
@@ -519,8 +525,11 @@ namespace IptvSuite.PackageSmoke
                     throw new InvalidOperationException("The DWM frame sampler is already active.");
                 }
                 IntervalsMilliseconds.Clear();
+                ExactIntervalsMilliseconds.Clear();
                 displayed = 0;
                 dropped = 0;
+                multiRefreshSegmentCount = 0;
+                discontinuityCount = 0;
                 failure = null;
                 running = true;
                 worker = new System.Threading.Thread(SampleLoop);
@@ -559,12 +568,23 @@ namespace IptvSuite.PackageSmoke
                             unchecked((uint)failure.HResult)),
                         failure);
                 }
+                if (discontinuityCount != 0)
+                {
+                    throw new InvalidOperationException("The DWM timing counters were discontinuous.");
+                }
                 if (IntervalsMilliseconds.Count < 30)
                 {
                     throw new InvalidOperationException("The DWM frame interval sample is too small.");
                 }
+                if (ExactIntervalsMilliseconds.Count < 30)
+                {
+                    throw new InvalidOperationException("The exact DWM frame interval sample is too small.");
+                }
                 var intervals = new System.Collections.Generic.List<double>(IntervalsMilliseconds);
+                var exactIntervals =
+                    new System.Collections.Generic.List<double>(ExactIntervalsMilliseconds);
                 intervals.Sort();
+                exactIntervals.Sort();
                 int percentileIndex = Math.Max(0, (int)Math.Ceiling(intervals.Count * 0.95) - 1);
                 ulong denominator = displayed + dropped;
                 if (denominator == 0)
@@ -574,9 +594,11 @@ namespace IptvSuite.PackageSmoke
                 return new DwmFrameSampleResult
                 {
                     P95Milliseconds = intervals[percentileIndex],
-                    MaximumMilliseconds = intervals[intervals.Count - 1],
+                    MaximumMilliseconds = exactIntervals[exactIntervals.Count - 1],
                     DroppedPercent = dropped * 100.0 / denominator,
                     IntervalCount = intervals.Count,
+                    ExactIntervalCount = exactIntervals.Count,
+                    MultiRefreshSegmentCount = multiRefreshSegmentCount,
                 };
             }
         }
@@ -605,23 +627,38 @@ namespace IptvSuite.PackageSmoke
                     {
                         lock (Sync)
                         {
-                            if (previousTimestamp != 0 &&
-                                timing.QpcVBlank > previousTimestamp &&
-                                timing.Refresh >= previousRefresh &&
-                                timing.FramesLate >= previousLate)
+                            if (previousTimestamp != 0)
                             {
-                                ulong refreshDelta = timing.Refresh - previousRefresh;
-                                if (refreshDelta > 0)
+                                if (timing.QpcVBlank <= previousTimestamp ||
+                                    timing.Refresh < previousRefresh ||
+                                    timing.FramesLate < previousLate)
                                 {
-                                    IntervalsMilliseconds.Add(
-                                        (timing.QpcVBlank - previousTimestamp) * 1000.0 /
-                                        System.Diagnostics.Stopwatch.Frequency /
-                                        refreshDelta);
-                                    ulong lateDelta = Math.Min(
-                                        timing.FramesLate - previousLate,
-                                        refreshDelta);
-                                    displayed += refreshDelta - lateDelta;
-                                    dropped += lateDelta;
+                                    discontinuityCount++;
+                                }
+                                else
+                                {
+                                    ulong refreshDelta = timing.Refresh - previousRefresh;
+                                    if (refreshDelta > 0)
+                                    {
+                                        double intervalMilliseconds =
+                                            (timing.QpcVBlank - previousTimestamp) * 1000.0 /
+                                            System.Diagnostics.Stopwatch.Frequency /
+                                            refreshDelta;
+                                        IntervalsMilliseconds.Add(intervalMilliseconds);
+                                        if (refreshDelta == 1)
+                                        {
+                                            ExactIntervalsMilliseconds.Add(intervalMilliseconds);
+                                        }
+                                        else
+                                        {
+                                            multiRefreshSegmentCount++;
+                                        }
+                                        ulong lateDelta = Math.Min(
+                                            timing.FramesLate - previousLate,
+                                            refreshDelta);
+                                        displayed += refreshDelta - lateDelta;
+                                        dropped += lateDelta;
+                                    }
                                 }
                             }
                         }
@@ -748,6 +785,8 @@ $catalogFrameP95Milliseconds = 0.0
 $catalogFrameMaximumMilliseconds = 0.0
 $catalogDroppedFramePercent = 0.0
 $catalogFrameIntervalCount = 0
+$catalogExactFrameIntervalCount = 0
+$catalogMultiRefreshSegmentCount = 0
 $catalogUiThreadResponsivenessProxyVerified = $false
 $catalogUiThreadResponsivenessProxyKind = "SendMessageTimeout(WM_NULL)"
 $catalogUiThreadResponsivenessProxyTimeoutMilliseconds = 200
@@ -3246,6 +3285,8 @@ try {
     $catalogFrameMaximumMilliseconds = $frameResult.MaximumMilliseconds
     $catalogDroppedFramePercent = $frameResult.DroppedPercent
     $catalogFrameIntervalCount = $frameResult.IntervalCount
+    $catalogExactFrameIntervalCount = $frameResult.ExactIntervalCount
+    $catalogMultiRefreshSegmentCount = $frameResult.MultiRefreshSegmentCount
     if ($catalogFrameP95Milliseconds -gt 33.3 -or
         $catalogDroppedFramePercent -ge 1.0 -or
         $catalogFrameMaximumMilliseconds -gt 200.0) {
@@ -3254,7 +3295,9 @@ try {
             "p95=$catalogFrameP95Milliseconds, " +
             "maximum=$catalogFrameMaximumMilliseconds, " +
             "droppedPercent=$catalogDroppedFramePercent, " +
-            "intervals=$catalogFrameIntervalCount.")
+            "intervals=$catalogFrameIntervalCount, " +
+            "exactIntervals=$catalogExactFrameIntervalCount, " +
+            "multiRefreshSegments=$catalogMultiRefreshSegmentCount.")
     }
 
     # This app-window UI-thread proxy is intentionally a separate scroll pass.
@@ -5219,6 +5262,8 @@ try {
         CatalogDwmFrameMaximumMilliseconds = [Math]::Round($catalogFrameMaximumMilliseconds, 3)
         CatalogDwmDroppedFramePercent = [Math]::Round($catalogDroppedFramePercent, 3)
         CatalogDwmFrameIntervalCount = $catalogFrameIntervalCount
+        CatalogDwmExactFrameIntervalCount = $catalogExactFrameIntervalCount
+        CatalogDwmMultiRefreshSegmentCount = $catalogMultiRefreshSegmentCount
         CatalogUiThreadResponsivenessProxyVerified =
             $catalogUiThreadResponsivenessProxyVerified
         CatalogUiThreadResponsivenessProxyKind =
