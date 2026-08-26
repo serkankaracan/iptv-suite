@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace IptvSuite.UnitTests;
@@ -6,6 +8,18 @@ namespace IptvSuite.UnitTests;
 [TestClass]
 public sealed class FixtureAndCanaryTests
 {
+    private static readonly string[] SanitizedCliReportPropertyNames =
+    [
+        "schemaVersion",
+        "profile",
+        "result",
+        "fileCount",
+        "directoryCount",
+        "totalFileBytes",
+        "inventorySha256",
+        "findingCount",
+    ];
+
     [TestMethod]
     [Timeout(10_000)]
     public async Task SameFixtureSpecificationProducesByteIdenticalOutputs()
@@ -158,6 +172,104 @@ public sealed class FixtureAndCanaryTests
     }
 
     [TestMethod]
+    public void ReleaseCandidateCanaryScannerReportsStableSanitizedInventory()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m16-canary-report");
+        Directory.CreateDirectory(Path.Combine(temporary.FullPath, "empty"));
+        string contentPath = Path.Combine(temporary.FullPath, "operator-visible-name.bin");
+        File.WriteAllBytes(contentPath, [1, 2, 3, 4]);
+        TestCanary canary = TestCanary.Create("M16", "FINAL_REPORT");
+
+        ArtifactCanaryScanReport first = ArtifactCanaryScanner.ScanWithReport(
+            temporary.FullPath,
+            canary,
+            ArtifactCanaryScanProfile.M16ReleaseCandidate);
+        ArtifactCanaryScanReport second = ArtifactCanaryScanner.ScanWithReport(
+            temporary.FullPath,
+            canary,
+            ArtifactCanaryScanProfile.M16ReleaseCandidate);
+
+        Assert.AreEqual(1, first.SchemaVersion);
+        Assert.AreEqual("M16ReleaseCandidate", first.Profile);
+        Assert.AreEqual(1, first.FileCount);
+        Assert.AreEqual(1, first.DirectoryCount);
+        Assert.AreEqual(4L, first.TotalFileBytes);
+        Assert.AreEqual(
+            "9779c971de13c2e36c585768774b8290ec1baab4847951631f8ffaec1a230d98",
+            first.InventorySha256);
+        Assert.AreEqual(first.InventorySha256, second.InventorySha256);
+        Assert.AreEqual(0, first.FindingCount);
+        Assert.IsTrue(first.IsClean);
+        Assert.IsEmpty(first.Findings);
+
+        File.WriteAllBytes(contentPath, [4, 3, 2, 1]);
+        ArtifactCanaryScanReport changed = ArtifactCanaryScanner.ScanWithReport(
+            temporary.FullPath,
+            canary,
+            ArtifactCanaryScanProfile.M16ReleaseCandidate);
+        Assert.AreNotEqual(first.InventorySha256, changed.InventorySha256);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task ReleaseCandidateCanaryCliUsesExactSanitizedExitAndJsonContract()
+    {
+        const string runScope = "M16";
+        const string caseId = "CLI_CONTRACT";
+        using TemporaryDirectory clean = TemporaryDirectory.Create("m16-cli-clean");
+        File.WriteAllBytes(Path.Combine(clean.FullPath, "operator-visible-name.bin"), [1, 2, 3]);
+
+        TestToolResult cleanResult = await RunTestToolAsync(
+            "scan-release-artifacts",
+            clean.FullPath,
+            runScope,
+            caseId);
+        Assert.AreEqual(0, cleanResult.ExitCode);
+        Assert.AreEqual(string.Empty, cleanResult.StandardError);
+        AssertSanitizedCliReport(cleanResult.StandardOutput, expectedResult: "clean", expectedFindings: 0);
+        AssertOutputIsSanitized(cleanResult, clean.FullPath, "operator-visible-name", TestCanary.Marker);
+
+        using TemporaryDirectory contaminated = TemporaryDirectory.Create("m16-cli-finding");
+        string contaminatedPath = Path.Combine(contaminated.FullPath, "operator-visible-name.bin");
+        using (FileStream stream = File.Create(contaminatedPath))
+        {
+            TestCanary.Create(runScope, caseId).WriteTo(stream, TestCanaryEncoding.Utf8);
+        }
+
+        TestToolResult findingResult = await RunTestToolAsync(
+            "scan-release-artifacts",
+            contaminated.FullPath,
+            runScope,
+            caseId);
+        Assert.AreEqual(2, findingResult.ExitCode);
+        StringAssert.Contains(findingResult.StandardError, "[REDACTED-ARTIFACT-PATH:");
+        AssertSanitizedCliReport(findingResult.StandardOutput, expectedResult: "finding", expectedFindings: null);
+        AssertOutputIsSanitized(
+            findingResult,
+            contaminated.FullPath,
+            "operator-visible-name",
+            TestCanary.Marker);
+
+        string missingRoot = Path.Combine(Path.GetTempPath(), $"m16-cli-missing-{Guid.NewGuid():N}");
+        TestToolResult operationalFailure = await RunTestToolAsync(
+            "scan-release-artifacts",
+            missingRoot,
+            runScope,
+            caseId);
+        Assert.AreEqual(1, operationalFailure.ExitCode);
+        Assert.AreEqual(string.Empty, operationalFailure.StandardOutput);
+        StringAssert.Contains(
+            operationalFailure.StandardError,
+            "M16ReleaseCandidateArtifactScan:RootMissing");
+        AssertOutputIsSanitized(operationalFailure, missingRoot, TestCanary.Marker);
+
+        TestToolResult usageFailure = await RunTestToolAsync("scan-release-artifacts");
+        Assert.AreEqual(64, usageFailure.ExitCode);
+        Assert.AreEqual(string.Empty, usageFailure.StandardOutput);
+        StringAssert.Contains(usageFailure.StandardError, "Usage:");
+    }
+
+    [TestMethod]
     public void ReleaseCandidateCanaryScannerFailsClosedAtEveryBound()
     {
         TestCanary canary = TestCanary.Create("M16", "BOUNDS");
@@ -256,6 +368,26 @@ public sealed class FixtureAndCanaryTests
         Assert.IsFalse(failure.Message.Contains(lockedPath, StringComparison.OrdinalIgnoreCase));
     }
 
+    [TestMethod]
+    public void ReleaseCandidateCanaryScannerRefusesFileAndDirectoryAlternateDataStreams()
+    {
+        using TemporaryDirectory fileSurface = TemporaryDirectory.Create("m16-canary-file-ads");
+        string filePath = Path.Combine(fileSurface.FullPath, "artifact.bin");
+        File.WriteAllBytes(filePath, [1, 2, 3]);
+        File.WriteAllText(
+            $"{filePath}:hidden",
+            "not-visible-to-default-stream-enumeration",
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        AssertAlternateDataStreamFailure(fileSurface.FullPath);
+
+        using TemporaryDirectory directorySurface = TemporaryDirectory.Create("m16-canary-directory-ads");
+        File.WriteAllText(
+            $"{directorySurface.FullPath}:hidden",
+            "not-visible-to-default-stream-enumeration",
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        AssertAlternateDataStreamFailure(directorySurface.FullPath);
+    }
+
     private static ArtifactCanaryScanLimits Limits(
         int maximumDirectoryDepth = 8,
         int maximumEntryCount = 32,
@@ -283,6 +415,74 @@ public sealed class FixtureAndCanaryTests
         Assert.AreEqual(expectedMessage, failure.Message);
     }
 
+    private static void AssertAlternateDataStreamFailure(string root)
+    {
+        IOException failure = Assert.ThrowsExactly<IOException>(() =>
+            ArtifactCanaryScanner.Scan(
+                root,
+                TestCanary.Create("M16", "ADS"),
+                ArtifactCanaryScanProfile.M16ReleaseCandidate));
+        Assert.AreEqual(
+            "M16ReleaseCandidateArtifactScan:AlternateDataStreamRefused",
+            failure.Message);
+    }
+
+    private static async Task<TestToolResult> RunTestToolAsync(params string[] arguments)
+    {
+        TextWriter originalOutput = Console.Out;
+        TextWriter originalError = Console.Error;
+        using StringWriter output = new(CultureInfo.InvariantCulture);
+        using StringWriter error = new(CultureInfo.InvariantCulture);
+        try
+        {
+            Console.SetOut(output);
+            Console.SetError(error);
+            int exitCode = await TestTool.RunAsync(arguments);
+            return new TestToolResult(exitCode, output.ToString(), error.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOutput);
+            Console.SetError(originalError);
+        }
+    }
+
+    private static void AssertSanitizedCliReport(
+        string output,
+        string expectedResult,
+        int? expectedFindings)
+    {
+        using JsonDocument document = JsonDocument.Parse(output);
+        JsonElement root = document.RootElement;
+        CollectionAssert.AreEqual(
+            SanitizedCliReportPropertyNames,
+            root.EnumerateObject().Select(static property => property.Name).ToArray());
+        Assert.AreEqual(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.AreEqual("M16ReleaseCandidate", root.GetProperty("profile").GetString());
+        Assert.AreEqual(expectedResult, root.GetProperty("result").GetString());
+        StringAssert.Matches(
+            root.GetProperty("inventorySha256").GetString()!,
+            new System.Text.RegularExpressions.Regex("^[0-9a-f]{64}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant));
+        int findingCount = root.GetProperty("findingCount").GetInt32();
+        if (expectedFindings.HasValue)
+        {
+            Assert.AreEqual(expectedFindings.Value, findingCount);
+        }
+        else
+        {
+            Assert.IsGreaterThan(0, findingCount);
+        }
+    }
+
+    private static void AssertOutputIsSanitized(TestToolResult result, params string[] forbiddenValues)
+    {
+        string combined = result.StandardOutput + result.StandardError;
+        foreach (string forbiddenValue in forbiddenValues)
+        {
+            Assert.DoesNotContain(forbiddenValue, combined, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
@@ -298,4 +498,6 @@ public sealed class FixtureAndCanaryTests
 
         throw new DirectoryNotFoundException("Repository root was not found.");
     }
+
+    private sealed record TestToolResult(int ExitCode, string StandardOutput, string StandardError);
 }

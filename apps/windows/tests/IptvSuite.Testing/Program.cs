@@ -1,4 +1,5 @@
 using IptvSuite.Testing;
+using System.Text.Json;
 
 return await TestTool.RunAsync(args).ConfigureAwait(false);
 
@@ -37,13 +38,24 @@ internal static class TestTool
                 ])
             {
                 TestCanary canary = TestCanary.Create(releaseRunScope, releaseCaseId);
-                IReadOnlyList<CanaryFinding> findings = ArtifactCanaryScanner.Scan(
+                ArtifactCanaryScanReport report = ArtifactCanaryScanner.ScanWithReport(
                     releaseRootPath,
                     canary,
                     ArtifactCanaryScanProfile.M16ReleaseCandidate);
-                WriteFindings(findings);
+                WriteFindings(report.Findings);
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    schemaVersion = report.SchemaVersion,
+                    profile = report.Profile,
+                    result = report.IsClean ? "clean" : "finding",
+                    fileCount = report.FileCount,
+                    directoryCount = report.DirectoryCount,
+                    totalFileBytes = report.TotalFileBytes,
+                    inventorySha256 = report.InventorySha256,
+                    findingCount = report.FindingCount,
+                }));
 
-                return findings.Count == 0 ? 0 : 2;
+                return report.IsClean ? 0 : 2;
             }
 
             if (arguments is

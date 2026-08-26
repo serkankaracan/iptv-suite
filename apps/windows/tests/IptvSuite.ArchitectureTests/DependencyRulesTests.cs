@@ -4459,8 +4459,16 @@ public sealed class DependencyRulesTests
             "M16ReleaseCandidateArtifactScan:ReparsePointRefused",
             "M16ReleaseCandidateArtifactScan:InventoryChanged",
             "M16ReleaseCandidateArtifactScan:ContentChanged",
+            "M16ReleaseCandidateArtifactScan:PathEncodingInvalid",
+            "M16ReleaseCandidateArtifactScan:AlternateDataStreamRefused",
+            "M16ReleaseCandidateArtifactScan:StreamEnumerationUnavailable",
             "AssertDigestEquivalent(initialDigests, verificationDigests)",
+            "AssertDigestEquivalent(verificationDigests, finalDigests)",
             "AssertInventoryEquivalent(verificationInventory, finalInventory)",
+            "FindFirstStreamW(",
+            "FindNextStreamW(",
+            "IPTVSUITE_M16_ARTIFACT_INVENTORY_V1",
+            "ArtifactCanaryScanReport",
             "FileShare.Read",
             "CryptographicOperations.FixedTimeEquals(",
             "[REDACTED-ARTIFACT-PATH:",
@@ -4476,9 +4484,28 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             releaseCommand,
             "ArtifactCanaryScanProfile.M16ReleaseCandidate");
+        foreach (string sanitizedReportInvariant in new[]
+        {
+            "ArtifactCanaryScanner.ScanWithReport(",
+            "schemaVersion = report.SchemaVersion",
+            "inventorySha256 = report.InventorySha256",
+            "findingCount = report.FindingCount",
+            "result = report.IsClean ? \"clean\" : \"finding\"",
+        })
+        {
+            StringAssert.Contains(releaseCommand, sanitizedReportInvariant);
+        }
+
+        Assert.IsFalse(
+            releaseCommand.Contains("relativePath =", StringComparison.Ordinal),
+            "The sanitized M16 inventory report must not publish artifact paths.");
+        string callerControlProbe = releaseCommand.Replace(
+            "profile = report.Profile",
+            string.Empty,
+            StringComparison.Ordinal);
         Assert.IsFalse(
             Regex.IsMatch(
-                releaseCommand,
+                callerControlProbe,
                 @"(?i)(?:maximum|limit|budget|skip|force|allow|profile)\s*=|TryParse|Parse\("),
             "The M16 release-artifact CLI must not accept caller-controlled limits or bypasses.");
         Assert.AreEqual(

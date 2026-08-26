@@ -1,5 +1,7 @@
-using System.Security.Cryptography;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 
 [assembly: InternalsVisibleTo("IptvSuite.UnitTests")]
@@ -8,6 +10,10 @@ namespace IptvSuite.Testing;
 
 public static class ArtifactCanaryScanner
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
     private static readonly ArtifactCanaryScanLimits M16ReleaseCandidateLimits = new(
         MaximumDirectoryDepth: 32,
         MaximumEntryCount: 25_000,
@@ -68,6 +74,12 @@ public static class ArtifactCanaryScanner
         string rootPath,
         TestCanary canary,
         ArtifactCanaryScanProfile profile)
+        => ScanWithReport(rootPath, canary, profile).Findings;
+
+    public static ArtifactCanaryScanReport ScanWithReport(
+        string rootPath,
+        TestCanary canary,
+        ArtifactCanaryScanProfile profile)
     {
         if (profile != ArtifactCanaryScanProfile.M16ReleaseCandidate)
         {
@@ -77,10 +89,16 @@ public static class ArtifactCanaryScanner
                 "The artifact canary scan profile is unsupported.");
         }
 
-        return ScanBounded(rootPath, canary, M16ReleaseCandidateLimits);
+        return ScanBoundedWithReport(rootPath, canary, M16ReleaseCandidateLimits);
     }
 
     internal static IReadOnlyList<CanaryFinding> ScanBounded(
+        string rootPath,
+        TestCanary canary,
+        ArtifactCanaryScanLimits limits)
+        => ScanBoundedWithReport(rootPath, canary, limits).Findings;
+
+    internal static ArtifactCanaryScanReport ScanBoundedWithReport(
         string rootPath,
         TestCanary canary,
         ArtifactCanaryScanLimits limits)
@@ -139,12 +157,90 @@ public static class ArtifactCanaryScanner
             findings: null,
             collectPathFindings: false);
         AssertInventoryEquivalent(verificationInventory, finalInventory);
+        List<BoundedArtifactDigest> finalDigests = ScanAndHashInventory(
+            finalInventory,
+            patterns,
+            findings: null,
+            limits,
+            scanForCanaries: false);
+        AssertDigestEquivalent(verificationDigests, finalDigests);
 
-        return findings
+        CanaryFinding[] orderedFindings = findings
             .OrderBy(finding => finding.RelativePath, StringComparer.Ordinal)
             .ThenBy(finding => finding.Encoding)
             .ThenBy(finding => finding.ByteOffset)
             .ToArray();
+        return CreateReport(finalInventory, finalDigests, orderedFindings);
+    }
+
+    private static ArtifactCanaryScanReport CreateReport(
+        List<BoundedArtifactEntry> inventory,
+        List<BoundedArtifactDigest> digests,
+        CanaryFinding[] findings)
+    {
+        int fileCount = inventory.Count(static entry => !entry.IsDirectory);
+        int directoryCount = inventory.Count - fileCount;
+        if (digests.Count != fileCount)
+        {
+            throw new ArtifactCanaryScanInvariantException(
+                "M16ReleaseCandidateArtifactScan:ContentChanged");
+        }
+
+        long totalFileBytes = 0;
+        Dictionary<string, BoundedArtifactDigest> digestByPath = new(
+            digests.Count,
+            StringComparer.Ordinal);
+        foreach (BoundedArtifactDigest digest in digests)
+        {
+            totalFileBytes = checked(totalFileBytes + digest.Length);
+            if (!digestByPath.TryAdd(digest.RelativePath, digest))
+            {
+                throw new ArtifactCanaryScanInvariantException(
+                    "M16ReleaseCandidateArtifactScan:ContentChanged");
+            }
+        }
+
+        using IncrementalHash inventoryHasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        inventoryHasher.AppendData("IPTVSUITE_M16_ARTIFACT_INVENTORY_V1"u8);
+        Span<byte> header = stackalloc byte[13];
+        foreach (BoundedArtifactEntry entry in inventory)
+        {
+            byte[] relativePathBytes = EncodeRelativePath(entry.RelativePath);
+            try
+            {
+                header[0] = entry.IsDirectory ? (byte)0x44 : (byte)0x46;
+                BinaryPrimitives.WriteInt32BigEndian(header[1..5], relativePathBytes.Length);
+                BinaryPrimitives.WriteInt64BigEndian(header[5..13], entry.Length);
+                inventoryHasher.AppendData(header);
+                inventoryHasher.AppendData(relativePathBytes);
+                if (!entry.IsDirectory)
+                {
+                    if (!digestByPath.TryGetValue(entry.RelativePath, out BoundedArtifactDigest? digest) ||
+                        digest.Length != entry.Length)
+                    {
+                        throw new ArtifactCanaryScanInvariantException(
+                            "M16ReleaseCandidateArtifactScan:ContentChanged");
+                    }
+
+                    inventoryHasher.AppendData(digest.Sha256);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(relativePathBytes);
+            }
+        }
+
+        string inventorySha256 = Convert.ToHexString(inventoryHasher.GetHashAndReset())
+            .ToLowerInvariant();
+        return new ArtifactCanaryScanReport(
+            SchemaVersion: 1,
+            Profile: nameof(ArtifactCanaryScanProfile.M16ReleaseCandidate),
+            FileCount: fileCount,
+            DirectoryCount: directoryCount,
+            TotalFileBytes: totalFileBytes,
+            InventorySha256: inventorySha256,
+            Findings: findings);
     }
 
     private static List<BoundedArtifactEntry> EnumerateEntriesBounded(
@@ -245,6 +341,8 @@ public static class ArtifactCanaryScanner
                         "M16ReleaseCandidateArtifactScan:ReparsePointRefused");
                 }
 
+                AssertNoAlternateDataStreams(entry);
+
                 if ((attributes & FileAttributes.Directory) != 0)
                 {
                     int childDepth = directory.Depth + 1;
@@ -330,6 +428,91 @@ public static class ArtifactCanaryScanner
         {
             throw new IOException(
                 "M16ReleaseCandidateArtifactScan:ReparsePointRefused");
+        }
+
+        AssertNoAlternateDataStreams(root);
+    }
+
+    private static void AssertNoAlternateDataStreams(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new IOException(
+                "M16ReleaseCandidateArtifactScan:StreamEnumerationUnavailable");
+        }
+
+        IntPtr findHandle;
+        Win32FindStreamData streamData;
+        try
+        {
+            findHandle = FindFirstStreamW(
+                path,
+                FindStreamInfoStandard,
+                out streamData,
+                0);
+        }
+        catch (Exception exception) when (
+            exception is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            throw new IOException(
+                "M16ReleaseCandidateArtifactScan:StreamEnumerationUnavailable",
+                exception);
+        }
+
+        if (findHandle == InvalidHandleValue)
+        {
+            if (Marshal.GetLastPInvokeError() == ErrorHandleEof)
+            {
+                return;
+            }
+
+            throw new IOException(
+                "M16ReleaseCandidateArtifactScan:StreamEnumerationFailed");
+        }
+
+        string? failure = null;
+        try
+        {
+            while (true)
+            {
+                if (!string.Equals(streamData.StreamName, "::$DATA", StringComparison.Ordinal))
+                {
+                    failure = "M16ReleaseCandidateArtifactScan:AlternateDataStreamRefused";
+                    break;
+                }
+
+                if (FindNextStreamW(findHandle, out streamData))
+                {
+                    continue;
+                }
+
+                if (Marshal.GetLastPInvokeError() != ErrorHandleEof)
+                {
+                    failure = "M16ReleaseCandidateArtifactScan:StreamEnumerationFailed";
+                }
+
+                break;
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (!FindClose(findHandle))
+                {
+                    failure ??= "M16ReleaseCandidateArtifactScan:StreamHandleCloseFailed";
+                }
+            }
+            catch (Exception exception) when (
+                exception is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+            {
+                failure ??= "M16ReleaseCandidateArtifactScan:StreamEnumerationUnavailable";
+            }
+        }
+
+        if (failure is not null)
+        {
+            throw new IOException(failure);
         }
     }
 
@@ -500,7 +683,7 @@ public static class ArtifactCanaryScanner
 
     private static string FingerprintRelativePath(string relativePath)
     {
-        byte[] pathBytes = Encoding.UTF8.GetBytes(relativePath);
+        byte[] pathBytes = EncodeRelativePath(relativePath);
         try
         {
             string fingerprint = Convert.ToHexString(SHA256.HashData(pathBytes))[..16];
@@ -511,6 +694,49 @@ public static class ArtifactCanaryScanner
             CryptographicOperations.ZeroMemory(pathBytes);
         }
     }
+
+    private static byte[] EncodeRelativePath(string relativePath)
+    {
+        try
+        {
+            return StrictUtf8.GetBytes(relativePath);
+        }
+        catch (EncoderFallbackException)
+        {
+            throw new ArtifactCanaryScanInvariantException(
+                "M16ReleaseCandidateArtifactScan:PathEncodingInvalid");
+        }
+    }
+
+    private const int FindStreamInfoStandard = 0;
+    private const int ErrorHandleEof = 38;
+    private static readonly IntPtr InvalidHandleValue = new(-1);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct Win32FindStreamData
+    {
+        public long StreamSize;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 296)]
+        public string? StreamName;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr FindFirstStreamW(
+        [MarshalAs(UnmanagedType.LPWStr)] string fileName,
+        int infoLevel,
+        out Win32FindStreamData findStreamData,
+        int flags);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FindNextStreamW(
+        IntPtr findStream,
+        out Win32FindStreamData findStreamData);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FindClose(IntPtr findFile);
 
     private static void AddBoundedFinding(
         List<CanaryFinding> findings,
@@ -725,3 +951,17 @@ internal sealed class ArtifactCanaryScanLimitException(string message) : IOExcep
 internal sealed class ArtifactCanaryScanInvariantException(string message) : IOException(message);
 
 public sealed record CanaryFinding(string RelativePath, TestCanaryEncoding Encoding, long ByteOffset);
+
+public sealed record ArtifactCanaryScanReport(
+    int SchemaVersion,
+    string Profile,
+    int FileCount,
+    int DirectoryCount,
+    long TotalFileBytes,
+    string InventorySha256,
+    IReadOnlyList<CanaryFinding> Findings)
+{
+    public int FindingCount => Findings.Count;
+
+    public bool IsClean => FindingCount == 0;
+}
