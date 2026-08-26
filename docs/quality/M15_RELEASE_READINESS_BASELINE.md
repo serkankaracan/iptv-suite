@@ -128,7 +128,7 @@ Yukarıdaki run `#1`/run `#10` ve ledger'ları pre-asset tarihsel accepted check
 
 Commit `c686424ea43be3a01b5fb364b2115cc84319b242` üzerindeki schema-v5 predecessor, aynı accepted asset/SBOM/CVE zinciriyle evaluation anında exact 12 blocker üretmiştir. O tarihsel şema yedi günlük `freshAtEvaluation` alanını taşıyor, fakat 24 saatlik final-release predicate'ini evidence içinde ayrı göstermiyordu; schema-v6 bu sözleşme boşluğunu kapatır. Schema-v5 sonucu tarihsel teknik checkpoint'tir ve geriye dönük final-release kabulü sayılmaz.
 
-Güncel schema-v6 readiness sonucu, run `#13`ün 24 saatlik final-release penceresi içindeki bu evaluation anında `technicalBaselinePassed=true`, `releaseReady=false` ve exact 12 remaining blocker'dır. `AssetProvenancePending`, `SbomPending` ve `CveReviewPending` bu evaluation anında teknik olarak kapanmıştır; 24 saatlik sınır aşıldığında yalnız sonuncusu yeniden açılır. Bu teknik zincir M15 completion, perpetual freshness veya genel “CVE-free” sonucu değildir.
+Güncel schema-v6 readiness sonucu, run `#18`in 24 saatlik final-release penceresi içindeki bu evaluation anında `technicalBaselinePassed=true`, `releaseReady=false` ve exact 12 remaining blocker'dır. `AssetProvenancePending`, `SbomPending` ve `CveReviewPending` bu evaluation anında teknik olarak kapanmıştır; 24 saatlik sınır aşıldığında yalnız sonuncusu yeniden açılır. Bu teknik zincir M15 completion, perpetual freshness veya genel “CVE-free” sonucu değildir.
 
 ## Development identity WACK preflight — IMPLEMENTED / EXECUTION PENDING
 
@@ -136,7 +136,7 @@ Güncel schema-v6 readiness sonucu, run `#13`ün 24 saatlik final-release pencer
 
 Normal push/PR akışı WACK çalıştırmaz. Yalnız elle tetiklenen `windows-quality.yml` akışında `run_wack=true`, mevcut signed package-smoke içine bu preflight'ı bağlar. Summary açıkça `ClosedBlocker=None` ve `ReleaseReady=false` taşır. Bu development signer/identity sonucu production identity, release signer, exact RC, clean-machine/private-flight veya Partner Center kabulü değildir; `WackPending` aynen açık kalır ve final candidate üzerinde yeniden WACK gerekir.
 
-Package-smoke/workflow contract yüzeyi değiştiğinden önceki package-SBOM acceptance ledger'ı bu implementation worktree'sinde fail-closed geçersizdir. Yeni clean checkpoint üzerinde dedicated SBOM ve ona zincirli CVE acceptance yenilenmeden güncel readiness için 12-blocker snapshot'ı yeniden kullanılamaz.
+WACK-bound package-smoke contract'ı clean `becd2cb408982eb34b1bf62de67cb628c9408055` üzerinde [SBOM producer run `#3` (`32928618825`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32928618825) ile official+strict `PASS` doğrulandı. SBOM acceptance ledger raw SHA-256 `69bfd62dc8145ba280c1aa45c92dde15173440d4378cb568df68beef3f814c80`, exact yedi-file contract SHA-256 `4896d447e53b075f48c0bbad7fe9336a64c2d8789b12c000e7b3c8a21c65e5fe`dir. Buna exact ledger hash'iyle zincirlenen clean `ef876d103223165bf546fb60fddef102e74c2c08` için [CVE producer run `#18` (`32929529931`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32929529931), `4/0/4` audited restore, 23-package graph ve direct/transitive/toplam `0/0/0` known-vulnerability sonucunu official+strict geçti. CVE acceptance ledger raw SHA-256 `a7f5e50f37337442d770b8d9a026dc5a9cd843d833c03af13b0689a0b69099e5`, teknik freshness sonu `2026-09-02T04:17:16Z`dir. WACK execution henüz yapılmamıştır ve `WackPending` açık kalır.
 
 ## Tarihsel pre-asset schema-v4 exact açık blocker seti
 
