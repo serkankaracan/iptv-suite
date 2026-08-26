@@ -130,6 +130,14 @@ Commit `c686424ea43be3a01b5fb364b2115cc84319b242` üzerindeki schema-v5 predeces
 
 Güncel schema-v6 readiness sonucu, run `#13`ün 24 saatlik final-release penceresi içindeki bu evaluation anında `technicalBaselinePassed=true`, `releaseReady=false` ve exact 12 remaining blocker'dır. `AssetProvenancePending`, `SbomPending` ve `CveReviewPending` bu evaluation anında teknik olarak kapanmıştır; 24 saatlik sınır aşıldığında yalnız sonuncusu yeniden açılır. Bu teknik zincir M15 completion, perpetual freshness veya genel “CVE-free” sonucu değildir.
 
+## Development identity WACK preflight — IMPLEMENTED / EXECUTION PENDING
+
+`eng/WindowsWack.ps1`, yalnız disposable development identity için `DevelopmentIdentityWackPreflightOnly` kapsamlı opt-in bir teknik preflight sağlar. Elevated ve interactive Windows hostta exact sistem `appcert.exe` dosyasını doğrular; resmî `reset` → `test -packagefullname ... -reportoutputpath ...` sırasını toplam en fazla 60 dakikada çalıştırır. Stdout/stderr ayrı ayrı 4 MiB, XML report 16 MiB ile sınırlıdır. Parser DTD/external resolution'ı kapatır; exact `REPORT`, `OVERALL_RESULT=PASS`, `PARTIAL_RUN=FALSE` ve varsa `LATEST_VERSION=TRUE` ister. Ham XML ile stdout/stderr her sonuçta silinir; yalnız path, package-full-name, publisher veya ham test metni taşımayan allowlist'li `wack-development-preflight-summary.json` kalabilir.
+
+Normal push/PR akışı WACK çalıştırmaz. Yalnız elle tetiklenen `windows-quality.yml` akışında `run_wack=true`, mevcut signed package-smoke içine bu preflight'ı bağlar. Summary açıkça `ClosedBlocker=None` ve `ReleaseReady=false` taşır. Bu development signer/identity sonucu production identity, release signer, exact RC, clean-machine/private-flight veya Partner Center kabulü değildir; `WackPending` aynen açık kalır ve final candidate üzerinde yeniden WACK gerekir.
+
+Package-smoke/workflow contract yüzeyi değiştiğinden önceki package-SBOM acceptance ledger'ı bu implementation worktree'sinde fail-closed geçersizdir. Yeni clean checkpoint üzerinde dedicated SBOM ve ona zincirli CVE acceptance yenilenmeden güncel readiness için 12-blocker snapshot'ı yeniden kullanılamaz.
+
 ## Tarihsel pre-asset schema-v4 exact açık blocker seti
 
 Aşağıdaki 13 kod, asset byte değişiminden önceki son hosted-kabul schema-v4 evidence'ında açıktır ve ordinal sıralı tutulmuştur:
@@ -170,7 +178,7 @@ Aşağıdaki 12 kod current evidence'ta açıktır ve ordinal sıralıdır:
 - Known-pattern source taraması ile exact installed-package runtime audit'i geçti. Runtime sonucu yalnız exact hosted package gözlem penceresindeki deterministic pre/post eşitliğini ve watcher'ın mutation görmediğini kanıtlar; clean VM'de install/update/reset/uninstall matrisi ve bütün olası write yolları ayrıca geçmelidir.
 - Exact 23-package inventory teknik dependency drift guard'ıdır ve tek başına SBOM değildir. Tarihsel hosted package-bound companion SPDX ile ayrı, fresh known-vulnerability incelemesi root `LICENSE`/`NOTICE`, genel “CVE-free” iddiası, redistribution kabulü veya codec/IP hukuk görüşü değildir; yeni deterministic asset-origin bağı da bu hukuk kapılarını kapatmaz.
 - Development identity ile mevcut disposable lifecycle kanıtları production identity/PFN, signing lineage, previous-package migration, repair veya private-flight sonucu değildir.
-- WACK, Partner Center private submission, privacy/support URL, Store listing/rating/reviewer notes ve geliştirici-owned reviewer service henüz kabul edilmemiştir.
+- Development-identity WACK preflight sözleşmesi implement edilmiştir; final RC-bound WACK, Partner Center private submission, privacy/support URL, Store listing/rating/reviewer notes ve geliştirici-owned reviewer service henüz kabul edilmemiştir.
 - ARM64 Windows MVP release setinde yoktur; deferred disposition gelecekte native ARM64 acceptance yapılmadan destek iddiasına dönüştürülemez.
 - Source-controlled MSBuild audit'i dış command-line/global-machine import yüzeyini doğrulamaz; release build invocation ve clean runner ayrıca bağlanmalıdır.
 

@@ -4330,6 +4330,127 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M15DevelopmentIdentityWackPreflightIsStrictBoundedAndNonClosing()
+    {
+        string helperPath = Path.Combine(RepositoryRoot, "eng", "WindowsWack.ps1");
+        string selfTestPath = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ArchitectureTests",
+            "Test-WindowsWack.ps1");
+        string packageSmokePath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1");
+        string workflowPath = Path.Combine(
+            RepositoryRoot,
+            ".github",
+            "workflows",
+            "windows-quality.yml");
+        Assert.IsTrue(File.Exists(helperPath), "The Windows WACK helper is missing.");
+        Assert.IsTrue(File.Exists(selfTestPath), "The Windows WACK self-test is missing.");
+
+        string helper = File.ReadAllText(helperPath);
+        string packageSmoke = File.ReadAllText(packageSmokePath);
+        string workflow = File.ReadAllText(workflowPath).Replace("\r\n", "\n", StringComparison.Ordinal);
+        StringAssert.Contains(
+            helper,
+            "Windows Kits\\10\\App Certification Kit\\appcert.exe");
+        StringAssert.Contains(helper, "-Arguments 'reset'");
+        StringAssert.Contains(helper, "'test -packagefullname '");
+        StringAssert.Contains(helper, "' -reportoutputpath '");
+        StringAssert.Contains(helper, "$script:windowsWackMaximumReportBytes = 16MB");
+        StringAssert.Contains(helper, "$script:windowsWackMaximumProcessOutputBytes = 4MB");
+        StringAssert.Contains(helper, "Scope = 'DevelopmentIdentityWackPreflightOnly'");
+        StringAssert.Contains(helper, "ClosedBlocker = 'None'");
+        StringAssert.Contains(helper, "ReleaseReady = $false");
+        Assert.IsFalse(helper.Contains("ReleaseReady = $true", StringComparison.Ordinal));
+        Assert.IsFalse(helper.Contains("WackPending", StringComparison.Ordinal));
+
+        StringAssert.Contains(
+            packageSmoke,
+            ". (Join-Path $PSScriptRoot \"WindowsWack.ps1\")");
+        Assert.AreEqual(
+            1,
+            Regex.Count(packageSmoke, @"\bInvoke-WindowsWackDevelopmentIdentityPreflight\b"),
+            "The package smoke must have one opt-in WACK execution site.");
+        StringAssert.Contains(
+            packageSmoke,
+            "$wackEvidencePath = Join-Path $artifactRoot \"wack-development-preflight-summary.json\"");
+        int wackIndex = packageSmoke.IndexOf(
+            "$wackDevelopmentIdentityResult = Invoke-WindowsWackDevelopmentIdentityPreflight",
+            StringComparison.Ordinal);
+        int auditCompletionIndex = packageSmoke.IndexOf(
+            "$packageInstallRootAuditCompletionAttempted = $true",
+            wackIndex,
+            StringComparison.Ordinal);
+        int packageRemovalIndex = packageSmoke.IndexOf(
+            "    Remove-ExactDevelopmentPackage",
+            auditCompletionIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            wackIndex >= 0 && wackIndex < auditCompletionIndex && auditCompletionIndex < packageRemovalIndex,
+            "WACK must inspect the exact installed package before audit completion and uninstall.");
+
+        StringAssert.Contains(
+            workflow,
+            "run_wack:\n        description: Run the development-identity WACK preflight without closing the final WACK blocker");
+        StringAssert.Contains(
+            workflow,
+            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_wack }}\n" +
+            "        shell: powershell\n" +
+            "        run: .\\eng\\Invoke-WindowsPackageSmoke.ps1 -Configuration Release -RunWack");
+        StringAssert.Contains(workflow, "name: windows-wack-development-preflight-evidence");
+        StringAssert.Contains(
+            workflow,
+            ".artifacts/msix-smoke/wack-development-preflight-summary.json");
+        Assert.IsFalse(workflow.Contains("report.xml", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(workflow.Contains("stdout.raw", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(workflow.Contains("stderr.raw", StringComparison.OrdinalIgnoreCase));
+
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(
+            File.Exists(windowsPowerShell),
+            "Windows PowerShell 5.1 is required for the WACK contract.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(selfTestPath);
+
+        using Process contractProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The Windows WACK self-test could not start.");
+        bool contractCompleted = contractProcess.WaitForExit(120_000);
+        if (!contractCompleted)
+        {
+            contractProcess.Kill(entireProcessTree: true);
+            contractProcess.WaitForExit();
+        }
+
+        string contractOutput = contractProcess.StandardOutput.ReadToEnd();
+        string contractError = contractProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            contractCompleted && contractProcess.ExitCode == 0,
+            $"Windows WACK contract failed.{Environment.NewLine}{contractOutput}{contractError}");
+    }
+
+    [TestMethod]
     public void M15SignedReleaseSetProducesAPinnedFailClosedPackageSbom()
     {
         string helperPath = Path.Combine(RepositoryRoot, "eng", "WindowsPackageSbom.ps1");
@@ -7460,7 +7581,7 @@ public sealed class DependencyRulesTests
         MatchCollection pinnedUses = Regex.Matches(
             workflow,
             @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
-        Assert.HasCount(13, allUses);
+        Assert.HasCount(14, allUses);
         Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
     }
 

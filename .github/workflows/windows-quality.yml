@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_wack:
+        description: Run the development-identity WACK preflight without closing the final WACK blocker
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -73,7 +78,7 @@ jobs:
     name: Packaged install and launch smoke
     needs: quality
     runs-on: windows-2025
-    timeout-minutes: 25
+    timeout-minutes: 90
 
     steps:
       - name: Check out repository
@@ -114,8 +119,14 @@ jobs:
           --configfile .\NuGet.config
 
       - name: Build, scan, install, launch, and remove signed MSIX
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_wack }}
         shell: powershell
         run: .\eng\Invoke-WindowsPackageSmoke.ps1 -Configuration Release
+
+      - name: Build, scan, install, launch, run development WACK preflight, and remove signed MSIX
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_wack }}
+        shell: powershell
+        run: .\eng\Invoke-WindowsPackageSmoke.ps1 -Configuration Release -RunWack
 
       - name: Verify packaged protected-store process lifecycle
         shell: powershell
@@ -161,6 +172,16 @@ jobs:
         with:
           name: windows-package-lifecycle-evidence
           path: .artifacts/package-lifecycle/last-success.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Upload sanitized development-identity WACK preflight evidence
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.run_wack }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-wack-development-preflight-evidence
+          path: .artifacts/msix-smoke/wack-development-preflight-summary.json
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7

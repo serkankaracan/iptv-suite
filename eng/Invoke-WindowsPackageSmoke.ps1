@@ -5,7 +5,9 @@ param(
 
     [string]$DotNetPath = "dotnet",
 
-    [switch]$EmitM14TraceMarkers
+    [switch]$EmitM14TraceMarkers,
+
+    [switch]$RunWack
 )
 
 Set-StrictMode -Version Latest
@@ -683,6 +685,7 @@ namespace IptvSuite.PackageSmoke
 '@
 Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
 . (Join-Path $PSScriptRoot "WindowsPackageInstallRootAudit.ps1")
+. (Join-Path $PSScriptRoot "WindowsWack.ps1")
 
 $expectedName = "IptvSuite.LocalDev.6f0d9a64"
 $expectedPublisher = "CN=IptvSuite Local Development"
@@ -748,6 +751,7 @@ $evidencePath = Join-Path $artifactRoot "last-success.json"
 $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
 $packageSbomPath = Join-Path $artifactRoot "package-sbom.spdx.json"
 $packageSbomSummaryPath = Join-Path $artifactRoot "package-sbom-summary.json"
+$wackEvidencePath = Join-Path $artifactRoot "wack-development-preflight-summary.json"
 
 $certificate = $null
 $installedPackage = $null
@@ -767,6 +771,7 @@ $primaryFailure = $null
 $successEvidence = $null
 $successMessage = $null
 $packageSbomResult = $null
+$wackDevelopmentIdentityResult = $null
 $protectedStoreDirectoryInitialized = $false
 $catalogUiaContractVerified = $false
 $catalogKeyboardFocusOrderVerified = $false
@@ -1529,7 +1534,8 @@ function Write-JsonAtomically {
     $resolvedDestination = [System.IO.Path]::GetFullPath($DestinationPath)
     $allowedDestinations = @(
         [System.IO.Path]::GetFullPath($evidencePath),
-        [System.IO.Path]::GetFullPath($failureEvidencePath)
+        [System.IO.Path]::GetFullPath($failureEvidencePath),
+        [System.IO.Path]::GetFullPath($wackEvidencePath)
     )
     if ($allowedDestinations -notcontains $resolvedDestination -or
         -not [System.IO.Directory]::GetParent($resolvedDestination).FullName.Equals(
@@ -2855,7 +2861,8 @@ try {
         $evidencePath,
         $failureEvidencePath,
         $packageSbomPath,
-        $packageSbomSummaryPath)) {
+        $packageSbomSummaryPath,
+        $wackEvidencePath)) {
         if (Test-Path -LiteralPath $staleEvidencePath) {
             Remove-Item -LiteralPath $staleEvidencePath -Force -ErrorAction Stop
         }
@@ -5138,6 +5145,23 @@ try {
     $sourceDeletionSiblingCatalogRetained = $resultTicket.SiblingCatalogRetained
     $playbackUiAcceptanceVerified = $true
 
+    if ($RunWack) {
+        $wackDevelopmentIdentityResult = Invoke-WindowsWackDevelopmentIdentityPreflight `
+            -PackageFullName $installedPackageFullName `
+            -PackageSha256 $packageSha256 `
+            -ArtifactRoot $artifactRoot
+        if ($wackDevelopmentIdentityResult.SchemaVersion -ne 1 -or
+            $wackDevelopmentIdentityResult.Scope -cne
+                "DevelopmentIdentityWackPreflightOnly" -or
+            $wackDevelopmentIdentityResult.ClosedBlocker -cne "None" -or
+            $wackDevelopmentIdentityResult.ReleaseReady -ne $false -or
+            $wackDevelopmentIdentityResult.PackageSha256 -cne $packageSha256 -or
+            $wackDevelopmentIdentityResult.OverallResult -cne "PASS" -or
+            $wackDevelopmentIdentityResult.PartialRun -cne "FALSE") {
+            throw "The development-identity WACK preflight result is invalid."
+        }
+    }
+
     $packageInstallRootAuditCompletionAttempted = $true
     $packageInstallRootAuditResult = Complete-WindowsPackageInstallRootAudit `
         -Audit $packageInstallRootAudit
@@ -5617,6 +5641,11 @@ if ($null -ne $primaryFailure -or $cleanupFailures.Count -ne 0) {
 }
 
 try {
+    if ($RunWack) {
+        Write-JsonAtomically `
+            -Value $wackDevelopmentIdentityResult `
+            -DestinationPath $wackEvidencePath
+    }
     Write-JsonAtomically -Value $successEvidence -DestinationPath $evidencePath
 }
 catch {
