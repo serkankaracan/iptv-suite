@@ -898,6 +898,172 @@ function Invoke-WindowsWackBoundedProcess {
     }
 }
 
+function Read-WindowsWackProcessOutputBytes {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.DirectoryInfo]$ArtifactRoot,
+
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $candidate = Assert-WindowsWackPathWithinRoot `
+        -Root $ArtifactRoot `
+        -CandidatePath $Path `
+        -Code 'TestOutputPathInvalid'
+    Assert-WindowsWackCondition `
+        ([System.IO.File]::Exists($candidate) -and
+            -not [System.IO.Directory]::Exists($candidate)) `
+        'TestOutputUnavailable'
+    try {
+        $file = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+    }
+    catch {
+        Fail-WindowsWack -Code 'TestOutputUnavailable'
+    }
+    Assert-WindowsWackCondition `
+        ($file -is [System.IO.FileInfo] -and -not $file.PSIsContainer -and
+            ($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0 -and
+            $file.Length -ge 0 -and
+            $file.Length -le $script:windowsWackMaximumProcessOutputBytes) `
+        'TestOutputInvalid'
+    $stream = $null
+    $bytes = $null
+    try {
+        $stream = [System.IO.File]::Open(
+            $file.FullName,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::None)
+        Assert-WindowsWackCondition `
+            ($stream.Length -ge 0 -and
+                $stream.Length -le $script:windowsWackMaximumProcessOutputBytes) `
+            'TestOutputInvalid'
+        $length = [long]$stream.Length
+        $bytes = New-Object byte[] ([int]$length)
+        $offset = 0
+        while ($offset -lt $bytes.Length) {
+            $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+            Assert-WindowsWackCondition ($read -gt 0) 'TestOutputReadFailed'
+            $offset += $read
+        }
+        Assert-WindowsWackCondition ($stream.ReadByte() -eq -1) 'TestOutputReadFailed'
+        Assert-WindowsWackCondition ($stream.Length -eq $length) 'TestOutputReadFailed'
+        return [pscustomobject][ordered]@{
+            Length = $length
+            Bytes = $bytes
+        }
+    }
+    catch {
+        if ($null -ne $bytes) {
+            [Array]::Clear($bytes, 0, $bytes.Length)
+        }
+        if (Test-WindowsWackStableError -ErrorRecord $_) {
+            throw
+        }
+        Fail-WindowsWack -Code 'TestOutputReadFailed'
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Resolve-WindowsWackMinusOneFailureCode {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.DirectoryInfo]$ArtifactRoot,
+
+        [Parameter(Mandatory)]
+        [string]$StandardOutputPath,
+
+        [Parameter(Mandatory)]
+        [string]$StandardErrorPath
+    )
+
+    $standardOutput = $null
+    $standardError = $null
+    $text = $null
+    $lines = $null
+    try {
+        $standardOutput = Read-WindowsWackProcessOutputBytes `
+            -ArtifactRoot $ArtifactRoot `
+            -Path $StandardOutputPath
+        $standardError = Read-WindowsWackProcessOutputBytes `
+            -ArtifactRoot $ArtifactRoot `
+            -Path $StandardErrorPath
+        # WACK's signed command-line binaries emit localized human text. The
+        # en-US markers below are used only to select a stable diagnostic code;
+        # raw output is never returned, logged, or included in evidence.
+        $text = ([System.Text.Encoding]::ASCII.GetString($standardOutput.Bytes) + "`n" +
+            [System.Text.Encoding]::ASCII.GetString($standardError.Bytes)).Replace(
+                [string][char]0,
+                [string]::Empty)
+        $lines = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::Ordinal)
+        foreach ($line in [System.Text.RegularExpressions.Regex]::Split(
+                $text,
+                "`r`n|`n|`r")) {
+            $normalizedLine = $line.Trim()
+            if ($normalizedLine.Length -gt 0) {
+                $lines.Add($normalizedLine) | Out-Null
+            }
+        }
+        $markers = [ordered]@{
+            'TestReportCreationFailed' = @(
+                'An error occurred while trying to create the report.',
+                'Failed to create the final report.')
+            'TestExecutionPhaseFailed' = @(
+                'An error occurred while trying to execute the phase.')
+            'TestExecutionStopped' = @(
+                'The Windows App Certification Kit was closed by the user or encountered an app error before completing the validation.')
+            'TestNoValidTests' = @(
+                'No valid test requested, execution stopped.')
+            'TestDriverInitializationFailed' = @(
+                'An error occurred while initializing the execution driver.')
+            'TestConcurrentInstance' = @(
+                'Only a single instance of this application can be running at a time.')
+            'TestElevationRequired' = @(
+                'This application requires administrator privileges to run. Please relaunch as administrator.')
+            'TestUnsupportedOperatingSystem' = @(
+                'Windows App Certification Kit is not supported on this version of Windows.')
+            'TestCommandLineInvalid' = @(
+                'A valid operation type must be specified.',
+                'Please specify only one operation.',
+                'A valid report file name must be specified.',
+                "The '/reportoutputpath' argument must be valid path to the report file.",
+                'The report output file path should point to a XML file.',
+                'A valid app package file name or package full name must be specified.',
+                'A valid package full name must be specified.')
+        }
+        foreach ($entry in $markers.GetEnumerator()) {
+            foreach ($marker in $entry.Value) {
+                if ($lines.Contains($marker)) {
+                    return [string]$entry.Key
+                }
+            }
+        }
+        return 'TestFailureUnclassified'
+    }
+    finally {
+        if ($null -ne $standardOutput -and $null -ne $standardOutput.Bytes) {
+            [Array]::Clear(
+                $standardOutput.Bytes,
+                0,
+                $standardOutput.Bytes.Length)
+        }
+        if ($null -ne $standardError -and $null -ne $standardError.Bytes) {
+            [Array]::Clear(
+                $standardError.Bytes,
+                0,
+                $standardError.Bytes.Length)
+        }
+        $text = $null
+        $lines = $null
+    }
+}
+
 function Resolve-WindowsWackTestExitDisposition {
     param(
         [Parameter(Mandatory)]
@@ -911,7 +1077,7 @@ function Resolve-WindowsWackTestExitDisposition {
         return 'ReportFinalizationRequired'
     }
     if ($ExitCode -eq -1) {
-        Fail-WindowsWack -Code 'TestInvalidCommandLine'
+        Fail-WindowsWack -Code 'TestFailureUnclassified'
     }
     if ($ExitCode -eq -2) {
         Fail-WindowsWack -Code 'TestInfrastructureError'
@@ -1145,6 +1311,13 @@ function Invoke-WindowsWackDevelopmentIdentityPreflight {
             -StandardOutputPath $testOutputPath `
             -StandardErrorPath $testErrorPath `
             -Phase 'Test'
+        if ($testResult.ExitCode -eq -1) {
+            $minusOneFailureCode = Resolve-WindowsWackMinusOneFailureCode `
+                -ArtifactRoot $artifact `
+                -StandardOutputPath $testOutputPath `
+                -StandardErrorPath $testErrorPath
+            Fail-WindowsWack -Code $minusOneFailureCode
+        }
         $testDisposition = Resolve-WindowsWackTestExitDisposition `
             -ExitCode $testResult.ExitCode
         $finalizeResult = $null

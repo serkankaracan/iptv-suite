@@ -84,6 +84,21 @@ function Write-TestReport {
     return $path
 }
 
+function Write-TestProcessOutput {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Text
+    )
+
+    $path = Join-Path $script:artifactRoot ($Name + '.raw')
+    [System.IO.File]::WriteAllText($path, $Text, $script:utf8NoBom)
+    return $path
+}
+
 function Assert-ReportTextFails {
     param(
         [Parameter(Mandatory)]
@@ -148,7 +163,7 @@ try {
             'ReportFinalizationRequired') `
         'Exit code one was not classified as report finalization.'
     $testExitFailures = [ordered]@{
-        '-1' = 'TestInvalidCommandLine'
+        '-1' = 'TestFailureUnclassified'
         '-2' = 'TestInfrastructureError'
         '-3' = 'TestUserInitiated'
         '-4' = 'TestInstallationError'
@@ -159,6 +174,120 @@ try {
         Assert-FailsWithCode -Code $entry.Value -Action {
             Resolve-WindowsWackTestExitDisposition -ExitCode ([int]$entry.Key)
         }
+    }
+    $emptyOutputPath = Write-TestProcessOutput -Name 'empty-output' -Text ''
+    $minusOneMarkers = [ordered]@{
+        'TestElevationRequired' =
+            'This application requires administrator privileges to run. Please relaunch as administrator.'
+        'TestConcurrentInstance' =
+            'Only a single instance of this application can be running at a time.'
+        'TestDriverInitializationFailed' =
+            'An error occurred while initializing the execution driver.'
+        'TestUnsupportedOperatingSystem' =
+            'Windows App Certification Kit is not supported on this version of Windows.'
+        'TestNoValidTests' =
+            'No valid test requested, execution stopped.'
+        'TestReportCreationFailed' =
+            'An error occurred while trying to create the report.'
+        'TestExecutionPhaseFailed' =
+            'An error occurred while trying to execute the phase.'
+        'TestExecutionStopped' =
+            'The Windows App Certification Kit was closed by the user or encountered an app error before completing the validation.'
+        'TestCommandLineInvalid' =
+            'A valid operation type must be specified.'
+    }
+    $markerOrdinal = 0
+    foreach ($entry in $minusOneMarkers.GetEnumerator()) {
+        $markerOrdinal++
+        $markerPath = Write-TestProcessOutput `
+            -Name ('minus-one-' + $entry.Key) `
+            -Text $entry.Value
+        $standardOutputPath = $markerPath
+        $standardErrorPath = $emptyOutputPath
+        if (($markerOrdinal % 2) -eq 0) {
+            $standardOutputPath = $emptyOutputPath
+            $standardErrorPath = $markerPath
+        }
+        $actualCode = Resolve-WindowsWackMinusOneFailureCode `
+            -ArtifactRoot (Get-Item -LiteralPath $script:artifactRoot -Force) `
+            -StandardOutputPath $standardOutputPath `
+            -StandardErrorPath $standardErrorPath
+        Assert-TestCondition `
+            ($actualCode -ceq $entry.Key) `
+            "Minus-one marker was classified as '$actualCode', expected '$($entry.Key)'."
+    }
+    $unknownOutputPath = Write-TestProcessOutput `
+        -Name 'minus-one-unknown' `
+        -Text 'Synthetic output with no WACK error marker.'
+    $unknownCode = Resolve-WindowsWackMinusOneFailureCode `
+        -ArtifactRoot (Get-Item -LiteralPath $script:artifactRoot -Force) `
+        -StandardOutputPath $unknownOutputPath `
+        -StandardErrorPath $emptyOutputPath
+    Assert-TestCondition `
+        ($unknownCode -ceq 'TestFailureUnclassified') `
+        'Unknown minus-one output did not fail closed.'
+    $caseChangedOutputPath = Write-TestProcessOutput `
+        -Name 'minus-one-case-changed' `
+        -Text 'an error occurred while trying to create the report.'
+    $caseChangedCode = Resolve-WindowsWackMinusOneFailureCode `
+        -ArtifactRoot (Get-Item -LiteralPath $script:artifactRoot -Force) `
+        -StandardOutputPath $caseChangedOutputPath `
+        -StandardErrorPath $emptyOutputPath
+    Assert-TestCondition `
+        ($caseChangedCode -ceq 'TestFailureUnclassified') `
+        'Case-changed minus-one output was not rejected.'
+    $embeddedMarkerOutputPath = Write-TestProcessOutput `
+        -Name 'minus-one-embedded-marker' `
+        -Text 'prefix Failed to create the final report. suffix'
+    $embeddedMarkerCode = Resolve-WindowsWackMinusOneFailureCode `
+        -ArtifactRoot (Get-Item -LiteralPath $script:artifactRoot -Force) `
+        -StandardOutputPath $embeddedMarkerOutputPath `
+        -StandardErrorPath $emptyOutputPath
+    Assert-TestCondition `
+        ($embeddedMarkerCode -ceq 'TestFailureUnclassified') `
+        'Embedded minus-one marker was not rejected.'
+    $priorityOutputPath = Write-TestProcessOutput `
+        -Name 'minus-one-priority' `
+        -Text ("An error occurred while trying to execute the phase.`r`n" +
+            'Failed to create the final report.')
+    $priorityCode = Resolve-WindowsWackMinusOneFailureCode `
+        -ArtifactRoot (Get-Item -LiteralPath $script:artifactRoot -Force) `
+        -StandardOutputPath $priorityOutputPath `
+        -StandardErrorPath $emptyOutputPath
+    Assert-TestCondition `
+        ($priorityCode -ceq 'TestReportCreationFailed') `
+        'Minus-one marker priority changed.'
+    Assert-FailsWithCode -Code 'TestOutputUnavailable' -Action {
+        Resolve-WindowsWackMinusOneFailureCode `
+            -ArtifactRoot (Get-Item -LiteralPath $script:artifactRoot -Force) `
+            -StandardOutputPath (Join-Path $script:artifactRoot 'missing.raw') `
+            -StandardErrorPath $emptyOutputPath
+    }
+    $outsideOutputPath = Join-Path $script:testRoot 'outside.raw'
+    [System.IO.File]::WriteAllText($outsideOutputPath, 'synthetic', $script:utf8NoBom)
+    Assert-FailsWithCode -Code 'TestOutputPathInvalid' -Action {
+        Resolve-WindowsWackMinusOneFailureCode `
+            -ArtifactRoot (Get-Item -LiteralPath $script:artifactRoot -Force) `
+            -StandardOutputPath $outsideOutputPath `
+            -StandardErrorPath $emptyOutputPath
+    }
+    $oversizedOutputPath = Join-Path $script:artifactRoot 'oversized.raw'
+    $oversizedStream = [System.IO.File]::Open(
+        $oversizedOutputPath,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None)
+    try {
+        $oversizedStream.SetLength(4MB + 1)
+    }
+    finally {
+        $oversizedStream.Dispose()
+    }
+    Assert-FailsWithCode -Code 'TestOutputInvalid' -Action {
+        Resolve-WindowsWackMinusOneFailureCode `
+            -ArtifactRoot (Get-Item -LiteralPath $script:artifactRoot -Force) `
+            -StandardOutputPath $oversizedOutputPath `
+            -StandardErrorPath $emptyOutputPath
     }
     Assert-WindowsWackCommandCompleted -Phase 'Reset' -ExitCode 0
     Assert-WindowsWackCommandCompleted -Phase 'Finalize' -ExitCode 0

@@ -4363,6 +4363,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(helper, "' -reportoutputpath '");
         StringAssert.Contains(helper, "'finalizereport -reportfilepath '");
         StringAssert.Contains(helper, "Resolve-WindowsWackTestExitDisposition");
+        StringAssert.Contains(helper, "Resolve-WindowsWackMinusOneFailureCode");
+        StringAssert.Contains(helper, "TestExecutionPhaseFailed");
+        StringAssert.Contains(helper, "TestReportCreationFailed");
         StringAssert.Contains(helper, "ReportFinalizationRequired");
         StringAssert.Contains(helper, "$script:windowsWackMaximumReportBytes = 16MB");
         StringAssert.Contains(helper, "$script:windowsWackMaximumProcessOutputBytes = 4MB");
