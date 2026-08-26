@@ -156,8 +156,9 @@ Response body, playlist satırı, player command line, environment ve full excep
 - Origin değişiminde Authorization/Cookie/user-info/query credential forward edilmez.
 - HTTPS→HTTP downgrade reddedilir.
 - Cookie default kapalı; kanıtlanmış provider ihtiyacında source-scoped container ve delete lifecycle gerekir.
+- Production transport OS/environment proxy'sini kullanmaz (`UseProxy=false`); connect callback her request'te bağlanan IDNA-canonical exact host + effective port authority ile gerçek socket authority'sini eşleştirmeden DNS/connect yapmaz; geçersiz IDN fail-closed reddedilir.
 - Retry yalnız safe/idempotent GET ve transient sınıflarda; exponential backoff + jitter + `Retry-After` cap. Auth, TLS, validation ve parse error retry edilmez.
-- DNS sonucu logo/image için connect öncesi address policy'ye, redirect sonrası tekrar policy'ye tabi olur.
+- DNS sonucu connect öncesi address policy'ye, redirect sonrası tekrar policy'ye tabi olur; mixed public/private cevap ile special-use adresler (en az `192.88.99.0/24`, `2001::/23`, `2002::/16`, `3fff::/20`) fail-closed reddedilir.
 
 ### 6.2 HTTP-only provider kararı
 
@@ -177,10 +178,11 @@ Logo fetch player request'inden ayrıdır:
 
 - yalnız `http/https`; `file/data/javascript/ftp/smb` reddedilir;
 - credential, Cookie, Authorization ve Referer verilmez;
-- loopback, link-local, multicast, unspecified ve private address default reddedilir;
-- kullanıcı açıkça private source origin yapılandırdıysa yalnız aynı-origin erişim yeni policy ile değerlendirilebilir;
+- logo/image isteğinde loopback, link-local, multicast, unspecified ve private address her zaman `PublicOnly` policy ile reddedilir;
+- kullanıcı onboarding ekranında private/local kaynak erişimini açıkça onayladıysa yalnız yetkilendirilmiş Remote M3U veya kalıcı Xtream source probe/import/catalog isteğinin exact HTTPS host + effective port origin'i private/local policy ile değerlendirilebilir; bu opt-in logo/image isteğine veya cross-origin redirect'e taşınmaz;
+- Bu pre-release modelde desteklenen legacy upgrade yoktur: kalıcı source kaydının varlığı, kaydın clean-install onboarding'deki aynı exact-origin private/local onay yolundan üretildiğinin kanıtıdır. Xtream production composition'a bağlanmadan önce de aynı açık consent UI/contract yolu zorunlu kılınmalı ve packaged acceptance ile doğrulanmalıdır; aksi durumda private/local opt-in verilemez.
 - DNS rebinding/redirect'te final IP tekrar kontrol edilir;
-- MIME/magic eşleşmesi, byte ≤ provisional 5 MiB, dimension/pixel/decode-time budget;
+- exact Content-Type ile bounded image header signature/dimension/pixel metadata doğrulanır ve byte sınırı uygulanır; bu kontrol tam bitstream geçerliliğini veya decode-time bütçesini kanıtlamaz, OS image decoder'ın codec karmaşıklığı/failure maliyeti residual risk olarak kalır;
 - concurrency 4 ve memory-only 32 MiB / 128-entry LRU uygulanır; görünürlükten çıkan satırın işi iptal edilir ve iptal edilmiş noncooperative sonuç cache'e alınmaz;
 - MVP'de durable image disk cache kapalıdır (`0` byte). İleride ayrıca threat/lifecycle review ile açılırsa `200 MiB` sessiz hedef değil hard üst sınırdır;
 - source silme cache namespace'ini temizler.

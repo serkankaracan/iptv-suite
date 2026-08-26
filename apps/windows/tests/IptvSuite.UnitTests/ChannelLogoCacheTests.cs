@@ -7,6 +7,15 @@ namespace IptvSuite.UnitTests;
 public sealed class ChannelLogoCacheTests
 {
     [TestMethod]
+    public void LogoImageRequiresPositivePixelDimensions()
+    {
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            new ChannelLogoImage(new byte[] { 1 }, ChannelLogoFormat.Png, 0, 1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            new ChannelLogoImage(new byte[] { 1 }, ChannelLogoFormat.Png, 1, 0));
+    }
+
+    [TestMethod]
     public async Task RepeatedChannelUsesCachedImageWithoutASecondProviderCall()
     {
         var provider = new CountingProvider();
@@ -415,7 +424,11 @@ public sealed class ChannelLogoCacheTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls++;
-            return ValueTask.FromResult<ChannelLogoImage?>(new ChannelLogoImage(new byte[] { 1, 2, 3 }, ChannelLogoFormat.Png));
+            return ValueTask.FromResult<ChannelLogoImage?>(new ChannelLogoImage(
+                new byte[] { 1, 2, 3 },
+                ChannelLogoFormat.Png,
+                1,
+                1));
         }
     }
 
@@ -443,7 +456,7 @@ public sealed class ChannelLogoCacheTests
                 await ReleaseFirst.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            return new ChannelLogoImage(new byte[] { (byte)call }, ChannelLogoFormat.Png);
+            return new ChannelLogoImage(new byte[] { (byte)call }, ChannelLogoFormat.Png, 1, 1);
         }
     }
 
@@ -471,7 +484,7 @@ public sealed class ChannelLogoCacheTests
                 await ReleaseFirst.Task.ConfigureAwait(false);
             }
 
-            return new ChannelLogoImage(new byte[] { (byte)call }, ChannelLogoFormat.Png);
+            return new ChannelLogoImage(new byte[] { (byte)call }, ChannelLogoFormat.Png, 1, 1);
         }
     }
 
@@ -535,7 +548,9 @@ public sealed class ChannelLogoCacheTests
                 cancellationToken.ThrowIfCancellationRequested();
                 return new ChannelLogoImage(
                     new byte[_payloadBytes],
-                    ChannelLogoFormat.Png);
+                    ChannelLogoFormat.Png,
+                    1,
+                    1);
             }
             finally
             {
@@ -579,7 +594,9 @@ public sealed class ChannelLogoCacheTests
             _calls[channelId] = checked(GetCalls(channelId) + 1);
             return ValueTask.FromResult<ChannelLogoImage?>(new ChannelLogoImage(
                 new byte[_payloadBytes[channelId]],
-                ChannelLogoFormat.Png));
+                ChannelLogoFormat.Png,
+                1,
+                1));
         }
     }
 
@@ -615,7 +632,7 @@ public sealed class ChannelLogoCacheTests
             try
             {
                 await Release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-                return new ChannelLogoImage(new byte[] { (byte)calls }, ChannelLogoFormat.Png);
+                return new ChannelLogoImage(new byte[] { (byte)calls }, ChannelLogoFormat.Png, 1, 1);
             }
             finally
             {
@@ -677,7 +694,9 @@ public sealed class ChannelLogoCacheTests
 
             return new ChannelLogoImage(
                 new byte[] { (byte)(call % byte.MaxValue) },
-                ChannelLogoFormat.Png);
+                ChannelLogoFormat.Png,
+                1,
+                1);
         }
     }
 }

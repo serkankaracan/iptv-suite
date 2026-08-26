@@ -102,7 +102,7 @@ public sealed class XtreamProviderClient : IXtreamProviderClient
         Func<ReadOnlyMemory<byte>, DomainResult<T>> parser,
         CancellationToken cancellationToken)
     {
-        using HttpTransportRequest request = HttpTransportRequest.Create(
+        using HttpTransportRequest request = HttpTransportRequest.CreateForExplicitPrivateSourceOrigin(
             uri,
             expectedEndpoint,
             maximumResponseBytes);
@@ -135,7 +135,7 @@ public sealed class XtreamProviderClient : IXtreamProviderClient
 
         try
         {
-            using HttpTransportRequest endpointProbe = HttpTransportRequest.Create(
+            using HttpTransportRequest endpointProbe = HttpTransportRequest.CreateForExplicitPrivateSourceOrigin(
                 baseUri,
                 expectedEndpoint,
                 1);

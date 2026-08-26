@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using IptvSuite.Application;
 using IptvSuite.Domain;
+using IptvSuite.Infrastructure;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -1406,6 +1407,12 @@ public sealed partial class MainPage : Page, IDisposable
                 row.ChannelId,
                 logoLoad.Token);
             if (_disposed || logo is null || !row.IsCurrentLogoLoad(generation)) return;
+            if (logo.PixelWidth is <= 0 or > SqliteChannelLogoProvider.MaximumLogoDimension ||
+                logo.PixelHeight is <= 0 or > SqliteChannelLogoProvider.MaximumLogoDimension ||
+                (long)logo.PixelWidth * logo.PixelHeight > SqliteChannelLogoProvider.MaximumLogoPixels)
+            {
+                return;
+            }
             using var stream = new InMemoryRandomAccessStream();
             using (var writer = new DataWriter(stream))
             {
@@ -1415,7 +1422,11 @@ public sealed partial class MainPage : Page, IDisposable
                 writer.DetachStream();
             }
             stream.Seek(0);
-            var image = new BitmapImage();
+            var image = new BitmapImage
+            {
+                DecodePixelWidth = logo.PixelWidth,
+                DecodePixelHeight = logo.PixelHeight,
+            };
             await image.SetSourceAsync(stream);
             logoLoad.Token.ThrowIfCancellationRequested();
             if (!_disposed && row.IsCurrentLogoLoad(generation)) row.LogoSource = image;

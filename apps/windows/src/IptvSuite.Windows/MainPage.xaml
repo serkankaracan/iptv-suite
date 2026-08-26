@@ -43,7 +43,7 @@
                     <TextBox x:Name="RemotePlaylistSourceNameTextBox" TabIndex="4" MaxLength="100" AutomationProperties.AutomationId="RemotePlaylistSourceNameTextBox" AutomationProperties.Name="Source name" Header="Source name" PlaceholderText="My authorized playlist" />
                     <TextBox x:Name="RemotePlaylistLocatorTextBox" Grid.Column="1" TabIndex="5" MaxLength="4096" IsSpellCheckEnabled="False" AutomationProperties.AutomationId="RemotePlaylistLocatorTextBox" AutomationProperties.Name="Secure playlist URL" Header="HTTPS playlist URL" PlaceholderText="https://" />
                 </Grid>
-                <CheckBox x:Name="RemotePlaylistAuthorizationCheckBox" TabIndex="6" AutomationProperties.AutomationId="RemotePlaylistAuthorizationCheckBox" AutomationProperties.Name="Confirm authorization to access this source" Checked="RemotePlaylistAuthorizationCheckBox_Changed" Unchecked="RemotePlaylistAuthorizationCheckBox_Changed" Content="I confirm that I am authorized to access this source." />
+                <CheckBox x:Name="RemotePlaylistAuthorizationCheckBox" TabIndex="6" AutomationProperties.AutomationId="RemotePlaylistAuthorizationCheckBox" AutomationProperties.Name="Kaynak erişim ve özel veya yerel ağ güvenini onayla" Checked="RemotePlaylistAuthorizationCheckBox_Changed" Unchecked="RemotePlaylistAuthorizationCheckBox_Changed" Content="Bu kaynağa erişim yetkim olduğunu; özel/yerel ağdaysa yalnızca bu tam sunucu ve porta güvendiğimi onaylıyorum." />
                 <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />

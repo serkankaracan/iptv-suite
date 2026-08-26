@@ -1,6 +1,6 @@
 # M15 MSIX ve Store release-readiness teknik baseline'i
 
-**Durum:** `IN PROGRESS / BLOCKED — technicalBaselinePassed=true; releaseReady=false, 2026-08-26`
+**Durum:** `HARDENING SOURCE DRIFT / HOSTED SBOM RENEWAL REQUIRED — technicalBaselinePassed=false; releaseReady=false, 2026-08-27`
 
 ## Checkpoint kararı
 
@@ -67,7 +67,7 @@ Windows PowerShell 5.1 adversarial self-test ve architecture suite `51/51` geçt
 
 ## Windows MVP release mimarisi kararı
 
-M15 release seti yalnız `x64` olarak sınırlandı. Schema v2 ile kaydedilen x64 disposition güncel release-readiness evidence schema v6'da da `releaseArchitectures=[x64]`, `arm64Disposition=DeferredUntilNativeArm64ChainAccepted`, `architectureImportSurfaceAuditVersion=1` ve `sourceControlledArchitectureImportSurfacePassed=true` değerlerini taşır; production project `Platforms=x64`, `PlatformTarget=x64`, `RuntimeIdentifier=win-x64` ve `AppxBundle=Never` invariant'larını korur. `RuntimeIdentifiers`, `AppxBundlePlatforms`, `win-arm64`, çoklu platform ve bundle açılımı fail-closed reddedilir.
+M15 release seti yalnız `x64` olarak sınırlandı. Schema v2 ile kaydedilen x64 disposition güncel release-readiness evidence schema v7'de de `releaseArchitectures=[x64]`, `arm64Disposition=DeferredUntilNativeArm64ChainAccepted`, `architectureImportSurfaceAuditVersion=1` ve `sourceControlledArchitectureImportSurfacePassed=true` değerlerini taşır; production project `Platforms=x64`, `PlatformTarget=x64`, `RuntimeIdentifier=win-x64` ve `AppxBundle=Never` invariant'larını korur. `RuntimeIdentifiers`, `AppxBundlePlatforms`, `win-arm64`, çoklu platform ve bundle açılımı fail-closed reddedilir.
 
 Kaynak-kontrollü MSBuild yüzeyi de karara bağlıdır: dört production project exact `Microsoft.NET.Sdk` kullanır; explicit `Import`/nested `Sdk`/`Target`/`UsingTask`, SDK import-hook veya artifacts-output redirect property, otomatik `*.csproj.user` ya da force-tracked project-extension wildcard import tanımlayamaz. İzin verilen iki generated project-extension adı yalnız NuGet'in `.nuget.g.props`/`.nuget.g.targets` çiftidir; başka mevcut wildcard eşleşmesi reddedilir ve tracked `obj` path denetimi case-insensitive'dir. Exact x64 property düğümleri ve taşıyan `PropertyGroup` koşulsuz/attributesız olmalıdır. Windows project ancestor zincirinde yalnız repository-root `Directory.Build.props` uygulanabilir, `Directory.Build.targets` ile otomatik CLI response dosyaları bulunamaz. Solution zincirinde yalnız root `Directory.Solution.props` uygulanabilir ve `Directory.Solution.targets` bulunamaz. Root `Directory.Build.props`, `Directory.Packages.props` ve `Directory.Solution.props` dosyaları architecture/bundle veya import-control property tanımlayamaz. Bu denetim source-controlled import yüzeyi içindir; dış command-line property, makine-geneli SDK/import veya değiştirilmiş build invocation kanıtı değildir. Release build documented locked komutla yürütülmelidir.
 
@@ -128,7 +128,7 @@ Yukarıdaki run `#1`/run `#10` ve ledger'ları pre-asset tarihsel accepted check
 
 Commit `c686424ea43be3a01b5fb364b2115cc84319b242` üzerindeki schema-v5 predecessor, aynı accepted asset/SBOM/CVE zinciriyle evaluation anında exact 12 blocker üretmiştir. O tarihsel şema yedi günlük `freshAtEvaluation` alanını taşıyor, fakat 24 saatlik final-release predicate'ini evidence içinde ayrı göstermiyordu; schema-v6 bu sözleşme boşluğunu kapatır. Schema-v5 sonucu tarihsel teknik checkpoint'tir ve geriye dönük final-release kabulü sayılmaz.
 
-Güncel schema-v6 readiness sonucu, run `#18`in 24 saatlik final-release penceresi içindeki bu evaluation anında `technicalBaselinePassed=true`, `releaseReady=false` ve exact 12 remaining blocker'dır. `AssetProvenancePending`, `SbomPending` ve `CveReviewPending` bu evaluation anında teknik olarak kapanmıştır; 24 saatlik sınır aşıldığında yalnız sonuncusu yeniden açılır. Bu teknik zincir M15 completion, perpetual freshness veya genel “CVE-free” sonucu değildir.
+Sonraki security hardening package-producing source snapshot'ını değiştirdi. Schema-v7 validator, exact ledger ile SBOM contract/workflow bağını doğrulamayı sürdürür; sağlam ledger ile current source arasındaki bu beklenen drift'i `result=stale-reopen`, `currentAtEvaluation=false`, `effectiveClosedBlocker=None` olarak yayımlar ve `SbomPending` kapısını yeniden açar. Böylece yeni clean commit hosted SBOM renewal üretebilir. Ledger eksikliği/tahrifi/duplicate property, contract/workflow drift'i, daha yakın package override ve iki geçiş arasındaki TOCTOU değişimi hard-invalid kalır. Final-release CVE freshness geçerliyken current sonuç `technicalBaselinePassed=false`, `releaseReady=false` ve exact 13 blocker'dır; freshness sona ererse `CveReviewPending` ayrıca yeniden açılır.
 
 ## Development identity WACK preflight — EXECUTED / TEST FAILED
 
@@ -160,9 +160,9 @@ Aşağıdaki 13 kod, asset byte değişiminden önceki son hosted-kabul schema-v
 12. `SupportUrlPending`
 13. `WackPending`
 
-## Güncel schema-v6 exact açık blocker seti
+## Güncel schema-v7 exact açık blocker seti
 
-Aşağıdaki 12 kod current evidence'ta açıktır ve ordinal sıralıdır:
+Aşağıdaki 13 kod, final-release CVE freshness geçerliyken current evidence'ta açıktır ve ordinal sıralıdır:
 
 1. `CodecIpLegalReviewPending`
 2. `LicenseFilePending`
@@ -173,9 +173,10 @@ Aşağıdaki 12 kod current evidence'ta açıktır ve ordinal sıralıdır:
 7. `ProductionLifecycleMatrixPending`
 8. `ReleaseSigningPending`
 9. `ReviewerServiceAndRehearsalPending`
-10. `StoreListingPending`
-11. `SupportUrlPending`
-12. `WackPending`
+10. `SbomPending`
+11. `StoreListingPending`
+12. `SupportUrlPending`
+13. `WackPending`
 
 ## Non-claims ve sonraki kabul sınırı
 

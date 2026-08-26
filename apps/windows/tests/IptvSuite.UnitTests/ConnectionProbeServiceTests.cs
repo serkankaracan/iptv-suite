@@ -51,6 +51,8 @@ public sealed class ConnectionProbeServiceTests
                 DomainErrorCode.RequestRateLimited),
             (HttpTransportFailure.RemoteServiceUnavailable, HttpTransportRetryability.BoundedTransient,
                 DomainErrorCode.RemoteServiceUnavailable),
+            (HttpTransportFailure.EndpointAddressRejected, HttpTransportRetryability.Never,
+                DomainErrorCode.RemoteRequestRejected),
         ];
 
         HttpTransportFailure[] failures = Enum.GetValues<HttpTransportFailure>();

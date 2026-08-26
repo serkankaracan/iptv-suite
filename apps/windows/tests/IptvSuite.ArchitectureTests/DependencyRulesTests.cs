@@ -2685,6 +2685,17 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             normalizedWindow,
             "cancellationProbeCount == 1 && (switchCount != 100 || soakMinutes != 0)");
+        StringAssert.Contains(window, "bool m16FinalProfile =");
+        StringAssert.Contains(window, "switchCount == 200");
+        StringAssert.Contains(window, "soakMinutes == 1440");
+        StringAssert.Contains(window, "cancellationProbeCount == 0");
+        StringAssert.Contains(window, "if (m10ProfileInvalid && !m16FinalProfile)");
+        StringAssert.Contains(window, "internal bool IsM16FinalProfile =>");
+        StringAssert.Contains(window, "CancellationProbeCount == 0;");
+        StringAssert.Contains(
+            normalizedApp,
+            "int maximumEvidenceBytes = request.IsM16FinalProfile ? 128 * 1024 : 64 * 1024;");
+        StringAssert.Contains(app, "bytes.Length > maximumEvidenceBytes");
         StringAssert.Contains(window, "RealTimePlayback = true,");
         Assert.AreEqual(
             1,
@@ -3481,6 +3492,13 @@ public sealed class DependencyRulesTests
             "tests",
             "IptvSuite.Testing",
             "NativePlaybackEvidenceValidator.cs"));
+        string testToolProgram = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.Testing",
+            "Program.cs"));
 
         StringAssert.Contains(controller, "NativePlaybackCompatibilitySpike.Local.a47d1387");
         StringAssert.Contains(controller, "PackageCertificateThumbprint");
@@ -3558,7 +3576,48 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "{32D186A7-218F-4C75-8876-DD77273A8999}");
         StringAssert.Contains(controller, "StartupP95Milliseconds -gt 3000");
         StringAssert.Contains(controller, "StartupMaximumMilliseconds -gt 5000");
-        StringAssert.Contains(controller, "[ValidateRange(0, 480)]");
+        StringAssert.Contains(controller, "[ValidateRange(2, 200)]");
+        StringAssert.Contains(controller, "[ValidateRange(0, 1440)]");
+        StringAssert.Contains(controller, "[ValidateSet(\"M10\", \"M16Final\")]");
+        StringAssert.Contains(controller, "$AcceptanceProfile = \"M10\"");
+        StringAssert.Contains(controller, "$SwitchCount -ne 200");
+        StringAssert.Contains(controller, "$SoakMinutes -ne 1440");
+        StringAssert.Contains(controller, "$NetworkInterruptionCount -ne 7");
+        StringAssert.Contains(controller, "$CancellationProbeCount -ne 0");
+        StringAssert.Contains(controller, "$SwitchCount -gt 100 -or $SoakMinutes -gt 480");
+        int profileValidationIndex = controller.IndexOf(
+            "if ($isM16FinalAcceptance) {",
+            StringComparison.Ordinal);
+        int embeddedControllerIndex = controller.IndexOf(
+            "$activationInterop = @'",
+            StringComparison.Ordinal);
+        int firstWorkspaceMutationIndex = controller.IndexOf(
+            "New-RegularDirectory -Path (Join-Path $repositoryRoot \".artifacts\")",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            profileValidationIndex >= 0 &&
+            profileValidationIndex < embeddedControllerIndex &&
+            embeddedControllerIndex < firstWorkspaceMutationIndex,
+            "Profile validation must fail before repository or artifact mutation.");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                controller,
+                Regex.Escape("The M10 native playback profile is outside its fixed switch or soak boundary."),
+                RegexOptions.CultureInvariant),
+            "M10 cross-parameter validation must have one source of truth.");
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                controller,
+                Regex.Escape("The M16 final native acceptance profile requires exactly 200 switches, 1440 soak minutes, seven interruptions, and no inline cancellation probe."),
+                RegexOptions.CultureInvariant),
+            "M16 cross-parameter validation must have one source of truth.");
+        Assert.IsFalse(
+            controller.Contains(
+                "Set-FailurePoint -Stage \"InputValidation\"",
+                StringComparison.Ordinal),
+            "Fail-fast profile validation must not be duplicated inside the evidence transaction.");
         StringAssert.Contains(controller, "$SwitchCount -ne 100");
         StringAssert.Contains(controller, "MemoryNetGrowthBytes -gt 104857600");
         StringAssert.Contains(controller, "MemoryNetGrowthPercent -gt 10");
@@ -3587,6 +3646,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "[int]$probe.PlaybackRetryCount -le $NetworkInterruptionCount");
         StringAssert.Contains(controller, "PlaybackRetryCount = [int]$probe.PlaybackRetryCount");
         StringAssert.Contains(controller, "SchemaVersion = 10");
+        StringAssert.Contains(controller, "$successCandidate[\"SchemaVersion\"] = 11");
+        StringAssert.Contains(controller, "$successCandidate[\"Stage\"] = \"M16NativeTierAFinalAcceptance\"");
         StringAssert.Contains(controller, "[int]$probeEnvelope.SchemaVersion -ne 8");
         StringAssert.Contains(controller, "$probeEnvelopeSchemaVersion = 8");
         Match controllerEnvelopeVersion = Regex.Match(
@@ -3632,12 +3693,31 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(controller, "traceRecordsOmittedAfterCapacity=");
         StringAssert.Contains(controller, "firstHlsLastFlushToSourceOpen");
         StringAssert.Contains(controller, "firstHlsLastFlushToMediaOpened");
-        StringAssert.Contains(probeMainWindow, "private const int ResourceSampleCapacity = 128;");
+        StringAssert.Contains(probeMainWindow, "private const int M10ResourceSampleCapacity = 128;");
+        StringAssert.Contains(probeMainWindow, "private const int M16FinalResourceSampleCapacity = 290;");
+        StringAssert.Contains(probeMainWindow, "int resourceSampleCapacity = request.IsM16FinalProfile");
+        StringAssert.Contains(probeMainWindow, "samples.Count >= resourceSampleCapacity");
         StringAssert.Contains(probeMainWindow, "NativePlaybackResourcePhase.ProbeStart");
         StringAssert.Contains(probeMainWindow, "NativePlaybackResourcePhase.SwitchesCompleted");
         StringAssert.Contains(probeMainWindow, "NativePlaybackResourcePhase.Soak");
         StringAssert.Contains(probeMainWindow, "public IReadOnlyList<NativePlaybackResourceSample> ResourceSamples");
-        StringAssert.Contains(controller, "$resourceSampleTrace.Count -gt 128");
+        StringAssert.Contains(controller, "$maximumProbeEvidenceBytes = if ($isM16FinalAcceptance) { 131072 } else { 65536 }");
+        StringAssert.Contains(controller, "$maximumResourceSampleCount = if ($isM16FinalAcceptance) { 290 } else { 128 }");
+        StringAssert.Contains(controller, "$resourceSampleTrace.Count -gt $maximumResourceSampleCount");
+        StringAssert.Contains(evidenceValidator, "private const string ExpectedM16Stage = \"M16NativeTierAFinalAcceptance\";");
+        StringAssert.Contains(evidenceValidator, "m16FinalAcceptance ? 200 : 100");
+        StringAssert.Contains(evidenceValidator, "RequireEqual(soakMinutes, 1440, \"SoakMinutes\")");
+        StringAssert.Contains(evidenceValidator, "private const int M16MinimumResourceSampleCount = (1440 / 5) - 2;");
+        StringAssert.Contains(evidenceValidator, "private const int M16MaximumResourceSampleCount = 290;");
+        StringAssert.Contains(evidenceValidator, "resourceSampleCount is < M16MinimumResourceSampleCount or");
+        StringAssert.Contains(evidenceValidator, "memoryNetGrowthBytes > 100L * 1024 * 1024");
+        StringAssert.Contains(evidenceValidator, "memoryNetGrowthPercent > 10d");
+        StringAssert.Contains(evidenceValidator, "if (memoryMonotonicIncrease)");
+        StringAssert.Contains(evidenceValidator, "m16FinalAcceptance ? 7 : 1");
+        StringAssert.Contains(testToolProgram, "validate-m16-native-playback-evidence");
+        StringAssert.Contains(testToolProgram, "M16NativePlaybackEvidenceValidator.Validate(");
+        StringAssert.Contains(evidenceValidator, "does not infer");
+        StringAssert.Contains(evidenceValidator, "OS-level audio-session quiescence");
         StringAssert.Contains(controller, "$tlsServer.GetNetworkRecoveryTraceSnapshot()");
         StringAssert.Contains(controller, "private const int NetworkRecoveryTraceCapacity = 7;");
         StringAssert.Contains(controller, "Native playback network recovery trace:");
@@ -4345,11 +4425,18 @@ public sealed class DependencyRulesTests
             RepositoryRoot,
             "eng",
             "windows-m16-final-artifact-acceptance.json");
+        string syntheticJourneyAcceptancePath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "windows-m16-synthetic-journey-acceptance.json");
         Assert.IsTrue(File.Exists(validatorPath), "The M16 release-candidate validator is missing.");
         Assert.IsTrue(File.Exists(baselinePath), "The M16 release-candidate baseline is missing.");
         Assert.IsTrue(
             File.Exists(finalArtifactAcceptancePath),
             "The M16 final-artifact acceptance ledger is missing.");
+        Assert.IsTrue(
+            File.Exists(syntheticJourneyAcceptancePath),
+            "The M16 synthetic-journey acceptance ledger is missing.");
 
         string validator = File.ReadAllText(validatorPath).Replace("\r\n", "\n", StringComparison.Ordinal);
         StringAssert.Contains(validator, "[switch]$AllowBlockedCandidate");
@@ -4362,10 +4449,20 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             validator,
             "$script:finalArtifactProducerContractSourceCount = 39");
+        StringAssert.Contains(
+            validator,
+            "$script:syntheticJourneyAcceptanceSha256 =");
+        StringAssert.Contains(
+            validator,
+            "$script:syntheticJourneyProducerContractSourceCount = 130");
         StringAssert.Contains(validator, "$kind = \"text-lf\"");
         StringAssert.Contains(validator, "$kind = \"binary\"");
         StringAssert.Contains(validator, "\"$relativePath`0$kind`0");
         StringAssert.Contains(validator, "finalArtifactCanaryAcceptance = [ordered]@{");
+        StringAssert.Contains(validator, "syntheticEndToEndJourneyAcceptance = [ordered]@{");
+        StringAssert.Contains(validator, "\"stale-reopen\"");
+        StringAssert.Contains(validator, "if (-not $finalArtifactAcceptanceCurrent)");
+        StringAssert.Contains(validator, "if (-not $syntheticJourneyAcceptanceCurrent)");
         StringAssert.Contains(validator, "schemaVersion = 1");
         StringAssert.Contains(validator, "evidenceKind = \"WindowsMvpReleaseCandidateGate\"");
         StringAssert.Contains(validator, "result = \"blocked\"");
@@ -4415,6 +4512,32 @@ public sealed class DependencyRulesTests
         CollectionAssert.DoesNotContain(
             remainingM16Blockers,
             "M16FinalArtifactCanaryScanPending");
+
+        using JsonDocument journeyAcceptance = JsonDocument.Parse(
+            File.ReadAllText(syntheticJourneyAcceptancePath));
+        JsonElement journeyRoot = journeyAcceptance.RootElement;
+        Assert.AreEqual(1, journeyRoot.GetProperty("schemaVersion").GetInt32());
+        Assert.AreEqual(
+            "M16SyntheticEndToEndJourneyPending",
+            journeyRoot.GetProperty("closedBlocker").GetString());
+        Assert.AreEqual(
+            130,
+            journeyRoot.GetProperty("producerContractSourceCount").GetInt32());
+        Assert.AreEqual(
+            2,
+            journeyRoot.GetProperty("qualityEvidence").GetProperty("cleanRunCount").GetInt32());
+        Assert.AreEqual(
+            "AuthorizedRemotePlaylistCompletesExactSyntheticReleaseCandidateJourney|Passed",
+            journeyRoot.GetProperty("qualityEvidence").GetProperty("journeyTestResult").GetString());
+        string[] journeyRemainingBlockers = journeyRoot
+            .GetProperty("remainingM16Blockers")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        Assert.AreEqual(5, journeyRemainingBlockers.Length);
+        CollectionAssert.DoesNotContain(
+            journeyRemainingBlockers,
+            "M16SyntheticEndToEndJourneyPending");
     }
 
     [TestMethod]
@@ -8415,7 +8538,10 @@ public sealed class DependencyRulesTests
         XElement authorization = RequiredNamedElement("RemotePlaylistAuthorizationCheckBox");
         StringAssert.Contains(
             authorization.Attribute("Content")?.Value ?? string.Empty,
-            "authorized");
+            "erişim yetkim");
+        StringAssert.Contains(
+            authorization.Attribute("Content")?.Value ?? string.Empty,
+            "özel/yerel ağdaysa yalnızca bu tam sunucu ve porta");
         Assert.AreEqual(
             "RemotePlaylistAuthorizationCheckBox_Changed",
             authorization.Attribute("Checked")?.Value);

@@ -9,6 +9,7 @@ internal static class HttpTransportDomainErrorMapper
         HttpTransportFailure.InvalidRequest or
         HttpTransportFailure.RedirectRejected or
         HttpTransportFailure.RedirectLimitExceeded or
+        HttpTransportFailure.EndpointAddressRejected or
         HttpTransportFailure.RequestRejected => DomainErrorCode.RemoteRequestRejected,
         HttpTransportFailure.ResponseTooLarge => DomainErrorCode.RemoteResponseTooLarge,
         HttpTransportFailure.RequestTimedOut => DomainErrorCode.RequestTimedOut,

@@ -33,6 +33,7 @@ public sealed class XtreamProviderClientTests
         Assert.IsTrue(transport.AllRequestsUsedHttps);
         Assert.IsTrue(transport.AllRequestsUsedPlayerApi);
         Assert.IsTrue(transport.AllRequestsContainedEncodedSyntheticCredentials);
+        Assert.IsTrue(transport.AllRequestsUsedExplicitPrivateSourcePolicy);
         Assert.AreEqual("[XTREAM-LIVE-CATALOG]", result.Value.ToString());
     }
 
@@ -174,6 +175,8 @@ public sealed class XtreamProviderClientTests
     {
         private static readonly PropertyInfo RequestUriProperty = typeof(HttpTransportRequest)
             .GetProperty("RequestUri", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        private static readonly PropertyInfo EndpointAddressPolicyProperty = typeof(HttpTransportRequest)
+            .GetProperty("EndpointAddressPolicy", BindingFlags.Instance | BindingFlags.NonPublic)!;
         private readonly Queue<HttpTransportResult> _responses;
 
         internal ScriptedTransport(params string[] bodies)
@@ -196,12 +199,18 @@ public sealed class XtreamProviderClientTests
 
         internal bool AllRequestsContainedEncodedSyntheticCredentials { get; private set; } = true;
 
+        internal bool AllRequestsUsedExplicitPrivateSourcePolicy { get; private set; } = true;
+
         public ValueTask<HttpTransportResult> GetAsync(
             HttpTransportRequest request,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Uri uri = (Uri)RequestUriProperty.GetValue(request)!;
+            AllRequestsUsedExplicitPrivateSourcePolicy &= string.Equals(
+                EndpointAddressPolicyProperty.GetValue(request)?.ToString(),
+                "ExplicitPrivateSourceOrigin",
+                StringComparison.Ordinal);
             AllRequestsUsedHttps &= uri.Scheme == Uri.UriSchemeHttps;
             AllRequestsUsedPlayerApi &= uri.AbsolutePath == "/provider/player_api.php";
             Dictionary<string, string> query = ParseQuery(uri.Query);

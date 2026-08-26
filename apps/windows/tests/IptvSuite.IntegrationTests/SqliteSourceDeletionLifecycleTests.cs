@@ -681,6 +681,7 @@ public sealed class SqliteSourceDeletionLifecycleTests
     }
 
     [TestMethod]
+    [DoNotParallelize]
     [Timeout(30_000)]
     public async Task PendingDiscoveryReturnsOnlyActionableJournalStatesInStableOrder()
     {
@@ -741,6 +742,7 @@ public sealed class SqliteSourceDeletionLifecycleTests
     }
 
     [TestMethod]
+    [DoNotParallelize]
     [Timeout(30_000)]
     public async Task PendingDiscoveryUsesBoundedSourceIdKeysetPagination()
     {

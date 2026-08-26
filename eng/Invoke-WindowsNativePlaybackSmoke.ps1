@@ -7,21 +7,51 @@ param(
 
     [string]$DotNetPath = "dotnet",
 
-    [ValidateRange(2, 100)]
+    [ValidateRange(2, 200)]
     [int]$SwitchCount = 25,
 
-    [ValidateRange(0, 480)]
+    [ValidateRange(0, 1440)]
     [int]$SoakMinutes = 0,
 
     [ValidateRange(0, 7)]
     [int]$NetworkInterruptionCount = 0,
 
     [ValidateRange(0, 1)]
-    [int]$CancellationProbeCount = 0
+    [int]$CancellationProbeCount = 0,
+
+    [ValidateSet("M10", "M16Final")]
+    [string]$AcceptanceProfile = "M10"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$isM16FinalAcceptance = $AcceptanceProfile -ceq "M16Final"
+$maximumProbeEvidenceBytes = if ($isM16FinalAcceptance) { 131072 } else { 65536 }
+$maximumResourceSampleCount = if ($isM16FinalAcceptance) { 290 } else { 128 }
+
+if ($isM16FinalAcceptance) {
+    if ($SwitchCount -ne 200 -or
+        $SoakMinutes -ne 1440 -or
+        $NetworkInterruptionCount -ne 7 -or
+        $CancellationProbeCount -ne 0) {
+        throw "The M16 final native acceptance profile requires exactly 200 switches, 1440 soak minutes, seven interruptions, and no inline cancellation probe."
+    }
+}
+else {
+    if ($SwitchCount -gt 100 -or $SoakMinutes -gt 480) {
+        throw "The M10 native playback profile is outside its fixed switch or soak boundary."
+    }
+    if ($SoakMinutes -gt 0 -and $SwitchCount -ne 100) {
+        throw "A native playback soak requires exactly 100 alternating switches."
+    }
+    if ($NetworkInterruptionCount -gt 0 -and $SwitchCount -ne 100) {
+        throw "A native playback network interruption probe requires exactly 100 alternating switches."
+    }
+    if ($CancellationProbeCount -gt 0 -and
+        ($SwitchCount -ne 100 -or $SoakMinutes -ne 0)) {
+        throw "A native playback cancellation probe requires exactly 100 alternating switches and no soak."
+    }
+}
 
 $activationInterop = @'
 using System;
@@ -1977,18 +2007,6 @@ try {
         }
     }
 
-    Set-FailurePoint -Stage "InputValidation" -Code "InvalidProbeParameters"
-    if ($SoakMinutes -gt 0 -and $SwitchCount -ne 100) {
-        throw "A native playback soak requires exactly 100 alternating switches."
-    }
-    if ($NetworkInterruptionCount -gt 0 -and $SwitchCount -ne 100) {
-        throw "A native playback network interruption probe requires exactly 100 alternating switches."
-    }
-    if ($CancellationProbeCount -gt 0 -and
-        ($SwitchCount -ne 100 -or $SoakMinutes -ne 0)) {
-        throw "A native playback cancellation probe requires exactly 100 alternating switches and no soak."
-    }
-
     Set-FailurePoint -Stage "ControllerCompilation" -Code "EmbeddedControllerCompilationFailed"
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
     Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
@@ -2236,7 +2254,7 @@ try {
             [System.StringComparison]::Ordinal) -or
         ($packageEvidenceEntries[0].Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
         $packageEvidenceEntries[0].Length -le 0 -or
-        $packageEvidenceEntries[0].Length -gt 65536) {
+        $packageEvidenceEntries[0].Length -gt $maximumProbeEvidenceBytes) {
         throw "The native playback probe evidence file set is outside policy."
     }
 
@@ -2463,7 +2481,7 @@ try {
         throw "The active first-HLS QPC diagnostic is inconsistent."
     }
     $resourceSampleTrace = @($probe.ResourceSamples)
-    if ($resourceSampleTrace.Count -gt 128) {
+    if ($resourceSampleTrace.Count -gt $maximumResourceSampleCount) {
         throw "The native playback resource sample trace exceeded its fixed capacity."
     }
     $previousResourceSampleTimestamp = 0L
@@ -3465,6 +3483,10 @@ try {
         PackageOutputRemoved = $false
         EnvironmentRestored = $false
         RepositoryCleanAfterRun = $false
+    }
+    if ($isM16FinalAcceptance) {
+        $successCandidate["SchemaVersion"] = 11
+        $successCandidate["Stage"] = "M16NativeTierAFinalAcceptance"
     }
 }
 catch {

@@ -153,7 +153,7 @@ public sealed class RemotePlaylistSourceOnboardingService
 
         try
         {
-            using HttpTransportRequest request = HttpTransportRequest.Create(
+            using HttpTransportRequest request = HttpTransportRequest.CreateForExplicitPrivateSourceOrigin(
                 requestUri,
                 prepared.Value!.SafeEndpoint,
                 HttpTransportLimits.MaximumAllowedResponseBytes);

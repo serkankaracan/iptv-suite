@@ -10,8 +10,8 @@ namespace IptvSuite.Infrastructure;
 public sealed class SqliteChannelLogoProvider : IChannelLogoProvider
 {
     public const int MaximumLogoBytes = 512 * 1024;
-    private static readonly byte[] PngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-    private static readonly byte[] JpegSignature = [0xff, 0xd8, 0xff];
+    public const int MaximumLogoDimension = 4096;
+    public const long MaximumLogoPixels = 4L * 1024 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly string _databasePath;
     private readonly SqliteCatalogDatabase _database;
@@ -48,8 +48,15 @@ public sealed class SqliteChannelLogoProvider : IChannelLogoProvider
         if (!response.IsSuccess) return null;
         using HttpResponseLease responseLease = response.Response!;
         return responseLease.Content.Length is > 0 and <= MaximumLogoBytes &&
-               TryIdentify(responseLease.Content.Span, out ChannelLogoFormat format)
-            ? new ChannelLogoImage(responseLease.Content.ToArray(), format)
+               ChannelLogoMetadataValidator.TryValidate(
+                   responseLease.Content,
+                   responseLease.MediaType,
+                   MaximumLogoDimension,
+                   MaximumLogoPixels,
+                   out ChannelLogoFormat format,
+                   out int width,
+                   out int height)
+            ? new ChannelLogoImage(responseLease.Content.ToArray(), format, width, height)
             : null;
     }
 
@@ -74,15 +81,6 @@ public sealed class SqliteChannelLogoProvider : IChannelLogoProvider
         string value = reader.GetString(0);
         DomainResult<ProtectedLocatorReference> parsed = ProtectedLocatorReference.Parse(value);
         return parsed.IsSuccess ? new LogoBinding(parsed.Value!, reader.GetString(1), reader.GetString(2), reader.GetInt32(3)) : null;
-    }
-
-    private static bool TryIdentify(ReadOnlySpan<byte> content, out ChannelLogoFormat format)
-    {
-        if (content.Length >= 8 && content[..8].SequenceEqual(PngSignature)) { format = ChannelLogoFormat.Png; return true; }
-        if (content.Length >= 3 && content[..3].SequenceEqual(JpegSignature)) { format = ChannelLogoFormat.Jpeg; return true; }
-        if (content.Length >= 12 && content[..4].SequenceEqual("RIFF"u8) && content.Slice(8, 4).SequenceEqual("WEBP"u8)) { format = ChannelLogoFormat.WebP; return true; }
-        format = default;
-        return false;
     }
 
     private sealed record LogoBinding(ProtectedLocatorReference Reference, string Scheme, string Host, int Port);

@@ -22,7 +22,7 @@ public sealed class SqliteCatalogSnapshotWriterTests
         await InitializeDatabaseAsync(databasePath);
         TestBatch test = await CreateBatchAsync(itemSuffix: "logo");
         await ActivateAsync(databasePath, test.Batch);
-        byte[] png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1];
+        byte[] png = CreatePngHeader(32, 24);
         var transport = new LogoTransport(png);
         var provider = new SqliteChannelLogoProvider(databasePath, transport);
 
@@ -30,6 +30,8 @@ public sealed class SqliteCatalogSnapshotWriterTests
 
         Assert.IsNotNull(image);
         Assert.AreEqual(ChannelLogoFormat.Png, image.Format);
+        Assert.AreEqual(32, image.PixelWidth);
+        Assert.AreEqual(24, image.PixelHeight);
         CollectionAssert.AreEqual(png, image.Content.ToArray());
         Assert.AreEqual(SqliteChannelLogoProvider.MaximumLogoBytes, transport.MaximumBytes);
         Assert.AreEqual("https", transport.Scheme);
@@ -44,6 +46,31 @@ public sealed class SqliteCatalogSnapshotWriterTests
         var blockedProvider = new SqliteChannelLogoProvider(databasePath, blockedTransport);
         Assert.IsNull(await blockedProvider.LoadAsync(test.Source.Id, crossOrigin.ChannelId));
         Assert.AreEqual(0, blockedTransport.Calls);
+    }
+
+    [TestMethod]
+    public void LogoMetadataValidationRequiresExactMediaTypeAndBoundedDimensions()
+    {
+        byte[] png = CreatePngHeader(2048, 2048);
+        byte[] jpeg = CreateJpegHeader(640, 360);
+        byte[] webP = CreateWebPHeader(320, 180);
+
+        AssertLogoMetadata(png, HttpResponseMediaType.Png, ChannelLogoFormat.Png, 2048, 2048);
+        AssertLogoMetadata(jpeg, HttpResponseMediaType.Jpeg, ChannelLogoFormat.Jpeg, 640, 360);
+        AssertLogoMetadata(webP, HttpResponseMediaType.WebP, ChannelLogoFormat.WebP, 320, 180);
+
+        Assert.IsFalse(ValidateLogo(png, HttpResponseMediaType.Jpeg).Accepted);
+        Assert.IsFalse(ValidateLogo(png, HttpResponseMediaType.Unspecified).Accepted);
+        Assert.IsFalse(ValidateLogo(png, HttpResponseMediaType.Other).Accepted);
+        Assert.IsFalse(ValidateLogo(CreatePngHeader(4097, 1), HttpResponseMediaType.Png).Accepted);
+        Assert.IsFalse(ValidateLogo(CreatePngHeader(3000, 2000), HttpResponseMediaType.Png).Accepted);
+        Assert.IsFalse(ValidateLogo(
+            CreatePngHeader(int.MaxValue, int.MaxValue),
+            HttpResponseMediaType.Png,
+            int.MaxValue).Accepted);
+        Assert.IsFalse(ValidateLogo(png[..24], HttpResponseMediaType.Png).Accepted);
+        Assert.IsFalse(ValidateLogo(jpeg[..8], HttpResponseMediaType.Jpeg).Accepted);
+        Assert.IsFalse(ValidateLogo(webP[..24], HttpResponseMediaType.WebP).Accepted);
     }
 
     [TestMethod]
@@ -159,6 +186,65 @@ public sealed class SqliteCatalogSnapshotWriterTests
             test.StreamReference);
         Assert.IsNull(tamperedLease);
         Assert.AreEqual("AuthenticationFailed", tamperedFailure);
+    }
+
+    [TestMethod]
+    [Timeout(90_000)]
+    public async Task LocatorAeadBindingRejectsTamperAndContextReplayWithSanitizedFailure()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("m16-r27-aead-binding");
+        foreach (AeadBindingMutation mutation in Enum.GetValues<AeadBindingMutation>())
+        {
+            string databasePath = Path.Combine(temporary.FullPath, $"catalog-{(int)mutation}.db");
+            await InitializeDatabaseAsync(databasePath);
+            TestBatch test = await CreateBatchAsync(itemSuffix: $"binding-{(int)mutation}");
+            await ActivateAsync(databasePath, test.Batch);
+
+            LocatorReadTuple readTuple = new(
+                test.Source.Id,
+                test.ChannelId,
+                ProtectedValuePurpose.ChannelStreamLocator,
+                test.StreamReference);
+            (SecretLease? baselineLease, string baselineFailure) = await ReadLocatorAsync(
+                databasePath,
+                readTuple.SourceId,
+                readTuple.ChannelId,
+                readTuple.Purpose,
+                readTuple.Reference);
+            Assert.AreEqual("None", baselineFailure, $"Baseline failed for {mutation}.");
+            Assert.IsNotNull(baselineLease, $"Baseline lease missing for {mutation}.");
+            using (baselineLease)
+            {
+                CollectionAssert.AreEqual(test.StreamPlaintext, baselineLease.Value.ToArray());
+            }
+
+            readTuple = await ApplyAeadBindingMutationAsync(
+                databasePath,
+                test,
+                mutation,
+                readTuple);
+            (SecretLease? rejectedLease, string rejectedFailure) = await ReadLocatorAsync(
+                databasePath,
+                readTuple.SourceId,
+                readTuple.ChannelId,
+                readTuple.Purpose,
+                readTuple.Reference);
+
+            Assert.IsNull(rejectedLease, $"Tampered locator returned plaintext for {mutation}.");
+            Assert.AreEqual("AuthenticationFailed", rejectedFailure, $"Unexpected failure for {mutation}.");
+            Assert.DoesNotContain(
+                Encoding.UTF8.GetString(test.StreamPlaintext),
+                rejectedFailure,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain(Id(readTuple.SourceId.Value), rejectedFailure, StringComparison.Ordinal);
+            Assert.DoesNotContain(Id(readTuple.ChannelId.Value), rejectedFailure, StringComparison.Ordinal);
+            Assert.DoesNotContain(readTuple.Reference.ToString(), rejectedFailure, StringComparison.Ordinal);
+        }
     }
 
     [TestMethod]
@@ -443,6 +529,137 @@ public sealed class SqliteCatalogSnapshotWriterTests
             logo);
     }
 
+    private static async Task<LocatorReadTuple> ApplyAeadBindingMutationAsync(
+        string databasePath,
+        TestBatch test,
+        AeadBindingMutation mutation,
+        LocatorReadTuple readTuple)
+    {
+        await using SqliteConnection connection = await OpenAsync(databasePath);
+        await ExecuteAsync(connection, "PRAGMA foreign_keys = OFF;");
+        switch (mutation)
+        {
+            case AeadBindingMutation.CiphertextTamper:
+                await FlipLocatorBlobAsync(connection, "ciphertext");
+                break;
+            case AeadBindingMutation.AuthenticationTagTamper:
+                await FlipLocatorBlobAsync(connection, "authentication_tag");
+                break;
+            case AeadBindingMutation.NonceTamper:
+                await FlipLocatorBlobAsync(connection, "nonce");
+                break;
+            case AeadBindingMutation.SourceContextReplay:
+                SourceId replaySource = SourceId.Generate();
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE sources SET source_id = $newSource WHERE source_id = $source;",
+                    ("$newSource", Id(replaySource.Value)),
+                    ("$source", Id(test.Source.Id.Value)));
+                readTuple = readTuple with { SourceId = replaySource };
+                break;
+            case AeadBindingMutation.SnapshotContextReplay:
+                SnapshotId replaySnapshot = SnapshotId.Generate();
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE sources SET active_snapshot_id = $newSnapshot WHERE source_id = $source;",
+                    ("$newSnapshot", Id(replaySnapshot.Value)),
+                    ("$source", Id(test.Source.Id.Value)));
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE snapshot_keys SET snapshot_id = $newSnapshot WHERE snapshot_id = $snapshot;",
+                    ("$newSnapshot", Id(replaySnapshot.Value)),
+                    ("$snapshot", Id(test.Snapshot.Id.Value)));
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE protected_locators SET snapshot_id = $newSnapshot WHERE purpose = $purpose;",
+                    ("$newSnapshot", Id(replaySnapshot.Value)),
+                    ("$purpose", (int)ProtectedValuePurpose.ChannelStreamLocator));
+                break;
+            case AeadBindingMutation.GenerationContextReplay:
+                Guid replayGeneration = Guid.NewGuid();
+                string currentGeneration = await ScalarStringAsync(
+                    connection,
+                    "SELECT key_generation_id FROM snapshot_keys WHERE snapshot_id = $snapshot;",
+                    ("$snapshot", Id(test.Snapshot.Id.Value)));
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE snapshot_keys SET key_generation_id = $newGeneration WHERE key_generation_id = $generation;",
+                    ("$newGeneration", Id(replayGeneration)),
+                    ("$generation", currentGeneration));
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE protected_locators SET key_generation_id = $newGeneration WHERE purpose = $purpose;",
+                    ("$newGeneration", Id(replayGeneration)),
+                    ("$purpose", (int)ProtectedValuePurpose.ChannelStreamLocator));
+                break;
+            case AeadBindingMutation.ChannelContextReplay:
+                ChannelId replayChannel = ChannelId.Generate();
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE protected_locators SET owner_id = $newOwner WHERE purpose = $purpose;",
+                    ("$newOwner", Id(replayChannel.Value)),
+                    ("$purpose", (int)ProtectedValuePurpose.ChannelStreamLocator));
+                readTuple = readTuple with { ChannelId = replayChannel };
+                break;
+            case AeadBindingMutation.PurposeContextReplay:
+                await ExecuteAsync(
+                    connection,
+                    "DELETE FROM protected_locators WHERE purpose = $purpose;",
+                    ("$purpose", (int)ProtectedValuePurpose.ChannelLogoLocator));
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE protected_locators SET purpose = $newPurpose WHERE purpose = $purpose;",
+                    ("$newPurpose", (int)ProtectedValuePurpose.ChannelLogoLocator),
+                    ("$purpose", (int)ProtectedValuePurpose.ChannelStreamLocator));
+                readTuple = readTuple with { Purpose = ProtectedValuePurpose.ChannelLogoLocator };
+                break;
+            case AeadBindingMutation.ReferenceContextReplay:
+                string replayReferenceText = $"locator-ref-v1:{Guid.NewGuid():N}";
+                DomainResult<ProtectedLocatorReference> parsed =
+                    ProtectedLocatorReference.Parse(replayReferenceText);
+                Assert.IsTrue(parsed.IsSuccess);
+                await ExecuteAsync(
+                    connection,
+                    "UPDATE protected_locators SET locator_reference = $newReference WHERE purpose = $purpose;",
+                    ("$newReference", replayReferenceText),
+                    ("$purpose", (int)ProtectedValuePurpose.ChannelStreamLocator));
+                readTuple = readTuple with { Reference = parsed.Value! };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown AEAD binding mutation.");
+        }
+
+        return readTuple;
+    }
+
+    private static async Task FlipLocatorBlobAsync(SqliteConnection connection, string columnName)
+    {
+        string validatedColumn = columnName switch
+        {
+            "ciphertext" => "ciphertext",
+            "authentication_tag" => "authentication_tag",
+            "nonce" => "nonce",
+            _ => throw new ArgumentOutOfRangeException(nameof(columnName)),
+        };
+        byte[] value = (byte[])(await ScalarAsync(
+            connection,
+            $"SELECT {validatedColumn} FROM protected_locators WHERE purpose = $purpose;",
+            ("$purpose", (int)ProtectedValuePurpose.ChannelStreamLocator)))!;
+        try
+        {
+            value[0] ^= 0x80;
+            await ExecuteAsync(
+                connection,
+                $"UPDATE protected_locators SET {validatedColumn} = $value WHERE purpose = $purpose;",
+                ("$value", value),
+                ("$purpose", (int)ProtectedValuePurpose.ChannelStreamLocator));
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(value);
+        }
+    }
+
     private static async Task<ContentSource> CreateSourceAsync(M4InMemorySecretStore store)
     {
         DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(store)
@@ -691,6 +908,93 @@ public sealed class SqliteCatalogSnapshotWriterTests
             null)!;
     }
 
+    private static void AssertLogoMetadata(
+        byte[] content,
+        HttpResponseMediaType mediaType,
+        ChannelLogoFormat expectedFormat,
+        int expectedWidth,
+        int expectedHeight)
+    {
+        (bool accepted, ChannelLogoFormat format, int width, int height) =
+            ValidateLogo(content, mediaType);
+        Assert.IsTrue(accepted);
+        Assert.AreEqual(expectedFormat, format);
+        Assert.AreEqual(expectedWidth, width);
+        Assert.AreEqual(expectedHeight, height);
+    }
+
+    private static (bool Accepted, ChannelLogoFormat Format, int Width, int Height) ValidateLogo(
+        byte[] content,
+        HttpResponseMediaType mediaType,
+        int maximumDimension = SqliteChannelLogoProvider.MaximumLogoDimension)
+    {
+        Type validator = typeof(IptvSuite.Infrastructure.AssemblyMarker).Assembly.GetType(
+            "IptvSuite.Infrastructure.ChannelLogoMetadataValidator",
+            throwOnError: true)!;
+        MethodInfo method = validator.GetMethod(
+            "TryValidate",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        object?[] arguments =
+        [
+            new ReadOnlyMemory<byte>(content),
+            mediaType,
+            maximumDimension,
+            SqliteChannelLogoProvider.MaximumLogoPixels,
+            ChannelLogoFormat.Png,
+            0,
+            0,
+        ];
+        bool accepted = (bool)method.Invoke(null, arguments)!;
+        return (accepted, (ChannelLogoFormat)arguments[4]!, (int)arguments[5]!, (int)arguments[6]!);
+    }
+
+    private static byte[] CreatePngHeader(int width, int height)
+    {
+        byte[] value = new byte[33];
+        byte[] signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+        signature.CopyTo(value, 0);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(value.AsSpan(8, 4), 13);
+        "IHDR"u8.CopyTo(value.AsSpan(12, 4));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(value.AsSpan(16, 4), (uint)width);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(value.AsSpan(20, 4), (uint)height);
+        value[24] = 8;
+        value[25] = 6;
+        return value;
+    }
+
+    private static byte[] CreateJpegHeader(int width, int height) =>
+    [
+        0xff, 0xd8,
+        0xff, 0xc0, 0x00, 0x11, 0x08,
+        (byte)(height >> 8), (byte)height,
+        (byte)(width >> 8), (byte)width,
+        0x03,
+        0x01, 0x11, 0x00,
+        0x02, 0x11, 0x00,
+        0x03, 0x11, 0x00,
+        0xff, 0xd9,
+    ];
+
+    private static byte[] CreateWebPHeader(int width, int height)
+    {
+        byte[] value = new byte[30];
+        "RIFF"u8.CopyTo(value.AsSpan(0, 4));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(value.AsSpan(4, 4), 22);
+        "WEBP"u8.CopyTo(value.AsSpan(8, 4));
+        "VP8X"u8.CopyTo(value.AsSpan(12, 4));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(value.AsSpan(16, 4), 10);
+        WriteUInt24LittleEndian(value.AsSpan(24, 3), width - 1);
+        WriteUInt24LittleEndian(value.AsSpan(27, 3), height - 1);
+        return value;
+    }
+
+    private static void WriteUInt24LittleEndian(Span<byte> target, int value)
+    {
+        target[0] = (byte)value;
+        target[1] = (byte)(value >> 8);
+        target[2] = (byte)(value >> 16);
+    }
+
     private sealed record TestBatch(
         object Batch,
         ContentSource Source,
@@ -702,7 +1006,28 @@ public sealed class SqliteCatalogSnapshotWriterTests
         byte[] StreamPlaintext,
         byte[] LogoPlaintext);
 
-    private sealed class LogoTransport(byte[] content) : IHttpTransport
+    private sealed record LocatorReadTuple(
+        SourceId SourceId,
+        ChannelId ChannelId,
+        ProtectedValuePurpose Purpose,
+        ProtectedLocatorReference Reference);
+
+    private enum AeadBindingMutation
+    {
+        CiphertextTamper,
+        AuthenticationTagTamper,
+        NonceTamper,
+        SourceContextReplay,
+        SnapshotContextReplay,
+        GenerationContextReplay,
+        ChannelContextReplay,
+        PurposeContextReplay,
+        ReferenceContextReplay,
+    }
+
+    private sealed class LogoTransport(
+        byte[] content,
+        HttpResponseMediaType mediaType = HttpResponseMediaType.Png) : IHttpTransport
     {
         internal int MaximumBytes { get; private set; }
         internal string? Scheme { get; private set; }
@@ -714,7 +1039,9 @@ public sealed class SqliteCatalogSnapshotWriterTests
             Calls++;
             MaximumBytes = request.MaximumResponseBytes;
             Scheme = "https";
-            return ValueTask.FromResult(HttpTransportResult.Success(200, HttpResponseLease.CopyFrom(content)));
+            return ValueTask.FromResult(HttpTransportResult.Success(
+                200,
+                HttpResponseLease.CopyFrom(content, mediaType)));
         }
     }
 }

@@ -20,6 +20,25 @@ $script:m16FinalArtifactAcceptanceRelativePath =
     "eng/windows-m16-final-artifact-acceptance.json"
 $script:m16FinalArtifactAcceptanceSha256 =
     "48c8fe9d886d2fc66991304f6a169a911c73433e2c9e5edf52c506a59e2fbac1"
+$script:m16SyntheticJourneyAcceptanceRelativePath =
+    "eng/windows-m16-synthetic-journey-acceptance.json"
+$script:m16SyntheticJourneyAcceptanceSha256 =
+    "d9089be0cdfd3e50b7f7bbd1b284af8be3a53a4ac90781255f60bacc1192c7c9"
+$script:m16SyntheticJourneyProducerStaticPaths = @(
+    ".github/workflows/windows-quality.yml",
+    "eng/Invoke-WindowsQualityGate.ps1",
+    "global.json",
+    "NuGet.config",
+    "Directory.Build.props",
+    "Directory.Packages.props",
+    "Directory.Solution.props",
+    "apps/windows/IptvSuite.Windows.sln")
+$script:m16SyntheticJourneyProducerSourceRoots = @(
+    "apps/windows/src/IptvSuite.Domain",
+    "apps/windows/src/IptvSuite.Application",
+    "apps/windows/src/IptvSuite.Infrastructure",
+    "apps/windows/tests/IptvSuite.Testing",
+    "apps/windows/tests/IptvSuite.IntegrationTests")
 $script:m16ProducerContractPaths = @(
     ".github/workflows/windows-quality.yml",
     ".config/dotnet-tools.json",
@@ -70,11 +89,13 @@ $script:m15Blockers = @(
     "ProductionLifecycleMatrixPending",
     "ReleaseSigningPending",
     "ReviewerServiceAndRehearsalPending",
+    "SbomPending",
     "StoreListingPending",
     "SupportUrlPending",
     "WackPending")
 $script:m16Blockers = @(
     "M16FeatureFreezeDecisionPending",
+    "M16FinalArtifactCanaryScanPending",
     "M16FinalSecurityArchitectureScanPending",
     "M16PhysicalDeviceAccessibilityMatrixPending",
     "M16ReleaseOperationsPlanPending",
@@ -244,6 +265,10 @@ $commit = (& git -C $RepositoryRoot rev-parse --verify HEAD 2>$null | Out-String
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') {
     throw "M15TechnicalInvariant:RepositoryBindingInvalid"
 }
+$sbomCurrentAtEvaluation =
+    $env:M16_SELF_TEST_M15_MODE -ceq "CurrentSbom"
+$cveFinalReleaseFreshAtEvaluation =
+    $env:M16_SELF_TEST_M15_MODE -cne "ExpiredCve"
 $blockers = @(
     "CodecIpLegalReviewPending",
     "LicenseFilePending",
@@ -257,6 +282,13 @@ $blockers = @(
     "StoreListingPending",
     "SupportUrlPending",
     "WackPending")
+if (-not $sbomCurrentAtEvaluation) {
+    $blockers += "SbomPending"
+}
+if (-not $cveFinalReleaseFreshAtEvaluation) {
+    $blockers += "CveReviewPending"
+}
+[System.Array]::Sort($blockers, [System.StringComparer]::Ordinal)
 if ($env:M16_SELF_TEST_M15_MODE -ceq "ExtraBlocker") {
     $blockers += "UnexpectedPending"
 }
@@ -264,14 +296,34 @@ elseif ($env:M16_SELF_TEST_M15_MODE -ceq "MissingBlocker") {
     $blockers = @($blockers | Where-Object { $_ -cne "WackPending" })
 }
 $summary = [ordered]@{
-    schemaVersion = 6
+    schemaVersion = 7
     result = "blocked"
-    technicalBaselinePassed = $true
+    technicalBaselinePassed = $sbomCurrentAtEvaluation
     releaseReady = $false
     commitSha = $commit
     packageSbomAcceptance = [ordered]@{
+        result = if ($sbomCurrentAtEvaluation) { "accepted-current" } else { "stale-reopen" }
+        currentAtEvaluation = $sbomCurrentAtEvaluation
+        effectiveClosedBlocker = if ($sbomCurrentAtEvaluation) { "SbomPending" } else { "None" }
         packageProducingSnapshotFileCount = 113
         packageProducingSnapshotSha256 = "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
+        currentPackageProducingSnapshotFileCount = if ($sbomCurrentAtEvaluation) { 113 } else { 115 }
+        currentPackageProducingSnapshotSha256 = if ($sbomCurrentAtEvaluation) {
+            "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
+        }
+        else {
+            ("c" * 64)
+        }
+        currentProductionInputSetCanonicalSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
+    }
+    packageVulnerabilityAcceptance = [ordered]@{
+        finalReleaseFreshAtEvaluation = $cveFinalReleaseFreshAtEvaluation
+        effectiveClosedBlocker = if ($cveFinalReleaseFreshAtEvaluation) {
+            "CveReviewPending"
+        }
+        else {
+            "None"
+        }
     }
     blockers = @($blockers)
 }
@@ -328,6 +380,21 @@ function Initialize-TestRepository {
     Copy-TestFixtureFile -RelativePath $script:m16FinalArtifactAcceptanceRelativePath
     foreach ($relativePath in $script:m16ProducerContractPaths) {
         Copy-TestFixtureFile -RelativePath $relativePath
+    }
+    Copy-TestFixtureFile `
+        -RelativePath $script:m16SyntheticJourneyAcceptanceRelativePath
+    foreach ($relativePath in $script:m16SyntheticJourneyProducerStaticPaths) {
+        Copy-TestFixtureFile -RelativePath $relativePath
+    }
+    foreach ($relativeRoot in $script:m16SyntheticJourneyProducerSourceRoots) {
+        $sourceRoot = Join-Path $script:repositoryRoot $relativeRoot.Replace('/', '\')
+        foreach ($sourceFile in @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -File | Where-Object {
+                    $_.FullName -notmatch '\\(bin|obj)\\'
+                })) {
+            $relativePath = $sourceFile.FullName.Substring(
+                $script:repositoryRoot.TrimEnd('\').Length + 1).Replace('\', '/')
+            Copy-TestFixtureFile -RelativePath $relativePath
+        }
     }
 
     & git init --quiet $script:fixtureRoot 2>&1 | Out-Null
@@ -873,7 +940,11 @@ function Assert-ExactStringSet {
 function Read-AndAssertBlockedEvidence {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path
+        [string]$Path,
+
+        [bool]$ExpectedSbomCurrentAtEvaluation = $false,
+
+        [bool]$ExpectedCveFinalReleaseFreshAtEvaluation = $true
     )
 
     Assert-TestCondition (Test-Path -LiteralPath $Path -PathType Leaf) `
@@ -903,6 +974,7 @@ function Read-AndAssertBlockedEvidence {
             "policy",
             "inputs",
             "finalArtifactCanaryAcceptance",
+            "syntheticEndToEndJourneyAcceptance",
             "gates",
             "blockerCounts",
             "blockers",
@@ -920,8 +992,10 @@ function Read-AndAssertBlockedEvidence {
         "aggregation integrity must be exact Boolean true."
     Assert-TestCondition `
         ($evidence.m1ToM15AutomatedGateSetPassed -is [bool] -and
-         $evidence.m1ToM15AutomatedGateSetPassed) `
-        "M1-M15 automated gate set must be exact Boolean true."
+         $evidence.m1ToM15AutomatedGateSetPassed -eq
+            ($ExpectedSbomCurrentAtEvaluation -and
+             $ExpectedCveFinalReleaseFreshAtEvaluation)) `
+        "the M1-M15 aggregate did not match SBOM/CVE currentness."
     Assert-TestCondition `
         ($evidence.m16TechnicalGateSetPassed -is [bool] -and
          -not $evidence.m16TechnicalGateSetPassed) `
@@ -940,6 +1014,8 @@ function Read-AndAssertBlockedEvidence {
     Assert-ExactStringSet `
         -Actual @($finalArtifactAcceptance.PSObject.Properties.Name) `
         -Expected @(
+            "result",
+            "current",
             "ledgerSha256",
             "decision",
             "scope",
@@ -959,10 +1035,14 @@ function Read-AndAssertBlockedEvidence {
             "producerContractSourceSetSha256",
             "packageProducingSnapshotFileCount",
             "packageProducingSnapshotSha256",
-            "closedBlocker") `
+            "closedBlocker",
+            "effectiveClosedBlocker") `
         -Message "final-artifact acceptance summary schema changed."
     Assert-TestCondition `
-        ($finalArtifactAcceptance.ledgerSha256 -ceq
+        ($finalArtifactAcceptance.result -ceq "stale-reopen" -and
+         $finalArtifactAcceptance.current -is [bool] -and
+         -not $finalArtifactAcceptance.current -and
+         $finalArtifactAcceptance.ledgerSha256 -ceq
             $script:m16FinalArtifactAcceptanceSha256 -and
          $finalArtifactAcceptance.decision -ceq
             "AcceptHostedM16FinalArtifactCanaryScan" -and
@@ -991,8 +1071,78 @@ function Read-AndAssertBlockedEvidence {
          $finalArtifactAcceptance.packageProducingSnapshotSha256 -ceq
             "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493" -and
          $finalArtifactAcceptance.closedBlocker -ceq
-            "M16FinalArtifactCanaryScanPending") `
+            "M16FinalArtifactCanaryScanPending" -and
+         $finalArtifactAcceptance.effectiveClosedBlocker -ceq "None") `
         "final-artifact acceptance binding changed."
+    $syntheticJourneyAcceptance = $evidence.syntheticEndToEndJourneyAcceptance
+    Assert-TestCondition ($syntheticJourneyAcceptance -is [pscustomobject]) `
+        "synthetic-journey acceptance summary is not an object."
+    Assert-ExactStringSet `
+        -Actual @($syntheticJourneyAcceptance.PSObject.Properties.Name) `
+        -Expected @(
+            "result",
+            "current",
+            "ledgerSha256",
+            "decision",
+            "scope",
+            "runCompletedAtUtc",
+            "runId",
+            "runNumber",
+            "runAttempt",
+            "runHeadSha",
+            "producerJobId",
+            "requiredGateJobId",
+            "artifactId",
+            "artifactName",
+            "artifactDigestSha256",
+            "qualitySummaryMemberLength",
+            "qualitySummaryMemberSha256",
+            "cleanRunCount",
+            "testCountPerRun",
+            "journeyTestResult",
+            "producerContractSourceCount",
+            "producerContractSourceSetSha256",
+            "closedBlocker",
+            "effectiveClosedBlocker") `
+        -Message "synthetic-journey acceptance summary schema changed."
+    Assert-TestCondition `
+        ($syntheticJourneyAcceptance.result -ceq "stale-reopen" -and
+         $syntheticJourneyAcceptance.current -is [bool] -and
+         -not $syntheticJourneyAcceptance.current -and
+         $syntheticJourneyAcceptance.ledgerSha256 -ceq
+            $script:m16SyntheticJourneyAcceptanceSha256 -and
+         $syntheticJourneyAcceptance.decision -ceq
+            "AcceptHostedM16SyntheticEndToEndJourney" -and
+         $syntheticJourneyAcceptance.scope -ceq
+            "M16SyntheticEndToEndJourneyOnly" -and
+         $syntheticJourneyAcceptance.runCompletedAtUtc -ceq
+            "2026-08-26T20:29:42Z" -and
+         $syntheticJourneyAcceptance.runId -eq 33009018937 -and
+         $syntheticJourneyAcceptance.runNumber -eq 276 -and
+         $syntheticJourneyAcceptance.runAttempt -eq 1 -and
+         $syntheticJourneyAcceptance.runHeadSha -ceq
+            "da205bd194016815ab069a3513eff4500796584d" -and
+         $syntheticJourneyAcceptance.producerJobId -eq 98310223088 -and
+         $syntheticJourneyAcceptance.requiredGateJobId -eq 98315789718 -and
+         $syntheticJourneyAcceptance.artifactId -eq 9622072031 -and
+         $syntheticJourneyAcceptance.artifactName -ceq
+            "windows-quality-evidence" -and
+         $syntheticJourneyAcceptance.artifactDigestSha256 -ceq
+            "04e823517cb745691b8b744670c858906b218c9f3030e47e3a4ba7540e44c1d4" -and
+         $syntheticJourneyAcceptance.qualitySummaryMemberLength -eq 45966 -and
+         $syntheticJourneyAcceptance.qualitySummaryMemberSha256 -ceq
+            "f3894bfb82f5ea811cf56c525c27c6dce6525e61f5404975aed4ab6142c3bf1c" -and
+         $syntheticJourneyAcceptance.cleanRunCount -eq 2 -and
+         $syntheticJourneyAcceptance.testCountPerRun -eq 614 -and
+         $syntheticJourneyAcceptance.journeyTestResult -ceq
+            "AuthorizedRemotePlaylistCompletesExactSyntheticReleaseCandidateJourney|Passed" -and
+         $syntheticJourneyAcceptance.producerContractSourceCount -eq 130 -and
+         $syntheticJourneyAcceptance.producerContractSourceSetSha256 -ceq
+            "4fd8c9e261a01d019b3b7f7aebf633fee6106e1bd8566b3fdbd13119bb25035f" -and
+         $syntheticJourneyAcceptance.closedBlocker -ceq
+            "M16SyntheticEndToEndJourneyPending" -and
+         $syntheticJourneyAcceptance.effectiveClosedBlocker -ceq "None") `
+        "synthetic-journey acceptance binding changed."
     Assert-TestCondition (@($evidence.inputs).Count -eq 8) `
         "the exact eight bounded evidence inputs were not summarized."
     Assert-ExactStringSet `
@@ -1007,16 +1157,40 @@ function Read-AndAssertBlockedEvidence {
             "catalog-regression-summary.json",
             "m15-readiness.json") `
         -Message "the exact bounded input-name set changed."
-    Assert-TestCondition ($evidence.blockerCounts.total -eq 18) `
-        "the exact 18-blocker baseline changed."
-    Assert-TestCondition ($evidence.blockerCounts.m15 -eq 12) `
-        "the exact 12 M15 blockers changed."
-    Assert-TestCondition ($evidence.blockerCounts.m16 -eq 6) `
-        "the exact six remaining M16 blockers changed."
+    $expectedM15Blockers = @($script:m15Blockers)
+    if ($ExpectedSbomCurrentAtEvaluation) {
+        $expectedM15Blockers = @(
+            $expectedM15Blockers | Where-Object { $_ -cne "SbomPending" })
+    }
+    if (-not $ExpectedCveFinalReleaseFreshAtEvaluation) {
+        $expectedM15Blockers += "CveReviewPending"
+    }
+    Assert-TestCondition `
+        ($evidence.blockerCounts.total -eq ($expectedM15Blockers.Count + 7)) `
+        "the total blocker baseline changed."
+    Assert-TestCondition ($evidence.blockerCounts.m15 -eq $expectedM15Blockers.Count) `
+        "the M15 blocker baseline changed."
+    Assert-TestCondition ($evidence.blockerCounts.m16 -eq 7) `
+        "the exact seven remaining M16 blockers changed."
     Assert-ExactStringSet `
         -Actual @($evidence.blockers | ForEach-Object { [string]$_.code }) `
-        -Expected @($script:m15Blockers + $script:m16Blockers) `
-        -Message "the exact 18 blocker codes changed."
+        -Expected @($expectedM15Blockers + $script:m16Blockers) `
+        -Message "the exact blocker codes changed."
+
+    $m1ToM15Gate = @($evidence.gates | Where-Object {
+            $_.code -ceq "M1ToM15AutomatedGateSet"
+        })
+    Assert-TestCondition `
+        ($m1ToM15Gate.Count -eq 1 -and
+         $m1ToM15Gate[0].result -ceq
+            $(if ($ExpectedSbomCurrentAtEvaluation -and
+                  $ExpectedCveFinalReleaseFreshAtEvaluation) {
+                    "passed"
+                }
+                else {
+                    "blocked"
+                })) `
+        "the M1-M15 gate summary did not match aggregate currentness."
     $blockerCodes = [string[]]@(
         $evidence.blockers | ForEach-Object { [string]$_.code })
     $sortedBlockerCodes = [string[]]@($blockerCodes)
@@ -1052,7 +1226,9 @@ Assert-TestCondition `
     ($validatorText.Contains('schemaVersionOneCandidateReadyAllowed = $false') -and
      -not $validatorText.Contains('candidateReady = $true') -and
      $validatorText.Contains('SoakMinutes") -Expected 0') -and
-     $validatorText.Contains('PackageSbomApplicationPackageSha256')) `
+     $validatorText.Contains('PackageSbomApplicationPackageSha256') -and
+     $validatorText.Contains('$M15Validation.PackageSbomCurrentAtEvaluation -and') -and
+     $validatorText.Contains('result = if ($m15Validation.AutomatedGateSetPassed)')) `
     "schema-v1 blocked-only, short native-profile, or package binding contract changed."
 
 try {
@@ -1101,9 +1277,15 @@ try {
         $script:utf8NoBom)
     Commit-TestRepositoryState -Message "Drift M16 final-artifact producer source"
     Write-ValidInputs
-    Assert-CandidateFailure `
-        -ExpectedMessage "M16TechnicalInvariant:FinalArtifactAcceptanceInvalid" `
-        -AllowBlockedCandidate
+    $staleFinalArtifactPath = Join-Path `
+        $script:evidenceRoot `
+        "stale-final-artifact.json"
+    Invoke-AllowedCandidate -EvidencePath $staleFinalArtifactPath
+    $staleFinalArtifactEvidence =
+        Read-AndAssertBlockedEvidence -Path $staleFinalArtifactPath
+    Assert-TestCondition `
+        (-not $staleFinalArtifactEvidence.finalArtifactCanaryAcceptance.current) `
+        "final-artifact source drift did not reopen its blocker."
     [System.IO.File]::WriteAllBytes($producerSourcePath, $producerSourceBytes)
     Commit-TestRepositoryState -Message "Restore M16 final-artifact producer source"
 
@@ -1121,13 +1303,70 @@ try {
     [System.IO.File]::WriteAllBytes($binaryProducerSourcePath, $binaryDriftBytes)
     Commit-TestRepositoryState -Message "Drift M16 final-artifact binary fixture"
     Write-ValidInputs
-    Assert-CandidateFailure `
-        -ExpectedMessage "M16TechnicalInvariant:FinalArtifactAcceptanceInvalid" `
-        -AllowBlockedCandidate
+    $staleBinaryArtifactPath = Join-Path `
+        $script:evidenceRoot `
+        "stale-final-artifact-binary.json"
+    Invoke-AllowedCandidate -EvidencePath $staleBinaryArtifactPath
+    $staleBinaryArtifactEvidence =
+        Read-AndAssertBlockedEvidence -Path $staleBinaryArtifactPath
+    Assert-TestCondition `
+        (-not $staleBinaryArtifactEvidence.finalArtifactCanaryAcceptance.current) `
+        "final-artifact binary drift did not reopen its blocker."
     [System.IO.File]::WriteAllBytes(
         $binaryProducerSourcePath,
         $binaryProducerSourceBytes)
     Commit-TestRepositoryState -Message "Restore M16 final-artifact binary fixture"
+
+    $journeyAcceptancePath = Join-Path `
+        $script:fixtureRoot `
+        ($script:m16SyntheticJourneyAcceptanceRelativePath.Replace('/', '\'))
+    [byte[]]$journeyAcceptanceBytes =
+        [System.IO.File]::ReadAllBytes($journeyAcceptancePath)
+    Remove-Item -LiteralPath $journeyAcceptancePath -Force
+    Commit-TestRepositoryState -Message "Remove M16 synthetic-journey acceptance ledger"
+    Write-ValidInputs
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:SyntheticJourneyAcceptanceInvalid" `
+        -AllowBlockedCandidate
+    [System.IO.File]::WriteAllBytes(
+        $journeyAcceptancePath,
+        $journeyAcceptanceBytes)
+    Commit-TestRepositoryState -Message "Restore M16 synthetic-journey acceptance ledger"
+
+    [System.IO.File]::AppendAllText(
+        $journeyAcceptancePath,
+        " ",
+        $script:utf8NoBom)
+    Commit-TestRepositoryState -Message "Tamper M16 synthetic-journey acceptance ledger"
+    Write-ValidInputs
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:SyntheticJourneyAcceptanceInvalid" `
+        -AllowBlockedCandidate
+    [System.IO.File]::WriteAllBytes(
+        $journeyAcceptancePath,
+        $journeyAcceptanceBytes)
+    Commit-TestRepositoryState -Message "Restore exact M16 synthetic-journey acceptance ledger"
+
+    $journeySourcePath = Join-Path `
+        $script:fixtureRoot `
+        "apps\windows\tests\IptvSuite.IntegrationTests\M16SyntheticEndToEndJourneyTests.cs"
+    [byte[]]$journeySourceBytes = [System.IO.File]::ReadAllBytes($journeySourcePath)
+    [System.IO.File]::AppendAllText(
+        $journeySourcePath,
+        "`n// self-test journey producer drift",
+        $script:utf8NoBom)
+    Commit-TestRepositoryState -Message "Drift M16 synthetic-journey producer source"
+    Write-ValidInputs
+    $staleJourneyPath = Join-Path `
+        $script:evidenceRoot `
+        "stale-synthetic-journey.json"
+    Invoke-AllowedCandidate -EvidencePath $staleJourneyPath
+    $staleJourneyEvidence = Read-AndAssertBlockedEvidence -Path $staleJourneyPath
+    Assert-TestCondition `
+        (-not $staleJourneyEvidence.syntheticEndToEndJourneyAcceptance.current) `
+        "synthetic-journey source drift did not reopen its blocker."
+    [System.IO.File]::WriteAllBytes($journeySourcePath, $journeySourceBytes)
+    Commit-TestRepositoryState -Message "Restore M16 synthetic-journey producer source"
 
     Write-ValidInputs
     Remove-Item -LiteralPath (Join-Path $script:inputRoot "quality-summary.json") -Force
@@ -1300,6 +1539,42 @@ try {
         Assert-CandidateFailure `
             -ExpectedMessage "M16TechnicalInvariant:M15BlockerSetInvalid" `
             -AllowBlockedCandidate
+    }
+    finally {
+        Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue
+    }
+
+    Write-ValidInputs
+    $env:M16_SELF_TEST_M15_MODE = "ExpiredCve"
+    try {
+        $expiredCvePath = Join-Path $script:evidenceRoot "expired-cve.json"
+        Invoke-AllowedCandidate -EvidencePath $expiredCvePath
+        $expiredCveEvidence = Read-AndAssertBlockedEvidence `
+            -Path $expiredCvePath `
+            -ExpectedSbomCurrentAtEvaluation $false `
+            -ExpectedCveFinalReleaseFreshAtEvaluation $false
+        Assert-TestCondition `
+            (@($expiredCveEvidence.blockers | ForEach-Object { [string]$_.code }) `
+                -ccontains "CveReviewPending") `
+            "expired CVE freshness did not reopen CveReviewPending."
+    }
+    finally {
+        Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue
+    }
+
+    Write-ValidInputs
+    $env:M16_SELF_TEST_M15_MODE = "CurrentSbom"
+    try {
+        $currentSbomPath = Join-Path $script:evidenceRoot "current-sbom.json"
+        Invoke-AllowedCandidate -EvidencePath $currentSbomPath
+        $currentSbomEvidence = Read-AndAssertBlockedEvidence `
+            -Path $currentSbomPath `
+            -ExpectedSbomCurrentAtEvaluation $true `
+            -ExpectedCveFinalReleaseFreshAtEvaluation $true
+        Assert-TestCondition `
+            ($currentSbomEvidence.m1ToM15AutomatedGateSetPassed -and
+             -not $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
+            "M15 aggregate or independent final-artifact staleness changed."
     }
     finally {
         Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue

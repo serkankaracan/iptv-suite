@@ -188,7 +188,9 @@ function Read-AndAssertEvidence {
         [Parameter(Mandatory = $true)]
         [string]$ForbiddenRoot,
 
-        [Nullable[bool]]$ExpectedFinalReleaseFreshAtEvaluation
+        [Nullable[bool]]$ExpectedFinalReleaseFreshAtEvaluation,
+
+        [bool]$ExpectedSbomCurrentAtEvaluation = $false
     )
 
     Assert-TestCondition (Test-Path -LiteralPath $EvidencePath -PathType Leaf) "evidence was not published."
@@ -228,11 +230,12 @@ function Read-AndAssertEvidence {
             "packageVulnerabilityAcceptance",
             "blockers") `
         -Message "evidence root schema changed."
-    Assert-TestCondition ($evidence.schemaVersion -eq 6) "schemaVersion must be 6."
+    Assert-TestCondition ($evidence.schemaVersion -eq 7) "schemaVersion must be 7."
     Assert-TestCondition ($evidence.result -ceq "blocked") "result must remain blocked."
     Assert-TestCondition `
-        ($evidence.technicalBaselinePassed -is [bool] -and $evidence.technicalBaselinePassed) `
-        "technicalBaselinePassed must be exact Boolean true."
+        ($evidence.technicalBaselinePassed -is [bool] -and
+         $evidence.technicalBaselinePassed -eq $ExpectedSbomCurrentAtEvaluation) `
+        "technicalBaselinePassed did not match the current SBOM acceptance state."
     Assert-TestCondition `
         ($evidence.releaseReady -is [bool] -and -not $evidence.releaseReady) `
         "releaseReady must be exact Boolean false."
@@ -356,6 +359,9 @@ function Read-AndAssertEvidence {
     Assert-ExactStringSet `
         -Actual @($packageSbomAcceptance.PSObject.Properties.Name) `
         -Expected @(
+            "result",
+            "currentAtEvaluation",
+            "ledgerSha256",
             "decision",
             "scope",
             "runCompletedAtUtc",
@@ -400,6 +406,9 @@ function Read-AndAssertEvidence {
             "contractSourceSetCanonicalSha256",
             "packageProducingSnapshotFileCount",
             "packageProducingSnapshotSha256",
+            "currentPackageProducingSnapshotFileCount",
+            "currentPackageProducingSnapshotSha256",
+            "currentProductionInputSetCanonicalSha256",
             "applicationPackageFile",
             "applicationPackageLength",
             "applicationPackageSha256",
@@ -420,10 +429,23 @@ function Read-AndAssertEvidence {
             "producerBlockerDisposition",
             "producerSbomPending",
             "closedBlocker",
+            "effectiveClosedBlocker",
             "legalSbomComplete") `
         -Message "the package SBOM acceptance evidence schema changed."
     Assert-TestCondition `
-        ($packageSbomAcceptance.decision -ceq "AcceptTechnicalPackageBoundSbom" -and
+        ($packageSbomAcceptance.result -ceq
+            $(if ($ExpectedSbomCurrentAtEvaluation) {
+                "accepted-current"
+            }
+            else {
+                "stale-reopen"
+            }) -and
+         $packageSbomAcceptance.currentAtEvaluation -is [bool] -and
+         $packageSbomAcceptance.currentAtEvaluation -eq
+            $ExpectedSbomCurrentAtEvaluation -and
+         $packageSbomAcceptance.ledgerSha256 -ceq
+            "05969121eee3fed429e53d9348f0234dee52c47b0ab7eee1517302b36cd0ce81" -and
+         $packageSbomAcceptance.decision -ceq "AcceptTechnicalPackageBoundSbom" -and
          $packageSbomAcceptance.scope -ceq "TechnicalPackageBoundSbomOnly" -and
          $packageSbomAcceptance.runCompletedAtUtc -ceq "2026-08-26T19:31:00Z" -and
          $packageSbomAcceptance.repository -ceq "serkankaracan/iptv-suite" -and
@@ -475,6 +497,17 @@ function Read-AndAssertEvidence {
          $packageSbomAcceptance.packageProducingSnapshotSha256 -ceq "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493") `
         "the package SBOM tool or source binding evidence changed."
     Assert-TestCondition `
+        ($packageSbomAcceptance.currentPackageProducingSnapshotFileCount -is [int] -and
+         $packageSbomAcceptance.currentPackageProducingSnapshotFileCount -gt 0 -and
+         $packageSbomAcceptance.currentPackageProducingSnapshotFileCount -le 256 -and
+         $packageSbomAcceptance.currentPackageProducingSnapshotSha256 -is [string] -and
+         $packageSbomAcceptance.currentPackageProducingSnapshotSha256 -cmatch
+            '^[0-9a-f]{64}$' -and
+         $packageSbomAcceptance.currentProductionInputSetCanonicalSha256 -is [string] -and
+         $packageSbomAcceptance.currentProductionInputSetCanonicalSha256 -cmatch
+            '^[0-9a-f]{64}$') `
+        "the current package-producing source binding is invalid."
+    Assert-TestCondition `
         ($packageSbomAcceptance.applicationPackageFile -ceq "IptvSuite.Windows_0.1.0.0_x64.msix" -and
          $packageSbomAcceptance.applicationPackageLength -eq 29852396 -and
          $packageSbomAcceptance.applicationPackageSha256 -ceq "76b8734134d9086ec1ec18e40e4193f0834d0c115364681cc49edf22f905f75a" -and
@@ -498,6 +531,8 @@ function Read-AndAssertEvidence {
          $packageSbomAcceptance.producerSbomPending -is [bool] -and
          $packageSbomAcceptance.producerSbomPending -and
          $packageSbomAcceptance.closedBlocker -ceq "SbomPending" -and
+         $packageSbomAcceptance.effectiveClosedBlocker -ceq
+            $(if ($ExpectedSbomCurrentAtEvaluation) { "SbomPending" } else { "None" }) -and
          $packageSbomAcceptance.legalSbomComplete -is [bool] -and
          -not $packageSbomAcceptance.legalSbomComplete) `
         "the bounded package SBOM acceptance disposition changed."
@@ -679,6 +714,9 @@ function Read-AndAssertEvidence {
     if (-not $expectedFinalReleaseFresh) {
         $expectedBlockers += "CveReviewPending"
     }
+    if (-not $ExpectedSbomCurrentAtEvaluation) {
+        $expectedBlockers += "SbomPending"
+    }
     Assert-ExactStringSet `
         -Actual @($evidence.blockers | ForEach-Object { [string]$_ }) `
         -Expected $expectedBlockers `
@@ -747,8 +785,10 @@ function Initialize-IsolatedFixture {
             Where-Object {
                 $_.FullName -notmatch '[\\/](?:bin|obj)[\\/]'
             })
-    Assert-TestCondition ($productionSourceFiles.Count -eq 107) `
-        "the exact package-producing source fixture count changed."
+    Assert-TestCondition `
+        ($productionSourceFiles.Count -gt 0 -and
+         $productionSourceFiles.Count -le 250) `
+        "the package-producing source fixture is empty or unbounded."
     foreach ($sourceFile in $productionSourceFiles) {
         $relativePath = $sourceFile.FullName.Substring(
             $script:repositoryRoot.Length + 1)
@@ -762,7 +802,7 @@ Assert-TestCondition `
     ($validatorText.Contains(
         '$packageProducingSnapshot = Get-PackageProducingSnapshot -Root $Root') -and
      $validatorText.Contains(
-        '$publicationPackageProducingSnapshot = Get-PackageProducingSnapshot') -and
+         '$publicationPackageSbomAcceptanceValidation = Read-PackageSbomAcceptance') -and
      $validatorText.Contains(
         '$publicationPackageProducingSnapshot.CanonicalBytes -eq') -and
      $validatorText.Contains(
@@ -781,6 +821,15 @@ Assert-TestCondition `
      $validatorText.Contains(
          '$publicationPackageVulnerabilityValidation.ContractSourceSetSha256')) `
     "the bounded two-pass package vulnerability acceptance contract changed."
+Assert-TestCondition `
+    ([regex]::Matches(
+        $validatorText,
+        'Get-CleanRepositoryCommit -Root \$resolvedRepositoryRoot').Count -eq 2 -and
+     $validatorText.Contains(
+         '$publicationCommit -ceq $repositoryCommit') -and
+     $validatorText.Contains(
+         '"RepositoryChanged"')) `
+    "the pre-publication clean-commit stability binding changed."
 Assert-TestCondition `
     ($validatorText.Contains(
         '$helperScriptBlock = [ScriptBlock]::Create($normalizedHelperText)') -and
@@ -1051,8 +1100,9 @@ try {
              $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
                 "CveReviewPending" -and
-             @($finalReleaseBoundaryEvidence.blockers).Count -eq 12 -and
-             @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "CveReviewPending") `
+             @($finalReleaseBoundaryEvidence.blockers).Count -eq 13 -and
+             @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "CveReviewPending" -and
+             @($finalReleaseBoundaryEvidence.blockers) -ccontains "SbomPending") `
             "the exact 24-hour final-release boundary did not remain accepted."
     }
     finally {
@@ -1090,8 +1140,9 @@ try {
              -not $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
                 "None" -and
-             @($finalReleaseExpiredEvidence.blockers).Count -eq 13 -and
-             @($finalReleaseExpiredEvidence.blockers) -ccontains "CveReviewPending") `
+             @($finalReleaseExpiredEvidence.blockers).Count -eq 14 -and
+             @($finalReleaseExpiredEvidence.blockers) -ccontains "CveReviewPending" -and
+             @($finalReleaseExpiredEvidence.blockers) -ccontains "SbomPending") `
             "the final-release blocker did not reopen at 24 hours plus one second."
     }
     finally {
@@ -1117,8 +1168,9 @@ try {
             (-not $staleEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              -not $staleEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $staleEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq "None" -and
-             @($staleEvidence.blockers).Count -eq 13 -and
-             @($staleEvidence.blockers) -ccontains "CveReviewPending") `
+             @($staleEvidence.blockers).Count -eq 14 -and
+             @($staleEvidence.blockers) -ccontains "CveReviewPending" -and
+             @($staleEvidence.blockers) -ccontains "SbomPending") `
             "stale package vulnerability acceptance did not reopen only its blocker."
     }
     finally {
@@ -1283,22 +1335,32 @@ try {
     Write-TestText `
         -Path $packageSourcePath `
         -Value ($packageSourceText + "`n// package-producing snapshot mutation")
-    Assert-AuditFailure `
+    $changedPackageSourceEvidencePath = Join-Path `
+        $fixtureEvidenceRoot `
+        "changed-package-source-snapshot.json"
+    Invoke-AllowedAudit `
         -Root $script:fixtureRoot `
-        -EvidencePath (Join-Path $fixtureEvidenceRoot "tampered-package-source-snapshot.json") `
-        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
-        -AllowBlockedInventory
+        -EvidencePath $changedPackageSourceEvidencePath
+    Read-AndAssertEvidence `
+        -EvidencePath $changedPackageSourceEvidencePath `
+        -ForbiddenRoot $script:fixtureRoot `
+        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
     Copy-TestFile -RelativePath $packageSourceRelativePath
 
     $addedPackageSourcePath = Join-Path `
         $script:fixtureRoot `
         "apps\windows\src\IptvSuite.Windows\UnexpectedAcceptanceInput.xaml"
     Write-TestText -Path $addedPackageSourcePath -Value '<Page />'
-    Assert-AuditFailure `
+    $addedPackageSourceEvidencePath = Join-Path `
+        $fixtureEvidenceRoot `
+        "added-package-source-snapshot.json"
+    Invoke-AllowedAudit `
         -Root $script:fixtureRoot `
-        -EvidencePath (Join-Path $fixtureEvidenceRoot "added-package-source-snapshot.json") `
-        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
-        -AllowBlockedInventory
+        -EvidencePath $addedPackageSourceEvidencePath
+    Read-AndAssertEvidence `
+        -EvidencePath $addedPackageSourceEvidencePath `
+        -ForbiddenRoot $script:fixtureRoot `
+        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
     Remove-Item -LiteralPath $addedPackageSourcePath -Force
 
     $removedPackageSourceRelativePath = `
@@ -1307,11 +1369,16 @@ try {
         $script:fixtureRoot `
         $removedPackageSourceRelativePath
     Remove-Item -LiteralPath $removedPackageSourcePath -Force
-    Assert-AuditFailure `
+    $removedPackageSourceEvidencePath = Join-Path `
+        $fixtureEvidenceRoot `
+        "removed-package-source-snapshot.json"
+    Invoke-AllowedAudit `
         -Root $script:fixtureRoot `
-        -EvidencePath (Join-Path $fixtureEvidenceRoot "removed-package-source-snapshot.json") `
-        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
-        -AllowBlockedInventory
+        -EvidencePath $removedPackageSourceEvidencePath
+    Read-AndAssertEvidence `
+        -EvidencePath $removedPackageSourceEvidencePath `
+        -ForbiddenRoot $script:fixtureRoot `
+        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
     Copy-TestFile -RelativePath $removedPackageSourceRelativePath
 
     $forbiddenNearestPackageOverrides = @(

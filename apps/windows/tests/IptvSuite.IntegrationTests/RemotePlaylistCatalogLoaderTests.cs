@@ -365,6 +365,8 @@ public sealed class RemotePlaylistCatalogLoaderTests
         DomainErrorCode.RequestRateLimited)]
     [DataRow(HttpTransportFailure.RemoteServiceUnavailable, HttpTransportRetryability.BoundedTransient,
         DomainErrorCode.RemoteServiceUnavailable)]
+    [DataRow(HttpTransportFailure.EndpointAddressRejected, HttpTransportRetryability.Never,
+        DomainErrorCode.RemoteRequestRejected)]
     public async Task TransportFailureMapsWithoutParsingOrExposingLocator(
         HttpTransportFailure failure,
         HttpTransportRetryability retryability,

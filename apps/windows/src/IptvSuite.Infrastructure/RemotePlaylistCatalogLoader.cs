@@ -62,7 +62,7 @@ internal sealed class RemotePlaylistCatalogLoader
         HttpTransportRequest request;
         try
         {
-            request = HttpTransportRequest.Create(
+            request = HttpTransportRequest.CreateForExplicitPrivateSourceOrigin(
                 requestUri,
                 configuration.SafeEndpoint,
                 HttpTransportLimits.MaximumAllowedResponseBytes);

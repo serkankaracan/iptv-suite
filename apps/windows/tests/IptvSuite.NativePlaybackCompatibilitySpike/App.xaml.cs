@@ -92,6 +92,11 @@ public partial class App : Application
         try
         {
             byte[] bytes = new System.Text.UTF8Encoding(false).GetBytes(evidence.ToJson());
+            int maximumEvidenceBytes = request.IsM16FinalProfile ? 128 * 1024 : 64 * 1024;
+            if (bytes.Length == 0 || bytes.Length > maximumEvidenceBytes)
+            {
+                throw new InvalidOperationException("The native playback probe evidence exceeds its fixed profile capacity.");
+            }
             await using (var stream = new FileStream(
                 pendingEvidencePath,
                 FileMode.CreateNew,

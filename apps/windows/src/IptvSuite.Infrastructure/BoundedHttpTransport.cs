@@ -13,7 +13,8 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
 {
     private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan MaximumRetryAfter = TimeSpan.FromSeconds(2);
-    private readonly HttpClient _client;
+    private readonly HttpClient _publicClient;
+    private readonly HttpClient _explicitPrivateSourceClient;
     private readonly TimeSpan _requestTimeout;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly IHttpTransportObserver? _observer;
@@ -25,7 +26,12 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
     }
 
     public BoundedHttpTransport(IHttpTransportObserver? observer)
-        : this(CreateProductionHandler(), DefaultRequestTimeout, Task.Delay, observer)
+        : this(
+            CreateProductionHandler(TimeSpan.FromMinutes(10)),
+            CreateProductionHandler(TimeSpan.Zero),
+            DefaultRequestTimeout,
+            Task.Delay,
+            observer)
     {
     }
 
@@ -47,22 +53,37 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
         TimeSpan requestTimeout,
         Func<TimeSpan, CancellationToken, Task> delayAsync,
         IHttpTransportObserver? observer)
+        : this(handler, explicitPrivateSourceHandler: null, requestTimeout, delayAsync, observer)
     {
-        ArgumentNullException.ThrowIfNull(handler);
+    }
+
+    private BoundedHttpTransport(
+        HttpMessageHandler publicHandler,
+        HttpMessageHandler? explicitPrivateSourceHandler,
+        TimeSpan requestTimeout,
+        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        IHttpTransportObserver? observer)
+    {
+        ArgumentNullException.ThrowIfNull(publicHandler);
         ArgumentNullException.ThrowIfNull(delayAsync);
         if (requestTimeout <= TimeSpan.Zero || requestTimeout > TimeSpan.FromMinutes(2))
         {
             throw new ArgumentOutOfRangeException(nameof(requestTimeout));
         }
 
-        _client = new HttpClient(handler, disposeHandler: true)
-        {
-            Timeout = Timeout.InfiniteTimeSpan,
-        };
+        _publicClient = CreateClient(publicHandler);
+        _explicitPrivateSourceClient = explicitPrivateSourceHandler is null
+            ? _publicClient
+            : CreateClient(explicitPrivateSourceHandler);
         _requestTimeout = requestTimeout;
         _delayAsync = delayAsync;
         _observer = observer;
     }
+
+    private static HttpClient CreateClient(HttpMessageHandler handler) => new(handler, disposeHandler: true)
+    {
+        Timeout = Timeout.InfiniteTimeSpan,
+    };
 
     public async ValueTask<HttpTransportResult> GetAsync(
         HttpTransportRequest request,
@@ -97,6 +118,11 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
         while (true)
         {
             using HttpRequestMessage message = new(HttpMethod.Get, currentUri);
+            HttpEndpointAddressPolicy addressPolicy = EndpointAddressPolicy.BindRequest(
+                message,
+                request.EndpointAddressPolicy,
+                request.ExpectedEndpoint,
+                currentEndpoint);
             message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
             if (request.HasAuthorization)
             {
@@ -109,7 +135,7 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
             try
             {
                 attemptCount++;
-                response = await _client.SendAsync(
+                response = await SelectClient(addressPolicy).SendAsync(
                     message,
                     HttpCompletionOption.ResponseHeadersRead,
                     linkedSource.Token).ConfigureAwait(false);
@@ -144,6 +170,14 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
 
                     if (request.HasAuthorization &&
                         assessment.Value!.OriginRelation == RedirectOriginRelation.CrossOrigin)
+                    {
+                        return Finish(HttpTransportResult.Failed(
+                            HttpTransportFailure.RedirectRejected,
+                            HttpTransportRetryability.Never,
+                            (int)response.StatusCode));
+                    }
+
+                    if (EndpointAddressPolicy.IsDisallowedCrossOriginLiteral(assessment.Value!))
                     {
                         return Finish(HttpTransportResult.Failed(
                             HttpTransportFailure.RedirectRejected,
@@ -197,7 +231,9 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
                 return Finish(
                     HttpTransportResult.Success(
                         (int)response.StatusCode,
-                        new HttpResponseLease(content).BindEffectiveUri(currentUri)),
+                        new HttpResponseLease(content)
+                            .BindEffectiveUri(currentUri)
+                            .BindMediaType(ClassifyMediaType(response.Content.Headers))),
                     content.Length);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -212,6 +248,12 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
                     HttpTransportFailure.ResponseTooLarge,
                     HttpTransportRetryability.Never,
                     (int)(response?.StatusCode ?? 0)));
+            }
+            catch (HttpRequestException exception) when (IsEndpointAddressFailure(exception))
+            {
+                return Finish(HttpTransportResult.Failed(
+                    HttpTransportFailure.EndpointAddressRejected,
+                    HttpTransportRetryability.Never));
             }
             catch (HttpRequestException exception) when (IsTlsFailure(exception))
             {
@@ -272,6 +314,11 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
             while (true)
             {
                 using var message = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                HttpEndpointAddressPolicy addressPolicy = EndpointAddressPolicy.BindRequest(
+                    message,
+                    request.EndpointAddressPolicy,
+                    request.ExpectedEndpoint,
+                    currentEndpoint);
                 message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
                 if (request.HasAuthorization)
                 {
@@ -283,7 +330,7 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
                 HttpResponseMessage response;
                 try
                 {
-                    response = await _client.SendAsync(
+                    response = await SelectClient(addressPolicy).SendAsync(
                         message,
                         HttpCompletionOption.ResponseHeadersRead,
                         linkedSource.Token).ConfigureAwait(false);
@@ -293,6 +340,12 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
                     return HttpStreamingResult.Failed(
                         HttpTransportFailure.RequestTimedOut,
                         HttpTransportRetryability.BoundedTransient);
+                }
+                catch (HttpRequestException exception) when (IsEndpointAddressFailure(exception))
+                {
+                    return HttpStreamingResult.Failed(
+                        HttpTransportFailure.EndpointAddressRejected,
+                        HttpTransportRetryability.Never);
                 }
                 catch (HttpRequestException exception) when (IsTlsFailure(exception))
                 {
@@ -342,7 +395,9 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
                             RedirectTargetPolicy.Evaluate(currentEndpoint, redirectUri!.AbsoluteUri);
                         if (!assessment.IsSuccess ||
                             (request.HasAuthorization &&
-                             assessment.Value!.OriginRelation == RedirectOriginRelation.CrossOrigin))
+                             assessment.Value!.OriginRelation == RedirectOriginRelation.CrossOrigin) ||
+                            (assessment.IsSuccess &&
+                             EndpointAddressPolicy.IsDisallowedCrossOriginLiteral(assessment.Value!)))
                         {
                             return HttpStreamingResult.Failed(
                                 HttpTransportFailure.RedirectRejected,
@@ -458,20 +513,49 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
             return;
         }
 
-        _client.Dispose();
+        _publicClient.Dispose();
+        if (!ReferenceEquals(_explicitPrivateSourceClient, _publicClient))
+        {
+            _explicitPrivateSourceClient.Dispose();
+        }
         _disposed = true;
         GC.SuppressFinalize(this);
     }
 
-    private static SocketsHttpHandler CreateProductionHandler() => new()
+    private HttpClient SelectClient(HttpEndpointAddressPolicy addressPolicy) =>
+        addressPolicy == HttpEndpointAddressPolicy.ExplicitPrivateSourceOrigin
+            ? _explicitPrivateSourceClient
+            : _publicClient;
+
+    private static SocketsHttpHandler CreateProductionHandler(TimeSpan pooledConnectionLifetime) => new()
     {
         AllowAutoRedirect = false,
         AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+        ConnectCallback = EndpointAddressPolicy.ConnectAsync,
         ConnectTimeout = TimeSpan.FromSeconds(5),
         MaxConnectionsPerServer = 4,
-        PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+        PooledConnectionLifetime = pooledConnectionLifetime,
         UseCookies = false,
+        UseProxy = false,
     };
+
+    private static HttpResponseMediaType ClassifyMediaType(HttpContentHeaders headers)
+    {
+        if (!headers.NonValidated.TryGetValues("Content-Type", out var rawValues) ||
+            rawValues.Count != 1 ||
+            !MediaTypeHeaderValue.TryParse(rawValues.Single(), out MediaTypeHeaderValue? contentType))
+        {
+            return HttpResponseMediaType.Other;
+        }
+
+        return contentType.MediaType?.ToLowerInvariant() switch
+        {
+            "image/png" => HttpResponseMediaType.Png,
+            "image/jpeg" => HttpResponseMediaType.Jpeg,
+            "image/webp" => HttpResponseMediaType.WebP,
+            _ => HttpResponseMediaType.Other,
+        };
+    }
 
     private static bool IsRedirect(HttpStatusCode statusCode) => statusCode is
         HttpStatusCode.MovedPermanently or
@@ -609,6 +693,22 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
         for (int depth = 0; current is not null && depth < 8; depth++)
         {
             if (current is AuthenticationException)
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
+    }
+
+    private static bool IsEndpointAddressFailure(HttpRequestException exception)
+    {
+        Exception? current = exception;
+        for (int depth = 0; current is not null && depth < 8; depth++)
+        {
+            if (current is EndpointAddressRejectedException)
             {
                 return true;
             }

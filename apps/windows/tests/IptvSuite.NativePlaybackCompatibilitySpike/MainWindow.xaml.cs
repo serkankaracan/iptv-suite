@@ -10,7 +10,8 @@ namespace IptvSuite.NativePlaybackCompatibilitySpike;
 
 public sealed partial class MainWindow : Window, IDisposable
 {
-    private const int ResourceSampleCapacity = 128;
+    private const int M10ResourceSampleCapacity = 128;
+    private const int M16FinalResourceSampleCapacity = 290;
     private readonly MediaPlayer _mediaPlayer;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly TaskCompletionSource _surfaceReady =
@@ -48,6 +49,9 @@ public sealed partial class MainWindow : Window, IDisposable
             cancellationToken,
             _lifetimeCancellation.Token);
         CancellationToken probeCancellationToken = probeCancellation.Token;
+        int resourceSampleCapacity = request.IsM16FinalProfile
+            ? M16FinalResourceSampleCapacity
+            : M10ResourceSampleCapacity;
         var startupSamples = new List<double>(request.SwitchCount);
         var hlsStartupSamples = new List<double>((request.SwitchCount + 1) / 2);
         var directStartupSamples = new List<double>(request.SwitchCount / 2);
@@ -95,7 +99,8 @@ public sealed partial class MainWindow : Window, IDisposable
             soakStopwatch,
             resourceSamples,
             NativePlaybackResourcePhase.ProbeStart,
-            switchOrdinal: 0);
+            switchOrdinal: 0,
+            resourceSampleCapacity: resourceSampleCapacity);
 
         void BeginStartupStage(NativePlaybackStartupStage stage)
         {
@@ -489,7 +494,8 @@ public sealed partial class MainWindow : Window, IDisposable
                 soakStopwatch,
                 resourceSamples,
                 NativePlaybackResourcePhase.SwitchesCompleted,
-                completedSwitchCount);
+                completedSwitchCount,
+                resourceSampleCapacity);
 
             if (request.CancellationProbeCount == 1)
             {
@@ -511,6 +517,7 @@ public sealed partial class MainWindow : Window, IDisposable
                     process,
                     soakStopwatch,
                     resourceSamples,
+                    resourceSampleCapacity,
                     completedSwitchCount,
                     sourceDetachSamples,
                     probeCancellationToken);
@@ -1348,6 +1355,7 @@ public sealed partial class MainWindow : Window, IDisposable
         Process process,
         Stopwatch soakStopwatch,
         List<NativePlaybackResourceSample> resourceSamples,
+        int resourceSampleCapacity,
         int switchOrdinal,
         List<double> sourceDetachSamples,
         CancellationToken cancellationToken)
@@ -1383,7 +1391,8 @@ public sealed partial class MainWindow : Window, IDisposable
                     soakStopwatch,
                     resourceSamples,
                     NativePlaybackResourcePhase.Soak,
-                    switchOrdinal);
+                    switchOrdinal,
+                    resourceSampleCapacity);
             }
 
             _mediaPlayer.IsLoopingEnabled = false;
@@ -1413,9 +1422,12 @@ public sealed partial class MainWindow : Window, IDisposable
         Stopwatch stopwatch,
         List<NativePlaybackResourceSample> samples,
         NativePlaybackResourcePhase phase,
-        int switchOrdinal)
+        int switchOrdinal,
+        int resourceSampleCapacity)
     {
-        if (samples.Count >= ResourceSampleCapacity)
+        if ((resourceSampleCapacity != M10ResourceSampleCapacity &&
+                resourceSampleCapacity != M16FinalResourceSampleCapacity) ||
+            samples.Count >= resourceSampleCapacity)
         {
             throw new InvalidOperationException("The native playback resource sample trace exceeded its fixed capacity.");
         }
@@ -1495,6 +1507,11 @@ internal sealed record NativePlaybackProbeRequest(
         "/hls.m3u8",
     ];
 
+    internal bool IsM16FinalProfile =>
+        SwitchCount == 200 &&
+        SoakDuration == TimeSpan.FromMinutes(1440) &&
+        CancellationProbeCount == 0;
+
     internal static NativePlaybackProbeRequest Parse(string? arguments)
     {
         string[] parts = arguments?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
@@ -1508,15 +1525,27 @@ internal sealed record NativePlaybackProbeRequest(
                 string cancellationProbeText] ||
             !Guid.TryParseExact(runIdText, "N", out Guid runId) ||
             runId.ToString("N") != runIdText ||
-            !int.TryParse(switchText, out int switchCount) || switchCount is < 2 or > 100 ||
-            !int.TryParse(soakText, out int soakMinutes) || soakMinutes is < 0 or > 480 ||
-            (soakMinutes > 0 && switchCount != 100) ||
+            !int.TryParse(switchText, out int switchCount) ||
+            !int.TryParse(soakText, out int soakMinutes) ||
             (cancellationProbeText != "0" && cancellationProbeText != "1") ||
             !int.TryParse(cancellationProbeText, out int cancellationProbeCount) ||
             cancellationProbeCount is < 0 or > 1 ||
-            (cancellationProbeCount == 1 && (switchCount != 100 || soakMinutes != 0)) ||
             !Uri.TryCreate(direct, UriKind.Absolute, out Uri? directUri) ||
             !Uri.TryCreate(hls, UriKind.Absolute, out Uri? hlsUri))
+        {
+            throw new ArgumentException("Invalid native playback probe arguments.", nameof(arguments));
+        }
+
+        bool m10ProfileInvalid =
+            switchCount is < 2 or > 100 ||
+            soakMinutes is < 0 or > 480 ||
+            (soakMinutes > 0 && switchCount != 100) ||
+            (cancellationProbeCount == 1 && (switchCount != 100 || soakMinutes != 0));
+        bool m16FinalProfile =
+            switchCount == 200 &&
+            soakMinutes == 1440 &&
+            cancellationProbeCount == 0;
+        if (m10ProfileInvalid && !m16FinalProfile)
         {
             throw new ArgumentException("Invalid native playback probe arguments.", nameof(arguments));
         }

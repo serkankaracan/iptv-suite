@@ -9,7 +9,31 @@ public enum ChannelLogoFormat
     WebP,
 }
 
-public sealed record ChannelLogoImage(ReadOnlyMemory<byte> Content, ChannelLogoFormat Format);
+public sealed record ChannelLogoImage
+{
+    public ChannelLogoImage(
+        ReadOnlyMemory<byte> content,
+        ChannelLogoFormat format,
+        int pixelWidth,
+        int pixelHeight)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pixelWidth);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pixelHeight);
+
+        Content = content;
+        Format = format;
+        PixelWidth = pixelWidth;
+        PixelHeight = pixelHeight;
+    }
+
+    public ReadOnlyMemory<byte> Content { get; }
+
+    public ChannelLogoFormat Format { get; }
+
+    public int PixelWidth { get; }
+
+    public int PixelHeight { get; }
+}
 
 public interface IChannelLogoProvider
 {

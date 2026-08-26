@@ -76,11 +76,30 @@ internal static class TestTool
                 return 0;
             }
 
+            if (arguments is
+                [
+                    "validate-m16-native-playback-evidence",
+                    string m16EvidencePath,
+                    string m16ControllerPath,
+                    string m16ExpectedCommitSha,
+                    string m16ExpectedSdk,
+                ])
+            {
+                M16NativePlaybackEvidenceValidator.Validate(
+                    m16EvidencePath,
+                    m16ControllerPath,
+                    m16ExpectedCommitSha,
+                    m16ExpectedSdk);
+                Console.WriteLine("M16 native playback acceptance evidence validated.");
+                return 0;
+            }
+
             Console.Error.WriteLine(
                 "Usage: generate-fixtures <specification> <output-directory> | " +
                 "scan-artifacts <root> <run-scope> <case-id> | " +
                 "scan-release-artifacts <root> <run-scope> <case-id> | " +
-                "validate-native-playback-evidence <evidence> <controller> <commit> <sdk>");
+                "validate-native-playback-evidence <evidence> <controller> <commit> <sdk> | " +
+                "validate-m16-native-playback-evidence <evidence> <controller> <commit> <sdk>");
             return 64;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)

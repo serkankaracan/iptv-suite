@@ -1272,12 +1272,11 @@ function Read-PackageSbomAcceptance {
     try {
         Assert-NoNearestPackageVersionOverrides -Root $Root
         $packageProducingSnapshot = Get-PackageProducingSnapshot -Root $Root
-        Assert-Condition `
-            ($packageProducingSnapshot.FileCount -eq
+        $packageProducingSnapshotCurrent =
+            $packageProducingSnapshot.FileCount -eq
                 $script:packageProducingSnapshotFileCount -and
-             $packageProducingSnapshot.Sha256 -ceq
-                $script:packageProducingSnapshotSha256) `
-            "PackageSbomAcceptanceInvalid"
+            $packageProducingSnapshot.Sha256 -ceq
+                $script:packageProducingSnapshotSha256
 
         $ledgerFile = Resolve-RegularRepositoryFile `
             -Root $Root `
@@ -1557,15 +1556,19 @@ function Read-PackageSbomAcceptance {
                 -RelativePaths $contractSourcePaths) -ceq
                 $script:packageSbomContractSourceSetSha256) `
             "PackageSbomAcceptanceInvalid"
-        Assert-Condition `
-            ((Get-CanonicalTextSourceSetSha256 `
-                -Root $Root `
-                -RelativePaths $productionInputPaths) -ceq
-                $script:packageSbomProductionInputSetSha256) `
-            "PackageSbomAcceptanceInvalid"
+        $currentProductionInputSetSha256 = Get-CanonicalTextSourceSetSha256 `
+            -Root $Root `
+            -RelativePaths $productionInputPaths
+        $productionInputSetCurrent =
+            $currentProductionInputSetSha256 -ceq
+                $script:packageSbomProductionInputSetSha256
         return [pscustomobject]@{
             Acceptance = $acceptance
             PackageProducingSnapshot = $packageProducingSnapshot
+            CurrentProductionInputSetSha256 = $currentProductionInputSetSha256
+            IsCurrent = [bool]($packageProducingSnapshotCurrent -and
+                $productionInputSetCurrent)
+            LedgerSha256 = Get-LowerSha256ForBytes -Bytes $ledgerBytes
         }
     }
     catch {
@@ -2952,6 +2955,8 @@ try {
     $packageSbomAcceptance = $packageSbomAcceptanceValidation.Acceptance
     $validatedPackageProducingSnapshot =
         $packageSbomAcceptanceValidation.PackageProducingSnapshot
+    $packageSbomCurrentAtEvaluation =
+        [bool]$packageSbomAcceptanceValidation.IsCurrent
 
     $script:technicalStage = "PackageVulnerabilityAcceptance"
     $packageVulnerabilityAcceptanceValidation = Read-PackageVulnerabilityAcceptance `
@@ -2983,23 +2988,34 @@ try {
         "SupportUrlPending",
         "WackPending"
     )
-    $effectiveBlockers = if ($packageVulnerabilityFinalReleaseFreshAtEvaluation) {
-        @($baseBlockers | Where-Object { $_ -cne "CveReviewPending" })
+    $effectiveBlockers = @($baseBlockers)
+    if ($packageVulnerabilityFinalReleaseFreshAtEvaluation) {
+        $effectiveBlockers = @(
+            $effectiveBlockers | Where-Object { $_ -cne "CveReviewPending" })
     }
-    else {
-        @($baseBlockers)
+    if (-not $packageSbomCurrentAtEvaluation) {
+        $effectiveBlockers += "SbomPending"
     }
     $blockers = Get-OrdinalSortedStrings -Values $effectiveBlockers
+    $expectedBlockerCount = 14
+    if ($packageVulnerabilityFinalReleaseFreshAtEvaluation) {
+        $expectedBlockerCount--
+    }
+    if ($packageSbomCurrentAtEvaluation) {
+        $expectedBlockerCount--
+    }
     Assert-Condition `
-        ($blockers.Count -eq $(if ($packageVulnerabilityFinalReleaseFreshAtEvaluation) { 12 } else { 13 })) `
+        ($blockers.Count -eq $expectedBlockerCount) `
         "PackageVulnerabilityAcceptanceInvalid"
 
+    $repositoryCommit = Get-CleanRepositoryCommit -Root $resolvedRepositoryRoot
+
     $summary = [ordered]@{
-        schemaVersion = 6
+        schemaVersion = 7
         result = "blocked"
-        technicalBaselinePassed = $true
+        technicalBaselinePassed = $packageSbomCurrentAtEvaluation
         releaseReady = $false
-        commitSha = Get-CleanRepositoryCommit -Root $resolvedRepositoryRoot
+        commitSha = $repositoryCommit
         manifest = [ordered]@{
             identity = $identity.GetAttribute("Name")
             publisher = $identity.GetAttribute("Publisher")
@@ -3069,6 +3085,14 @@ try {
             legalSbomComplete = $false
         }
         packageSbomAcceptance = [ordered]@{
+            result = if ($packageSbomCurrentAtEvaluation) {
+                "accepted-current"
+            }
+            else {
+                "stale-reopen"
+            }
+            currentAtEvaluation = $packageSbomCurrentAtEvaluation
+            ledgerSha256 = $packageSbomAcceptanceValidation.LedgerSha256
             decision = $packageSbomAcceptance.decision
             scope = $packageSbomAcceptance.scope
             runCompletedAtUtc = $packageSbomAcceptance.runCompletedAtUtc
@@ -3113,6 +3137,12 @@ try {
             contractSourceSetCanonicalSha256 = $packageSbomAcceptance.contractSourceSetCanonicalSha256
             packageProducingSnapshotFileCount = $packageSbomAcceptance.packageProducingSnapshotFileCount
             packageProducingSnapshotSha256 = $packageSbomAcceptance.packageProducingSnapshotSha256
+            currentPackageProducingSnapshotFileCount =
+                $validatedPackageProducingSnapshot.FileCount
+            currentPackageProducingSnapshotSha256 =
+                $validatedPackageProducingSnapshot.Sha256
+            currentProductionInputSetCanonicalSha256 =
+                $packageSbomAcceptanceValidation.CurrentProductionInputSetSha256
             applicationPackageFile = $packageSbomAcceptance.applicationPackageFile
             applicationPackageLength = $packageSbomAcceptance.applicationPackageLength
             applicationPackageSha256 = $packageSbomAcceptance.applicationPackageSha256
@@ -3133,6 +3163,12 @@ try {
             producerBlockerDisposition = $packageSbomAcceptance.producerBlockerDisposition
             producerSbomPending = $packageSbomAcceptance.producerSbomPending
             closedBlocker = "SbomPending"
+            effectiveClosedBlocker = if ($packageSbomCurrentAtEvaluation) {
+                "SbomPending"
+            }
+            else {
+                "None"
+            }
             legalSbomComplete = $false
         }
         packageVulnerabilityAcceptance = [ordered]@{
@@ -3232,16 +3268,23 @@ try {
         "AssetProvenanceInvalid"
 
     $script:technicalStage = "PackageSbomAcceptanceStability"
-    Assert-NoNearestPackageVersionOverrides -Root $resolvedRepositoryRoot
-    $publicationPackageProducingSnapshot = Get-PackageProducingSnapshot `
+    $publicationPackageSbomAcceptanceValidation = Read-PackageSbomAcceptance `
         -Root $resolvedRepositoryRoot
+    $publicationPackageProducingSnapshot =
+        $publicationPackageSbomAcceptanceValidation.PackageProducingSnapshot
     Assert-Condition `
         ($publicationPackageProducingSnapshot.FileCount -eq
-            $validatedPackageProducingSnapshot.FileCount -and
+             $validatedPackageProducingSnapshot.FileCount -and
          $publicationPackageProducingSnapshot.CanonicalBytes -eq
-            $validatedPackageProducingSnapshot.CanonicalBytes -and
+             $validatedPackageProducingSnapshot.CanonicalBytes -and
          $publicationPackageProducingSnapshot.Sha256 -ceq
-            $validatedPackageProducingSnapshot.Sha256) `
+             $validatedPackageProducingSnapshot.Sha256 -and
+         $publicationPackageSbomAcceptanceValidation.LedgerSha256 -ceq
+             $packageSbomAcceptanceValidation.LedgerSha256 -and
+         $publicationPackageSbomAcceptanceValidation.CurrentProductionInputSetSha256 -ceq
+             $packageSbomAcceptanceValidation.CurrentProductionInputSetSha256 -and
+         $publicationPackageSbomAcceptanceValidation.IsCurrent -eq
+             $packageSbomCurrentAtEvaluation) `
         "PackageSbomAcceptanceInvalid"
 
     $script:technicalStage = "PackageVulnerabilityAcceptanceStability"
@@ -3255,6 +3298,12 @@ try {
          $publicationPackageVulnerabilityValidation.FinalReleaseFreshAtEvaluation -eq
             $packageVulnerabilityFinalReleaseFreshAtEvaluation) `
         "PackageVulnerabilityAcceptanceInvalid"
+
+    $script:technicalStage = "RepositoryStability"
+    $publicationCommit = Get-CleanRepositoryCommit -Root $resolvedRepositoryRoot
+    Assert-Condition `
+        ($publicationCommit -ceq $repositoryCommit) `
+        "RepositoryChanged"
 
     $script:technicalStage = "EvidencePublication"
     Publish-BoundedEvidence `

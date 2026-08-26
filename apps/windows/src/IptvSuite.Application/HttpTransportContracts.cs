@@ -17,6 +17,7 @@ public enum HttpTransportFailure
     TlsValidationFailed,
     RateLimited,
     RemoteServiceUnavailable,
+    EndpointAddressRejected,
 }
 
 public enum HttpTransportRetryability
@@ -24,6 +25,21 @@ public enum HttpTransportRetryability
     Never,
     BoundedTransient,
     Manual,
+}
+
+public enum HttpResponseMediaType
+{
+    Unspecified,
+    Png,
+    Jpeg,
+    WebP,
+    Other,
+}
+
+internal enum HttpEndpointAddressPolicy
+{
+    PublicOnly,
+    ExplicitPrivateSourceOrigin,
 }
 
 public readonly record struct HttpTransportObservation(
@@ -49,17 +65,21 @@ public sealed class HttpTransportRequest : IDisposable
         Uri requestUri,
         SafeEndpoint expectedEndpoint,
         int maximumResponseBytes,
-        byte[] authorizationValue)
+        byte[] authorizationValue,
+        HttpEndpointAddressPolicy endpointAddressPolicy)
     {
         RequestUri = requestUri;
         ExpectedEndpoint = expectedEndpoint;
         MaximumResponseBytes = maximumResponseBytes;
         _authorizationValue = authorizationValue;
+        EndpointAddressPolicy = endpointAddressPolicy;
     }
 
     internal Uri RequestUri { get; }
 
     internal SafeEndpoint ExpectedEndpoint { get; }
+
+    internal HttpEndpointAddressPolicy EndpointAddressPolicy { get; }
 
     public int MaximumResponseBytes { get; }
 
@@ -86,6 +106,31 @@ public sealed class HttpTransportRequest : IDisposable
         SafeEndpoint expectedEndpoint,
         int maximumResponseBytes)
     {
+        return CreateCore(
+            requestUri,
+            expectedEndpoint,
+            maximumResponseBytes,
+            HttpEndpointAddressPolicy.PublicOnly);
+    }
+
+    internal static HttpTransportRequest CreateForExplicitPrivateSourceOrigin(
+        Uri requestUri,
+        SafeEndpoint expectedEndpoint,
+        int maximumResponseBytes)
+    {
+        return CreateCore(
+            requestUri,
+            expectedEndpoint,
+            maximumResponseBytes,
+            HttpEndpointAddressPolicy.ExplicitPrivateSourceOrigin);
+    }
+
+    private static HttpTransportRequest CreateCore(
+        Uri requestUri,
+        SafeEndpoint expectedEndpoint,
+        int maximumResponseBytes,
+        HttpEndpointAddressPolicy endpointAddressPolicy)
+    {
         ArgumentNullException.ThrowIfNull(requestUri);
         ArgumentNullException.ThrowIfNull(expectedEndpoint);
         if (!requestUri.IsAbsoluteUri ||
@@ -105,7 +150,12 @@ public sealed class HttpTransportRequest : IDisposable
             throw new ArgumentOutOfRangeException(nameof(maximumResponseBytes));
         }
 
-        return new HttpTransportRequest(new Uri(requestUri.AbsoluteUri), expectedEndpoint, maximumResponseBytes, []);
+        return new HttpTransportRequest(
+            new Uri(requestUri.AbsoluteUri),
+            expectedEndpoint,
+            maximumResponseBytes,
+            [],
+            endpointAddressPolicy);
     }
 
     public static HttpTransportRequest CreateWithAuthorization(
@@ -166,6 +216,7 @@ public sealed class HttpResponseLease : IDisposable
 {
     private byte[] _content;
     private Uri? _effectiveUri;
+    private HttpResponseMediaType _mediaType;
 
     internal HttpResponseLease(byte[] content)
     {
@@ -174,6 +225,8 @@ public sealed class HttpResponseLease : IDisposable
     }
 
     public ReadOnlyMemory<byte> Content => _content;
+
+    public HttpResponseMediaType MediaType => _mediaType;
 
     internal Uri? EffectiveUri => _effectiveUri;
 
@@ -191,6 +244,17 @@ public sealed class HttpResponseLease : IDisposable
         return this;
     }
 
+    internal HttpResponseLease BindMediaType(HttpResponseMediaType mediaType)
+    {
+        if (_mediaType != HttpResponseMediaType.Unspecified)
+        {
+            throw new InvalidOperationException("The response media type is already bound.");
+        }
+
+        _mediaType = mediaType;
+        return this;
+    }
+
     public static HttpResponseLease CopyFrom(ReadOnlySpan<byte> content)
     {
         if (content.IsEmpty || content.Length > HttpTransportLimits.MaximumAllowedResponseBytes)
@@ -199,6 +263,18 @@ public sealed class HttpResponseLease : IDisposable
         }
 
         return new HttpResponseLease(content.ToArray());
+    }
+
+    public static HttpResponseLease CopyFrom(
+        ReadOnlySpan<byte> content,
+        HttpResponseMediaType mediaType)
+    {
+        if (mediaType == HttpResponseMediaType.Unspecified)
+        {
+            throw new ArgumentOutOfRangeException(nameof(mediaType));
+        }
+
+        return CopyFrom(content).BindMediaType(mediaType);
     }
 
     public void Dispose()

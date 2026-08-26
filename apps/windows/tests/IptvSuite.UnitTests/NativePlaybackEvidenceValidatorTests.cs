@@ -315,6 +315,106 @@ public sealed class NativePlaybackEvidenceValidatorTests
     }
 
     [TestMethod]
+    public void M16FinalProfileAcceptsOnlyItsExactLongSoakShape()
+    {
+        using ValidationFiles files = ValidationFiles.Create("m16-native-evidence-valid");
+        string m16Evidence = CreateValidM16Evidence(files.ControllerSha256);
+
+        files.WriteEvidence(m16Evidence);
+        files.ValidateM16();
+        _ = Assert.ThrowsExactly<InvalidDataException>(files.Validate);
+
+        files.WriteEvidence(CreateValidEvidence(files.ControllerSha256));
+        _ = Assert.ThrowsExactly<InvalidDataException>(files.ValidateM16);
+    }
+
+    [TestMethod]
+    public void M16FinalProfileKeepsExactCountsAndResourceBudgetsFailClosed()
+    {
+        using ValidationFiles files = ValidationFiles.Create("m16-native-evidence-bounds");
+        string evidence = CreateValidM16Evidence(files.ControllerSha256);
+        (string Original, string Replacement)[] mutations =
+        [
+            ("\"SchemaVersion\":11", "\"SchemaVersion\":10"),
+            (
+                "\"Stage\":\"M16NativeTierAFinalAcceptance\"",
+                "\"Stage\":\"M10NativeTierAPlayback\""),
+            ("\"SwitchCount\":200", "\"SwitchCount\":199"),
+            ("\"SoakMinutes\":1440", "\"SoakMinutes\":1439"),
+            ("\"ResourceSampleCount\":289", "\"ResourceSampleCount\":285"),
+            ("\"ResourceSampleCount\":289", "\"ResourceSampleCount\":291"),
+            ("\"WarmupPrivateBytes\":200000000", "\"WarmupPrivateBytes\":0"),
+            ("\"MemoryNetGrowthBytes\":10000000", "\"MemoryNetGrowthBytes\":104857601"),
+            ("\"MemoryNetGrowthPercent\":5", "\"MemoryNetGrowthPercent\":10.001"),
+            ("\"MemoryNetGrowthPercent\":5", "\"MemoryNetGrowthPercent\":5.001"),
+            ("\"MemoryMonotonicIncrease\":false", "\"MemoryMonotonicIncrease\":true"),
+            ("\"WarmupHandleCount\":1000", "\"WarmupHandleCount\":0"),
+            ("\"DetachedSourceCount\":202", "\"DetachedSourceCount\":201"),
+            ("\"PlaybackRetryCount\":1", "\"PlaybackRetryCount\":8"),
+            ("\"NetworkInterruptionCount\":7", "\"NetworkInterruptionCount\":6"),
+            ("\"NetworkRecoveryCount\":7", "\"NetworkRecoveryCount\":6"),
+            ("\"CancellationProbeCount\":0", "\"CancellationProbeCount\":1"),
+        ];
+
+        foreach ((string original, string replacement) in mutations)
+        {
+            files.WriteEvidence(ReplaceOnce(evidence, original, replacement));
+            _ = Assert.ThrowsExactly<InvalidDataException>(files.ValidateM16);
+        }
+    }
+
+    [TestMethod]
+    public void M16FinalProfileAcceptsUnchangedInclusiveResourceLimits()
+    {
+        using ValidationFiles files = ValidationFiles.Create("m16-native-evidence-exact-limits");
+        string evidence = CreateValidM16Evidence(files.ControllerSha256);
+
+        files.WriteEvidence(evidence);
+        files.ValidateM16();
+
+        string absoluteLimitEvidence = ReplaceOnce(
+            evidence,
+            "\"WarmupPrivateBytes\":200000000",
+            "\"WarmupPrivateBytes\":2097152000");
+        absoluteLimitEvidence = ReplaceOnce(
+            absoluteLimitEvidence,
+            "\"MemoryNetGrowthBytes\":10000000",
+            "\"MemoryNetGrowthBytes\":104857600");
+        files.WriteEvidence(absoluteLimitEvidence);
+        files.ValidateM16();
+
+        string relativeLimitEvidence = ReplaceOnce(
+            evidence,
+            "\"MemoryNetGrowthBytes\":10000000",
+            "\"MemoryNetGrowthBytes\":20000000");
+        relativeLimitEvidence = ReplaceOnce(
+            relativeLimitEvidence,
+            "\"MemoryNetGrowthPercent\":5",
+            "\"MemoryNetGrowthPercent\":10");
+        files.WriteEvidence(relativeLimitEvidence);
+        files.ValidateM16();
+
+        string roundedPercentEvidence = ReplaceOnce(
+            evidence,
+            "\"MemoryNetGrowthBytes\":10000000",
+            "\"MemoryNetGrowthBytes\":10000999");
+        files.WriteEvidence(roundedPercentEvidence);
+        files.ValidateM16();
+
+        files.WriteEvidence(ReplaceOnce(
+            evidence,
+            "\"ResourceSampleCount\":289",
+            "\"ResourceSampleCount\":286"));
+        files.ValidateM16();
+
+        files.WriteEvidence(ReplaceOnce(
+            evidence,
+            "\"ResourceSampleCount\":289",
+            "\"ResourceSampleCount\":290"));
+        files.ValidateM16();
+    }
+
+    [TestMethod]
     public void ValidationErrorsDoNotEchoPathsOrUntrustedValues()
     {
         using ValidationFiles files = ValidationFiles.Create("native-evidence-sanitized-error");
@@ -485,6 +585,37 @@ public sealed class NativePlaybackEvidenceValidatorTests
         return evidence;
     }
 
+    private static string CreateValidM16Evidence(string controllerSha256)
+    {
+        string evidence = CreateCancellationDisabledEvidence(CreateValidEvidence(controllerSha256));
+        (string Original, string Replacement)[] replacements =
+        [
+            ("\"SchemaVersion\":10", "\"SchemaVersion\":11"),
+            (
+                "\"Stage\":\"M10NativeTierAPlayback\"",
+                "\"Stage\":\"M16NativeTierAFinalAcceptance\""),
+            ("\"SwitchCount\":100", "\"SwitchCount\":200"),
+            ("\"SoakMinutes\":0", "\"SoakMinutes\":1440"),
+            ("\"ResourceSampleCount\":0", "\"ResourceSampleCount\":289"),
+            ("\"WarmupPrivateBytes\":0", "\"WarmupPrivateBytes\":200000000"),
+            ("\"MemoryNetGrowthBytes\":0", "\"MemoryNetGrowthBytes\":10000000"),
+            ("\"MemoryNetGrowthPercent\":0", "\"MemoryNetGrowthPercent\":5"),
+            ("\"WarmupHandleCount\":0", "\"WarmupHandleCount\":1000"),
+            ("\"HandleNetGrowth\":0", "\"HandleNetGrowth\":-10"),
+            ("\"DetachedSourceCount\":101", "\"DetachedSourceCount\":202"),
+            ("\"NetworkInterruptionCount\":1", "\"NetworkInterruptionCount\":7"),
+            ("\"NetworkRecoveryCount\":1", "\"NetworkRecoveryCount\":7"),
+            ("\"LoopbackRequestCount\":120", "\"LoopbackRequestCount\":240"),
+        ];
+
+        foreach ((string original, string replacement) in replacements)
+        {
+            evidence = ReplaceOnce(evidence, original, replacement);
+        }
+
+        return evidence;
+    }
+
     private static string ReplaceOnce(string value, string original, string replacement)
     {
         int index = value.IndexOf(original, StringComparison.Ordinal);
@@ -535,6 +666,13 @@ public sealed class NativePlaybackEvidenceValidatorTests
 
         internal void Validate() =>
             NativePlaybackEvidenceValidator.Validate(
+                EvidencePath,
+                ControllerPath,
+                CommitSha,
+                ExpectedSdk);
+
+        internal void ValidateM16() =>
+            M16NativePlaybackEvidenceValidator.Validate(
                 EvidencePath,
                 ControllerPath,
                 CommitSha,

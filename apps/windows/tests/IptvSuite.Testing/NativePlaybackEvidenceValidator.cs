@@ -8,7 +8,10 @@ public static class NativePlaybackEvidenceValidator
 {
     private const int MaximumEvidenceBytes = 64 * 1024;
     private const int MaximumControllerBytes = 1024 * 1024;
-    private const string ExpectedStage = "M10NativeTierAPlayback";
+    private const int M16MinimumResourceSampleCount = (1440 / 5) - 2;
+    private const int M16MaximumResourceSampleCount = 290;
+    private const string ExpectedM10Stage = "M10NativeTierAPlayback";
+    private const string ExpectedM16Stage = "M16NativeTierAFinalAcceptance";
     private const string ExpectedRuntimeName = "Microsoft.WindowsAppRuntime.2";
     private const string ExpectedRuntimePublisherId = "8wekyb3d8bbwe";
 
@@ -108,6 +111,35 @@ public static class NativePlaybackEvidenceValidator
         string expectedCommitSha,
         string expectedSdk)
     {
+        ValidateCore(
+            evidencePath,
+            controllerPath,
+            expectedCommitSha,
+            expectedSdk,
+            m16FinalAcceptance: false);
+    }
+
+    internal static void ValidateM16FinalAcceptance(
+        string evidencePath,
+        string controllerPath,
+        string expectedCommitSha,
+        string expectedSdk)
+    {
+        ValidateCore(
+            evidencePath,
+            controllerPath,
+            expectedCommitSha,
+            expectedSdk,
+            m16FinalAcceptance: true);
+    }
+
+    private static void ValidateCore(
+        string evidencePath,
+        string controllerPath,
+        string expectedCommitSha,
+        string expectedSdk,
+        bool m16FinalAcceptance)
+    {
         if (!IsLowerHex(expectedCommitSha, 40))
         {
             throw Invalid("Expected native playback commit is invalid.");
@@ -148,7 +180,12 @@ public static class NativePlaybackEvidenceValidator
                     CommentHandling = JsonCommentHandling.Disallow,
                     MaxDepth = 4,
                 });
-            ValidateRoot(document.RootElement, controllerSha256, expectedCommitSha, expectedSdk);
+            ValidateRoot(
+                document.RootElement,
+                controllerSha256,
+                expectedCommitSha,
+                expectedSdk,
+                m16FinalAcceptance);
         }
         catch (JsonException)
         {
@@ -160,7 +197,8 @@ public static class NativePlaybackEvidenceValidator
         JsonElement root,
         string controllerSha256,
         string expectedCommitSha,
-        string expectedSdk)
+        string expectedSdk,
+        bool m16FinalAcceptance)
     {
         if (root.ValueKind != JsonValueKind.Object)
         {
@@ -176,8 +214,14 @@ public static class NativePlaybackEvidenceValidator
             throw Invalid("Native playback evidence property sequence is invalid.");
         }
 
-        RequireEqual(RequireInt32(root, "SchemaVersion"), 10, "SchemaVersion");
-        RequireEqual(RequireString(root, "Stage"), ExpectedStage, "Stage");
+        RequireEqual(
+            RequireInt32(root, "SchemaVersion"),
+            m16FinalAcceptance ? 11 : 10,
+            "SchemaVersion");
+        RequireEqual(
+            RequireString(root, "Stage"),
+            m16FinalAcceptance ? ExpectedM16Stage : ExpectedM10Stage,
+            "Stage");
         RequireEqual(RequireString(root, "Result"), "Passed", "Result");
         RequireLowerHex(root, "RunId", 32);
         RequireUtcRoundTripTimestamp(root, "CompletedAtUtc");
@@ -197,7 +241,7 @@ public static class NativePlaybackEvidenceValidator
         RequireEqual(RequireBoolean(root, "ProbeRunIdBound"), true, "ProbeRunIdBound");
 
         int switchCount = RequireInt32(root, "SwitchCount");
-        RequireEqual(switchCount, 100, "SwitchCount");
+        RequireEqual(switchCount, m16FinalAcceptance ? 200 : 100, "SwitchCount");
         double startupP95 = RequireNonNegativeDouble(root, "StartupP95Milliseconds");
         double startupMaximum = RequireNonNegativeDouble(root, "StartupMaximumMilliseconds");
         double hlsStartupP95 = RequireNonNegativeDouble(root, "HlsStartupP95Milliseconds");
@@ -208,18 +252,75 @@ public static class NativePlaybackEvidenceValidator
             throw InvalidProperty("StartupP95Milliseconds");
         }
 
-        RequireEqual(RequireInt32(root, "SoakMinutes"), 0, "SoakMinutes");
-        RequireEqual(RequireInt32(root, "ResourceSampleCount"), 0, "ResourceSampleCount");
-        RequireEqual(RequireInt64(root, "WarmupPrivateBytes"), 0L, "WarmupPrivateBytes");
-        RequireEqual(RequireInt64(root, "MemoryNetGrowthBytes"), 0L, "MemoryNetGrowthBytes");
-        RequireEqual(RequireDouble(root, "MemoryNetGrowthPercent"), 0d, "MemoryNetGrowthPercent");
-        RequireEqual(RequireBoolean(root, "MemoryMonotonicIncrease"), false, "MemoryMonotonicIncrease");
-        RequireEqual(RequireInt32(root, "WarmupHandleCount"), 0, "WarmupHandleCount");
-        RequireEqual(RequireInt32(root, "HandleNetGrowth"), 0, "HandleNetGrowth");
+        int soakMinutes = RequireInt32(root, "SoakMinutes");
+        int resourceSampleCount = RequireInt32(root, "ResourceSampleCount");
+        long warmupPrivateBytes = RequireInt64(root, "WarmupPrivateBytes");
+        long memoryNetGrowthBytes = RequireInt64(root, "MemoryNetGrowthBytes");
+        double memoryNetGrowthPercent = RequireDouble(root, "MemoryNetGrowthPercent");
+        bool memoryMonotonicIncrease = RequireBoolean(root, "MemoryMonotonicIncrease");
+        int warmupHandleCount = RequireInt32(root, "WarmupHandleCount");
+        int handleNetGrowth = RequireInt32(root, "HandleNetGrowth");
+        if (m16FinalAcceptance)
+        {
+            RequireEqual(soakMinutes, 1440, "SoakMinutes");
+            if (resourceSampleCount is < M16MinimumResourceSampleCount or
+                > M16MaximumResourceSampleCount)
+            {
+                throw InvalidProperty("ResourceSampleCount");
+            }
+
+            if (warmupPrivateBytes <= 0)
+            {
+                throw InvalidProperty("WarmupPrivateBytes");
+            }
+
+            if (memoryNetGrowthBytes > 100L * 1024 * 1024)
+            {
+                throw InvalidProperty("MemoryNetGrowthBytes");
+            }
+
+            if (memoryNetGrowthPercent > 10d)
+            {
+                throw InvalidProperty("MemoryNetGrowthPercent");
+            }
+
+            double calculatedMemoryNetGrowthPercent =
+                (double)memoryNetGrowthBytes * 100d / warmupPrivateBytes;
+            if (Math.Abs(
+                    memoryNetGrowthPercent -
+                    calculatedMemoryNetGrowthPercent) > 0.0005001d)
+            {
+                throw InvalidProperty("MemoryNetGrowthPercent");
+            }
+
+            if (memoryMonotonicIncrease)
+            {
+                throw InvalidProperty("MemoryMonotonicIncrease");
+            }
+
+            if (warmupHandleCount <= 0)
+            {
+                throw InvalidProperty("WarmupHandleCount");
+            }
+
+            _ = handleNetGrowth;
+        }
+        else
+        {
+            RequireEqual(soakMinutes, 0, "SoakMinutes");
+            RequireEqual(resourceSampleCount, 0, "ResourceSampleCount");
+            RequireEqual(warmupPrivateBytes, 0L, "WarmupPrivateBytes");
+            RequireEqual(memoryNetGrowthBytes, 0L, "MemoryNetGrowthBytes");
+            RequireEqual(memoryNetGrowthPercent, 0d, "MemoryNetGrowthPercent");
+            RequireEqual(memoryMonotonicIncrease, false, "MemoryMonotonicIncrease");
+            RequireEqual(warmupHandleCount, 0, "WarmupHandleCount");
+            RequireEqual(handleNetGrowth, 0, "HandleNetGrowth");
+        }
         RequireEqual(RequireInt32(root, "SurfaceTransitionCount"), 6, "SurfaceTransitionCount");
 
         int playbackRetryCount = RequireInt32(root, "PlaybackRetryCount");
-        if (playbackRetryCount is < 0 or > 1)
+        int maximumPlaybackRetryCount = m16FinalAcceptance ? 7 : 1;
+        if (playbackRetryCount < 0 || playbackRetryCount > maximumPlaybackRetryCount)
         {
             throw InvalidProperty("PlaybackRetryCount");
         }
@@ -233,14 +334,16 @@ public static class NativePlaybackEvidenceValidator
         }
 
         int cancellationProbeCount = RequireInt32(root, "CancellationProbeCount");
-        if (cancellationProbeCount is < 0 or > 1)
+        if (cancellationProbeCount is < 0 or > 1 ||
+            (m16FinalAcceptance && cancellationProbeCount != 0))
         {
             throw InvalidProperty("CancellationProbeCount");
         }
 
         RequireEqual(
             RequireInt32(root, "DetachedSourceCount"),
-            switchCount + playbackRetryCount + (cancellationProbeCount * 2),
+            switchCount + playbackRetryCount + (cancellationProbeCount * 2) +
+                (m16FinalAcceptance ? 1 : 0),
             "DetachedSourceCount");
 
         int cancellationObservedCount = RequireInt32(root, "CancellationObservedCount");
@@ -379,8 +482,15 @@ public static class NativePlaybackEvidenceValidator
                 "CancellationNoAutomaticRestart");
         }
 
-        RequireEqual(RequireInt32(root, "NetworkInterruptionCount"), 1, "NetworkInterruptionCount");
-        RequireEqual(RequireInt32(root, "NetworkRecoveryCount"), 1, "NetworkRecoveryCount");
+        int expectedNetworkInterruptionCount = m16FinalAcceptance ? 7 : 1;
+        RequireEqual(
+            RequireInt32(root, "NetworkInterruptionCount"),
+            expectedNetworkInterruptionCount,
+            "NetworkInterruptionCount");
+        RequireEqual(
+            RequireInt32(root, "NetworkRecoveryCount"),
+            expectedNetworkInterruptionCount,
+            "NetworkRecoveryCount");
         int injectedOrdinal = RequireInt32(root, "LastInjectedRequestOrdinal");
         int recoveryOrdinal = RequireInt32(root, "LastRecoveryRequestOrdinal");
         if (injectedOrdinal <= 0 || recoveryOrdinal <= injectedOrdinal)
@@ -388,10 +498,18 @@ public static class NativePlaybackEvidenceValidator
             throw InvalidProperty("LastRecoveryRequestOrdinal");
         }
 
-        RequireNonNegativeInt64(root, "InitialPrivateBytes");
-        RequireNonNegativeInt64(root, "FinalPrivateBytes");
-        RequireNonNegativeInt32(root, "InitialHandleCount");
-        RequireNonNegativeInt32(root, "FinalHandleCount");
+        long initialPrivateBytes = RequireInt64(root, "InitialPrivateBytes");
+        long finalPrivateBytes = RequireInt64(root, "FinalPrivateBytes");
+        int initialHandleCount = RequireInt32(root, "InitialHandleCount");
+        int finalHandleCount = RequireInt32(root, "FinalHandleCount");
+        if (initialPrivateBytes < 0 || finalPrivateBytes < 0 ||
+            initialHandleCount < 0 || finalHandleCount < 0 ||
+            (m16FinalAcceptance &&
+                (initialPrivateBytes == 0 || finalPrivateBytes == 0 ||
+                 initialHandleCount == 0 || finalHandleCount == 0)))
+        {
+            throw InvalidProperty("InitialPrivateBytes");
+        }
         if (RequireInt32(root, "LoopbackRequestCount") < switchCount)
         {
             throw InvalidProperty("LoopbackRequestCount");
@@ -681,4 +799,22 @@ public static class NativePlaybackEvidenceValidator
         Invalid($"Native playback evidence property '{name}' is invalid.");
 
     private static InvalidDataException Invalid(string message) => new(message);
+}
+
+/// <summary>
+/// Validates the fixed M16 native soak evidence contract. This does not infer
+/// OS-level audio-session quiescence from the managed source-detach metrics.
+/// </summary>
+public static class M16NativePlaybackEvidenceValidator
+{
+    public static void Validate(
+        string evidencePath,
+        string controllerPath,
+        string expectedCommitSha,
+        string expectedSdk) =>
+        NativePlaybackEvidenceValidator.ValidateM16FinalAcceptance(
+            evidencePath,
+            controllerPath,
+            expectedCommitSha,
+            expectedSdk);
 }

@@ -202,6 +202,119 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile(
     [ref]$parseErrors)
 Assert-Contract ($parseErrors.Count -eq 0) "The native playback controller has PowerShell 5.1 parse errors."
 
+$controllerText = [System.IO.File]::ReadAllText($resolvedControllerPath)
+$m16FinalProfileInvariants = @(
+    '[ValidateSet("M10", "M16Final")]',
+    '$AcceptanceProfile = "M10"',
+    '$SwitchCount -ne 200',
+    '$SoakMinutes -ne 1440',
+    '$NetworkInterruptionCount -ne 7',
+    '$CancellationProbeCount -ne 0',
+    '$maximumProbeEvidenceBytes = if ($isM16FinalAcceptance) { 131072 } else { 65536 }',
+    '$maximumResourceSampleCount = if ($isM16FinalAcceptance) { 290 } else { 128 }',
+    '$successCandidate["SchemaVersion"] = 11',
+    '$successCandidate["Stage"] = "M16NativeTierAFinalAcceptance"'
+)
+foreach ($invariant in $m16FinalProfileInvariants) {
+    Assert-Contract `
+        ($controllerText.IndexOf($invariant, [System.StringComparison]::Ordinal) -ge 0) `
+        "The M16 final native playback profile is incomplete or caller-variable."
+}
+
+$profileValidationIndex = $controllerText.IndexOf(
+    'if ($isM16FinalAcceptance) {',
+    [System.StringComparison]::Ordinal)
+$embeddedControllerIndex = $controllerText.IndexOf(
+    '$activationInterop = @''',
+    [System.StringComparison]::Ordinal)
+$firstWorkspaceMutationIndex = $controllerText.IndexOf(
+    'New-RegularDirectory -Path (Join-Path $repositoryRoot ".artifacts")',
+    [System.StringComparison]::Ordinal)
+Assert-Contract `
+    ($profileValidationIndex -ge 0 -and
+        $profileValidationIndex -lt $embeddedControllerIndex -and
+        $embeddedControllerIndex -lt $firstWorkspaceMutationIndex) `
+    "M10/M16 profile validation must fail before repository or artifact mutation."
+Assert-Contract `
+    ([regex]::Matches(
+            $controllerText,
+            [regex]::Escape("The M10 native playback profile is outside its fixed switch or soak boundary.")).Count -eq 1) `
+    "M10 profile validation must have one fail-fast source of truth."
+Assert-Contract `
+    ([regex]::Matches(
+            $controllerText,
+            [regex]::Escape("The M16 final native acceptance profile requires exactly 200 switches, 1440 soak minutes, seven interruptions, and no inline cancellation probe.")).Count -eq 1) `
+    "M16 profile validation must have one fail-fast source of truth."
+Assert-Contract `
+    ($controllerText.IndexOf(
+            'Set-FailurePoint -Stage "InputValidation"',
+            [System.StringComparison]::Ordinal) -lt 0) `
+    "Fail-fast profile validation must not be duplicated inside the evidence transaction."
+
+function Invoke-FailFastProfileScenario {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    $scenarioRoot = Join-Path `
+        ([System.IO.Path]::GetTempPath()) `
+        ("iptvsuite-native-profile-" + [Guid]::NewGuid().ToString("N"))
+    $scenarioControllerRoot = Join-Path $scenarioRoot "eng"
+    $scenarioArtifactRoot = Join-Path $scenarioRoot ".artifacts\native-playback-smoke"
+    $sentinelPath = Join-Path $scenarioArtifactRoot "last-success.json"
+    try {
+        [System.IO.Directory]::CreateDirectory($scenarioControllerRoot) | Out-Null
+        [System.IO.Directory]::CreateDirectory($scenarioArtifactRoot) | Out-Null
+        $scenarioControllerPath = Join-Path $scenarioControllerRoot "Invoke-WindowsNativePlaybackSmoke.ps1"
+        [System.IO.File]::Copy($resolvedControllerPath, $scenarioControllerPath, $false)
+        [System.IO.File]::WriteAllText(
+            $sentinelPath,
+            "profile-validation-sentinel",
+            [System.Text.UTF8Encoding]::new($false))
+
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            & (Join-Path $PSHOME "powershell.exe") `
+                -NoProfile `
+                -ExecutionPolicy Bypass `
+                -File $scenarioControllerPath `
+                @Arguments *> $null
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        Assert-Contract ($exitCode -ne 0) "$Name unexpectedly passed."
+        Assert-Contract `
+            ([System.IO.File]::ReadAllText($sentinelPath) -ceq "profile-validation-sentinel") `
+            "$Name mutated pre-existing evidence before rejecting the profile."
+        Assert-Contract `
+            (@([System.IO.DirectoryInfo]::new($scenarioArtifactRoot).GetFileSystemInfos()).Count -eq 1) `
+            "$Name created artifact output before rejecting the profile."
+    }
+    finally {
+        if ([System.IO.Directory]::Exists($scenarioRoot)) {
+            [System.IO.Directory]::Delete($scenarioRoot, $true)
+        }
+    }
+}
+
+Invoke-FailFastProfileScenario `
+    -Arguments @("-SwitchCount", "101") `
+    -Name "Out-of-range M10 profile"
+Invoke-FailFastProfileScenario `
+    -Arguments @(
+        "-AcceptanceProfile", "M16Final",
+        "-SwitchCount", "199",
+        "-SoakMinutes", "1440",
+        "-NetworkInterruptionCount", "7") `
+    -Name "Non-exact M16 profile"
+
 $probePropertyAssertions = @($ast.FindAll({
     param($node)
     if ($node -isnot [System.Management.Automation.Language.CommandAst] -or

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
+using System.Security.Authentication;
 using System.Text;
 using IptvSuite.Application;
 using IptvSuite.Domain;
@@ -249,20 +250,224 @@ public sealed class BoundedHttpTransportTests
     }
 
     [TestMethod]
-    public async Task ProductionTlsValidationRejectsSyntheticUntrustedCertificate()
+    public async Task TlsValidationFailureUsesStableTypedFailureThroughInjectedHandler()
     {
-        await using LocalHttpFixtureServer fixture = await LocalHttpFixtureServer.StartHttpsAsync(
-            new Dictionary<string, FixtureHttpResponse>
-            {
-                ["/list"] = new(200, "application/octet-stream", new byte[] { 1 }),
-            });
-        using BoundedHttpTransport transport = new();
+        using StubHandler handler = new((_, _) => Task.FromException<HttpResponseMessage>(
+            new HttpRequestException("synthetic", new AuthenticationException("synthetic"))));
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
 
-        HttpTransportResult result = await transport.GetAsync(
-            CreateRequest(new Uri(fixture.BaseAddress, "/list").AbsoluteUri, 64));
+        HttpTransportResult result = await transport.GetAsync(CreateRequest("https://example.test/list", 64));
 
         Assert.AreEqual(HttpTransportFailure.TlsValidationFailed, result.Failure);
         Assert.IsNull(result.Response);
+        Assert.HasCount(1, handler.RequestUris);
+    }
+
+    [TestMethod]
+    public async Task ProductionIpLiteralLoopbackFailsClosedWithoutRetry()
+    {
+        RecordingObserver observer = new();
+        using BoundedHttpTransport transport = new(observer);
+
+        HttpTransportResult result = await transport.GetAsync(
+            CreateRequest("https://127.0.0.1:65535/list", 64));
+
+        Assert.AreEqual(HttpTransportFailure.EndpointAddressRejected, result.Failure);
+        Assert.AreEqual(HttpTransportRetryability.Never, result.Retryability);
+        Assert.HasCount(1, observer.Observations);
+        Assert.AreEqual(1, observer.Observations[0].AttemptCount);
+    }
+
+    [TestMethod]
+    public async Task ProductionDnsResolutionToLoopbackFailsClosedWithoutRetry()
+    {
+        RecordingObserver observer = new();
+        using BoundedHttpTransport transport = new(observer);
+
+        HttpTransportResult result = await transport.GetAsync(
+            CreateRequest("https://localhost:65535/list", 64));
+
+        Assert.AreEqual(HttpTransportFailure.EndpointAddressRejected, result.Failure);
+        Assert.AreEqual(HttpTransportRetryability.Never, result.Retryability);
+        Assert.HasCount(1, observer.Observations);
+        Assert.AreEqual(1, observer.Observations[0].AttemptCount);
+    }
+
+    [TestMethod]
+    public void ResolvedAddressPolicyRejectsSpecialPrivateAndMixedDnsAnswers()
+    {
+        Assert.IsTrue(AreResolvedAddressesAllowed(
+            allowExplicitPrivateSourceOrigin: false,
+            "public.example",
+            "93.184.216.34",
+            "2606:4700:4700::1111"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "private.example", "127.0.0.1"));
+        Assert.IsTrue(AreResolvedAddressesAllowed(true, "private.example", "127.0.0.1", "::1"));
+        Assert.IsTrue(AreResolvedAddressesAllowed(true, "private.example", "10.0.0.1", "192.168.1.1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(
+            allowExplicitPrivateSourceOrigin: true,
+            "mixed.example",
+            "93.184.216.34",
+            "10.0.0.1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "mapped.example", "::ffff:127.0.0.1"));
+        Assert.IsTrue(AreResolvedAddressesAllowed(true, "mapped.example", "::ffff:127.0.0.1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(true, "unspecified.example", "0.0.0.0"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(true, "multicast.example", "239.1.1.1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "special.example", "192.0.0.1"));
+        Assert.IsTrue(AreResolvedAddressesAllowed(false, "public.example", "192.0.1.1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "documentation.example", "192.0.2.1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "relay.example", "192.88.99.1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "special.example", "2001::1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(true, "special.example", "2001:1ff::1"));
+        Assert.IsTrue(AreResolvedAddressesAllowed(false, "public.example", "2001:200::1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "sixtofour.example", "2002::1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(true, "documentation.example", "2001:db8::1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "documentation.example", "3fff:fff::1"));
+        Assert.IsTrue(AreResolvedAddressesAllowed(false, "public.example", "3fff:1000::1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(false, "127.0.0.1", "127.0.0.1"));
+        Assert.IsTrue(AreResolvedAddressesAllowed(true, "127.0.0.1", "127.0.0.1"));
+        Assert.IsFalse(AreResolvedAddressesAllowed(true, "127.0.0.1", "127.0.0.2"));
+    }
+
+    [TestMethod]
+    public void ExplicitPrivatePolicyIsBoundOnlyToTheExactSourceOrigin()
+    {
+        DomainResult<PreparedRemotePlaylistSourceDraft> source =
+            SourceConfigurationValidator.PrepareRemotePlaylist(
+                "Synthetic",
+                "https://private.example:8443/list");
+        DomainResult<PreparedRemotePlaylistSourceDraft> otherOrigin =
+            SourceConfigurationValidator.PrepareRemotePlaylist(
+                "Synthetic",
+                "https://redirect.example:8443/list");
+        Assert.IsTrue(source.IsSuccess);
+        Assert.IsTrue(otherOrigin.IsSuccess);
+
+        using HttpTransportRequest explicitPrivateRequest = CreateExplicitPrivateSourceRequest(
+            new Uri("https://private.example:8443/list"),
+            source.Value!.SafeEndpoint,
+            64);
+        Assert.AreEqual(
+            "ExplicitPrivateSourceOrigin",
+            BindAddressPolicy(explicitPrivateRequest, source.Value.SafeEndpoint));
+        Assert.AreEqual(
+            "PublicOnly",
+            BindAddressPolicy(explicitPrivateRequest, otherOrigin.Value!.SafeEndpoint));
+
+        using HttpTransportRequest publicOnlyRequest = HttpTransportRequest.Create(
+            new Uri("https://private.example:8443/list"),
+            source.Value.SafeEndpoint,
+            64);
+        Assert.AreEqual(
+            "PublicOnly",
+            BindAddressPolicy(publicOnlyRequest, source.Value.SafeEndpoint));
+
+        Assert.IsTrue(IsBoundAuthorityAllowed(
+            explicitPrivateRequest,
+            source.Value.SafeEndpoint,
+            "private.example",
+            8443));
+        Assert.IsFalse(IsBoundAuthorityAllowed(
+            explicitPrivateRequest,
+            source.Value.SafeEndpoint,
+            "redirect.example",
+            8443));
+        Assert.IsFalse(IsBoundAuthorityAllowed(
+            explicitPrivateRequest,
+            source.Value.SafeEndpoint,
+            "private.example",
+            443));
+
+        DomainResult<PreparedRemotePlaylistSourceDraft> internationalSource =
+            SourceConfigurationValidator.PrepareRemotePlaylist(
+                "Synthetic",
+                "https://bücher.example:8443/list");
+        Assert.IsTrue(internationalSource.IsSuccess);
+        using HttpTransportRequest internationalRequest = CreateExplicitPrivateSourceRequest(
+            new Uri("https://bücher.example:8443/list"),
+            internationalSource.Value!.SafeEndpoint,
+            64);
+        Assert.IsTrue(IsBoundAuthorityAllowed(
+            internationalRequest,
+            internationalSource.Value.SafeEndpoint,
+            "bücher.example",
+            8443));
+        Assert.IsTrue(IsBoundAuthorityAllowed(
+            internationalRequest,
+            internationalSource.Value.SafeEndpoint,
+            "xn--bcher-kva.example",
+            8443));
+        Assert.IsFalse(IsBoundAuthorityAllowed(
+            internationalRequest,
+            internationalSource.Value.SafeEndpoint,
+            "\ud800.example",
+            8443));
+    }
+
+    [TestMethod]
+    public void ProductionConnectionPoolsDisableProxyAndIsolatePrivateReuse()
+    {
+        MethodInfo factory = typeof(BoundedHttpTransport).GetMethod(
+            "CreateProductionHandler",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The production HTTP handler factory is unavailable.");
+        using var publicHandler = (SocketsHttpHandler)factory.Invoke(
+            null,
+            [TimeSpan.FromMinutes(10)])!;
+        using var explicitPrivateHandler = (SocketsHttpHandler)factory.Invoke(
+            null,
+            [TimeSpan.Zero])!;
+
+        Assert.IsFalse(publicHandler.UseProxy);
+        Assert.IsFalse(explicitPrivateHandler.UseProxy);
+        Assert.AreEqual(TimeSpan.FromMinutes(10), publicHandler.PooledConnectionLifetime);
+        Assert.AreEqual(TimeSpan.Zero, explicitPrivateHandler.PooledConnectionLifetime);
+    }
+
+    [TestMethod]
+    public async Task CrossOriginRedirectToPrivateLiteralIsRejectedBeforeSecondRequest()
+    {
+        using StubHandler handler = new((_, _) =>
+        {
+            HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+            redirect.Headers.Location = new Uri("https://127.0.0.1/private");
+            return Task.FromResult(redirect);
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+
+        HttpTransportResult result = await transport.GetAsync(CreateRequest("https://example.test/start", 64));
+
+        Assert.AreEqual(HttpTransportFailure.RedirectRejected, result.Failure);
+        Assert.AreEqual(HttpTransportRetryability.Never, result.Retryability);
+        Assert.HasCount(1, handler.RequestUris);
+    }
+
+    [TestMethod]
+    public async Task BufferedResponseClassifiesOnlyExactImageMediaTypes()
+    {
+        static async Task<HttpResponseMediaType> ClassifyAsync(Action<HttpContentHeaders>? configure)
+        {
+            using StubHandler handler = new((_, _) =>
+            {
+                HttpResponseMessage response = Response(HttpStatusCode.OK, [1]);
+                configure?.Invoke(response.Content.Headers);
+                return Task.FromResult(response);
+            });
+            using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+            HttpTransportResult result = await transport.GetAsync(
+                CreateRequest("https://example.test/logo", 64));
+            Assert.IsTrue(result.IsSuccess);
+            using HttpResponseLease response = result.Response!;
+            return response.MediaType;
+        }
+
+        Assert.AreEqual(HttpResponseMediaType.Png, await ClassifyAsync(headers =>
+            headers.ContentType = new MediaTypeHeaderValue("image/png")));
+        Assert.AreEqual(HttpResponseMediaType.Other, await ClassifyAsync(configure: null));
+        Assert.AreEqual(HttpResponseMediaType.Other, await ClassifyAsync(headers =>
+            headers.TryAddWithoutValidation("Content-Type", "not-a-media-type")));
+        Assert.AreEqual(HttpResponseMediaType.Other, await ClassifyAsync(headers =>
+            headers.TryAddWithoutValidation("Content-Type", ["image/png", "image/jpeg"])));
     }
 
     [TestMethod]
@@ -412,6 +617,102 @@ public sealed class BoundedHttpTransportTests
             SourceConfigurationValidator.PrepareRemotePlaylist("Synthetic", locator);
         Assert.IsTrue(prepared.IsSuccess);
         return HttpTransportRequest.Create(uri, prepared.Value!.SafeEndpoint, maximumBytes);
+    }
+
+    private static bool AreResolvedAddressesAllowed(
+        bool allowExplicitPrivateSourceOrigin,
+        string host,
+        params string[] addressTexts)
+    {
+        Type policy = typeof(BoundedHttpTransport).Assembly.GetType(
+            "IptvSuite.Infrastructure.EndpointAddressPolicy",
+            throwOnError: true)!;
+        MethodInfo method = policy.GetMethod(
+            "AreResolvedAddressesAllowed",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The endpoint address policy test seam is unavailable.");
+        IPAddress[] addresses = addressTexts.Select(IPAddress.Parse).ToArray();
+        Type addressPolicyType = typeof(HttpTransportRequest).Assembly.GetType(
+            "IptvSuite.Application.HttpEndpointAddressPolicy",
+            throwOnError: true)!;
+        object addressPolicy = Enum.Parse(
+            addressPolicyType,
+            allowExplicitPrivateSourceOrigin
+                ? "ExplicitPrivateSourceOrigin"
+                : "PublicOnly");
+        return (bool)method.Invoke(null, [host, addresses, addressPolicy])!;
+    }
+
+    private static HttpTransportRequest CreateExplicitPrivateSourceRequest(
+        Uri requestUri,
+        SafeEndpoint expectedEndpoint,
+        int maximumBytes)
+    {
+        MethodInfo factory = typeof(HttpTransportRequest).GetMethod(
+            "CreateForExplicitPrivateSourceOrigin",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The explicit private source request factory is unavailable.");
+        return (HttpTransportRequest)factory.Invoke(
+            null,
+            [requestUri, expectedEndpoint, maximumBytes])!;
+    }
+
+    private static string BindAddressPolicy(
+        HttpTransportRequest request,
+        SafeEndpoint currentEndpoint)
+    {
+        PropertyInfo requestPolicy = typeof(HttpTransportRequest).GetProperty(
+            "EndpointAddressPolicy",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The endpoint address policy binding is unavailable.");
+        PropertyInfo expectedEndpoint = typeof(HttpTransportRequest).GetProperty(
+            "ExpectedEndpoint",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The expected endpoint binding is unavailable.");
+        Type policy = typeof(BoundedHttpTransport).Assembly.GetType(
+            "IptvSuite.Infrastructure.EndpointAddressPolicy",
+            throwOnError: true)!;
+        MethodInfo bind = policy.GetMethod(
+            "BindRequest",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The endpoint address policy binder is unavailable.");
+        using var message = new HttpRequestMessage(HttpMethod.Get, "https://synthetic.invalid/");
+        object effectivePolicy = bind.Invoke(
+            null,
+            [message, requestPolicy.GetValue(request), expectedEndpoint.GetValue(request), currentEndpoint])!;
+        return effectivePolicy.ToString()!;
+    }
+
+    private static bool IsBoundAuthorityAllowed(
+        HttpTransportRequest request,
+        SafeEndpoint currentEndpoint,
+        string candidateHost,
+        int candidatePort)
+    {
+        PropertyInfo requestPolicy = typeof(HttpTransportRequest).GetProperty(
+            "EndpointAddressPolicy",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The endpoint address policy binding is unavailable.");
+        PropertyInfo expectedEndpoint = typeof(HttpTransportRequest).GetProperty(
+            "ExpectedEndpoint",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The expected endpoint binding is unavailable.");
+        Type policy = typeof(BoundedHttpTransport).Assembly.GetType(
+            "IptvSuite.Infrastructure.EndpointAddressPolicy",
+            throwOnError: true)!;
+        MethodInfo bind = policy.GetMethod(
+            "BindRequest",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The endpoint address policy binder is unavailable.");
+        MethodInfo verify = policy.GetMethod(
+            "IsBoundAuthorityAllowed",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The endpoint authority verifier is unavailable.");
+        using var message = new HttpRequestMessage(HttpMethod.Get, "https://synthetic.invalid/");
+        _ = bind.Invoke(
+            null,
+            [message, requestPolicy.GetValue(request), expectedEndpoint.GetValue(request), currentEndpoint]);
+        return (bool)verify.Invoke(null, [message, candidateHost, candidatePort])!;
     }
 
     private static HttpTransportRequest CreateAuthorizedRequest(
