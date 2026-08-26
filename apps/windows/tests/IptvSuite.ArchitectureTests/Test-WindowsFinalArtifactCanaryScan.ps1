@@ -88,6 +88,9 @@ foreach ($requiredSource in @(
         'Initialize-WindowsFinalPackageOwnership',
         'Remove-WindowsFinalPackageSideState',
         'Stop-WindowsFinalExactPackageProcesses',
+        '"Microsoft.PowerShell.Security\Certificate::CurrentUser\My"',
+        '"Microsoft.PowerShell.Security\Certificate::LocalMachine\TrustedPeople"',
+        '"Microsoft.PowerShell.Security\Certificate::LocalMachine\Root"',
         '"-M16RunToken"',
         '"m16-final-artifact-surfaces.json"',
         '"last-success.json"',
@@ -99,6 +102,7 @@ foreach ($requiredSource in @(
 }
 foreach ($forbiddenSource in @(
         'IPTVSUITE_TEST_ONLY_CANARY_V1',
+        'Cert:\',
         '-SoakMinutes',
         '-ContinueOnError',
         'Write-Host')) {
@@ -380,6 +384,13 @@ try {
     [System.IO.File]::WriteAllBytes(
         [System.IO.Path]::Combine($staleRunPaths.CaptureRoot, "stale.bin"),
         [byte[]](1, 2, 3, 4))
+    $certificateDrive = Get-PSDrive -Name "Cert" -ErrorAction SilentlyContinue
+    if ($null -ne $certificateDrive) {
+        Remove-PSDrive -Name "Cert" -Force -ErrorAction Stop
+    }
+    Assert-Condition `
+        ($null -eq (Get-PSDrive -Name "Cert" -ErrorAction SilentlyContinue)) `
+        "The certificate-drive-independent cleanup precondition was not established."
     Remove-WindowsFinalStalePackageOwnership -Paths $packagePaths
     Assert-Condition `
         (-not (Test-Path -LiteralPath $staleRunPaths.OwnershipRoot) -and

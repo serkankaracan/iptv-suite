@@ -850,7 +850,9 @@ function Remove-WindowsFinalPackageSideState {
         -CertificateThumbprint $signingFileThumbprint
 
     $friendlySigningCertificates = @(
-        Get-ChildItem -LiteralPath "Cert:\CurrentUser\My" -ErrorAction Stop |
+        Get-ChildItem `
+            -LiteralPath "Microsoft.PowerShell.Security\Certificate::CurrentUser\My" `
+            -ErrorAction Stop |
             Where-Object {
                 $_.FriendlyName -ceq $expectedSigningFriendlyName -and
                 $_.Subject -ceq $expectedPublisher -and
@@ -870,11 +872,11 @@ function Remove-WindowsFinalPackageSideState {
     }
     if (-not [string]::IsNullOrEmpty($signingThumbprint)) {
         Remove-WindowsFinalOwnedCertificate `
-            -StorePath "Cert:\LocalMachine\TrustedPeople" `
+            -StorePath "Microsoft.PowerShell.Security\Certificate::LocalMachine\TrustedPeople" `
             -Thumbprint $signingThumbprint `
             -ExpectedSubject $expectedPublisher
         Remove-WindowsFinalOwnedCertificate `
-            -StorePath "Cert:\CurrentUser\My" `
+            -StorePath "Microsoft.PowerShell.Security\Certificate::CurrentUser\My" `
             -Thumbprint $signingThumbprint `
             -ExpectedSubject $expectedPublisher `
             -ExpectedFriendlyName $expectedSigningFriendlyName `
@@ -905,7 +907,7 @@ function Remove-WindowsFinalPackageSideState {
             -CertificateThumbprint $fromFile
         if (-not [string]::IsNullOrEmpty($thumbprint)) {
             Remove-WindowsFinalOwnedCertificate `
-                -StorePath "Cert:\LocalMachine\Root" `
+                -StorePath "Microsoft.PowerShell.Security\Certificate::LocalMachine\Root" `
                 -Thumbprint $thumbprint `
                 -ExpectedSubject $expectedLoopbackSubject
         }
