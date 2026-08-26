@@ -42,6 +42,28 @@ function Write-TestText {
     [System.IO.File]::WriteAllText($Path, $Value, $script:utf8NoBom)
 }
 
+function Get-TestFileSha256 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::None)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [System.BitConverter]::ToString(
+            $sha256.ComputeHash($stream)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Copy-TestFile {
     param(
         [Parameter(Mandatory = $true)]
@@ -819,10 +841,8 @@ try {
     Write-TestText `
         -Path $vulnerabilityAcceptancePath `
         -Value $tamperedVulnerabilityAcceptanceText
-    $tamperedVulnerabilityAcceptanceSha256 =
-        (Get-FileHash `
-            -LiteralPath $vulnerabilityAcceptancePath `
-            -Algorithm SHA256).Hash.ToLowerInvariant()
+    $tamperedVulnerabilityAcceptanceSha256 = Get-TestFileSha256 `
+        -Path $vulnerabilityAcceptancePath
     $semanticValidatorText = $validatorText.Replace(
         "8c60360ae0dac240ef801688a04472266dabd16bfb1069a841b365b61c89a197",
         $tamperedVulnerabilityAcceptanceSha256)
