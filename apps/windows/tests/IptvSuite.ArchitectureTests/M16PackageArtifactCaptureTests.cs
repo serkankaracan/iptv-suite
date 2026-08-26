@@ -396,6 +396,15 @@ public sealed class M16PackageArtifactCaptureTests
             "{ $packageIdentityMutex = Enter-WindowsPackageIdentityMutex }");
         StringAssert.Contains(packageSmoke, "PackageFullNameFromId");
         StringAssert.Contains(packageSmoke, "ProcessorArchitecture = 9");
+        Assert.AreEqual(
+            4,
+            Regex.Count(
+                packageSmoke,
+                Regex.Escape("[uint16]$sourcePackageVersion.")),
+            "Windows PowerShell 5.1 must use its supported UInt16 type name for package-version fields.");
+        Assert.IsFalse(
+            packageSmoke.Contains("[ushort]", StringComparison.Ordinal),
+            "The unsupported Windows PowerShell 5.1 ushort type accelerator must not return.");
 
         string ownershipWriter = ExtractBetween(
             packageSmoke,

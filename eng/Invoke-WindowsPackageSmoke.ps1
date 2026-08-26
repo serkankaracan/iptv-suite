@@ -4247,10 +4247,10 @@ try {
         [IptvSuite.PackageSmoke.PackagedApplicationActivator]::GetPackageFullName(
             $expectedName,
             $expectedPublisher,
-            [ushort]$sourcePackageVersion.Major,
-            [ushort]$sourcePackageVersion.Minor,
-            [ushort]$sourcePackageVersion.Build,
-            [ushort]$sourcePackageVersion.Revision)
+            [uint16]$sourcePackageVersion.Major,
+            [uint16]$sourcePackageVersion.Minor,
+            [uint16]$sourcePackageVersion.Build,
+            [uint16]$sourcePackageVersion.Revision)
     if ($expectedPackageFullName -cnotmatch
             '\AIptvSuite\.LocalDev\.6f0d9a64_[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+_x64__[0-9a-z]{13}\z') {
         throw "The expected disposable package full name is invalid."
