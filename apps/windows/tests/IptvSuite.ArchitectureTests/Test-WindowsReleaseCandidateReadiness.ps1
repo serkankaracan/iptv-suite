@@ -16,6 +16,50 @@ $script:evidenceRoot = Join-Path $script:fixtureRoot ".artifacts\m16-release-can
 $script:originalCommit = $null
 $script:productionPackageSha256 = ("a" * 64)
 $script:nativePackageSha256 = ("b" * 64)
+$script:m16FinalArtifactAcceptanceRelativePath =
+    "eng/windows-m16-final-artifact-acceptance.json"
+$script:m16FinalArtifactAcceptanceSha256 =
+    "48c8fe9d886d2fc66991304f6a169a911c73433e2c9e5edf52c506a59e2fbac1"
+$script:m16ProducerContractPaths = @(
+    ".github/workflows/windows-quality.yml",
+    ".config/dotnet-tools.json",
+    "eng/Invoke-WindowsFinalArtifactCanaryScan.ps1",
+    "eng/Invoke-WindowsPackageSmoke.ps1",
+    "eng/WindowsM16FinalArtifactEvidence.ps1",
+    "eng/WindowsBoundedProcess.ps1",
+    "eng/WindowsPackageInstallRootAudit.ps1",
+    "eng/WindowsWack.ps1",
+    "eng/Invoke-WindowsPackageSbom.ps1",
+    "eng/WindowsPackageSbom.ps1",
+    "eng/windows-package-sbom-tool.json",
+    "apps/windows/tests/IptvSuite.Testing/ArtifactCanaryScanner.cs",
+    "apps/windows/tests/IptvSuite.Testing/FakePlayer.cs",
+    "apps/windows/tests/IptvSuite.Testing/InMemorySecretStore.cs",
+    "apps/windows/tests/IptvSuite.Testing/IptvSuite.Testing.csproj",
+    "apps/windows/tests/IptvSuite.Testing/LocalHttpFixtureServer.cs",
+    "apps/windows/tests/IptvSuite.Testing/M14CatalogCorpusGenerator.cs",
+    "apps/windows/tests/IptvSuite.Testing/NativePlaybackEvidenceValidator.cs",
+    "apps/windows/tests/IptvSuite.Testing/packages.lock.json",
+    "apps/windows/tests/IptvSuite.Testing/Program.cs",
+    "apps/windows/tests/IptvSuite.Testing/ScriptedTransport.cs",
+    "apps/windows/tests/IptvSuite.Testing/SyntheticFixtureGenerator.cs",
+    "apps/windows/tests/IptvSuite.Testing/TemporaryDirectory.cs",
+    "apps/windows/tests/IptvSuite.Testing/TestCanary.cs",
+    "apps/windows/tests/IptvSuite.Testing/TestTime.cs",
+    "apps/windows/tests/IptvSuite.Testing/TimeoutGuard.cs",
+    "apps/windows/tests/IptvSuite.CatalogUiAcceptanceHarness/IptvSuite.CatalogUiAcceptanceHarness.csproj",
+    "apps/windows/tests/IptvSuite.CatalogUiAcceptanceHarness/packages.lock.json",
+    "apps/windows/tests/IptvSuite.CatalogUiAcceptanceHarness/Program.cs",
+    "apps/windows/tests/IptvSuite.PlaybackUiAcceptanceHarness/IptvSuite.PlaybackUiAcceptanceHarness.csproj",
+    "apps/windows/tests/IptvSuite.PlaybackUiAcceptanceHarness/packages.lock.json",
+    "apps/windows/tests/IptvSuite.PlaybackUiAcceptanceHarness/Program.cs",
+    "apps/windows/tests/fixtures/playback/tier-a/direct-h264-aac.ts",
+    "apps/windows/tests/fixtures/playback/tier-a/fixture-manifest.json",
+    "apps/windows/tests/fixtures/playback/tier-a/hls.m3u8",
+    "apps/windows/tests/fixtures/playback/tier-a/hls-000.ts",
+    "apps/windows/tests/fixtures/playback/tier-a/hls-001.ts",
+    "apps/windows/tests/fixtures/playback/tier-a/hls-002.ts",
+    "apps/windows/tests/fixtures/playback/tier-a/hls-003.ts")
 $script:m15Blockers = @(
     "CodecIpLegalReviewPending",
     "LicenseFilePending",
@@ -31,7 +75,6 @@ $script:m15Blockers = @(
     "WackPending")
 $script:m16Blockers = @(
     "M16FeatureFreezeDecisionPending",
-    "M16FinalArtifactCanaryScanPending",
     "M16FinalSecurityArchitectureScanPending",
     "M16PhysicalDeviceAccessibilityMatrixPending",
     "M16ReleaseOperationsPlanPending",
@@ -80,6 +123,24 @@ function Write-TestJson {
     Write-TestText -Path $Path -Value ($Value | ConvertTo-Json -Depth 20)
 }
 
+function Copy-TestFixtureFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath
+    )
+
+    $normalizedPath = $RelativePath.Replace('/', '\')
+    $sourcePath = Join-Path $script:repositoryRoot $normalizedPath
+    $destinationPath = Join-Path $script:fixtureRoot $normalizedPath
+    Assert-TestCondition (Test-Path -LiteralPath $sourcePath -PathType Leaf) `
+        "fixture source is missing: $RelativePath"
+    $parent = [System.IO.Path]::GetDirectoryName($destinationPath)
+    [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+    [System.IO.File]::WriteAllBytes(
+        $destinationPath,
+        [System.IO.File]::ReadAllBytes($sourcePath))
+}
+
 function Get-TestFileSha256 {
     param(
         [Parameter(Mandatory = $true)]
@@ -120,6 +181,19 @@ function Invoke-TestGit {
     Assert-TestCondition ($exitCode -eq 0) `
         "git command failed: git $($Arguments -join ' '); $output"
     return $output
+}
+
+function Commit-TestRepositoryState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    Invoke-TestGit -Arguments @("add", "--all") | Out-Null
+    Invoke-TestGit -Arguments @("commit", "--quiet", "-m", $Message) | Out-Null
+    $script:originalCommit = Invoke-TestGit -Arguments @("rev-parse", "--verify", "HEAD")
+    Assert-TestCondition ($script:originalCommit -cmatch '^[0-9a-f]{40}$') `
+        "fixture HEAD is not an exact 40-character SHA-1."
 }
 
 function Get-TruePropertyMap {
@@ -195,6 +269,10 @@ $summary = [ordered]@{
     technicalBaselinePassed = $true
     releaseReady = $false
     commitSha = $commit
+    packageSbomAcceptance = [ordered]@{
+        packageProducingSnapshotFileCount = 113
+        packageProducingSnapshotSha256 = "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
+    }
     blockers = @($blockers)
 }
 [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($EvidencePath)) | Out-Null
@@ -247,17 +325,17 @@ function Initialize-TestRepository {
     Write-TestText `
         -Path (Join-Path $script:fixtureRoot "eng\Invoke-WindowsNativePlaybackSmoke.ps1") `
         -Value "# Synthetic controller marker used only by the bounded M16 self-test.`n"
+    Copy-TestFixtureFile -RelativePath $script:m16FinalArtifactAcceptanceRelativePath
+    foreach ($relativePath in $script:m16ProducerContractPaths) {
+        Copy-TestFixtureFile -RelativePath $relativePath
+    }
 
     & git init --quiet $script:fixtureRoot 2>&1 | Out-Null
     Assert-TestCondition ($LASTEXITCODE -eq 0) "temporary git repository initialization failed."
     Invoke-TestGit -Arguments @("config", "user.name", "IPTV Suite M16 Self Test") | Out-Null
     Invoke-TestGit -Arguments @("config", "user.email", "m16-self-test@example.invalid") | Out-Null
     Invoke-TestGit -Arguments @("config", "core.autocrlf", "false") | Out-Null
-    Invoke-TestGit -Arguments @("add", "--", ".gitignore", "global.json", "apps", "eng") | Out-Null
-    Invoke-TestGit -Arguments @("commit", "--quiet", "-m", "M16 self-test fixture") | Out-Null
-    $script:originalCommit = Invoke-TestGit -Arguments @("rev-parse", "--verify", "HEAD")
-    Assert-TestCondition ($script:originalCommit -cmatch '^[0-9a-f]{40}$') `
-        "fixture HEAD is not an exact 40-character SHA-1."
+    Commit-TestRepositoryState -Message "M16 self-test fixture"
 }
 
 function Write-ValidInputs {
@@ -824,6 +902,7 @@ function Read-AndAssertBlockedEvidence {
             "releasePackageSha256",
             "policy",
             "inputs",
+            "finalArtifactCanaryAcceptance",
             "gates",
             "blockerCounts",
             "blockers",
@@ -855,6 +934,65 @@ function Read-AndAssertBlockedEvidence {
     Assert-TestCondition `
         ($evidence.releasePackageSha256 -ceq $script:productionPackageSha256) `
         "release package binding changed."
+    $finalArtifactAcceptance = $evidence.finalArtifactCanaryAcceptance
+    Assert-TestCondition ($finalArtifactAcceptance -is [pscustomobject]) `
+        "final-artifact acceptance summary is not an object."
+    Assert-ExactStringSet `
+        -Actual @($finalArtifactAcceptance.PSObject.Properties.Name) `
+        -Expected @(
+            "ledgerSha256",
+            "decision",
+            "scope",
+            "runCompletedAtUtc",
+            "runId",
+            "runNumber",
+            "runAttempt",
+            "runHeadSha",
+            "producerJobId",
+            "artifactId",
+            "artifactName",
+            "artifactDigestSha256",
+            "memberLength",
+            "memberSha256",
+            "packageSha256",
+            "producerContractSourceCount",
+            "producerContractSourceSetSha256",
+            "packageProducingSnapshotFileCount",
+            "packageProducingSnapshotSha256",
+            "closedBlocker") `
+        -Message "final-artifact acceptance summary schema changed."
+    Assert-TestCondition `
+        ($finalArtifactAcceptance.ledgerSha256 -ceq
+            $script:m16FinalArtifactAcceptanceSha256 -and
+         $finalArtifactAcceptance.decision -ceq
+            "AcceptHostedM16FinalArtifactCanaryScan" -and
+         $finalArtifactAcceptance.scope -ceq "M16FinalArtifactCanaryScanOnly" -and
+         $finalArtifactAcceptance.runCompletedAtUtc -ceq "2026-08-26T20:29:42Z" -and
+         $finalArtifactAcceptance.runId -eq 33009018937 -and
+         $finalArtifactAcceptance.runNumber -eq 276 -and
+         $finalArtifactAcceptance.runAttempt -eq 1 -and
+         $finalArtifactAcceptance.runHeadSha -ceq
+            "da205bd194016815ab069a3513eff4500796584d" -and
+         $finalArtifactAcceptance.producerJobId -eq 98313237561 -and
+         $finalArtifactAcceptance.artifactId -eq 9622360788 -and
+         $finalArtifactAcceptance.artifactName -ceq
+            "windows-m16-final-artifact-evidence" -and
+         $finalArtifactAcceptance.artifactDigestSha256 -ceq
+            "919d6d9680ca5fe7c49cd8a62615f5c8f90e13b069b587039a7ee572abc8b7be" -and
+         $finalArtifactAcceptance.memberLength -eq 3281 -and
+         $finalArtifactAcceptance.memberSha256 -ceq
+            "87132e006bc03b6f8a385a7c999755f252ea2a18282a06f2fb916c51a921500a" -and
+         $finalArtifactAcceptance.packageSha256 -ceq
+            "d758893ce36b1cb24c2f144b49da99ca56d9483ee9361b41d2fb7b083a7db68b" -and
+         $finalArtifactAcceptance.producerContractSourceCount -eq 39 -and
+         $finalArtifactAcceptance.producerContractSourceSetSha256 -ceq
+            "3318bf8638903bd05f509e29d4d6281e945773d0833003e3379a266f7b9ae2bb" -and
+         $finalArtifactAcceptance.packageProducingSnapshotFileCount -eq 113 -and
+         $finalArtifactAcceptance.packageProducingSnapshotSha256 -ceq
+            "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493" -and
+         $finalArtifactAcceptance.closedBlocker -ceq
+            "M16FinalArtifactCanaryScanPending") `
+        "final-artifact acceptance binding changed."
     Assert-TestCondition (@($evidence.inputs).Count -eq 8) `
         "the exact eight bounded evidence inputs were not summarized."
     Assert-ExactStringSet `
@@ -869,16 +1007,16 @@ function Read-AndAssertBlockedEvidence {
             "catalog-regression-summary.json",
             "m15-readiness.json") `
         -Message "the exact bounded input-name set changed."
-    Assert-TestCondition ($evidence.blockerCounts.total -eq 19) `
-        "the exact 19-blocker baseline changed."
+    Assert-TestCondition ($evidence.blockerCounts.total -eq 18) `
+        "the exact 18-blocker baseline changed."
     Assert-TestCondition ($evidence.blockerCounts.m15 -eq 12) `
         "the exact 12 M15 blockers changed."
-    Assert-TestCondition ($evidence.blockerCounts.m16 -eq 7) `
-        "the exact seven M16 blockers changed."
+    Assert-TestCondition ($evidence.blockerCounts.m16 -eq 6) `
+        "the exact six remaining M16 blockers changed."
     Assert-ExactStringSet `
         -Actual @($evidence.blockers | ForEach-Object { [string]$_.code }) `
         -Expected @($script:m15Blockers + $script:m16Blockers) `
-        -Message "the exact 19 blocker codes changed."
+        -Message "the exact 18 blocker codes changed."
     $blockerCodes = [string[]]@(
         $evidence.blockers | ForEach-Object { [string]$_.code })
     $sortedBlockerCodes = [string[]]@($blockerCodes)
@@ -930,6 +1068,66 @@ try {
         -EvidencePath $defaultPath `
         -ExpectedMessage "M16ReleaseCandidateBlocked: candidateReady=false; evidence was published."
     Read-AndAssertBlockedEvidence -Path $defaultPath | Out-Null
+
+    $acceptancePath = Join-Path `
+        $script:fixtureRoot `
+        ($script:m16FinalArtifactAcceptanceRelativePath.Replace('/', '\'))
+    [byte[]]$acceptanceBytes = [System.IO.File]::ReadAllBytes($acceptancePath)
+    Remove-Item -LiteralPath $acceptancePath -Force
+    Commit-TestRepositoryState -Message "Remove M16 final-artifact acceptance ledger"
+    Write-ValidInputs
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:FinalArtifactAcceptanceInvalid" `
+        -AllowBlockedCandidate
+    [System.IO.File]::WriteAllBytes($acceptancePath, $acceptanceBytes)
+    Commit-TestRepositoryState -Message "Restore M16 final-artifact acceptance ledger"
+
+    [System.IO.File]::AppendAllText($acceptancePath, " ", $script:utf8NoBom)
+    Commit-TestRepositoryState -Message "Tamper M16 final-artifact acceptance ledger"
+    Write-ValidInputs
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:FinalArtifactAcceptanceInvalid" `
+        -AllowBlockedCandidate
+    [System.IO.File]::WriteAllBytes($acceptancePath, $acceptanceBytes)
+    Commit-TestRepositoryState -Message "Restore exact M16 final-artifact acceptance ledger"
+
+    $producerSourcePath = Join-Path `
+        $script:fixtureRoot `
+        "eng\WindowsM16FinalArtifactEvidence.ps1"
+    [byte[]]$producerSourceBytes = [System.IO.File]::ReadAllBytes($producerSourcePath)
+    [System.IO.File]::AppendAllText(
+        $producerSourcePath,
+        "`n# self-test producer drift",
+        $script:utf8NoBom)
+    Commit-TestRepositoryState -Message "Drift M16 final-artifact producer source"
+    Write-ValidInputs
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:FinalArtifactAcceptanceInvalid" `
+        -AllowBlockedCandidate
+    [System.IO.File]::WriteAllBytes($producerSourcePath, $producerSourceBytes)
+    Commit-TestRepositoryState -Message "Restore M16 final-artifact producer source"
+
+    $binaryProducerSourcePath = Join-Path `
+        $script:fixtureRoot `
+        "apps\windows\tests\fixtures\playback\tier-a\direct-h264-aac.ts"
+    [byte[]]$binaryProducerSourceBytes =
+        [System.IO.File]::ReadAllBytes($binaryProducerSourcePath)
+    [byte[]]$binaryDriftBytes = New-Object byte[] $binaryProducerSourceBytes.Length
+    [System.Array]::Copy(
+        $binaryProducerSourceBytes,
+        $binaryDriftBytes,
+        $binaryProducerSourceBytes.Length)
+    $binaryDriftBytes[0] = [byte]($binaryDriftBytes[0] -bxor 1)
+    [System.IO.File]::WriteAllBytes($binaryProducerSourcePath, $binaryDriftBytes)
+    Commit-TestRepositoryState -Message "Drift M16 final-artifact binary fixture"
+    Write-ValidInputs
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:FinalArtifactAcceptanceInvalid" `
+        -AllowBlockedCandidate
+    [System.IO.File]::WriteAllBytes(
+        $binaryProducerSourcePath,
+        $binaryProducerSourceBytes)
+    Commit-TestRepositoryState -Message "Restore M16 final-artifact binary fixture"
 
     Write-ValidInputs
     Remove-Item -LiteralPath (Join-Path $script:inputRoot "quality-summary.json") -Force

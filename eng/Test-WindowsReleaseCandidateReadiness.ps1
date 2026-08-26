@@ -13,6 +13,8 @@ $ErrorActionPreference = "Stop"
 $script:maximumInputBytes = 1MB
 $script:maximumAggregateInputBytes = 4MB
 $script:maximumOutputBytes = 256KB
+$script:maximumFinalArtifactAcceptanceBytes = 32KB
+$script:maximumProducerContractSourceBytes = 2MB
 $script:maximumJsonDepth = 16
 $script:maximumObjectPropertyCount = 1024
 $script:maximumArrayLength = 4096
@@ -21,6 +23,16 @@ $script:maximumJsonNodeCount = 65536
 $script:technicalStage = "Initialization"
 $script:utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
 $script:utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$script:finalArtifactAcceptanceRelativePath =
+    "eng/windows-m16-final-artifact-acceptance.json"
+$script:finalArtifactAcceptanceSha256 =
+    "48c8fe9d886d2fc66991304f6a169a911c73433e2c9e5edf52c506a59e2fbac1"
+$script:finalArtifactProducerContractSourceCount = 39
+$script:finalArtifactProducerContractSourceSetSha256 =
+    "3318bf8638903bd05f509e29d4d6281e945773d0833003e3379a266f7b9ae2bb"
+$script:packageProducingSnapshotFileCount = 113
+$script:packageProducingSnapshotSha256 =
+    "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
 
 function Fail-TechnicalInvariant {
     param(
@@ -212,6 +224,176 @@ function Read-RegularFileBytes {
         }
 
         Fail-TechnicalInvariant -Code $Code
+    }
+}
+
+function Get-FinalArtifactProducerContractBinding {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $code = "FinalArtifactAcceptanceInvalid"
+    $directoryContracts = @(
+        [pscustomobject]@{
+            RelativeRoot = "apps/windows/tests/IptvSuite.Testing"
+            IgnoreBuildDirectories = $true
+            FileNames = [string[]]@(
+                "ArtifactCanaryScanner.cs",
+                "FakePlayer.cs",
+                "InMemorySecretStore.cs",
+                "IptvSuite.Testing.csproj",
+                "LocalHttpFixtureServer.cs",
+                "M14CatalogCorpusGenerator.cs",
+                "NativePlaybackEvidenceValidator.cs",
+                "packages.lock.json",
+                "Program.cs",
+                "ScriptedTransport.cs",
+                "SyntheticFixtureGenerator.cs",
+                "TemporaryDirectory.cs",
+                "TestCanary.cs",
+                "TestTime.cs",
+                "TimeoutGuard.cs")
+        },
+        [pscustomobject]@{
+            RelativeRoot = "apps/windows/tests/IptvSuite.CatalogUiAcceptanceHarness"
+            IgnoreBuildDirectories = $true
+            FileNames = [string[]]@(
+                "IptvSuite.CatalogUiAcceptanceHarness.csproj",
+                "packages.lock.json",
+                "Program.cs")
+        },
+        [pscustomobject]@{
+            RelativeRoot = "apps/windows/tests/IptvSuite.PlaybackUiAcceptanceHarness"
+            IgnoreBuildDirectories = $true
+            FileNames = [string[]]@(
+                "IptvSuite.PlaybackUiAcceptanceHarness.csproj",
+                "packages.lock.json",
+                "Program.cs")
+        },
+        [pscustomobject]@{
+            RelativeRoot = "apps/windows/tests/fixtures/playback/tier-a"
+            IgnoreBuildDirectories = $false
+            FileNames = [string[]]@(
+                "direct-h264-aac.ts",
+                "fixture-manifest.json",
+                "hls.m3u8",
+                "hls-000.ts",
+                "hls-001.ts",
+                "hls-002.ts",
+                "hls-003.ts")
+        })
+    $relativePaths = [string[]]@(
+        ".github/workflows/windows-quality.yml",
+        ".config/dotnet-tools.json",
+        "eng/Invoke-WindowsFinalArtifactCanaryScan.ps1",
+        "eng/Invoke-WindowsPackageSmoke.ps1",
+        "eng/WindowsM16FinalArtifactEvidence.ps1",
+        "eng/WindowsBoundedProcess.ps1",
+        "eng/WindowsPackageInstallRootAudit.ps1",
+        "eng/WindowsWack.ps1",
+        "eng/Invoke-WindowsPackageSbom.ps1",
+        "eng/WindowsPackageSbom.ps1",
+        "eng/windows-package-sbom-tool.json")
+    foreach ($directoryContract in $directoryContracts) {
+        $relativeRoot = [string]$directoryContract.RelativeRoot
+        $relativePaths += [string[]]@($directoryContract.FileNames | ForEach-Object {
+                "$relativeRoot/$_"
+            })
+    }
+    Assert-Condition `
+        ($relativePaths.Count -eq $script:finalArtifactProducerContractSourceCount) `
+        $code
+
+    foreach ($directoryContract in $directoryContracts) {
+        $contractRoot = [System.IO.Path]::GetFullPath(
+            (Join-Path $Root ([string]$directoryContract.RelativeRoot)))
+        Assert-Condition `
+            (Test-PathContainedByRoot -Path $contractRoot -Root $Root) `
+            $code
+        Assert-NoReparseDirectoryChain `
+            -Root $Root `
+            -DirectoryPath $contractRoot `
+            -Code $code
+        Assert-Condition `
+            (Test-Path -LiteralPath $contractRoot -PathType Container) `
+            $code
+        $actualFileNames = [System.Collections.Generic.List[string]]::new()
+        foreach ($entry in @(Get-ChildItem -LiteralPath $contractRoot -Force)) {
+            if ($entry.PSIsContainer) {
+                Assert-Condition `
+                    ($directoryContract.IgnoreBuildDirectories -is [bool] -and
+                     $directoryContract.IgnoreBuildDirectories -and
+                     ($entry.Name -ceq "bin" -or $entry.Name -ceq "obj")) `
+                    $code
+                continue
+            }
+            Assert-Condition `
+                (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
+                $code
+            $actualFileNames.Add([string]$entry.Name)
+        }
+        $actualNames = [string[]]$actualFileNames.ToArray()
+        $expectedNames = [string[]]@($directoryContract.FileNames)
+        [System.Array]::Sort($actualNames, [System.StringComparer]::Ordinal)
+        [System.Array]::Sort($expectedNames, [System.StringComparer]::Ordinal)
+        Assert-Condition ($actualNames.Count -eq $expectedNames.Count) $code
+        for ($index = 0; $index -lt $expectedNames.Count; $index++) {
+            Assert-Condition ($actualNames[$index] -ceq $expectedNames[$index]) $code
+        }
+    }
+
+    $records = [System.Collections.Generic.List[string]]::new()
+    [long]$aggregateBytes = 0
+    foreach ($relativePath in $relativePaths) {
+        Assert-Condition `
+            ($relativePath -cmatch '\A[A-Za-z0-9._/-]+\z' -and
+             -not [System.IO.Path]::IsPathRooted($relativePath) -and
+             $relativePath -notmatch '(?:^|/)\.\.(?:/|$)') `
+            $code
+        [byte[]]$sourceBytes = Read-RegularFileBytes `
+            -Path (Join-Path $Root $relativePath) `
+            -MaximumBytes $script:maximumProducerContractSourceBytes `
+            -Root $Root `
+            -Code $code
+        $isBinary = $relativePath.EndsWith(
+            ".ts",
+            [System.StringComparison]::OrdinalIgnoreCase)
+        if ($isBinary) {
+            [byte[]]$canonicalBytes = $sourceBytes
+            $kind = "binary"
+        }
+        else {
+            Assert-Condition `
+                (-not ($sourceBytes.Length -ge 3 -and
+                       $sourceBytes[0] -eq 0xef -and
+                       $sourceBytes[1] -eq 0xbb -and
+                       $sourceBytes[2] -eq 0xbf)) `
+                $code
+            try {
+                $sourceText = $script:utf8Strict.GetString($sourceBytes)
+            }
+            catch {
+                Fail-TechnicalInvariant -Code $code
+            }
+            $normalizedText =
+                $sourceText.Replace("`r`n", "`n").Replace("`r", "`n")
+            [byte[]]$canonicalBytes = $script:utf8NoBom.GetBytes($normalizedText)
+            $kind = "text-lf"
+        }
+        Assert-Condition ($canonicalBytes.Length -gt 0) $code
+        $aggregateBytes += $canonicalBytes.Length
+        Assert-Condition ($aggregateBytes -le 32MB) $code
+        $records.Add(
+            "$relativePath`0$kind`0$($canonicalBytes.Length)`0" +
+            (Get-LowerSha256Bytes -Bytes $canonicalBytes))
+    }
+
+    [byte[]]$bindingBytes = $script:utf8NoBom.GetBytes(
+        ([string[]]$records.ToArray() -join "`n"))
+    return [pscustomobject]@{
+        SourceCount = [int]$records.Count
+        SourceSetSha256 = Get-LowerSha256Bytes -Bytes $bindingBytes
     }
 }
 
@@ -466,6 +648,24 @@ function Get-ExactProperty {
     $matches = @($Value.PSObject.Properties | Where-Object { $_.Name -ceq $Name })
     Assert-Condition ($matches.Count -eq 1) $Code
     return $matches[0].Value
+}
+
+function Assert-ExactPropertyNames {
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Value,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Expected,
+
+        [string]$Code = "InputContractInvalid"
+    )
+
+    $actual = [string[]]@($Value.PSObject.Properties.Name)
+    Assert-Condition ($actual.Count -eq $Expected.Count) $Code
+    for ($index = 0; $index -lt $Expected.Count; $index++) {
+        Assert-Condition ($actual[$index] -ceq $Expected[$index]) $Code
+    }
 }
 
 function Assert-ExactString {
@@ -1582,7 +1782,456 @@ function Test-M15Input {
     foreach ($requiredBlocker in $requiredBlockers) {
         Assert-Condition ($seen.Contains($requiredBlocker)) "M15BlockerSetInvalid"
     }
-    return [string[]]$blockers
+
+    $packageSbomAcceptance = Get-ExactProperty $value "packageSbomAcceptance"
+    Assert-Condition ($packageSbomAcceptance -is [pscustomobject]) `
+        "M15PackageSnapshotInvalid"
+    Assert-ExactInteger `
+        -Value (Get-ExactProperty `
+            $packageSbomAcceptance `
+            "packageProducingSnapshotFileCount" `
+            "M15PackageSnapshotInvalid") `
+        -Expected $script:packageProducingSnapshotFileCount `
+        -Code "M15PackageSnapshotInvalid"
+    Assert-ExactString `
+        -Value (Get-ExactProperty `
+            $packageSbomAcceptance `
+            "packageProducingSnapshotSha256" `
+            "M15PackageSnapshotInvalid") `
+        -Expected $script:packageProducingSnapshotSha256 `
+        -Code "M15PackageSnapshotInvalid"
+
+    return [pscustomobject]@{
+        Blockers = [string[]]$blockers
+        PackageProducingSnapshotFileCount =
+            $script:packageProducingSnapshotFileCount
+        PackageProducingSnapshotSha256 =
+            $script:packageProducingSnapshotSha256
+    }
+}
+
+function Read-M16FinalArtifactAcceptance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$M15Validation
+    )
+
+    $code = "FinalArtifactAcceptanceInvalid"
+    try {
+        $contractBinding = Get-FinalArtifactProducerContractBinding -Root $Root
+        Assert-Condition `
+            ($contractBinding.SourceCount -eq
+                $script:finalArtifactProducerContractSourceCount -and
+             $contractBinding.SourceSetSha256 -ceq
+                $script:finalArtifactProducerContractSourceSetSha256) `
+            $code
+
+        $ledgerPath = Join-Path `
+            $Root `
+            ($script:finalArtifactAcceptanceRelativePath.Replace('/', '\'))
+        $record = Read-StrictJsonRecord `
+            -Path $ledgerPath `
+            -Root $Root `
+            -Name "windows-m16-final-artifact-acceptance.json" `
+            -MaximumBytes $script:maximumFinalArtifactAcceptanceBytes
+        Assert-Condition `
+            ($record.Sha256 -ceq $script:finalArtifactAcceptanceSha256) `
+            $code
+        $acceptance = $record.Value
+        Assert-ExactPropertyNames `
+            -Value $acceptance `
+            -Expected @(
+                "schemaVersion",
+                "decision",
+                "scope",
+                "runCompletedAtUtc",
+                "repository",
+                "repositoryId",
+                "workflowPath",
+                "workflowName",
+                "workflowId",
+                "runId",
+                "runNumber",
+                "runAttempt",
+                "runEvent",
+                "runBranch",
+                "runHeadSha",
+                "runConclusion",
+                "producerJobId",
+                "producerJobName",
+                "producerJobConclusion",
+                "artifactId",
+                "artifactName",
+                "artifactSizeBytes",
+                "artifactDigestSha256",
+                "memberName",
+                "memberLength",
+                "memberSha256",
+                "sameRunPackageEvidence",
+                "evidence",
+                "producerContractSourceCount",
+                "producerContractSourceSetSha256",
+                "packageProducingSnapshotFileCount",
+                "packageProducingSnapshotSha256",
+                "closedBlocker",
+                "remainingM16Blockers",
+                "nonClaims") `
+            -Code $code
+
+        $expectedRootStrings = [ordered]@{
+            decision = "AcceptHostedM16FinalArtifactCanaryScan"
+            scope = "M16FinalArtifactCanaryScanOnly"
+            runCompletedAtUtc = "2026-08-26T20:29:42Z"
+            repository = "serkankaracan/iptv-suite"
+            workflowPath = ".github/workflows/windows-quality.yml"
+            workflowName = "Windows quality"
+            runEvent = "workflow_dispatch"
+            runBranch = "main"
+            runHeadSha = "da205bd194016815ab069a3513eff4500796584d"
+            runConclusion = "success"
+            producerJobName = "Packaged install and launch smoke"
+            producerJobConclusion = "success"
+            artifactName = "windows-m16-final-artifact-evidence"
+            artifactDigestSha256 = "919d6d9680ca5fe7c49cd8a62615f5c8f90e13b069b587039a7ee572abc8b7be"
+            memberName = "last-success.json"
+            memberSha256 = "87132e006bc03b6f8a385a7c999755f252ea2a18282a06f2fb916c51a921500a"
+            producerContractSourceSetSha256 =
+                $script:finalArtifactProducerContractSourceSetSha256
+            packageProducingSnapshotSha256 =
+                $script:packageProducingSnapshotSha256
+            closedBlocker = "M16FinalArtifactCanaryScanPending"
+        }
+        foreach ($expected in $expectedRootStrings.GetEnumerator()) {
+            Assert-ExactString `
+                -Value (Get-ExactProperty $acceptance $expected.Key $code) `
+                -Expected ([string]$expected.Value) `
+                -Code $code
+        }
+        Assert-UtcTimestamp `
+            -Value (Get-ExactProperty $acceptance "runCompletedAtUtc" $code) `
+            -Code $code
+        $expectedRootIntegers = [ordered]@{
+            schemaVersion = 1
+            repositoryId = 1328998460
+            workflowId = 330610209
+            runId = [long]33009018937
+            runNumber = 276
+            runAttempt = 1
+            producerJobId = [long]98313237561
+            artifactId = [long]9622360788
+            artifactSizeBytes = 1000
+            memberLength = 3281
+            producerContractSourceCount =
+                $script:finalArtifactProducerContractSourceCount
+            packageProducingSnapshotFileCount =
+                $script:packageProducingSnapshotFileCount
+        }
+        foreach ($expected in $expectedRootIntegers.GetEnumerator()) {
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $acceptance $expected.Key $code) `
+                -Expected ([long]$expected.Value) `
+                -Code $code
+        }
+
+        Assert-Condition `
+            ($acceptance.packageProducingSnapshotFileCount -eq
+                $M15Validation.PackageProducingSnapshotFileCount -and
+             $acceptance.packageProducingSnapshotSha256 -ceq
+                $M15Validation.PackageProducingSnapshotSha256) `
+            $code
+
+        $packageEvidence = Get-ExactProperty `
+            $acceptance `
+            "sameRunPackageEvidence" `
+            $code
+        Assert-Condition ($packageEvidence -is [pscustomobject]) $code
+        Assert-ExactPropertyNames `
+            -Value $packageEvidence `
+            -Expected @(
+                "runId",
+                "runHeadSha",
+                "artifactId",
+                "artifactName",
+                "artifactSizeBytes",
+                "artifactDigestSha256",
+                "lastSuccessMemberName",
+                "lastSuccessMemberLength",
+                "lastSuccessMemberSha256",
+                "lastSuccessCommitSha",
+                "sbomSummaryMemberName",
+                "sbomSummaryMemberLength",
+                "sbomSummaryMemberSha256",
+                "sbomSummaryCommitSha",
+                "sbomMemberName",
+                "sbomMemberLength",
+                "sbomMemberSha256",
+                "configuration",
+                "dotNetSdk",
+                "productionInputSetSha256",
+                "applicationPackageFile",
+                "applicationPackageLength",
+                "applicationPackageSha256",
+                "runtimePackageSha256",
+                "officialSbomValidationPassed",
+                "strictSbomValidationPassed") `
+            -Code $code
+        $expectedPackageStrings = [ordered]@{
+            runHeadSha = "da205bd194016815ab069a3513eff4500796584d"
+            artifactName = "windows-msix-smoke-evidence"
+            artifactDigestSha256 = "ca7447cb98c8821b7501904b9c1ef269b0365d3c82da81b0a8926f79247706fc"
+            lastSuccessMemberName = "last-success.json"
+            lastSuccessMemberSha256 = "8bf91807044c763b89107a9c197947baa4056d728cc128fd968be33b68c615aa"
+            lastSuccessCommitSha = "da205bd194016815ab069a3513eff4500796584d"
+            sbomSummaryMemberName = "package-sbom-summary.json"
+            sbomSummaryMemberSha256 = "0818ec843c845974900679ecccf11167d094b9893b595cc1a34eea541186ad3f"
+            sbomSummaryCommitSha = "da205bd194016815ab069a3513eff4500796584d"
+            sbomMemberName = "package-sbom.spdx.json"
+            sbomMemberSha256 = "05c351c69729e51a8c928c5cb7ebbee0b71d984e43e51ec89d7698a0e7348848"
+            configuration = "Release"
+            dotNetSdk = "10.0.302"
+            productionInputSetSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
+            applicationPackageFile = "IptvSuite.Windows_0.1.0.0_x64.msix"
+            applicationPackageSha256 = "d758893ce36b1cb24c2f144b49da99ca56d9483ee9361b41d2fb7b083a7db68b"
+            runtimePackageSha256 = "a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf"
+        }
+        foreach ($expected in $expectedPackageStrings.GetEnumerator()) {
+            Assert-ExactString `
+                -Value (Get-ExactProperty $packageEvidence $expected.Key $code) `
+                -Expected ([string]$expected.Value) `
+                -Code $code
+        }
+        $expectedPackageIntegers = [ordered]@{
+            runId = [long]33009018937
+            artifactId = [long]9622359781
+            artifactSizeBytes = 7770
+            lastSuccessMemberLength = 18716
+            sbomSummaryMemberLength = 1985
+            sbomMemberLength = 50566
+            applicationPackageLength = 29852407
+        }
+        foreach ($expected in $expectedPackageIntegers.GetEnumerator()) {
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $packageEvidence $expected.Key $code) `
+                -Expected ([long]$expected.Value) `
+                -Code $code
+        }
+        Assert-True `
+            -Value (Get-ExactProperty $packageEvidence "officialSbomValidationPassed" $code) `
+            -Code $code
+        Assert-True `
+            -Value (Get-ExactProperty $packageEvidence "strictSbomValidationPassed" $code) `
+            -Code $code
+
+        $evidence = Get-ExactProperty $acceptance "evidence" $code
+        Assert-Condition ($evidence -is [pscustomobject]) $code
+        Assert-ExactPropertyNames `
+            -Value $evidence `
+            -Expected @(
+                "schemaVersion",
+                "milestone",
+                "evidenceKind",
+                "result",
+                "runToken",
+                "commitSha",
+                "packageSha256",
+                "packageSbomApplicationPackageSha256",
+                "scannerProfile",
+                "surfaceCount",
+                "totalFileCount",
+                "totalDirectoryCount",
+                "totalFileBytes",
+                "packageIntermediateSha256",
+                "fullLogScannerReportSha256",
+                "surfaces",
+                "sameBuildBindingPassed",
+                "repositoryStable",
+                "rawSurfacesUploaded",
+                "supportArtifactScope") `
+            -Code $code
+        $expectedEvidenceStrings = [ordered]@{
+            milestone = "M16"
+            evidenceKind = "FinalArtifactCanaryScan"
+            result = "passed"
+            runToken = "c631ca74662d4dfcb96037a3951ba48f"
+            commitSha = "da205bd194016815ab069a3513eff4500796584d"
+            packageSha256 = "d758893ce36b1cb24c2f144b49da99ca56d9483ee9361b41d2fb7b083a7db68b"
+            packageSbomApplicationPackageSha256 = "d758893ce36b1cb24c2f144b49da99ca56d9483ee9361b41d2fb7b083a7db68b"
+            scannerProfile = "M16ReleaseCandidate"
+            packageIntermediateSha256 = "721e4de5b3ec2086f3078b07f9e74b620d9893815def8984fa4eceb15787e609"
+            fullLogScannerReportSha256 = "2313762b66b2d27f051f27a15add5bc83750885e9dd03acc620ac5fe309c4e62"
+            supportArtifactScope = "ReleaseAcceptanceOnly"
+        }
+        foreach ($expected in $expectedEvidenceStrings.GetEnumerator()) {
+            Assert-ExactString `
+                -Value (Get-ExactProperty $evidence $expected.Key $code) `
+                -Expected ([string]$expected.Value) `
+                -Code $code
+        }
+        Assert-ExactInteger `
+            -Value (Get-ExactProperty $evidence "schemaVersion" $code) `
+            -Expected 1 `
+            -Code $code
+        Assert-ExactInteger `
+            -Value (Get-ExactProperty $evidence "surfaceCount" $code) `
+            -Expected 4 `
+            -Code $code
+        Assert-ExactInteger `
+            -Value (Get-ExactProperty $evidence "totalFileCount" $code) `
+            -Expected 86 `
+            -Code $code
+        Assert-ExactInteger `
+            -Value (Get-ExactProperty $evidence "totalDirectoryCount" $code) `
+            -Expected 26 `
+            -Code $code
+        Assert-ExactInteger `
+            -Value (Get-ExactProperty $evidence "totalFileBytes" $code) `
+            -Expected 154129442 `
+            -Code $code
+        Assert-True `
+            -Value (Get-ExactProperty $evidence "sameBuildBindingPassed" $code) `
+            -Code $code
+        Assert-True `
+            -Value (Get-ExactProperty $evidence "repositoryStable" $code) `
+            -Code $code
+        Assert-False `
+            -Value (Get-ExactProperty $evidence "rawSurfacesUploaded" $code) `
+            -Code $code
+        Assert-Condition `
+            ($packageEvidence.runId -eq $acceptance.runId -and
+             $packageEvidence.runHeadSha -ceq $acceptance.runHeadSha -and
+             $packageEvidence.lastSuccessCommitSha -ceq $acceptance.runHeadSha -and
+             $packageEvidence.sbomSummaryCommitSha -ceq $acceptance.runHeadSha -and
+             $evidence.commitSha -ceq $acceptance.runHeadSha -and
+             $evidence.packageSha256 -ceq $packageEvidence.applicationPackageSha256 -and
+             $evidence.packageSbomApplicationPackageSha256 -ceq
+                $packageEvidence.applicationPackageSha256) `
+            $code
+
+        $expectedSurfaces = @(
+            [pscustomobject]@{
+                SurfaceId = "owned-app-data"; FileCount = 12; DirectoryCount = 23
+                TotalFileBytes = 39096320
+                InventorySha256 = "eca7da65fa829ac57d1b675b340c782df8756ae2b977d5bb9bfe1179cf18c34f"
+            },
+            [pscustomobject]@{
+                SurfaceId = "exact-package"; FileCount = 72; DirectoryCount = 3
+                TotalFileBytes = 115028791
+                InventorySha256 = "18b2576569e56aac142ebef0cae0a1e875aee21db5beb0e018c570f56be689ec"
+            },
+            [pscustomobject]@{
+                SurfaceId = "support-artifact"; FileCount = 1; DirectoryCount = 0
+                TotalFileBytes = 1139
+                InventorySha256 = "729ecc731898eb61d41063ca13a19abbcb3818dc30a6c54f25dd04781ded0297"
+            },
+            [pscustomobject]@{
+                SurfaceId = "full-log"; FileCount = 1; DirectoryCount = 0
+                TotalFileBytes = 3192
+                InventorySha256 = "dd4e25c91bb92f3bd129178955ef7b5e75154f01c3d44c76e22161895619c0a8"
+            })
+        $surfaces = @(Get-ExactProperty $evidence "surfaces" $code)
+        Assert-Condition ($surfaces.Count -eq $expectedSurfaces.Count) $code
+        [long]$totalFiles = 0
+        [long]$totalDirectories = 0
+        [long]$totalBytes = 0
+        for ($index = 0; $index -lt $expectedSurfaces.Count; $index++) {
+            $surface = $surfaces[$index]
+            $expected = $expectedSurfaces[$index]
+            Assert-Condition ($surface -is [pscustomobject]) $code
+            Assert-ExactPropertyNames `
+                -Value $surface `
+                -Expected @(
+                    "surfaceId", "schemaVersion", "profile", "result",
+                    "fileCount", "directoryCount", "totalFileBytes",
+                    "inventorySha256", "findingCount") `
+                -Code $code
+            Assert-ExactString `
+                -Value (Get-ExactProperty $surface "surfaceId" $code) `
+                -Expected $expected.SurfaceId `
+                -Code $code
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $surface "schemaVersion" $code) `
+                -Expected 1 `
+                -Code $code
+            Assert-ExactString `
+                -Value (Get-ExactProperty $surface "profile" $code) `
+                -Expected "M16ReleaseCandidate" `
+                -Code $code
+            Assert-ExactString `
+                -Value (Get-ExactProperty $surface "result" $code) `
+                -Expected "clean" `
+                -Code $code
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $surface "fileCount" $code) `
+                -Expected $expected.FileCount `
+                -Code $code
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $surface "directoryCount" $code) `
+                -Expected $expected.DirectoryCount `
+                -Code $code
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $surface "totalFileBytes" $code) `
+                -Expected $expected.TotalFileBytes `
+                -Code $code
+            Assert-ExactString `
+                -Value (Get-ExactProperty $surface "inventorySha256" $code) `
+                -Expected $expected.InventorySha256 `
+                -Code $code
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $surface "findingCount" $code) `
+                -Expected 0 `
+                -Code $code
+            $totalFiles += [long]$surface.fileCount
+            $totalDirectories += [long]$surface.directoryCount
+            $totalBytes += [long]$surface.totalFileBytes
+        }
+        Assert-Condition `
+            ($totalFiles -eq [long]$evidence.totalFileCount -and
+             $totalDirectories -eq [long]$evidence.totalDirectoryCount -and
+             $totalBytes -eq [long]$evidence.totalFileBytes) `
+            $code
+
+        Assert-ExactStringArray `
+            -Value (Get-ExactProperty $acceptance "remainingM16Blockers" $code) `
+            -Expected @(
+                "M16FeatureFreezeDecisionPending",
+                "M16FinalSecurityArchitectureScanPending",
+                "M16PhysicalDeviceAccessibilityMatrixPending",
+                "M16ReleaseOperationsPlanPending",
+                "M16SyntheticEndToEndJourneyPending",
+                "M16TwentyFourHourSoakPending") `
+            -Code $code
+        $nonClaims = Get-ExactProperty $acceptance "nonClaims" $code
+        Assert-Condition ($nonClaims -is [pscustomobject]) $code
+        Assert-ExactPropertyNames `
+            -Value $nonClaims `
+            -Expected @(
+                "candidateReady",
+                "finalSecurityArchitectureScanComplete",
+                "twentyFourHourSoakComplete",
+                "physicalDeviceAccessibilityMatrixComplete",
+                "storeWackLegalOrSigningApproved") `
+            -Code $code
+        foreach ($propertyName in @($nonClaims.PSObject.Properties.Name)) {
+            Assert-False `
+                -Value (Get-ExactProperty $nonClaims $propertyName $code) `
+                -Code $code
+        }
+
+        return [pscustomobject]@{
+            Record = $record
+            Acceptance = $acceptance
+            ContractBinding = $contractBinding
+        }
+    }
+    catch {
+        if ($_.Exception.Message -ceq "M16TechnicalInvariant:$code") {
+            throw $_.Exception.Message
+        }
+        Fail-TechnicalInvariant -Code $code
+    }
 }
 
 function Get-InputEvidenceSummary {
@@ -1826,8 +2475,16 @@ try {
     Assert-Condition `
         ($aggregateInputBytes -le $script:maximumAggregateInputBytes) `
         "AggregateInputSizeInvalid"
-    $m15Blockers = @(Test-M15Input $m15Record $repositoryCommit)
+    $m15Validation = Test-M15Input $m15Record $repositoryCommit
+    $m15Blockers = @($m15Validation.Blockers)
     $inputRecords["m15-readiness"] = $m15Record
+
+    $script:technicalStage = "FinalArtifactAcceptance"
+    $finalArtifactAcceptanceValidation = Read-M16FinalArtifactAcceptance `
+        -Root $resolvedRepositoryRoot `
+        -M15Validation $m15Validation
+    $finalArtifactAcceptance =
+        $finalArtifactAcceptanceValidation.Acceptance
 
     $script:technicalStage = "InputStability"
     foreach ($key in @($inputRecords.Keys)) {
@@ -1848,7 +2505,6 @@ try {
     $m16BlockerDefinitions = @(
         [ordered]@{ code = "M16FeatureFreezeDecisionPending"; category = "Governance"; origin = "M16"; closureMode = "RecordedDecisionRequired" },
         [ordered]@{ code = "M16SyntheticEndToEndJourneyPending"; category = "Technical"; origin = "M16"; closureMode = "AutomatedEvidenceRequired" },
-        [ordered]@{ code = "M16FinalArtifactCanaryScanPending"; category = "Security"; origin = "M16"; closureMode = "AutomatedEvidenceRequired" },
         [ordered]@{ code = "M16FinalSecurityArchitectureScanPending"; category = "Security"; origin = "M16"; closureMode = "AutomatedEvidenceRequired" },
         [ordered]@{ code = "M16TwentyFourHourSoakPending"; category = "Reliability"; origin = "M16"; closureMode = "OperatorEvidenceRequired" },
         [ordered]@{ code = "M16PhysicalDeviceAccessibilityMatrixPending"; category = "Accessibility"; origin = "M16"; closureMode = "OperatorEvidenceRequired" },
@@ -1912,11 +2568,43 @@ try {
             blockedEvidencePublishedBeforeDefaultFailure = $true
         }
         inputs = @($inputEvidence)
+        finalArtifactCanaryAcceptance = [ordered]@{
+            ledgerSha256 = $finalArtifactAcceptanceValidation.Record.Sha256
+            decision = $finalArtifactAcceptance.decision
+            scope = $finalArtifactAcceptance.scope
+            runCompletedAtUtc = $finalArtifactAcceptance.runCompletedAtUtc
+            runId = $finalArtifactAcceptance.runId
+            runNumber = $finalArtifactAcceptance.runNumber
+            runAttempt = $finalArtifactAcceptance.runAttempt
+            runHeadSha = $finalArtifactAcceptance.runHeadSha
+            producerJobId = $finalArtifactAcceptance.producerJobId
+            artifactId = $finalArtifactAcceptance.artifactId
+            artifactName = $finalArtifactAcceptance.artifactName
+            artifactDigestSha256 = $finalArtifactAcceptance.artifactDigestSha256
+            memberLength = $finalArtifactAcceptance.memberLength
+            memberSha256 = $finalArtifactAcceptance.memberSha256
+            packageSha256 =
+                $finalArtifactAcceptance.evidence.packageSha256
+            producerContractSourceCount =
+                $finalArtifactAcceptance.producerContractSourceCount
+            producerContractSourceSetSha256 =
+                $finalArtifactAcceptance.producerContractSourceSetSha256
+            packageProducingSnapshotFileCount =
+                $finalArtifactAcceptance.packageProducingSnapshotFileCount
+            packageProducingSnapshotSha256 =
+                $finalArtifactAcceptance.packageProducingSnapshotSha256
+            closedBlocker = $finalArtifactAcceptance.closedBlocker
+        }
         gates = @(
             [ordered]@{
                 code = "M1ToM15AutomatedGateSet"
                 result = "passed"
                 evidenceCount = 8
+            },
+            [ordered]@{
+                code = "M16FinalArtifactCanaryScan"
+                result = "passed"
+                evidenceCount = 1
             },
             [ordered]@{
                 code = "M16TechnicalGateSet"
@@ -1963,6 +2651,17 @@ try {
              $stableRecord.Sha256 -ceq $originalRecord.Sha256) `
             "InputChanged"
     }
+    $stableFinalArtifactAcceptance = Read-M16FinalArtifactAcceptance `
+        -Root $resolvedRepositoryRoot `
+        -M15Validation $m15Validation
+    Assert-Condition `
+        ($stableFinalArtifactAcceptance.Record.ByteLength -eq
+            $finalArtifactAcceptanceValidation.Record.ByteLength -and
+         $stableFinalArtifactAcceptance.Record.Sha256 -ceq
+            $finalArtifactAcceptanceValidation.Record.Sha256 -and
+         $stableFinalArtifactAcceptance.ContractBinding.SourceSetSha256 -ceq
+            $finalArtifactAcceptanceValidation.ContractBinding.SourceSetSha256) `
+        "FinalArtifactAcceptanceInvalid"
     $prePublicationCommit = Get-CleanRepositoryCommit -Root $resolvedRepositoryRoot
     Assert-Condition ($prePublicationCommit -ceq $repositoryCommit) "RepositoryChanged"
 

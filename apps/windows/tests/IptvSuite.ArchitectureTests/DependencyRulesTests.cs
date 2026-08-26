@@ -4341,14 +4341,31 @@ public sealed class DependencyRulesTests
             "docs",
             "quality",
             "M16_RELEASE_CANDIDATE_BASELINE.md");
+        string finalArtifactAcceptancePath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "windows-m16-final-artifact-acceptance.json");
         Assert.IsTrue(File.Exists(validatorPath), "The M16 release-candidate validator is missing.");
         Assert.IsTrue(File.Exists(baselinePath), "The M16 release-candidate baseline is missing.");
+        Assert.IsTrue(
+            File.Exists(finalArtifactAcceptancePath),
+            "The M16 final-artifact acceptance ledger is missing.");
 
         string validator = File.ReadAllText(validatorPath).Replace("\r\n", "\n", StringComparison.Ordinal);
         StringAssert.Contains(validator, "[switch]$AllowBlockedCandidate");
         StringAssert.Contains(validator, "$script:maximumInputBytes = 1MB");
         StringAssert.Contains(validator, "$script:maximumAggregateInputBytes = 4MB");
         StringAssert.Contains(validator, "$script:maximumOutputBytes = 256KB");
+        StringAssert.Contains(
+            validator,
+            "$script:finalArtifactAcceptanceSha256 =");
+        StringAssert.Contains(
+            validator,
+            "$script:finalArtifactProducerContractSourceCount = 39");
+        StringAssert.Contains(validator, "$kind = \"text-lf\"");
+        StringAssert.Contains(validator, "$kind = \"binary\"");
+        StringAssert.Contains(validator, "\"$relativePath`0$kind`0");
+        StringAssert.Contains(validator, "finalArtifactCanaryAcceptance = [ordered]@{");
         StringAssert.Contains(validator, "schemaVersion = 1");
         StringAssert.Contains(validator, "evidenceKind = \"WindowsMvpReleaseCandidateGate\"");
         StringAssert.Contains(validator, "result = \"blocked\"");
@@ -4378,6 +4395,26 @@ public sealed class DependencyRulesTests
         {
             StringAssert.Contains(validator, inputName);
         }
+
+        using JsonDocument acceptance = JsonDocument.Parse(
+            File.ReadAllText(finalArtifactAcceptancePath));
+        JsonElement acceptanceRoot = acceptance.RootElement;
+        Assert.AreEqual(1, acceptanceRoot.GetProperty("schemaVersion").GetInt32());
+        Assert.AreEqual(
+            "M16FinalArtifactCanaryScanPending",
+            acceptanceRoot.GetProperty("closedBlocker").GetString());
+        Assert.AreEqual(
+            39,
+            acceptanceRoot.GetProperty("producerContractSourceCount").GetInt32());
+        string[] remainingM16Blockers = acceptanceRoot
+            .GetProperty("remainingM16Blockers")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        Assert.AreEqual(6, remainingM16Blockers.Length);
+        CollectionAssert.DoesNotContain(
+            remainingM16Blockers,
+            "M16FinalArtifactCanaryScanPending");
     }
 
     [TestMethod]
