@@ -423,35 +423,35 @@ function Read-AndAssertEvidence {
     Assert-TestCondition `
         ($packageSbomAcceptance.decision -ceq "AcceptTechnicalPackageBoundSbom" -and
          $packageSbomAcceptance.scope -ceq "TechnicalPackageBoundSbomOnly" -and
-         $packageSbomAcceptance.runCompletedAtUtc -ceq "2026-08-26T01:29:09Z" -and
+         $packageSbomAcceptance.runCompletedAtUtc -ceq "2026-08-26T02:48:32Z" -and
          $packageSbomAcceptance.repository -ceq "serkankaracan/iptv-suite" -and
          $packageSbomAcceptance.workflowPath -ceq ".github/workflows/windows-package-sbom.yml" -and
          $packageSbomAcceptance.workflowName -ceq "Windows package SBOM producer" -and
-         $packageSbomAcceptance.runId -eq 32918708589 -and
-         $packageSbomAcceptance.runNumber -eq 1 -and
+         $packageSbomAcceptance.runId -eq 32923642659 -and
+         $packageSbomAcceptance.runNumber -eq 2 -and
          $packageSbomAcceptance.runAttempt -eq 1 -and
          $packageSbomAcceptance.runEvent -ceq "workflow_dispatch" -and
          $packageSbomAcceptance.runBranch -ceq "main" -and
-         $packageSbomAcceptance.runHeadSha -ceq "e7564aa9382fb12b10869866811e75847d1f6f16" -and
+         $packageSbomAcceptance.runHeadSha -ceq "b78c6c0512a91c9ab1fd86e18f703856a45a4b53" -and
          $packageSbomAcceptance.runConclusion -ceq "success" -and
-         $packageSbomAcceptance.packageJobId -eq 98027737145 -and
+         $packageSbomAcceptance.packageJobId -eq 98042026161 -and
          $packageSbomAcceptance.packageJobName -ceq "Package-bound SBOM producer gate" -and
          $packageSbomAcceptance.packageJobConclusion -ceq "success" -and
-         $packageSbomAcceptance.artifactId -eq 9589197924 -and
+         $packageSbomAcceptance.artifactId -eq 9590841342 -and
          $packageSbomAcceptance.artifactName -ceq "windows-msix-smoke-evidence" -and
-         $packageSbomAcceptance.artifactSizeBytes -eq 7677 -and
-         $packageSbomAcceptance.artifactDigestSha256 -ceq "13c330fc6203838f4a6108281f5daa76cd31f6f85d2e2d0a942bb147fc7921a2") `
+         $packageSbomAcceptance.artifactSizeBytes -eq 7683 -and
+         $packageSbomAcceptance.artifactDigestSha256 -ceq "66bb75c354f9c08c0002f0f3d0a390ecfe0326284928e2da91dc9836ffe41a33") `
         "the hosted package SBOM workflow evidence changed."
     Assert-TestCondition `
         ($packageSbomAcceptance.lastSuccessMemberName -ceq "last-success.json" -and
-         $packageSbomAcceptance.lastSuccessMemberLength -eq 17809 -and
-         $packageSbomAcceptance.lastSuccessMemberSha256 -ceq "c9e8731c4824073b5143d3fa06162a2a34fb62acd7f3652d23cd7052ff71abf0" -and
+         $packageSbomAcceptance.lastSuccessMemberLength -eq 17820 -and
+         $packageSbomAcceptance.lastSuccessMemberSha256 -ceq "a226c7069c9ddf648d77b7e149340b9fbf7f2c7662a0a0ad9ff1317222e8fc7f" -and
          $packageSbomAcceptance.sbomSummaryMemberName -ceq "package-sbom-summary.json" -and
          $packageSbomAcceptance.sbomSummaryMemberLength -eq 1985 -and
-         $packageSbomAcceptance.sbomSummaryMemberSha256 -ceq "e3591cf618744fa7b43da5fffc0ea23f4d54e2da20bba5ea206923d26662557d" -and
+         $packageSbomAcceptance.sbomSummaryMemberSha256 -ceq "ce3c94e832ceab8091b7591ed707bac38c3bc538025ed4c5699c600edcb78bcb" -and
          $packageSbomAcceptance.sbomMemberName -ceq "package-sbom.spdx.json" -and
          $packageSbomAcceptance.sbomMemberLength -eq 50566 -and
-         $packageSbomAcceptance.sbomMemberSha256 -ceq "f14aba1e07e19f6c641977b411909828d03a7dbd474a1cd9576bad3e84f09335") `
+         $packageSbomAcceptance.sbomMemberSha256 -ceq "eeefe6c741b41fc630a089d41445498e919cc1f49ed4f5f3350c87439a789e16") `
         "the hosted package SBOM artifact member evidence changed."
     Assert-TestCondition `
         ($packageSbomAcceptance.configuration -ceq "Release" -and
@@ -470,12 +470,12 @@ function Read-AndAssertEvidence {
          $packageSbomAcceptance.contractSourceCount -eq 7 -and
          $packageSbomAcceptance.contractSourceSetCanonicalSha256 -ceq "e5324fafa743cd003af480ab2c521ae2181a306fd67704c221d905025a7fccae" -and
          $packageSbomAcceptance.packageProducingSnapshotFileCount -eq 111 -and
-         $packageSbomAcceptance.packageProducingSnapshotSha256 -ceq "465b2a74eba4f6c45871d57e4e042772a5a30024ff7e45ac7b9563571f101d9d") `
+         $packageSbomAcceptance.packageProducingSnapshotSha256 -ceq "6b068e8ccb651159dc2bad754f370ba428c6c3087c01c6bc7e419e6095cfadcc") `
         "the package SBOM tool or source binding evidence changed."
     Assert-TestCondition `
         ($packageSbomAcceptance.applicationPackageFile -ceq "IptvSuite.Windows_0.1.0.0_x64.msix" -and
-         $packageSbomAcceptance.applicationPackageLength -eq 29828577 -and
-         $packageSbomAcceptance.applicationPackageSha256 -ceq "8bdac4afbd9682f8f5c28064f0500cffd683354ea8fa4a1a9dd36412cb4a2f8b" -and
+         $packageSbomAcceptance.applicationPackageLength -eq 29843541 -and
+         $packageSbomAcceptance.applicationPackageSha256 -ceq "b23fba0be6bc56e450f0e9a45d5822dc3b400160f29c89c77a9df2231b136a4c" -and
          $packageSbomAcceptance.applicationIdentityName -ceq "IptvSuite.LocalDev.6f0d9a64" -and
          $packageSbomAcceptance.applicationVersion -ceq "0.1.0.0" -and
          $packageSbomAcceptance.applicationSignatureStatus -ceq "Valid" -and
