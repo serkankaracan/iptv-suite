@@ -496,8 +496,8 @@ namespace IptvSuite.PackageSmoke
         private static System.Threading.Thread worker;
         private static bool running;
         private static Exception failure;
-        private static readonly System.Collections.Generic.List<ulong> Timestamps =
-            new System.Collections.Generic.List<ulong>();
+        private static readonly System.Collections.Generic.List<double> IntervalsMilliseconds =
+            new System.Collections.Generic.List<double>();
         private static ulong displayed;
         private static ulong dropped;
 
@@ -518,7 +518,7 @@ namespace IptvSuite.PackageSmoke
                 {
                     throw new InvalidOperationException("The DWM frame sampler is already active.");
                 }
-                Timestamps.Clear();
+                IntervalsMilliseconds.Clear();
                 displayed = 0;
                 dropped = 0;
                 failure = null;
@@ -559,24 +559,11 @@ namespace IptvSuite.PackageSmoke
                             unchecked((uint)failure.HResult)),
                         failure);
                 }
-                if (Timestamps.Count < 31)
-                {
-                    throw new InvalidOperationException("The DWM frame sample is too small.");
-                }
-                var intervals = new System.Collections.Generic.List<double>(Timestamps.Count - 1);
-                for (int index = 1; index < Timestamps.Count; index++)
-                {
-                    if (Timestamps[index] > Timestamps[index - 1])
-                    {
-                        intervals.Add(
-                            (Timestamps[index] - Timestamps[index - 1]) * 1000.0 /
-                            System.Diagnostics.Stopwatch.Frequency);
-                    }
-                }
-                if (intervals.Count < 30)
+                if (IntervalsMilliseconds.Count < 30)
                 {
                     throw new InvalidOperationException("The DWM frame interval sample is too small.");
                 }
+                var intervals = new System.Collections.Generic.List<double>(IntervalsMilliseconds);
                 intervals.Sort();
                 int percentileIndex = Math.Max(0, (int)Math.Ceiling(intervals.Count * 0.95) - 1);
                 ulong denominator = displayed + dropped;
@@ -618,17 +605,24 @@ namespace IptvSuite.PackageSmoke
                     {
                         lock (Sync)
                         {
-                            Timestamps.Add(timing.QpcVBlank);
                             if (previousTimestamp != 0 &&
+                                timing.QpcVBlank > previousTimestamp &&
                                 timing.Refresh >= previousRefresh &&
                                 timing.FramesLate >= previousLate)
                             {
                                 ulong refreshDelta = timing.Refresh - previousRefresh;
-                                ulong lateDelta = Math.Min(
-                                    timing.FramesLate - previousLate,
-                                    refreshDelta);
-                                displayed += refreshDelta - lateDelta;
-                                dropped += lateDelta;
+                                if (refreshDelta > 0)
+                                {
+                                    IntervalsMilliseconds.Add(
+                                        (timing.QpcVBlank - previousTimestamp) * 1000.0 /
+                                        System.Diagnostics.Stopwatch.Frequency /
+                                        refreshDelta);
+                                    ulong lateDelta = Math.Min(
+                                        timing.FramesLate - previousLate,
+                                        refreshDelta);
+                                    displayed += refreshDelta - lateDelta;
+                                    dropped += lateDelta;
+                                }
                             }
                         }
                         previousTimestamp = timing.QpcVBlank;
@@ -3255,7 +3249,12 @@ try {
     if ($catalogFrameP95Milliseconds -gt 33.3 -or
         $catalogDroppedFramePercent -ge 1.0 -or
         $catalogFrameMaximumMilliseconds -gt 200.0) {
-        throw "The packaged catalog DWM frame budget failed."
+        throw (
+            "The packaged catalog DWM frame budget failed: " +
+            "p95=$catalogFrameP95Milliseconds, " +
+            "maximum=$catalogFrameMaximumMilliseconds, " +
+            "droppedPercent=$catalogDroppedFramePercent, " +
+            "intervals=$catalogFrameIntervalCount.")
     }
 
     # This app-window UI-thread proxy is intentionally a separate scroll pass.

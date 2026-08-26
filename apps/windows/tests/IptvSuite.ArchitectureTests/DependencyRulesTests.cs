@@ -721,7 +721,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "[StructLayout(LayoutKind.Sequential, Pack = 1)]");
         StringAssert.Contains(packageSmoke, "Marshal.SizeOf(typeof(DwmTimingInfo)) != 292");
         StringAssert.Contains(packageSmoke, "timing.Size = (uint)Marshal.SizeOf(typeof(DwmTimingInfo))");
-        StringAssert.Contains(packageSmoke, "Timestamps.Add(timing.QpcVBlank)");
+        StringAssert.Contains(packageSmoke, "timing.QpcVBlank > previousTimestamp");
+        StringAssert.Contains(packageSmoke, "IntervalsMilliseconds.Add(");
+        StringAssert.Contains(packageSmoke, "System.Diagnostics.Stopwatch.Frequency /");
+        StringAssert.Contains(packageSmoke, "refreshDelta);");
         StringAssert.Contains(packageSmoke, "timing.FramesLate - previousLate");
         StringAssert.Contains(packageSmoke, "failure.GetType().Name");
         StringAssert.Contains(packageSmoke, "unchecked((uint)failure.HResult)");
@@ -751,6 +754,8 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$catalogFrameP95Milliseconds -gt 33.3");
         StringAssert.Contains(packageSmoke, "$catalogDroppedFramePercent -ge 1.0");
         StringAssert.Contains(packageSmoke, "$catalogFrameMaximumMilliseconds -gt 200.0");
+        StringAssert.Contains(packageSmoke, "p95=$catalogFrameP95Milliseconds");
+        StringAssert.Contains(packageSmoke, "droppedPercent=$catalogDroppedFramePercent");
         StringAssert.Contains(packageSmoke, "CatalogDwmFrameP95Milliseconds =");
         StringAssert.Contains(packageSmoke, "CatalogDwmFrameMaximumMilliseconds =");
         StringAssert.Contains(packageSmoke, "CatalogDwmDroppedFramePercent =");
@@ -7388,6 +7393,15 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             workflow,
             "run_native_client:\n        description: Run the native Tier A smoke on an approved x64 Windows Client runner");
+        StringAssert.Contains(
+            workflow,
+            "renew_package_evidence:\n        description: Run package evidence after an acceptance-bound contract change");
+        StringAssert.Contains(
+            workflow,
+            "  package-smoke:\n    name: Packaged install and launch smoke\n" +
+            "    if: ${{ always() && (needs.quality.result == 'success' || " +
+            "(github.event_name == 'workflow_dispatch' && inputs.renew_package_evidence)) }}\n" +
+            "    needs: quality\n");
         StringAssert.Contains(workflow, "name: windows-native-playback-evidence");
         StringAssert.Contains(workflow, ".artifacts/native-playback-smoke/last-success.json");
         StringAssert.Contains(workflow, "timeout-minutes: 30");
@@ -7407,6 +7421,8 @@ public sealed class DependencyRulesTests
             "scan-artifacts .\\.artifacts\\native-playback-smoke M10 NATIVE_PLAYBACK_EVIDENCE");
         StringAssert.Contains(workflow, "name: Required Windows gate");
         StringAssert.Contains(workflow, "if: ${{ always() }}");
+        StringAssert.Contains(workflow, "test \"$QUALITY_RESULT\" = \"success\"");
+        StringAssert.Contains(workflow, "test \"$PACKAGE_SMOKE_RESULT\" = \"success\"");
         StringAssert.Contains(
             workflow,
             "NATIVE_PLAYBACK_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.run_native_client }}");
