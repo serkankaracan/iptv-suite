@@ -8536,6 +8536,11 @@ public sealed class DependencyRulesTests
         Assert.AreEqual("4096", locatorInput.Attribute("MaxLength")?.Value);
         Assert.AreEqual("False", locatorInput.Attribute("IsSpellCheckEnabled")?.Value);
         XElement authorization = RequiredNamedElement("RemotePlaylistAuthorizationCheckBox");
+        const string expectedAuthorizationAccessibleName =
+            "Kaynak erişim ve özel veya yerel ağ güvenini onayla";
+        Assert.AreEqual(
+            expectedAuthorizationAccessibleName,
+            authorization.Attribute("AutomationProperties.Name")?.Value);
         StringAssert.Contains(
             authorization.Attribute("Content")?.Value ?? string.Empty,
             "erişim yetkim");
@@ -8707,6 +8712,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "RemotePlaylistSourceNameTextBox");
         StringAssert.Contains(packageSmoke, "RemotePlaylistLocatorTextBox");
         StringAssert.Contains(packageSmoke, "RemotePlaylistAuthorizationCheckBox");
+        StringAssert.Contains(
+            packageSmoke,
+            "\"Kaynak erişim ve özel veya yerel ağ güvenini onayla\"");
         StringAssert.Contains(packageSmoke, "[System.Net.IPAddress]::IsLoopback(");
         StringAssert.Contains(packageSmoke, "Reset-AppxPackage `");
         StringAssert.Contains(packageSmoke, "CleanInstallOnboardingVerified = $cleanInstallOnboardingVerified");

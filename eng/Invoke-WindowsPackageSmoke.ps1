@@ -4703,7 +4703,7 @@ try {
             $onboardingRoot `
             "RemotePlaylistAuthorizationCheckBox" `
             ([System.Windows.Automation.ControlType]::CheckBox) `
-            "Confirm authorization to access this source"
+            "Kaynak erişim ve özel veya yerel ağ güvenini onayla"
         $onboardingSubmitButton = Get-RequiredAutomationElement `
             $onboardingRoot `
             "RemotePlaylistAddButton" `
