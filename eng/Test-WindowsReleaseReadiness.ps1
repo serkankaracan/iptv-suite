@@ -14,6 +14,7 @@ $script:maximumEvidenceBytes = 1MB
 $script:maximumSourceFileBytes = 2MB
 $script:maximumPackageSbomAcceptanceBytes = 16KB
 $script:maximumPackageVulnerabilityAcceptanceBytes = 16KB
+$script:maximumAssetProvenanceBytes = 32KB
 $script:maximumPackageProducingSnapshotFiles = 256
 $script:maximumPackageProducingSnapshotDirectories = 128
 $script:maximumPackageProducingSnapshotBytes = 64MB
@@ -37,6 +38,10 @@ $script:packageSbomContractSourceSetSha256 = "e5324fafa743cd003af480ab2c521ae218
 $script:packageSbomProductionInputSetSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
 $script:packageProducingSnapshotFileCount = 111
 $script:packageProducingSnapshotSha256 = "465b2a74eba4f6c45871d57e4e042772a5a30024ff7e45ac7b9563571f101d9d"
+$script:assetProvenanceRelativePath = "eng/windows-production-asset-provenance.json"
+$script:assetProvenanceSha256 = "8006c56170202457815f3768dfcff56236b661a4dbb57aa7b7bf3a5acdcc6412"
+$script:assetGeneratorSha256 = "4ac099e8da587b5df61817ab92071235e4e91408d891f5cafa3037599d7f603b"
+$script:assetCanonicalSetSha256 = "6338f26af851a45eb4c7da593430ef1eab5a34afa6013365c2621fbfa0957777"
 
 function Fail-TechnicalInvariant {
     param(
@@ -659,10 +664,190 @@ function Get-PackageProducingSnapshot {
     }
 }
 
+function Get-UInt16LittleEndian {
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Offset
+    )
+
+    Assert-Condition `
+        ($Offset -ge 0 -and $Offset -le ($Bytes.Length - 2)) `
+        "AssetProvenanceInvalid"
+    return [int]([System.BitConverter]::ToUInt16($Bytes, $Offset))
+}
+
+function Get-UInt32LittleEndian {
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Offset
+    )
+
+    Assert-Condition `
+        ($Offset -ge 0 -and $Offset -le ($Bytes.Length - 4)) `
+        "AssetProvenanceInvalid"
+    return [long]([System.BitConverter]::ToUInt32($Bytes, $Offset))
+}
+
+function Get-UInt32BigEndian {
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Offset
+    )
+
+    Assert-Condition `
+        ($Offset -ge 0 -and $Offset -le ($Bytes.Length - 4)) `
+        "AssetProvenanceInvalid"
+    return [long]$Bytes[$Offset] * 16777216L +
+        [long]$Bytes[$Offset + 1] * 65536L +
+        [long]$Bytes[$Offset + 2] * 256L +
+        [long]$Bytes[$Offset + 3]
+}
+
+function Get-PngAssetShape {
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes,
+
+        [int]$Offset = 0,
+
+        [int]$Length = $Bytes.Length
+    )
+
+    Assert-Condition `
+        ($Offset -ge 0 -and
+         $Length -ge 45 -and
+         [long]$Offset + [long]$Length -le $Bytes.Length) `
+        "AssetProvenanceInvalid"
+    $signature = [byte[]]@(137, 80, 78, 71, 13, 10, 26, 10)
+    for ($index = 0; $index -lt $signature.Length; $index++) {
+        Assert-Condition `
+            ($Bytes[$Offset + $index] -eq $signature[$index]) `
+            "AssetProvenanceInvalid"
+    }
+
+    Assert-Condition `
+        ((Get-UInt32BigEndian -Bytes $Bytes -Offset ($Offset + 8)) -eq 13 -and
+         $Bytes[$Offset + 12] -eq 73 -and
+         $Bytes[$Offset + 13] -eq 72 -and
+         $Bytes[$Offset + 14] -eq 68 -and
+         $Bytes[$Offset + 15] -eq 82) `
+        "AssetProvenanceInvalid"
+    $width = Get-UInt32BigEndian -Bytes $Bytes -Offset ($Offset + 16)
+    $height = Get-UInt32BigEndian -Bytes $Bytes -Offset ($Offset + 20)
+    Assert-Condition `
+        ($width -gt 0 -and $width -le 4096 -and
+         $height -gt 0 -and $height -le 4096 -and
+         $Bytes[$Offset + 24] -eq 8 -and
+         $Bytes[$Offset + 25] -eq 6 -and
+         $Bytes[$Offset + 26] -eq 0 -and
+         $Bytes[$Offset + 27] -eq 0 -and
+         $Bytes[$Offset + 28] -eq 0) `
+        "AssetProvenanceInvalid"
+
+    $endOffset = $Offset + $Length - 12
+    Assert-Condition `
+        ((Get-UInt32BigEndian -Bytes $Bytes -Offset $endOffset) -eq 0 -and
+         $Bytes[$endOffset + 4] -eq 73 -and
+         $Bytes[$endOffset + 5] -eq 69 -and
+         $Bytes[$endOffset + 6] -eq 78 -and
+         $Bytes[$endOffset + 7] -eq 68) `
+        "AssetProvenanceInvalid"
+
+    return [pscustomobject]@{
+        Width = [int]$width
+        Height = [int]$height
+    }
+}
+
+function Get-ProductionAssetShape {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.FileInfo]$File,
+
+        [Parameter(Mandatory = $true)]
+        [string]$MediaType
+    )
+
+    [byte[]]$bytes = Read-BoundedRegularFileBytes `
+        -File $File `
+        -MaximumBytes $script:maximumSourceFileBytes `
+        -Code "AssetProvenanceInvalid"
+    if ($MediaType -ceq "image/png") {
+        $png = Get-PngAssetShape -Bytes $bytes
+        return [pscustomobject]@{
+            Width = $png.Width
+            Height = $png.Height
+            FrameSizes = [int[]]@()
+        }
+    }
+
+    Assert-Condition ($MediaType -ceq "image/vnd.microsoft.icon") `
+        "AssetProvenanceInvalid"
+    Assert-Condition `
+        ($bytes.Length -ge 22 -and
+         (Get-UInt16LittleEndian -Bytes $bytes -Offset 0) -eq 0 -and
+         (Get-UInt16LittleEndian -Bytes $bytes -Offset 2) -eq 1) `
+        "AssetProvenanceInvalid"
+    $frameCount = Get-UInt16LittleEndian -Bytes $bytes -Offset 4
+    Assert-Condition ($frameCount -gt 0 -and $frameCount -le 32) `
+        "AssetProvenanceInvalid"
+    $directoryLength = 6 + (16 * $frameCount)
+    Assert-Condition ($directoryLength -lt $bytes.Length) "AssetProvenanceInvalid"
+
+    $frameSizes = [System.Collections.Generic.List[int]]::new()
+    [long]$expectedImageOffset = $directoryLength
+    for ($frameIndex = 0; $frameIndex -lt $frameCount; $frameIndex++) {
+        $entryOffset = 6 + (16 * $frameIndex)
+        $width = if ($bytes[$entryOffset] -eq 0) { 256 } else { [int]$bytes[$entryOffset] }
+        $height = if ($bytes[$entryOffset + 1] -eq 0) { 256 } else { [int]$bytes[$entryOffset + 1] }
+        $imageLength = Get-UInt32LittleEndian -Bytes $bytes -Offset ($entryOffset + 8)
+        $imageOffset = Get-UInt32LittleEndian -Bytes $bytes -Offset ($entryOffset + 12)
+        Assert-Condition `
+            ($width -eq $height -and
+             $bytes[$entryOffset + 2] -eq 0 -and
+             $bytes[$entryOffset + 3] -eq 0 -and
+             (Get-UInt16LittleEndian -Bytes $bytes -Offset ($entryOffset + 4)) -eq 1 -and
+             (Get-UInt16LittleEndian -Bytes $bytes -Offset ($entryOffset + 6)) -eq 32 -and
+             $imageLength -ge 45 -and
+             $imageOffset -eq $expectedImageOffset -and
+             $imageOffset + $imageLength -le $bytes.Length) `
+            "AssetProvenanceInvalid"
+        $png = Get-PngAssetShape `
+            -Bytes $bytes `
+            -Offset ([int]$imageOffset) `
+            -Length ([int]$imageLength)
+        Assert-Condition ($png.Width -eq $width -and $png.Height -eq $height) `
+            "AssetProvenanceInvalid"
+        $frameSizes.Add($width)
+        $expectedImageOffset += $imageLength
+    }
+    Assert-Condition ($expectedImageOffset -eq $bytes.Length) `
+        "AssetProvenanceInvalid"
+
+    return [pscustomobject]@{
+        Width = $null
+        Height = $null
+        FrameSizes = [int[]]$frameSizes.ToArray()
+    }
+}
+
 function Assert-NoDuplicateJsonProperties {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Text
+        [string]$Text,
+
+        [string]$Code = "PackageSbomAcceptanceInvalid",
+
+        [string]$DuplicateCode = "PackageSbomAcceptanceDuplicateProperty"
     )
 
     $objectPropertySets = [System.Collections.Stack]::new()
@@ -678,7 +863,7 @@ function Assert-NoDuplicateJsonProperties {
         }
         if ($character -eq [char]0x7d) {
             Assert-Condition ($objectPropertySets.Count -gt 0) `
-                "PackageSbomAcceptanceInvalid"
+                $Code
             [void]$objectPropertySets.Pop()
             $index++
             continue
@@ -700,7 +885,7 @@ function Assert-NoDuplicateJsonProperties {
             }
             if ($stringCharacter -eq [char]0x5c) {
                 $index++
-                Assert-Condition ($index -lt $Text.Length) "PackageSbomAcceptanceInvalid"
+                Assert-Condition ($index -lt $Text.Length) $Code
                 $escapeCharacter = $Text[$index]
                 switch ($escapeCharacter) {
                     '"' { [void]$builder.Append([char]0x22) }
@@ -713,15 +898,15 @@ function Assert-NoDuplicateJsonProperties {
                     't' { [void]$builder.Append([char]0x09) }
                     'u' {
                         Assert-Condition (($index + 4) -lt $Text.Length) `
-                            "PackageSbomAcceptanceInvalid"
+                            $Code
                         $hex = $Text.Substring($index + 1, 4)
                         Assert-Condition ($hex -cmatch '\A[0-9A-Fa-f]{4}\z') `
-                            "PackageSbomAcceptanceInvalid"
+                            $Code
                         [void]$builder.Append([char][Convert]::ToInt32($hex, 16))
                         $index += 4
                     }
                     default {
-                        Fail-TechnicalInvariant -Code "PackageSbomAcceptanceInvalid"
+                        Fail-TechnicalInvariant -Code $Code
                     }
                 }
                 $index++
@@ -729,27 +914,350 @@ function Assert-NoDuplicateJsonProperties {
             }
 
             Assert-Condition ([int]$stringCharacter -ge 0x20) `
-                "PackageSbomAcceptanceInvalid"
+                $Code
             [void]$builder.Append($stringCharacter)
             $index++
         }
 
-        Assert-Condition $closed "PackageSbomAcceptanceInvalid"
+        Assert-Condition $closed $Code
         $lookAhead = $index
         while ($lookAhead -lt $Text.Length -and [char]::IsWhiteSpace($Text[$lookAhead])) {
             $lookAhead++
         }
         if ($lookAhead -lt $Text.Length -and $Text[$lookAhead] -eq [char]0x3a) {
             Assert-Condition ($objectPropertySets.Count -gt 0) `
-                "PackageSbomAcceptanceInvalid"
+                $Code
             $propertyName = $builder.ToString()
             if (-not $objectPropertySets.Peek().Add($propertyName)) {
-                Fail-TechnicalInvariant -Code "PackageSbomAcceptanceDuplicateProperty"
+                Fail-TechnicalInvariant -Code $DuplicateCode
             }
         }
     }
 
-    Assert-Condition ($objectPropertySets.Count -eq 0) "PackageSbomAcceptanceInvalid"
+    Assert-Condition ($objectPropertySets.Count -eq 0) $Code
+}
+
+function Read-ProductionAssetProvenance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [object[]]$AssetInventory
+    )
+
+    try {
+        $ledgerFile = Resolve-RegularRepositoryFile `
+            -Root $Root `
+            -RelativePath ($script:assetProvenanceRelativePath.Replace('/', '\')) `
+            -MaximumBytes $script:maximumAssetProvenanceBytes `
+            -Code "AssetProvenanceInvalid"
+        $ledgerSha256 = Get-LowerSha256 -File $ledgerFile
+        Assert-Condition ($ledgerSha256 -ceq $script:assetProvenanceSha256) `
+            "AssetProvenanceInvalid"
+        $ledgerText = Read-StrictUtf8Text `
+            -File $ledgerFile `
+            -MaximumBytes $script:maximumAssetProvenanceBytes `
+            -Code "AssetProvenanceInvalid"
+        Assert-NoDuplicateJsonProperties `
+            -Text $ledgerText `
+            -Code "AssetProvenanceInvalid" `
+            -DuplicateCode "AssetProvenanceDuplicateProperty"
+        try {
+            $ledger = $ledgerText | ConvertFrom-Json
+        }
+        catch {
+            Fail-TechnicalInvariant -Code "AssetProvenanceInvalid"
+        }
+
+        Assert-ExactStringSet `
+            -Actual @($ledger.PSObject.Properties.Name) `
+            -Expected @(
+                "schemaVersion",
+                "decision",
+                "scope",
+                "provenanceKind",
+                "generatorPath",
+                "generatorVersion",
+                "generatorSha256",
+                "algorithmVersion",
+                "canonicalAssetSetSha256",
+                "assets",
+                "sourceAssetDependencies",
+                "thirdPartyAssetInputs",
+                "fonts",
+                "text",
+                "trademarks",
+                "developmentPlaceholderOnly",
+                "productionBrandApproved",
+                "copyrightOwnershipDetermined",
+                "redistributionDecisionComplete",
+                "legalReviewComplete") `
+            -Code "AssetProvenanceInvalid"
+        Assert-Condition `
+            ($ledger.schemaVersion -is [int] -and
+             $ledger.schemaVersion -eq 1 -and
+             $ledger.decision -is [string] -and
+             $ledger.decision -ceq "AcceptGeneratedAssetProvenance" -and
+             $ledger.scope -is [string] -and
+             $ledger.scope -ceq "ExactWindowsPackageAssetOriginOnly" -and
+             $ledger.provenanceKind -is [string] -and
+             $ledger.provenanceKind -ceq
+                "GeneratedBySourceControlledDeterministicRecipe" -and
+             $ledger.generatorPath -is [string] -and
+             $ledger.generatorPath -ceq "eng/New-WindowsProductionAssets.ps1" -and
+             $ledger.generatorVersion -is [string] -and
+             $ledger.generatorVersion -ceq "1.0.0" -and
+             $ledger.generatorSha256 -is [string] -and
+             $ledger.generatorSha256 -ceq $script:assetGeneratorSha256 -and
+             $ledger.algorithmVersion -is [string] -and
+             $ledger.algorithmVersion -ceq
+                "WindowsProductionAssets-Rgba8Filter0FixedHuffmanLz77-PngFrameIco-v1" -and
+             $ledger.canonicalAssetSetSha256 -is [string] -and
+             $ledger.canonicalAssetSetSha256 -ceq
+                $script:assetCanonicalSetSha256) `
+            "AssetProvenanceInvalid"
+
+        foreach ($emptyArrayName in @(
+            "sourceAssetDependencies",
+            "thirdPartyAssetInputs",
+            "fonts",
+            "text",
+            "trademarks")) {
+            $emptyArray = $ledger.PSObject.Properties[$emptyArrayName].Value
+            Assert-Condition `
+                ($emptyArray -is [System.Array] -and @($emptyArray).Count -eq 0) `
+                "AssetProvenanceInvalid"
+        }
+        Assert-Condition `
+            ($ledger.developmentPlaceholderOnly -is [bool] -and
+             $ledger.developmentPlaceholderOnly -and
+             $ledger.productionBrandApproved -is [bool] -and
+             -not $ledger.productionBrandApproved -and
+             $ledger.copyrightOwnershipDetermined -is [bool] -and
+             -not $ledger.copyrightOwnershipDetermined -and
+             $ledger.redistributionDecisionComplete -is [bool] -and
+             -not $ledger.redistributionDecisionComplete -and
+             $ledger.legalReviewComplete -is [bool] -and
+             -not $ledger.legalReviewComplete) `
+            "AssetProvenanceInvalid"
+
+        $expectedAssets = @(
+            [pscustomobject]@{
+                Path = "apps/windows/src/IptvSuite.Windows/Assets/AppIcon.ico"
+                MediaType = "image/vnd.microsoft.icon"
+                Width = $null
+                Height = $null
+                FrameSizes = [int[]]@(256, 128, 64, 48, 32, 16)
+            },
+            [pscustomobject]@{
+                Path = "apps/windows/src/IptvSuite.Windows/Assets/SplashScreen.scale-200.png"
+                MediaType = "image/png"
+                Width = 1240
+                Height = 600
+                FrameSizes = [int[]]@()
+            },
+            [pscustomobject]@{
+                Path = "apps/windows/src/IptvSuite.Windows/Assets/Square150x150Logo.scale-200.png"
+                MediaType = "image/png"
+                Width = 300
+                Height = 300
+                FrameSizes = [int[]]@()
+            },
+            [pscustomobject]@{
+                Path = "apps/windows/src/IptvSuite.Windows/Assets/Square44x44Logo.scale-200.png"
+                MediaType = "image/png"
+                Width = 88
+                Height = 88
+                FrameSizes = [int[]]@()
+            },
+            [pscustomobject]@{
+                Path = "apps/windows/src/IptvSuite.Windows/Assets/Square44x44Logo.targetsize-24_altform-unplated.png"
+                MediaType = "image/png"
+                Width = 24
+                Height = 24
+                FrameSizes = [int[]]@()
+            },
+            [pscustomobject]@{
+                Path = "apps/windows/src/IptvSuite.Windows/Assets/Square44x44Logo.targetsize-48_altform-lightunplated.png"
+                MediaType = "image/png"
+                Width = 48
+                Height = 48
+                FrameSizes = [int[]]@()
+            },
+            [pscustomobject]@{
+                Path = "apps/windows/src/IptvSuite.Windows/Assets/StoreLogo.png"
+                MediaType = "image/png"
+                Width = 50
+                Height = 50
+                FrameSizes = [int[]]@()
+            },
+            [pscustomobject]@{
+                Path = "apps/windows/src/IptvSuite.Windows/Assets/Wide310x150Logo.scale-200.png"
+                MediaType = "image/png"
+                Width = 620
+                Height = 300
+                FrameSizes = [int[]]@()
+            })
+        Assert-Condition `
+            ($ledger.assets -is [System.Array] -and
+             @($ledger.assets).Count -eq $expectedAssets.Count -and
+             $AssetInventory.Count -eq $expectedAssets.Count) `
+            "AssetProvenanceInvalid"
+        Assert-ExactStringSet `
+            -Actual @($AssetInventory | ForEach-Object { [string]$_.path }) `
+            -Expected @($expectedAssets | ForEach-Object { [string]$_.Path }) `
+            -Code "AssetProvenanceInvalid"
+
+        $canonicalLines = [System.Collections.Generic.List[string]]::new()
+        for ($assetIndex = 0; $assetIndex -lt $expectedAssets.Count; $assetIndex++) {
+            $expected = $expectedAssets[$assetIndex]
+            $record = @($ledger.assets)[$assetIndex]
+            $expectedProperties = if ($expected.MediaType -ceq "image/png") {
+                @("path", "mediaType", "width", "height", "length", "sha256")
+            }
+            else {
+                @("path", "mediaType", "frameSizes", "length", "sha256")
+            }
+            Assert-ExactStringSet `
+                -Actual @($record.PSObject.Properties.Name) `
+                -Expected $expectedProperties `
+                -Code "AssetProvenanceInvalid"
+            Assert-Condition `
+                ($record.path -is [string] -and
+                 $record.path -ceq $expected.Path -and
+                 $record.mediaType -is [string] -and
+                 $record.mediaType -ceq $expected.MediaType -and
+                 $record.length -is [int] -and
+                 $record.length -gt 0 -and
+                 $record.length -le $script:maximumSourceFileBytes -and
+                 $record.sha256 -is [string] -and
+                 $record.sha256 -cmatch '\A[0-9a-f]{64}\z') `
+                "AssetProvenanceInvalid"
+
+            if ($expected.MediaType -ceq "image/png") {
+                Assert-Condition `
+                    ($record.width -is [int] -and
+                     $record.width -eq $expected.Width -and
+                     $record.height -is [int] -and
+                     $record.height -eq $expected.Height) `
+                    "AssetProvenanceInvalid"
+            }
+            else {
+                Assert-Condition ($record.frameSizes -is [System.Array]) `
+                    "AssetProvenanceInvalid"
+                Assert-ExactStringSet `
+                    -Actual @($record.frameSizes | ForEach-Object { $_.ToString() }) `
+                    -Expected @($expected.FrameSizes | ForEach-Object { $_.ToString() }) `
+                    -Code "AssetProvenanceInvalid"
+                for ($frameIndex = 0; $frameIndex -lt $expected.FrameSizes.Count; $frameIndex++) {
+                    Assert-Condition `
+                        (@($record.frameSizes)[$frameIndex] -is [int] -and
+                         @($record.frameSizes)[$frameIndex] -eq
+                            $expected.FrameSizes[$frameIndex]) `
+                        "AssetProvenanceInvalid"
+                }
+            }
+
+            $assetFile = Resolve-RegularRepositoryFile `
+                -Root $Root `
+                -RelativePath ($expected.Path.Replace('/', '\')) `
+                -MaximumBytes $script:maximumSourceFileBytes `
+                -Code "AssetProvenanceInvalid"
+            $assetSha256 = Get-LowerSha256 -File $assetFile
+            Assert-Condition `
+                ($assetFile.Length -eq $record.length -and
+                 $assetSha256 -ceq $record.sha256) `
+                "AssetProvenanceInvalid"
+            $inventoryRecord = @($AssetInventory | Where-Object {
+                $_.path -ceq $expected.Path
+            })
+            Assert-Condition `
+                ($inventoryRecord.Count -eq 1 -and
+                 $inventoryRecord[0].length -eq $record.length -and
+                 $inventoryRecord[0].sha256 -ceq $record.sha256) `
+                "AssetProvenanceInvalid"
+            $shape = Get-ProductionAssetShape `
+                -File $assetFile `
+                -MediaType $expected.MediaType
+            if ($expected.MediaType -ceq "image/png") {
+                Assert-Condition `
+                    ($shape.Width -eq $expected.Width -and
+                     $shape.Height -eq $expected.Height -and
+                     @($shape.FrameSizes).Count -eq 0) `
+                    "AssetProvenanceInvalid"
+                $shapeText = "size=$($expected.Width)x$($expected.Height)"
+            }
+            else {
+                Assert-Condition `
+                    (@($shape.FrameSizes).Count -eq $expected.FrameSizes.Count) `
+                    "AssetProvenanceInvalid"
+                for ($frameIndex = 0; $frameIndex -lt $expected.FrameSizes.Count; $frameIndex++) {
+                    Assert-Condition `
+                        ($shape.FrameSizes[$frameIndex] -eq
+                            $expected.FrameSizes[$frameIndex]) `
+                        "AssetProvenanceInvalid"
+                }
+                $shapeText = "frames=" + ($expected.FrameSizes -join ',')
+            }
+            $canonicalLines.Add(
+                "$($expected.Path)|$($expected.MediaType)|$shapeText|$($record.length)|$($record.sha256)")
+        }
+
+        $canonicalText = ($canonicalLines.ToArray() -join "`n") + "`n"
+        $canonicalSha256 = Get-LowerSha256ForBytes `
+            -Bytes $script:utf8NoBom.GetBytes($canonicalText)
+        Assert-Condition `
+            ($canonicalSha256 -ceq $ledger.canonicalAssetSetSha256) `
+            "AssetProvenanceInvalid"
+
+        $generatorFile = Resolve-RegularRepositoryFile `
+            -Root $Root `
+            -RelativePath ($ledger.generatorPath.Replace('/', '\')) `
+            -MaximumBytes $script:maximumSourceFileBytes `
+            -Code "AssetProvenanceInvalid"
+        [void](Read-StrictUtf8Text `
+            -File $generatorFile `
+            -MaximumBytes $script:maximumSourceFileBytes `
+            -Code "AssetProvenanceInvalid")
+        Assert-Condition `
+            ((Get-LowerSha256 -File $generatorFile) -ceq
+                $ledger.generatorSha256) `
+            "AssetProvenanceInvalid"
+        try {
+            & $generatorFile.FullName -VerifyRoot $Root 6>&1 | Out-Null
+        }
+        catch {
+            Fail-TechnicalInvariant -Code "AssetProvenanceVerificationInvalid"
+        }
+
+        return [pscustomobject]@{
+            LedgerSha256 = $ledgerSha256
+            Decision = $ledger.decision
+            Scope = $ledger.scope
+            ProvenanceKind = $ledger.provenanceKind
+            GeneratorPath = $ledger.generatorPath
+            GeneratorVersion = $ledger.generatorVersion
+            GeneratorSha256 = $ledger.generatorSha256
+            AlgorithmVersion = $ledger.algorithmVersion
+            CanonicalAssetSetSha256 = $canonicalSha256
+            AssetCount = [int]$expectedAssets.Count
+            DeterministicRecipeVerified = $true
+            DevelopmentPlaceholderOnly = $true
+            ProductionBrandApproved = $false
+            CopyrightOwnershipDetermined = $false
+            RedistributionDecisionComplete = $false
+            LegalReviewComplete = $false
+        }
+    }
+    catch {
+        if ($_.Exception.Message -match
+            '^M15TechnicalInvariant:AssetProvenance(?:Invalid|DuplicateProperty|VerificationInvalid)$') {
+            throw $_.Exception.Message
+        }
+
+        Fail-TechnicalInvariant -Code "AssetProvenanceInvalid"
+    }
 }
 
 function Read-PackageSbomAcceptance {
@@ -2186,6 +2694,11 @@ try {
         }
     }
 
+    $script:technicalStage = "ProductionAssetProvenance"
+    $assetProvenance = Read-ProductionAssetProvenance `
+        -Root $resolvedRepositoryRoot `
+        -AssetInventory $assets
+
     $script:technicalStage = "ApplicationManifest"
     $applicationManifestFile = Resolve-RegularRepositoryFile `
         -Root $resolvedRepositoryRoot `
@@ -2445,7 +2958,6 @@ try {
 
     $script:technicalStage = "EvidenceComposition"
     $baseBlockers = @(
-        "AssetProvenancePending",
         "CodecIpLegalReviewPending",
         "CveReviewPending",
         "LicenseFilePending",
@@ -2468,11 +2980,11 @@ try {
     }
     $blockers = Get-OrdinalSortedStrings -Values $effectiveBlockers
     Assert-Condition `
-        ($blockers.Count -eq $(if ($packageVulnerabilityFreshAtEvaluation) { 13 } else { 14 })) `
+        ($blockers.Count -eq $(if ($packageVulnerabilityFreshAtEvaluation) { 12 } else { 13 })) `
         "PackageVulnerabilityAcceptanceInvalid"
 
     $summary = [ordered]@{
-        schemaVersion = 4
+        schemaVersion = 5
         result = "blocked"
         technicalBaselinePassed = $true
         releaseReady = $false
@@ -2509,6 +3021,34 @@ try {
             installRootDiscoveryDenylistVersion = 1
         }
         assets = @($assets)
+        assetProvenance = [ordered]@{
+            ledgerSha256 = $assetProvenance.LedgerSha256
+            decision = $assetProvenance.Decision
+            scope = $assetProvenance.Scope
+            provenanceKind = $assetProvenance.ProvenanceKind
+            generatorPath = $assetProvenance.GeneratorPath
+            generatorVersion = $assetProvenance.GeneratorVersion
+            generatorSha256 = $assetProvenance.GeneratorSha256
+            algorithmVersion = $assetProvenance.AlgorithmVersion
+            canonicalAssetSetSha256 = $assetProvenance.CanonicalAssetSetSha256
+            assetCount = $assetProvenance.AssetCount
+            deterministicRecipeVerified =
+                $assetProvenance.DeterministicRecipeVerified
+            sourceAssetDependencyCount = 0
+            thirdPartyAssetInputCount = 0
+            fontInputCount = 0
+            textInputCount = 0
+            trademarkInputCount = 0
+            developmentPlaceholderOnly =
+                $assetProvenance.DevelopmentPlaceholderOnly
+            productionBrandApproved =
+                $assetProvenance.ProductionBrandApproved
+            copyrightOwnershipDetermined =
+                $assetProvenance.CopyrightOwnershipDetermined
+            redistributionDecisionComplete =
+                $assetProvenance.RedistributionDecisionComplete
+            legalReviewComplete = $assetProvenance.LegalReviewComplete
+        }
         lockfiles = @($lockfileEvidence)
         packageInventory = @($packageInventory)
         packageInventoryPolicy = [ordered]@{
@@ -2659,6 +3199,22 @@ try {
         }
         blockers = @($blockers)
     }
+
+    $script:technicalStage = "ProductionAssetProvenanceStability"
+    $publicationAssetProvenance = Read-ProductionAssetProvenance `
+        -Root $resolvedRepositoryRoot `
+        -AssetInventory $assets
+    Assert-Condition `
+        ($publicationAssetProvenance.LedgerSha256 -ceq
+            $assetProvenance.LedgerSha256 -and
+         $publicationAssetProvenance.GeneratorSha256 -ceq
+            $assetProvenance.GeneratorSha256 -and
+         $publicationAssetProvenance.CanonicalAssetSetSha256 -ceq
+            $assetProvenance.CanonicalAssetSetSha256 -and
+         $publicationAssetProvenance.AssetCount -eq
+            $assetProvenance.AssetCount -and
+         $publicationAssetProvenance.DeterministicRecipeVerified) `
+        "AssetProvenanceInvalid"
 
     $script:technicalStage = "PackageSbomAcceptanceStability"
     Assert-NoNearestPackageVersionOverrides -Root $resolvedRepositoryRoot

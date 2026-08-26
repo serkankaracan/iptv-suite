@@ -116,9 +116,17 @@ Bu exact SBOM ledger'ına zincirlenen clean `15826e5ecad4a4b5737aa7bf39d28c62b0e
 
 Resmî dayanaklar (erişim: `2026-08-26`): [.NET 10 `dotnet package list`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-package-list), [NuGet JSON v1 makine-okunur çıktı spec'i](https://github.com/NuGet/Home/wiki/%5BSpec%5D-Machine-readable-output-for-dotnet-list-package) ve [NuGet Audit / `VulnerabilityInfo` davranışı](https://learn.microsoft.com/en-us/nuget/concepts/auditing-packages).
 
-## Exact açık blocker seti
+## Deterministic package asset provenance ara checkpoint'i
 
-Aşağıdaki 13 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur:
+Manifestin exact sekiz PNG/ICO package asset'i artık `eng/New-WindowsProductionAssets.ps1` içindeki source-controlled `WindowsProductionAssets-Rgba8Filter0FixedHuffmanLz77-PngFrameIco-v1` tarifiyle üretilir. Tarif source asset dependency, üçüncü taraf asset girdisi, font, metin veya trademark girdisi kullanmaz; iki ayrı output root'unda byte-identical üretim ile existing-root verification destekler. Strict `eng/windows-production-asset-provenance.json` ledger'ı exact sekiz path'i, PNG dimension'larını, ICO frame setini, byte length/SHA-256 değerlerini, generator SHA-256 `4ac099e8da587b5df61817ab92071235e4e91408d891f5cafa3037599d7f603b` ve canonical asset-set SHA-256 `6338f26af851a45eb4c7da593430ef1eab5a34afa6013365c2621fbfa0957777` değerini fail-closed bağlar.
+
+Bu bağ yalnız exact package asset origin'ini kanıtlar. Görseller `developmentPlaceholderOnly=true` olan nötr teknik placeholder'lardır; `productionBrandApproved`, `copyrightOwnershipDetermined`, `redistributionDecisionComplete` ve `legalReviewComplete` değerlerinin tamamı `false` kalır. Dolayısıyla bu checkpoint public marka/logo onayı, copyright ownership, redistribution hakkı, root `LICENSE`/`NOTICE`, Store/legal ya da codec-IP kapanışı değildir.
+
+Asset byte'ları önceki 111-dosyalık package-producing snapshot'ını değiştirdi. Bu nedenle yukarıdaki SBOM/CVE run ve ledger'ları tarihsel accepted checkpoint olarak korunur; yeni hosted package SBOM ve ona exact ledger hash'iyle zincirlenen CVE acceptance yenilenmeden schema-v5 için final 12-blocker/readiness sonucu iddia edilmez.
+
+## Son hosted-kabul checkpoint'indeki exact açık blocker seti
+
+Aşağıdaki 13 kod, asset byte değişiminden önceki son hosted-kabul schema-v4 evidence'ında açıktır ve ordinal sıralı tutulmuştur:
 
 1. `AssetProvenancePending`
 2. `CodecIpLegalReviewPending`
@@ -137,7 +145,7 @@ Aşağıdaki 13 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur
 ## Non-claims ve sonraki kabul sınırı
 
 - Known-pattern source taraması ile exact installed-package runtime audit'i geçti. Runtime sonucu yalnız exact hosted package gözlem penceresindeki deterministic pre/post eşitliğini ve watcher'ın mutation görmediğini kanıtlar; clean VM'de install/update/reset/uninstall matrisi ve bütün olası write yolları ayrıca geçmelidir.
-- Exact 23-package inventory teknik dependency drift guard'ıdır ve tek başına SBOM değildir. Hosted kabul edilmiş package-bound companion SPDX ile ayrı, fresh known-vulnerability incelemesi root `LICENSE`/`NOTICE`, asset provenance, genel “CVE-free” iddiası, redistribution kabulü veya codec/IP hukuk görüşü değildir.
+- Exact 23-package inventory teknik dependency drift guard'ıdır ve tek başına SBOM değildir. Tarihsel hosted package-bound companion SPDX ile ayrı, fresh known-vulnerability incelemesi root `LICENSE`/`NOTICE`, genel “CVE-free” iddiası, redistribution kabulü veya codec/IP hukuk görüşü değildir; yeni deterministic asset-origin bağı da bu hukuk kapılarını kapatmaz.
 - Development identity ile mevcut disposable lifecycle kanıtları production identity/PFN, signing lineage, previous-package migration, repair veya private-flight sonucu değildir.
 - WACK, Partner Center private submission, privacy/support URL, Store listing/rating/reviewer notes ve geliştirici-owned reviewer service henüz kabul edilmemiştir.
 - ARM64 Windows MVP release setinde yoktur; deferred disposition gelecekte native ARM64 acceptance yapılmadan destek iddiasına dönüştürülemez.

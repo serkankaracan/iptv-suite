@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "decision": "AcceptGeneratedAssetProvenance",
+  "scope": "ExactWindowsPackageAssetOriginOnly",
+  "provenanceKind": "GeneratedBySourceControlledDeterministicRecipe",
+  "generatorPath": "eng/New-WindowsProductionAssets.ps1",
+  "generatorVersion": "1.0.0",
+  "generatorSha256": "4ac099e8da587b5df61817ab92071235e4e91408d891f5cafa3037599d7f603b",
+  "algorithmVersion": "WindowsProductionAssets-Rgba8Filter0FixedHuffmanLz77-PngFrameIco-v1",
+  "canonicalAssetSetSha256": "6338f26af851a45eb4c7da593430ef1eab5a34afa6013365c2621fbfa0957777",
+  "assets": [
+    {
+      "path": "apps/windows/src/IptvSuite.Windows/Assets/AppIcon.ico",
+      "mediaType": "image/vnd.microsoft.icon",
+      "frameSizes": [
+        256,
+        128,
+        64,
+        48,
+        32,
+        16
+      ],
+      "length": 9200,
+      "sha256": "66c95e67039e4510fbc626aa31fd7d2c487f091360fefe7639473feb071c1fb1"
+    },
+    {
+      "path": "apps/windows/src/IptvSuite.Windows/Assets/SplashScreen.scale-200.png",
+      "mediaType": "image/png",
+      "width": 1240,
+      "height": 600,
+      "length": 35205,
+      "sha256": "e31f9bd18bdd8144fae89087d0a6ae6b23012341158662bc2070bd0308b34953"
+    },
+    {
+      "path": "apps/windows/src/IptvSuite.Windows/Assets/Square150x150Logo.scale-200.png",
+      "mediaType": "image/png",
+      "width": 300,
+      "height": 300,
+      "length": 6924,
+      "sha256": "fa922648697c8b14fccd6f93485c5b5f58fdd573900b01f342fdbebefda67219"
+    },
+    {
+      "path": "apps/windows/src/IptvSuite.Windows/Assets/Square44x44Logo.scale-200.png",
+      "mediaType": "image/png",
+      "width": 88,
+      "height": 88,
+      "length": 941,
+      "sha256": "12f09072315f9a89658e0bb6d602e3a20f4c9d70ac1fa0c3f0e1084521d5924a"
+    },
+    {
+      "path": "apps/windows/src/IptvSuite.Windows/Assets/Square44x44Logo.targetsize-24_altform-unplated.png",
+      "mediaType": "image/png",
+      "width": 24,
+      "height": 24,
+      "length": 152,
+      "sha256": "77ac8b3dad9b3990fa6e2dd6de92881a7d979ab03f763ce7bcb901bc7553a800"
+    },
+    {
+      "path": "apps/windows/src/IptvSuite.Windows/Assets/Square44x44Logo.targetsize-48_altform-lightunplated.png",
+      "mediaType": "image/png",
+      "width": 48,
+      "height": 48,
+      "length": 742,
+      "sha256": "ca0bbfd2768eb8be69428c91b45ac4c47ffbe93626fd8b4cf20c4eda7b1fed2a"
+    },
+    {
+      "path": "apps/windows/src/IptvSuite.Windows/Assets/StoreLogo.png",
+      "mediaType": "image/png",
+      "width": 50,
+      "height": 50,
+      "length": 458,
+      "sha256": "31be9d741ddb10be87e292e030e267f8162824689b5a9a58b4b241f1c2446eae"
+    },
+    {
+      "path": "apps/windows/src/IptvSuite.Windows/Assets/Wide310x150Logo.scale-200.png",
+      "mediaType": "image/png",
+      "width": 620,
+      "height": 300,
+      "length": 11162,
+      "sha256": "e3042cba7da12e5303c7675b6f7e21c166cc6251274be997c8217ce4376bd92c"
+    }
+  ],
+  "sourceAssetDependencies": [],
+  "thirdPartyAssetInputs": [],
+  "fonts": [],
+  "text": [],
+  "trademarks": [],
+  "developmentPlaceholderOnly": true,
+  "productionBrandApproved": false,
+  "copyrightOwnershipDetermined": false,
+  "redistributionDecisionComplete": false,
+  "legalReviewComplete": false
+}

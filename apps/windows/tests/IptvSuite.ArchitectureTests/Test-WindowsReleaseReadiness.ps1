@@ -218,6 +218,7 @@ function Read-AndAssertEvidence {
             "packaging",
             "storage",
             "assets",
+            "assetProvenance",
             "lockfiles",
             "packageInventory",
             "packageInventoryPolicy",
@@ -225,7 +226,7 @@ function Read-AndAssertEvidence {
             "packageVulnerabilityAcceptance",
             "blockers") `
         -Message "evidence root schema changed."
-    Assert-TestCondition ($evidence.schemaVersion -eq 4) "schemaVersion must be 4."
+    Assert-TestCondition ($evidence.schemaVersion -eq 5) "schemaVersion must be 5."
     Assert-TestCondition ($evidence.result -ceq "blocked") "result must remain blocked."
     Assert-TestCondition `
         ($evidence.technicalBaselinePassed -is [bool] -and $evidence.technicalBaselinePassed) `
@@ -234,6 +235,67 @@ function Read-AndAssertEvidence {
         ($evidence.releaseReady -is [bool] -and -not $evidence.releaseReady) `
         "releaseReady must be exact Boolean false."
     Assert-TestCondition (@($evidence.assets).Count -eq 8) "the exact eight production assets were not inventoried."
+    $assetProvenance = $evidence.assetProvenance
+    Assert-ExactStringSet `
+        -Actual @($assetProvenance.PSObject.Properties.Name) `
+        -Expected @(
+            "ledgerSha256",
+            "decision",
+            "scope",
+            "provenanceKind",
+            "generatorPath",
+            "generatorVersion",
+            "generatorSha256",
+            "algorithmVersion",
+            "canonicalAssetSetSha256",
+            "assetCount",
+            "deterministicRecipeVerified",
+            "sourceAssetDependencyCount",
+            "thirdPartyAssetInputCount",
+            "fontInputCount",
+            "textInputCount",
+            "trademarkInputCount",
+            "developmentPlaceholderOnly",
+            "productionBrandApproved",
+            "copyrightOwnershipDetermined",
+            "redistributionDecisionComplete",
+            "legalReviewComplete") `
+        -Message "the asset provenance evidence schema changed."
+    Assert-TestCondition `
+        ($assetProvenance.ledgerSha256 -ceq
+            "8006c56170202457815f3768dfcff56236b661a4dbb57aa7b7bf3a5acdcc6412" -and
+         $assetProvenance.decision -ceq "AcceptGeneratedAssetProvenance" -and
+         $assetProvenance.scope -ceq "ExactWindowsPackageAssetOriginOnly" -and
+         $assetProvenance.provenanceKind -ceq
+            "GeneratedBySourceControlledDeterministicRecipe" -and
+         $assetProvenance.generatorPath -ceq
+            "eng/New-WindowsProductionAssets.ps1" -and
+         $assetProvenance.generatorVersion -ceq "1.0.0" -and
+         $assetProvenance.generatorSha256 -ceq
+            "4ac099e8da587b5df61817ab92071235e4e91408d891f5cafa3037599d7f603b" -and
+         $assetProvenance.algorithmVersion -ceq
+            "WindowsProductionAssets-Rgba8Filter0FixedHuffmanLz77-PngFrameIco-v1" -and
+         $assetProvenance.canonicalAssetSetSha256 -ceq
+            "6338f26af851a45eb4c7da593430ef1eab5a34afa6013365c2621fbfa0957777" -and
+         $assetProvenance.assetCount -eq 8 -and
+         $assetProvenance.deterministicRecipeVerified -is [bool] -and
+         $assetProvenance.deterministicRecipeVerified -and
+         $assetProvenance.sourceAssetDependencyCount -eq 0 -and
+         $assetProvenance.thirdPartyAssetInputCount -eq 0 -and
+         $assetProvenance.fontInputCount -eq 0 -and
+         $assetProvenance.textInputCount -eq 0 -and
+         $assetProvenance.trademarkInputCount -eq 0 -and
+         $assetProvenance.developmentPlaceholderOnly -is [bool] -and
+         $assetProvenance.developmentPlaceholderOnly -and
+         $assetProvenance.productionBrandApproved -is [bool] -and
+         -not $assetProvenance.productionBrandApproved -and
+         $assetProvenance.copyrightOwnershipDetermined -is [bool] -and
+         -not $assetProvenance.copyrightOwnershipDetermined -and
+         $assetProvenance.redistributionDecisionComplete -is [bool] -and
+         -not $assetProvenance.redistributionDecisionComplete -and
+         $assetProvenance.legalReviewComplete -is [bool] -and
+         -not $assetProvenance.legalReviewComplete) `
+        "the exact generated asset provenance disposition changed."
     Assert-TestCondition (@($evidence.lockfiles).Count -eq 4) "the exact four production lockfiles were not inventoried."
     Assert-TestCondition (@($evidence.packageInventory).Count -eq 23) "the exact production package inventory changed."
     Assert-ExactStringSet `
@@ -571,7 +633,6 @@ function Read-AndAssertEvidence {
         "the exact package vulnerability disposition changed."
 
     $expectedBlockers = @(
-        "AssetProvenancePending",
         "CodecIpLegalReviewPending",
         "LicenseFilePending",
         "NoticeFilePending",
@@ -636,11 +697,13 @@ function Initialize-IsolatedFixture {
         "eng\Invoke-WindowsPackageSbom.ps1",
         "eng\Invoke-WindowsPackageSmoke.ps1",
         "eng\Invoke-WindowsPackageVulnerabilityAudit.ps1",
+        "eng\New-WindowsProductionAssets.ps1",
         "eng\WindowsPackageInstallRootAudit.ps1",
         "eng\WindowsPackageSbom.ps1",
         "eng\WindowsPackageVulnerabilityAudit.ps1",
         "eng\windows-package-vulnerability-audit.config",
         "eng\windows-package-vulnerability-acceptance.json",
+        "eng\windows-production-asset-provenance.json",
         "eng\windows-package-sbom-acceptance.json",
         "eng\windows-package-sbom-tool.json")
     foreach ($relativePath in $requiredFiles) {
@@ -691,6 +754,15 @@ Assert-TestCondition `
      $validatorText.Contains('-CapturedText $normalizedHelperText') -and
      -not $validatorText.Contains('. $helperFile.FullName')) `
     "the captured package vulnerability helper execution contract changed."
+Assert-TestCondition `
+    ([regex]::Matches(
+        $validatorText,
+        'Read-ProductionAssetProvenance').Count -eq 3 -and
+     $validatorText.Contains(
+        '& $generatorFile.FullName -VerifyRoot $Root 6>&1 | Out-Null') -and
+     $validatorText.Contains(
+        '$publicationAssetProvenance = Read-ProductionAssetProvenance')) `
+    "the two-pass deterministic asset provenance contract changed."
 
 try {
     [System.IO.Directory]::CreateDirectory($script:actualEvidenceRoot) | Out-Null
@@ -712,6 +784,198 @@ try {
     Read-AndAssertEvidence `
         -EvidencePath $fixtureEvidencePath `
         -ForbiddenRoot $script:fixtureRoot | Out-Null
+
+    $assetProvenanceRelativePath =
+        "eng\windows-production-asset-provenance.json"
+    $assetProvenancePath = Join-Path `
+        $script:fixtureRoot `
+        $assetProvenanceRelativePath
+    $assetProvenanceText = [System.IO.File]::ReadAllText($assetProvenancePath)
+    $acceptedAssetProvenanceSha256 =
+        "8006c56170202457815f3768dfcff56236b661a4dbb57aa7b7bf3a5acdcc6412"
+
+    Remove-Item -LiteralPath $assetProvenancePath -Force
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "missing-asset-provenance.json") `
+        -ExpectedMessage "M15TechnicalInvariant:AssetProvenanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $assetProvenanceRelativePath
+
+    $duplicateAssetProvenanceText = $assetProvenanceText.Replace(
+        '  "decision": "AcceptGeneratedAssetProvenance",',
+        ('  "duplicateProbe": { "value": 1, "value": 2 },' + "`n" +
+         '  "decision": "AcceptGeneratedAssetProvenance",'))
+    Assert-TestCondition `
+        ($duplicateAssetProvenanceText -cne $assetProvenanceText) `
+        "duplicate asset provenance mutation was not applied."
+    Write-TestText -Path $assetProvenancePath -Value $duplicateAssetProvenanceText
+    $duplicateAssetProvenanceSha256 = Get-TestFileSha256 `
+        -Path $assetProvenancePath
+    $duplicateAssetValidatorText = $validatorText.Replace(
+        $acceptedAssetProvenanceSha256,
+        $duplicateAssetProvenanceSha256)
+    Assert-TestCondition ($duplicateAssetValidatorText -cne $validatorText) `
+        "duplicate asset provenance validator mutation was not applied."
+    $duplicateAssetValidatorPath = Join-Path `
+        $script:fixtureRoot `
+        "eng\Test-WindowsReleaseReadiness.asset-duplicate.ps1"
+    Write-TestText `
+        -Path $duplicateAssetValidatorPath `
+        -Value $duplicateAssetValidatorText
+    try {
+        Assert-AuditFailure `
+            -Root $script:fixtureRoot `
+            -EvidencePath (Join-Path $fixtureEvidenceRoot "duplicate-asset-provenance.json") `
+            -ExpectedMessage "M15TechnicalInvariant:AssetProvenanceDuplicateProperty" `
+            -ValidatorPath $duplicateAssetValidatorPath `
+            -AllowBlockedInventory
+    }
+    finally {
+        Remove-Item `
+            -LiteralPath $duplicateAssetValidatorPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+    Copy-TestFile -RelativePath $assetProvenanceRelativePath
+
+    $nonClaimAssetProvenanceText = $assetProvenanceText.Replace(
+        '"productionBrandApproved": false',
+        '"productionBrandApproved": true')
+    Assert-TestCondition `
+        ($nonClaimAssetProvenanceText -cne $assetProvenanceText) `
+        "asset provenance non-claim mutation was not applied."
+    Write-TestText -Path $assetProvenancePath -Value $nonClaimAssetProvenanceText
+    $nonClaimAssetProvenanceSha256 = Get-TestFileSha256 `
+        -Path $assetProvenancePath
+    $nonClaimAssetValidatorText = $validatorText.Replace(
+        $acceptedAssetProvenanceSha256,
+        $nonClaimAssetProvenanceSha256)
+    Assert-TestCondition ($nonClaimAssetValidatorText -cne $validatorText) `
+        "asset provenance non-claim validator mutation was not applied."
+    $nonClaimAssetValidatorPath = Join-Path `
+        $script:fixtureRoot `
+        "eng\Test-WindowsReleaseReadiness.asset-nonclaim.ps1"
+    Write-TestText `
+        -Path $nonClaimAssetValidatorPath `
+        -Value $nonClaimAssetValidatorText
+    try {
+        Assert-AuditFailure `
+            -Root $script:fixtureRoot `
+            -EvidencePath (Join-Path $fixtureEvidenceRoot "asset-provenance-nonclaim.json") `
+            -ExpectedMessage "M15TechnicalInvariant:AssetProvenanceInvalid" `
+            -ValidatorPath $nonClaimAssetValidatorPath `
+            -AllowBlockedInventory
+    }
+    finally {
+        Remove-Item `
+            -LiteralPath $nonClaimAssetValidatorPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+    Copy-TestFile -RelativePath $assetProvenanceRelativePath
+
+    $externalInputAssetProvenanceText = $assetProvenanceText.Replace(
+        '"thirdPartyAssetInputs": []',
+        '"thirdPartyAssetInputs": ["external-input"]')
+    Assert-TestCondition `
+        ($externalInputAssetProvenanceText -cne $assetProvenanceText) `
+        "asset provenance external-input mutation was not applied."
+    Write-TestText `
+        -Path $assetProvenancePath `
+        -Value $externalInputAssetProvenanceText
+    $externalInputAssetProvenanceSha256 = Get-TestFileSha256 `
+        -Path $assetProvenancePath
+    $externalInputAssetValidatorText = $validatorText.Replace(
+        $acceptedAssetProvenanceSha256,
+        $externalInputAssetProvenanceSha256)
+    Assert-TestCondition ($externalInputAssetValidatorText -cne $validatorText) `
+        "asset provenance external-input validator mutation was not applied."
+    $externalInputAssetValidatorPath = Join-Path `
+        $script:fixtureRoot `
+        "eng\Test-WindowsReleaseReadiness.asset-external-input.ps1"
+    Write-TestText `
+        -Path $externalInputAssetValidatorPath `
+        -Value $externalInputAssetValidatorText
+    try {
+        Assert-AuditFailure `
+            -Root $script:fixtureRoot `
+            -EvidencePath (Join-Path $fixtureEvidenceRoot "asset-provenance-external-input.json") `
+            -ExpectedMessage "M15TechnicalInvariant:AssetProvenanceInvalid" `
+            -ValidatorPath $externalInputAssetValidatorPath `
+            -AllowBlockedInventory
+    }
+    finally {
+        Remove-Item `
+            -LiteralPath $externalInputAssetValidatorPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+    Copy-TestFile -RelativePath $assetProvenanceRelativePath
+
+    $dimensionAssetProvenanceText = $assetProvenanceText.Replace(
+        '"width": 50',
+        '"width": 51')
+    Assert-TestCondition `
+        ($dimensionAssetProvenanceText -cne $assetProvenanceText) `
+        "asset provenance dimension mutation was not applied."
+    Write-TestText -Path $assetProvenancePath -Value $dimensionAssetProvenanceText
+    $dimensionAssetProvenanceSha256 = Get-TestFileSha256 `
+        -Path $assetProvenancePath
+    $dimensionAssetValidatorText = $validatorText.Replace(
+        $acceptedAssetProvenanceSha256,
+        $dimensionAssetProvenanceSha256)
+    Assert-TestCondition ($dimensionAssetValidatorText -cne $validatorText) `
+        "asset provenance dimension validator mutation was not applied."
+    $dimensionAssetValidatorPath = Join-Path `
+        $script:fixtureRoot `
+        "eng\Test-WindowsReleaseReadiness.asset-dimension.ps1"
+    Write-TestText `
+        -Path $dimensionAssetValidatorPath `
+        -Value $dimensionAssetValidatorText
+    try {
+        Assert-AuditFailure `
+            -Root $script:fixtureRoot `
+            -EvidencePath (Join-Path $fixtureEvidenceRoot "asset-provenance-dimension.json") `
+            -ExpectedMessage "M15TechnicalInvariant:AssetProvenanceInvalid" `
+            -ValidatorPath $dimensionAssetValidatorPath `
+            -AllowBlockedInventory
+    }
+    finally {
+        Remove-Item `
+            -LiteralPath $dimensionAssetValidatorPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+    Copy-TestFile -RelativePath $assetProvenanceRelativePath
+
+    $assetGeneratorRelativePath = "eng\New-WindowsProductionAssets.ps1"
+    $assetGeneratorPath = Join-Path $script:fixtureRoot $assetGeneratorRelativePath
+    $assetGeneratorText = [System.IO.File]::ReadAllText($assetGeneratorPath)
+    Write-TestText `
+        -Path $assetGeneratorPath `
+        -Value ($assetGeneratorText + "`n# generator drift")
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "asset-generator-drift.json") `
+        -ExpectedMessage "M15TechnicalInvariant:AssetProvenanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $assetGeneratorRelativePath
+
+    $assetByteRelativePath =
+        "apps\windows\src\IptvSuite.Windows\Assets\StoreLogo.png"
+    $assetBytePath = Join-Path $script:fixtureRoot $assetByteRelativePath
+    $assetBytes = [System.IO.File]::ReadAllBytes($assetBytePath)
+    Assert-TestCondition ($assetBytes.Length -gt 64) `
+        "asset byte mutation target is too small."
+    $assetBytes[50] = $assetBytes[50] -bxor 1
+    [System.IO.File]::WriteAllBytes($assetBytePath, $assetBytes)
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "asset-byte-drift.json") `
+        -ExpectedMessage "M15TechnicalInvariant:AssetProvenanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $assetByteRelativePath
 
     $evaluationClockExpression =
         '$evaluationUtcNow = [DateTimeOffset]::UtcNow'
@@ -739,7 +1003,7 @@ try {
         Assert-TestCondition `
             (-not $staleEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              $staleEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq "None" -and
-             @($staleEvidence.blockers).Count -eq 14 -and
+             @($staleEvidence.blockers).Count -eq 13 -and
              @($staleEvidence.blockers) -ccontains "CveReviewPending") `
             "stale package vulnerability acceptance did not reopen only its blocker."
     }
