@@ -13,6 +13,7 @@ $ErrorActionPreference = "Stop"
 $script:maximumEvidenceBytes = 1MB
 $script:maximumSourceFileBytes = 2MB
 $script:maximumPackageSbomAcceptanceBytes = 16KB
+$script:maximumPackageVulnerabilityAcceptanceBytes = 16KB
 $script:maximumPackageProducingSnapshotFiles = 256
 $script:maximumPackageProducingSnapshotDirectories = 128
 $script:maximumPackageProducingSnapshotBytes = 64MB
@@ -21,6 +22,16 @@ $script:utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
 $script:utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:packageSbomAcceptanceRelativePath = "eng/windows-package-sbom-acceptance.json"
 $script:packageSbomAcceptanceSha256 = "853f1c702b9acc5e500d232688a22322aaeb6c3ff3f497a2fff269abc83fb904"
+$script:packageVulnerabilityAcceptanceRelativePath =
+    "eng/windows-package-vulnerability-acceptance.json"
+$script:packageVulnerabilityAcceptanceSha256 =
+    "8c60360ae0dac240ef801688a04472266dabd16bfb1069a841b365b61c89a197"
+$script:packageVulnerabilityContractSourceCount = 16
+$script:packageVulnerabilityContractSourceSetSha256 =
+    "6b09978b5ee3ffc4d14e09458724a3d18fd1d23c5ec9ab3134dd25bfc7e91ff3"
+$script:packageVulnerabilityHelperSourceSha256 =
+    "3321951caee1745d644e6333ab0a7b8546f905ce2a54b92e686e7b7f104db057"
+$script:packageVulnerabilityMaximumAgeDays = 7
 $script:packageSbomContractSourceCount = 7
 $script:packageSbomContractSourceSetSha256 = "2b9cfe5d859ed070c47e2e74591b5567a5a8bc3a2006d2a5d775428f8a54c9ce"
 $script:packageSbomProductionInputSetSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
@@ -403,11 +414,27 @@ function Get-CanonicalTextSourceSetSha256 {
         [string]$Root,
 
         [Parameter(Mandatory = $true)]
-        [string[]]$RelativePaths
+        [string[]]$RelativePaths,
+
+        [string]$CapturedRelativePath,
+
+        [string]$CapturedText
     )
 
     Assert-Condition ($RelativePaths.Count -gt 0 -and $RelativePaths.Count -le 32) `
         "PackageSbomAcceptanceInvalid"
+    $hasCapturedRelativePath =
+        $PSBoundParameters.ContainsKey("CapturedRelativePath")
+    $hasCapturedText = $PSBoundParameters.ContainsKey("CapturedText")
+    Assert-Condition ($hasCapturedRelativePath -eq $hasCapturedText) `
+        "PackageSbomAcceptanceInvalid"
+    if ($hasCapturedRelativePath) {
+        Assert-Condition `
+            (-not [string]::IsNullOrWhiteSpace($CapturedRelativePath) -and
+             $null -ne $CapturedText -and
+             $RelativePaths -ccontains $CapturedRelativePath) `
+            "PackageSbomAcceptanceInvalid"
+    }
     $records = @()
     foreach ($relativePath in $RelativePaths) {
         Assert-Condition `
@@ -415,14 +442,20 @@ function Get-CanonicalTextSourceSetSha256 {
              -not [System.IO.Path]::IsPathRooted($relativePath) -and
              $relativePath -notmatch '(?:^|/)\.\.(?:/|$)') `
             "PackageSbomAcceptanceInvalid"
-        $file = Resolve-RegularRepositoryFile `
-            -Root $Root `
-            -RelativePath ($relativePath.Replace('/', '\')) `
-            -MaximumBytes $script:maximumSourceFileBytes `
-            -Code "PackageSbomAcceptanceInvalid"
-        $text = Read-StrictUtf8Text `
-            -File $file `
-            -Code "PackageSbomAcceptanceInvalid"
+        $text = if ($hasCapturedRelativePath -and
+            $relativePath -ceq $CapturedRelativePath) {
+            $CapturedText
+        }
+        else {
+            $file = Resolve-RegularRepositoryFile `
+                -Root $Root `
+                -RelativePath ($relativePath.Replace('/', '\')) `
+                -MaximumBytes $script:maximumSourceFileBytes `
+                -Code "PackageSbomAcceptanceInvalid"
+            Read-StrictUtf8Text `
+                -File $file `
+                -Code "PackageSbomAcceptanceInvalid"
+        }
         $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
         $normalizedBytes = $script:utf8NoBom.GetBytes($normalized)
         Assert-Condition ($normalizedBytes.Length -gt 0) "PackageSbomAcceptanceInvalid"
@@ -1032,6 +1065,398 @@ function Read-PackageSbomAcceptance {
         }
 
         Fail-TechnicalInvariant -Code "PackageSbomAcceptanceInvalid"
+    }
+}
+
+function Read-PackageVulnerabilityAcceptance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    try {
+        $ledgerFile = Resolve-RegularRepositoryFile `
+            -Root $Root `
+            -RelativePath ($script:packageVulnerabilityAcceptanceRelativePath.Replace('/', '\')) `
+            -MaximumBytes $script:maximumPackageVulnerabilityAcceptanceBytes `
+            -Code "PackageVulnerabilityAcceptanceInvalid"
+        [byte[]]$ledgerBytes = Read-BoundedRegularFileBytes `
+            -File $ledgerFile `
+            -MaximumBytes $script:maximumPackageVulnerabilityAcceptanceBytes `
+            -Code "PackageVulnerabilityAcceptanceInvalid"
+        try {
+            $ledgerText = $script:utf8Strict.GetString($ledgerBytes)
+        }
+        catch {
+            Fail-TechnicalInvariant -Code "PackageVulnerabilityAcceptanceInvalid"
+        }
+        try {
+            Assert-NoDuplicateJsonProperties -Text $ledgerText
+        }
+        catch {
+            Fail-TechnicalInvariant -Code "PackageVulnerabilityAcceptanceInvalid"
+        }
+        Assert-Condition `
+            ((Get-LowerSha256ForBytes -Bytes $ledgerBytes) -ceq
+             $script:packageVulnerabilityAcceptanceSha256) `
+            "PackageVulnerabilityAcceptanceInvalid"
+        try {
+            $acceptance = $ledgerText | ConvertFrom-Json
+        }
+        catch {
+            Fail-TechnicalInvariant -Code "PackageVulnerabilityAcceptanceInvalid"
+        }
+
+        Assert-Condition ($null -ne $acceptance) "PackageVulnerabilityAcceptanceInvalid"
+        Assert-ExactStringSet `
+            -Actual @($acceptance.PSObject.Properties.Name) `
+            -Expected @(
+                "schemaVersion",
+                "decision",
+                "scope",
+                "runCompletedAtUtc",
+                "freshThroughUtc",
+                "freshnessPolicy",
+                "maximumAgeDays",
+                "repository",
+                "repositoryId",
+                "workflowPath",
+                "workflowName",
+                "workflowId",
+                "runId",
+                "runNumber",
+                "runAttempt",
+                "runEvent",
+                "runBranch",
+                "runHeadSha",
+                "runConclusion",
+                "jobId",
+                "jobName",
+                "jobConclusion",
+                "artifactId",
+                "artifactName",
+                "artifactSizeBytes",
+                "artifactDigestSha256",
+                "lastSuccessMemberName",
+                "lastSuccessMemberLength",
+                "lastSuccessMemberSha256",
+                "packageSbomAcceptanceSha256",
+                "observedAtUtc",
+                "producerResult",
+                "producerScope",
+                "producerRepositoryCommitSha",
+                "repositoryClean",
+                "dotNetSdk",
+                "projectPath",
+                "targetFramework",
+                "outputVersion",
+                "auditSource",
+                "auditSourceId",
+                "auditSourceConfigSha256",
+                "includeTransitive",
+                "noRestoreDuringList",
+                "lockedRestore",
+                "nuGetAuditEnabled",
+                "nuGetAuditMode",
+                "nuGetAuditLevel",
+                "httpCacheFreshAtStart",
+                "restoreProjectCount",
+                "restoreSkippedCount",
+                "restoreProjectsAuditedCount",
+                "productionProjectCount",
+                "auditSuppressionCount",
+                "auditBuildOverrideCount",
+                "contractSnapshotFileCount",
+                "contractSnapshotCanonicalBytes",
+                "contractSnapshotSha256",
+                "productionLockfileCount",
+                "productionPackageCount",
+                "windowsLeafPackageCount",
+                "topLevelPackageCount",
+                "transitivePackageCount",
+                "productionPackageGraphSha256",
+                "inventoryOutputLength",
+                "inventoryOutputSha256",
+                "rawOutputLength",
+                "rawOutputSha256",
+                "knownDirectVulnerabilityCount",
+                "knownTransitiveVulnerabilityCount",
+                "knownVulnerabilityCount",
+                "officialOutputValidationPassed",
+                "strictValidationPassed",
+                "producerCheckpointOnly",
+                "producerCveReviewPending",
+                "closedBlocker",
+                "remainingBlockers",
+                "cveFreeClaim",
+                "legalReviewComplete") `
+            -Code "PackageVulnerabilityAcceptanceInvalid"
+
+        $expectedStrings = [ordered]@{
+            decision = "AcceptTechnicalKnownVulnerabilityReview"
+            scope = "ProductionWindowsLeafKnownVulnerabilityReviewOnly"
+            runCompletedAtUtc = "2026-08-25T23:48:39Z"
+            freshThroughUtc = "2026-09-01T23:48:39Z"
+            freshnessPolicy = "RunCompletionPlus7Days"
+            repository = "serkankaracan/iptv-suite"
+            workflowPath = ".github/workflows/windows-cve-review.yml"
+            workflowName = "Windows known-vulnerability producer"
+            runEvent = "push"
+            runBranch = "main"
+            runHeadSha = "2053f4099819b3bb19bb9dd3370d60f0161098f1"
+            runConclusion = "success"
+            jobName = "Known-vulnerability producer gate"
+            jobConclusion = "success"
+            artifactName = "windows-cve-review-evidence"
+            artifactDigestSha256 = "4d0c0a2a928038721053a61a0931b6e1fcfdf57053383fa0db0c0b9bccbb9210"
+            lastSuccessMemberName = "last-success.json"
+            lastSuccessMemberSha256 = "f62f147842bf2e8d3951fbaca103a6d4b2d485fa269fd972d7ae3360f754c553"
+            packageSbomAcceptanceSha256 = $script:packageSbomAcceptanceSha256
+            observedAtUtc = "2026-08-25T23:48:24.8639907Z"
+            producerResult = "passed"
+            producerScope = "ProductionWindowsLeafKnownVulnerabilityProducer"
+            producerRepositoryCommitSha = "2053f4099819b3bb19bb9dd3370d60f0161098f1"
+            dotNetSdk = "10.0.302"
+            projectPath = "apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj"
+            targetFramework = "net10.0-windows10.0.26100.0"
+            auditSource = "https://data.nuget.org/v3/index.json"
+            auditSourceId = "nuget.org-audit-vulnerabilityinfo"
+            auditSourceConfigSha256 = "a66cc28824e3eee4d9e51844bcdd00bbcdccaa27566bc4cbb269abc8644334b3"
+            nuGetAuditMode = "all"
+            nuGetAuditLevel = "low"
+            contractSnapshotSha256 = $script:packageVulnerabilityContractSourceSetSha256
+            productionPackageGraphSha256 = "760562b81e0097913e1daf4ec88c67596337dd6636ed6d88c8f645424dc50b6e"
+            inventoryOutputSha256 = "6c0f18b5dd94bf82754726a18c88f330a47c86dca8939e94e943d78b1e0506c9"
+            rawOutputSha256 = "532fd239ddb450511d88bf3b83a2413a2e222a148a8302d232bdb9c7ec47cc28"
+            closedBlocker = "CveReviewPending"
+        }
+        foreach ($expected in $expectedStrings.GetEnumerator()) {
+            Assert-Condition `
+                ($acceptance.PSObject.Properties[$expected.Key].Value -is [string] -and
+                 [string]$acceptance.PSObject.Properties[$expected.Key].Value -ceq
+                    [string]$expected.Value) `
+                "PackageVulnerabilityAcceptanceInvalid"
+        }
+
+        $expectedInt32 = [ordered]@{
+            schemaVersion = 1
+            maximumAgeDays = $script:packageVulnerabilityMaximumAgeDays
+            repositoryId = 1328998460
+            workflowId = 342499403
+            runNumber = 4
+            runAttempt = 1
+            artifactSizeBytes = 1121
+            lastSuccessMemberLength = 2403
+            outputVersion = 1
+            restoreProjectCount = 4
+            restoreSkippedCount = 0
+            restoreProjectsAuditedCount = 4
+            productionProjectCount = 4
+            auditSuppressionCount = 0
+            auditBuildOverrideCount = 0
+            contractSnapshotFileCount = $script:packageVulnerabilityContractSourceCount
+            contractSnapshotCanonicalBytes = 98075
+            productionLockfileCount = 4
+            productionPackageCount = 23
+            windowsLeafPackageCount = 23
+            topLevelPackageCount = 2
+            transitivePackageCount = 21
+            inventoryOutputLength = 3471
+            rawOutputLength = 427
+            knownDirectVulnerabilityCount = 0
+            knownTransitiveVulnerabilityCount = 0
+            knownVulnerabilityCount = 0
+        }
+        foreach ($expected in $expectedInt32.GetEnumerator()) {
+            Assert-Condition `
+                ($acceptance.PSObject.Properties[$expected.Key].Value -is [int] -and
+                 [int]$acceptance.PSObject.Properties[$expected.Key].Value -eq
+                    [int]$expected.Value) `
+                "PackageVulnerabilityAcceptanceInvalid"
+        }
+
+        $expectedInt64 = [ordered]@{
+            runId = [long]32912296486
+            jobId = [long]98008739618
+            artifactId = [long]9586961516
+        }
+        foreach ($expected in $expectedInt64.GetEnumerator()) {
+            Assert-Condition `
+                ($acceptance.PSObject.Properties[$expected.Key].Value -is [long] -and
+                 [long]$acceptance.PSObject.Properties[$expected.Key].Value -eq
+                    [long]$expected.Value) `
+                "PackageVulnerabilityAcceptanceInvalid"
+        }
+
+        foreach ($propertyName in @(
+                "repositoryClean",
+                "includeTransitive",
+                "noRestoreDuringList",
+                "lockedRestore",
+                "nuGetAuditEnabled",
+                "httpCacheFreshAtStart",
+                "officialOutputValidationPassed",
+                "strictValidationPassed",
+                "producerCheckpointOnly",
+                "producerCveReviewPending")) {
+            Assert-Condition `
+                ($acceptance.PSObject.Properties[$propertyName].Value -is [bool] -and
+                 [bool]$acceptance.PSObject.Properties[$propertyName].Value) `
+                "PackageVulnerabilityAcceptanceInvalid"
+        }
+        foreach ($propertyName in @("cveFreeClaim", "legalReviewComplete")) {
+            Assert-Condition `
+                ($acceptance.PSObject.Properties[$propertyName].Value -is [bool] -and
+                 -not [bool]$acceptance.PSObject.Properties[$propertyName].Value) `
+                "PackageVulnerabilityAcceptanceInvalid"
+        }
+
+        $expectedRemainingBlockers = @(
+            "AssetProvenancePending",
+            "CodecIpLegalReviewPending",
+            "LicenseFilePending",
+            "NoticeFilePending",
+            "PartnerCenterPrivateFlightPending",
+            "PrivacyPolicyPending",
+            "ProductionIdentityMigrationPending",
+            "ProductionLifecycleMatrixPending",
+            "ReleaseSigningPending",
+            "ReviewerServiceAndRehearsalPending",
+            "StoreListingPending",
+            "SupportUrlPending",
+            "WackPending")
+        Assert-Condition ($acceptance.remainingBlockers -is [System.Array]) `
+            "PackageVulnerabilityAcceptanceInvalid"
+        Assert-ExactStringSet `
+            -Actual @($acceptance.remainingBlockers | ForEach-Object { [string]$_ }) `
+            -Expected $expectedRemainingBlockers `
+            -Code "PackageVulnerabilityAcceptanceInvalid"
+
+        $contractSourcePaths = @(
+            "global.json",
+            "Directory.Build.props",
+            "Directory.Packages.props",
+            "NuGet.config",
+            "eng/windows-package-vulnerability-audit.config",
+            "eng/WindowsPackageVulnerabilityAudit.ps1",
+            "eng/Invoke-WindowsPackageVulnerabilityAudit.ps1",
+            ".github/workflows/windows-cve-review.yml",
+            "apps/windows/src/IptvSuite.Domain/IptvSuite.Domain.csproj",
+            "apps/windows/src/IptvSuite.Domain/packages.lock.json",
+            "apps/windows/src/IptvSuite.Application/IptvSuite.Application.csproj",
+            "apps/windows/src/IptvSuite.Application/packages.lock.json",
+            "apps/windows/src/IptvSuite.Infrastructure/IptvSuite.Infrastructure.csproj",
+            "apps/windows/src/IptvSuite.Infrastructure/packages.lock.json",
+            "apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj",
+            "apps/windows/src/IptvSuite.Windows/packages.lock.json")
+        Assert-Condition `
+            ($contractSourcePaths.Count -eq $script:packageVulnerabilityContractSourceCount) `
+            "PackageVulnerabilityAcceptanceInvalid"
+        $helperRelativePath = "eng/WindowsPackageVulnerabilityAudit.ps1"
+        $helperFile = Resolve-RegularRepositoryFile `
+            -Root $Root `
+            -RelativePath ($helperRelativePath.Replace('/', '\')) `
+            -MaximumBytes $script:maximumSourceFileBytes `
+            -Code "PackageVulnerabilityAcceptanceInvalid"
+        $helperText = Read-StrictUtf8Text `
+            -File $helperFile `
+            -MaximumBytes $script:maximumSourceFileBytes `
+            -Code "PackageVulnerabilityAcceptanceInvalid"
+        $normalizedHelperText =
+            $helperText.Replace("`r`n", "`n").Replace("`r", "`n")
+        Assert-Condition `
+            ((Get-LowerSha256ForBytes `
+                -Bytes $script:utf8NoBom.GetBytes($normalizedHelperText)) -ceq
+             $script:packageVulnerabilityHelperSourceSha256) `
+            "PackageVulnerabilityAcceptanceInvalid"
+
+        $contractSourceSetSha256 = Get-CanonicalTextSourceSetSha256 `
+            -Root $Root `
+            -RelativePaths $contractSourcePaths `
+            -CapturedRelativePath $helperRelativePath `
+            -CapturedText $normalizedHelperText
+        Assert-Condition `
+            ($contractSourceSetSha256 -ceq
+             $script:packageVulnerabilityContractSourceSetSha256) `
+            "PackageVulnerabilityAcceptanceInvalid"
+
+        try {
+            $helperScriptBlock = [ScriptBlock]::Create($normalizedHelperText)
+            . $helperScriptBlock
+        }
+        catch {
+            Fail-TechnicalInvariant -Code "PackageVulnerabilityAcceptanceInvalid"
+        }
+        $buildInputPolicy = Assert-WindowsPackageVulnerabilityBuildInputPolicy `
+            -RepositoryRoot $Root
+        $contractSnapshot = Get-WindowsPackageVulnerabilityContractSnapshot `
+            -RepositoryRoot $Root
+        $packageGraph = Get-WindowsProductionPackageGraph `
+            -RepositoryRoot $Root
+        Assert-Condition `
+            ($buildInputPolicy.ProductionProjectCount -eq 4 -and
+             $buildInputPolicy.SuppressionCount -eq 0 -and
+             $buildInputPolicy.BuildOverrideCount -eq 0 -and
+             $contractSnapshot.FileCount -eq $acceptance.contractSnapshotFileCount -and
+             $contractSnapshot.CanonicalBytes -eq $acceptance.contractSnapshotCanonicalBytes -and
+             $contractSnapshot.Sha256 -ceq $acceptance.contractSnapshotSha256 -and
+             $packageGraph.LockfileCount -eq $acceptance.productionLockfileCount -and
+             $packageGraph.PackageCount -eq $acceptance.productionPackageCount -and
+             $packageGraph.WindowsLeafPackageCount -eq $acceptance.windowsLeafPackageCount -and
+             $packageGraph.Sha256 -ceq $acceptance.productionPackageGraphSha256) `
+            "PackageVulnerabilityAcceptanceInvalid"
+
+        $styles = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor
+            [System.Globalization.DateTimeStyles]::AdjustToUniversal
+        $evaluationUtcNow = [DateTimeOffset]::UtcNow
+        [DateTimeOffset]$runCompleted = [DateTimeOffset]::MinValue
+        [DateTimeOffset]$freshThrough = [DateTimeOffset]::MinValue
+        [DateTimeOffset]$observedAt = [DateTimeOffset]::MinValue
+        Assert-Condition `
+            ([DateTimeOffset]::TryParseExact(
+                [string]$acceptance.runCompletedAtUtc,
+                "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                $styles,
+                [ref]$runCompleted)) `
+            "PackageVulnerabilityAcceptanceInvalid"
+        Assert-Condition `
+            ([DateTimeOffset]::TryParseExact(
+                [string]$acceptance.freshThroughUtc,
+                "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                $styles,
+                [ref]$freshThrough)) `
+            "PackageVulnerabilityAcceptanceInvalid"
+        Assert-Condition `
+            ([DateTimeOffset]::TryParseExact(
+                [string]$acceptance.observedAtUtc,
+                "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'",
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                $styles,
+                [ref]$observedAt)) `
+            "PackageVulnerabilityAcceptanceInvalid"
+        Assert-Condition `
+            ($freshThrough -eq
+                $runCompleted.AddDays($script:packageVulnerabilityMaximumAgeDays) -and
+             $observedAt -le $runCompleted -and
+             ($runCompleted - $observedAt) -le [TimeSpan]::FromMinutes(15) -and
+             $observedAt -le $evaluationUtcNow.AddMinutes(5)) `
+            "PackageVulnerabilityAcceptanceInvalid"
+
+        return [pscustomobject]@{
+            Acceptance = $acceptance
+            ContractSourceSetSha256 = $contractSourceSetSha256
+            FreshAtEvaluation = ($evaluationUtcNow -le $freshThrough)
+        }
+    }
+    catch {
+        if ($_.Exception.Message -ceq
+            "M15TechnicalInvariant:PackageVulnerabilityAcceptanceInvalid") {
+            throw $_.Exception.Message
+        }
+
+        Fail-TechnicalInvariant -Code "PackageVulnerabilityAcceptanceInvalid"
     }
 }
 
@@ -2010,8 +2435,16 @@ try {
     $validatedPackageProducingSnapshot =
         $packageSbomAcceptanceValidation.PackageProducingSnapshot
 
+    $script:technicalStage = "PackageVulnerabilityAcceptance"
+    $packageVulnerabilityAcceptanceValidation = Read-PackageVulnerabilityAcceptance `
+        -Root $resolvedRepositoryRoot
+    $packageVulnerabilityAcceptance =
+        $packageVulnerabilityAcceptanceValidation.Acceptance
+    $packageVulnerabilityFreshAtEvaluation =
+        $packageVulnerabilityAcceptanceValidation.FreshAtEvaluation
+
     $script:technicalStage = "EvidenceComposition"
-    $blockers = Get-OrdinalSortedStrings -Values @(
+    $baseBlockers = @(
         "AssetProvenancePending",
         "CodecIpLegalReviewPending",
         "CveReviewPending",
@@ -2027,9 +2460,19 @@ try {
         "SupportUrlPending",
         "WackPending"
     )
+    $effectiveBlockers = if ($packageVulnerabilityFreshAtEvaluation) {
+        @($baseBlockers | Where-Object { $_ -cne "CveReviewPending" })
+    }
+    else {
+        @($baseBlockers)
+    }
+    $blockers = Get-OrdinalSortedStrings -Values $effectiveBlockers
+    Assert-Condition `
+        ($blockers.Count -eq $(if ($packageVulnerabilityFreshAtEvaluation) { 13 } else { 14 })) `
+        "PackageVulnerabilityAcceptanceInvalid"
 
     $summary = [ordered]@{
-        schemaVersion = 3
+        schemaVersion = 4
         result = "blocked"
         technicalBaselinePassed = $true
         releaseReady = $false
@@ -2141,6 +2584,79 @@ try {
             closedBlocker = "SbomPending"
             legalSbomComplete = $false
         }
+        packageVulnerabilityAcceptance = [ordered]@{
+            ledgerSha256 = $script:packageVulnerabilityAcceptanceSha256
+            decision = $packageVulnerabilityAcceptance.decision
+            scope = $packageVulnerabilityAcceptance.scope
+            runCompletedAtUtc = $packageVulnerabilityAcceptance.runCompletedAtUtc
+            freshThroughUtc = $packageVulnerabilityAcceptance.freshThroughUtc
+            freshnessPolicy = $packageVulnerabilityAcceptance.freshnessPolicy
+            maximumAgeDays = $packageVulnerabilityAcceptance.maximumAgeDays
+            freshAtEvaluation = $packageVulnerabilityFreshAtEvaluation
+            repository = $packageVulnerabilityAcceptance.repository
+            workflowPath = $packageVulnerabilityAcceptance.workflowPath
+            workflowName = $packageVulnerabilityAcceptance.workflowName
+            workflowId = $packageVulnerabilityAcceptance.workflowId
+            runId = $packageVulnerabilityAcceptance.runId
+            runNumber = $packageVulnerabilityAcceptance.runNumber
+            runAttempt = $packageVulnerabilityAcceptance.runAttempt
+            runHeadSha = $packageVulnerabilityAcceptance.runHeadSha
+            runConclusion = $packageVulnerabilityAcceptance.runConclusion
+            jobId = $packageVulnerabilityAcceptance.jobId
+            jobName = $packageVulnerabilityAcceptance.jobName
+            jobConclusion = $packageVulnerabilityAcceptance.jobConclusion
+            artifactId = $packageVulnerabilityAcceptance.artifactId
+            artifactName = $packageVulnerabilityAcceptance.artifactName
+            artifactDigestSha256 = $packageVulnerabilityAcceptance.artifactDigestSha256
+            lastSuccessMemberLength = $packageVulnerabilityAcceptance.lastSuccessMemberLength
+            lastSuccessMemberSha256 = $packageVulnerabilityAcceptance.lastSuccessMemberSha256
+            packageSbomAcceptanceSha256 =
+                $packageVulnerabilityAcceptance.packageSbomAcceptanceSha256
+            observedAtUtc = $packageVulnerabilityAcceptance.observedAtUtc
+            producerRepositoryCommitSha =
+                $packageVulnerabilityAcceptance.producerRepositoryCommitSha
+            dotNetSdk = $packageVulnerabilityAcceptance.dotNetSdk
+            projectPath = $packageVulnerabilityAcceptance.projectPath
+            targetFramework = $packageVulnerabilityAcceptance.targetFramework
+            auditSourceId = $packageVulnerabilityAcceptance.auditSourceId
+            auditSourceConfigSha256 =
+                $packageVulnerabilityAcceptance.auditSourceConfigSha256
+            restoreProjectCount = $packageVulnerabilityAcceptance.restoreProjectCount
+            restoreSkippedCount = $packageVulnerabilityAcceptance.restoreSkippedCount
+            restoreProjectsAuditedCount =
+                $packageVulnerabilityAcceptance.restoreProjectsAuditedCount
+            productionProjectCount = $packageVulnerabilityAcceptance.productionProjectCount
+            productionLockfileCount = $packageVulnerabilityAcceptance.productionLockfileCount
+            productionPackageCount = $packageVulnerabilityAcceptance.productionPackageCount
+            topLevelPackageCount = $packageVulnerabilityAcceptance.topLevelPackageCount
+            transitivePackageCount = $packageVulnerabilityAcceptance.transitivePackageCount
+            contractSnapshotSha256 =
+                $packageVulnerabilityAcceptance.contractSnapshotSha256
+            productionPackageGraphSha256 =
+                $packageVulnerabilityAcceptance.productionPackageGraphSha256
+            knownDirectVulnerabilityCount =
+                $packageVulnerabilityAcceptance.knownDirectVulnerabilityCount
+            knownTransitiveVulnerabilityCount =
+                $packageVulnerabilityAcceptance.knownTransitiveVulnerabilityCount
+            knownVulnerabilityCount =
+                $packageVulnerabilityAcceptance.knownVulnerabilityCount
+            officialOutputValidationPassed =
+                $packageVulnerabilityAcceptance.officialOutputValidationPassed
+            strictValidationPassed =
+                $packageVulnerabilityAcceptance.strictValidationPassed
+            producerCheckpointOnly =
+                $packageVulnerabilityAcceptance.producerCheckpointOnly
+            producerCveReviewPending =
+                $packageVulnerabilityAcceptance.producerCveReviewPending
+            effectiveClosedBlocker = if ($packageVulnerabilityFreshAtEvaluation) {
+                "CveReviewPending"
+            }
+            else {
+                "None"
+            }
+            cveFreeClaim = $false
+            legalReviewComplete = $false
+        }
         blockers = @($blockers)
     }
 
@@ -2156,6 +2672,16 @@ try {
          $publicationPackageProducingSnapshot.Sha256 -ceq
             $validatedPackageProducingSnapshot.Sha256) `
         "PackageSbomAcceptanceInvalid"
+
+    $script:technicalStage = "PackageVulnerabilityAcceptanceStability"
+    $publicationPackageVulnerabilityValidation = Read-PackageVulnerabilityAcceptance `
+        -Root $resolvedRepositoryRoot
+    Assert-Condition `
+        ($publicationPackageVulnerabilityValidation.ContractSourceSetSha256 -ceq
+            $packageVulnerabilityAcceptanceValidation.ContractSourceSetSha256 -and
+         $publicationPackageVulnerabilityValidation.FreshAtEvaluation -eq
+            $packageVulnerabilityFreshAtEvaluation) `
+        "PackageVulnerabilityAcceptanceInvalid"
 
     $script:technicalStage = "EvidencePublication"
     Publish-BoundedEvidence `

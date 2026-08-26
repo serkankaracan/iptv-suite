@@ -67,7 +67,7 @@ Windows PowerShell 5.1 adversarial self-test ve architecture suite `51/51` geçt
 
 ## Windows MVP release mimarisi kararı
 
-M15 release seti yalnız `x64` olarak sınırlandı. Schema v2 ile kaydedilen x64 disposition güncel release-readiness evidence schema v3'te de `releaseArchitectures=[x64]`, `arm64Disposition=DeferredUntilNativeArm64ChainAccepted`, `architectureImportSurfaceAuditVersion=1` ve `sourceControlledArchitectureImportSurfacePassed=true` değerlerini taşır; production project `Platforms=x64`, `PlatformTarget=x64`, `RuntimeIdentifier=win-x64` ve `AppxBundle=Never` invariant'larını korur. `RuntimeIdentifiers`, `AppxBundlePlatforms`, `win-arm64`, çoklu platform ve bundle açılımı fail-closed reddedilir.
+M15 release seti yalnız `x64` olarak sınırlandı. Schema v2 ile kaydedilen x64 disposition güncel release-readiness evidence schema v4'te de `releaseArchitectures=[x64]`, `arm64Disposition=DeferredUntilNativeArm64ChainAccepted`, `architectureImportSurfaceAuditVersion=1` ve `sourceControlledArchitectureImportSurfacePassed=true` değerlerini taşır; production project `Platforms=x64`, `PlatformTarget=x64`, `RuntimeIdentifier=win-x64` ve `AppxBundle=Never` invariant'larını korur. `RuntimeIdentifiers`, `AppxBundlePlatforms`, `win-arm64`, çoklu platform ve bundle açılımı fail-closed reddedilir.
 
 Kaynak-kontrollü MSBuild yüzeyi de karara bağlıdır: dört production project exact `Microsoft.NET.Sdk` kullanır; explicit `Import`/nested `Sdk`/`Target`/`UsingTask`, SDK import-hook veya artifacts-output redirect property, otomatik `*.csproj.user` ya da force-tracked project-extension wildcard import tanımlayamaz. İzin verilen iki generated project-extension adı yalnız NuGet'in `.nuget.g.props`/`.nuget.g.targets` çiftidir; başka mevcut wildcard eşleşmesi reddedilir ve tracked `obj` path denetimi case-insensitive'dir. Exact x64 property düğümleri ve taşıyan `PropertyGroup` koşulsuz/attributesız olmalıdır. Windows project ancestor zincirinde yalnız repository-root `Directory.Build.props` uygulanabilir, `Directory.Build.targets` ile otomatik CLI response dosyaları bulunamaz. Solution zincirinde yalnız root `Directory.Solution.props` uygulanabilir ve `Directory.Solution.targets` bulunamaz. Root `Directory.Build.props`, `Directory.Packages.props` ve `Directory.Solution.props` dosyaları architecture/bundle veya import-control property tanımlayamaz. Bu denetim source-controlled import yüzeyi içindir; dış command-line property, makine-geneli SDK/import veya değiştirilmiş build invocation kanıtı değildir. Release build documented locked komutla yürütülmelidir.
 
@@ -79,7 +79,7 @@ Bu karar ARM64 desteği veya emulation acceptance'ı değildir. ARM64 ancak nati
 
 Package-bound SBOM akışı, exact pin'li `Microsoft.Sbom.DotNetTool 4.1.5` ile signed application MSIX ve exact Windows App Runtime `x64` dependency MSIX'ini tek release setine bağlayan companion SPDX `2.2` üretir. Nupkg, shim ve çalıştırılan extracted tool payload'ı birebir bağlıdır; iki MSIX imzası fail-closed doğrulanır. Resmî aracın dokunulmamış çıktısı önce doğrulanır; ardından iki MSIX'in identity/hash bağları, exact production component seti ve gerekli release-set ilişkileri repository-owned sıkı doğrulamayla zenginleştirilip yeniden denetlenir.
 
-Gerçek araçla iki sentetik MSIX kullanan local uçtan uca prova `PASS`, architecture suite `52/52 PASS` ve full quality gate `569/569 × 2 PASS` sonucundadır. Ardından clean commit `12b1e95e8c3df04c42482daa52bdabd81abe1701` için [run `#226` (`32897767622`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32897767622) ve package job `97966018579`, signed application MSIX + exact x64 Windows App Runtime release setinin üretim, resmî doğrulama, sıkı doğrulama ve sanitized artifact upload zincirini `PASS` tamamladı. İndirilen artifact ile iç üyelerin hash'leri doğrulandı; source-controlled schema-v1 acceptance ledger'ı bu exact hosted sonucu release-readiness evidence schema v3'e bağladı. Producer summary'sindeki tarihsel `HostedAcceptancePending` / `SbomPending=true` candidate durumu değiştirilmedi; ayrı ledger yalnız bu run için `SbomPending` blocker'ını kapatır.
+Gerçek araçla iki sentetik MSIX kullanan local uçtan uca prova `PASS`, architecture suite `52/52 PASS` ve full quality gate `569/569 × 2 PASS` sonucundadır. Ardından clean commit `12b1e95e8c3df04c42482daa52bdabd81abe1701` için [run `#226` (`32897767622`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32897767622) ve package job `97966018579`, signed application MSIX + exact x64 Windows App Runtime release setinin üretim, resmî doğrulama, sıkı doğrulama ve sanitized artifact upload zincirini `PASS` tamamladı. İndirilen artifact ile iç üyelerin hash'leri doğrulandı; source-controlled schema-v1 acceptance ledger'ı bu exact hosted sonucu güncel release-readiness evidence schema v4'e bağladı. Producer summary'sindeki tarihsel `HostedAcceptancePending` / `SbomPending=true` candidate durumu değiştirilmedi; ayrı ledger yalnız bu run için `SbomPending` blocker'ını kapatır.
 
 | Kabul alanı | Exact değer |
 |---|---|
@@ -94,41 +94,44 @@ Gerçek araçla iki sentetik MSIX kullanan local uçtan uca prova `PASS`, archit
 | Package-producing snapshot | Beş kök build girdisi + solution + `apps/windows/src` altındaki bütün production girdileri, exact `111` dosya; SHA-256 `465b2a74eba4f6c45871d57e4e042772a5a30024ff7e45ac7b9563571f101d9d` |
 | Contract source seti | Workflow, tool config ve package/SBOM/install-root scriptlerinden exact `7` dosya; SHA-256 `2b9cfe5d859ed070c47e2e74591b5567a5a8bc3a2006d2a5d775428f8a54c9ce` |
 
-Snapshot metin girdilerini strict UTF-8/LF, PNG/ICO asset'lerini ham byte olarak canonicalize eder; bounded exact file reads, lazy bounded traversal ve yayımdan önce ikinci snapshot doğrulaması kullanır. Dosya ekleme, silme, içerik değişimi, daha yakın central-package importu, reparse veya sınır aşımı eski hosted kabulü fail-closed geçersiz kılar. Ledger duplicate JSON property'lerini reddeder ve workflow tamamlanma zamanını yalnız `runCompletedAtUtc` olarak adlandırır. Bu teknik package-bound companion SPDX kabulü root `LICENSE`/`NOTICE`, redistribution kararı, asset provenance, CVE sonucu, codec/IP hukuk incelemesi, production signing veya Store kabulü değildir. Bu kapılar aşağıdaki 14 blocker içinde açık kalır.
+Snapshot metin girdilerini strict UTF-8/LF, PNG/ICO asset'lerini ham byte olarak canonicalize eder; bounded exact file reads, lazy bounded traversal ve yayımdan önce ikinci snapshot doğrulaması kullanır. Dosya ekleme, silme, içerik değişimi, daha yakın central-package importu, reparse veya sınır aşımı eski hosted kabulü fail-closed geçersiz kılar. Ledger duplicate JSON property'lerini reddeder ve workflow tamamlanma zamanını yalnız `runCompletedAtUtc` olarak adlandırır. Bu teknik package-bound companion SPDX kabulü tek başına root `LICENSE`/`NOTICE`, redistribution kararı, asset provenance, known-vulnerability sonucu, codec/IP hukuk incelemesi, production signing veya Store kabulü değildir. Ayrı known-vulnerability kabulü aşağıdadır; kalan kapılar 13 blocker içinde açık kalır.
 
 ## Known-vulnerability producer checkpoint'i
 
-`windows-cve-review.yml`, mevcut accepted package/SBOM workflow ve ledger'ından ayrı bir producer lane'dir. Exact SDK `10.0.302` ile yalnız `apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj` leaf'ini, dedicated config'teki exact package source ve `https://data.nuget.org/v3/index.json` audit source'u üzerinden denetler. Restore; yeni ve repository `.artifacts` altında bounded `NUGET_HTTP_CACHE_PATH`, `NUGET_PACKAGES` ve `DOTNET_CLI_HOME`, `--no-http-cache`, locked/force evaluation, `RestoreUseStaticGraphEvaluation=false`, `NuGetAudit=true`, `NuGetAuditMode=all`, `NuGetAuditLevel=low` ve fatal `NU1900`–`NU1905` contract'ıyla yürür. Authoritative MSBuild sonucu exact `RestoreProjectCount=4`, `RestoreSkippedCount=0`, `RestoreProjectsAuditedCount=4` olmalıdır.
+`windows-cve-review.yml`, mevcut accepted package/SBOM workflow ve ledger'ından ayrı bir producer lane'dir. Exact SDK `10.0.302` ile yalnız `apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj` leaf'ini, dedicated config'teki exact package source ve `https://data.nuget.org/v3/index.json` audit source'u üzerinden denetler. Restore; yeni ve repository `.artifacts` altında bounded `NUGET_HTTP_CACHE_PATH`, `NUGET_PACKAGES` ve `DOTNET_CLI_HOME`, `--no-http-cache`, locked evaluation, `RestoreUseStaticGraphEvaluation=false`, `NuGetAudit=true`, `NuGetAuditMode=all`, `NuGetAuditLevel=low` ve fatal `NU1900`–`NU1905` contract'ıyla yürür. Authoritative MSBuild sonucu exact `RestoreProjectCount=4`, `RestoreSkippedCount=0`, `RestoreProjectsAuditedCount=4` olmalıdır.
 
 Producer iki ayrı JSON v1 çıktısını fail-closed okur. Filtresiz `--include-transitive` envanteri exact bir project/framework, `2` top-level + `21` transitive = `23` package ID/sürümünü dört strict UTF-8/schema-v2 production lockfile'ındaki content-hash bağlı aggregate graph ile birebir eşleştirir. Ardından `--vulnerable --include-transitive` çıktısı exact source/project/parameter/empty-package şeklinde olmalı ve `knownVulnerabilityCount=0` üretmelidir. `NuGetAuditSuppress`, warning suppression, audit/cache/fallback/import gölgelemesi ve beklenmeyen ancestor build/config yüzeyi reddedilir; 16 kritik girdi restore öncesi, audit öncesi ve evidence öncesi aynı snapshot'ta kalmalı ve worktree sonunda yeniden temiz olmalıdır. Duplicate JSON property, schema drift'i, yanlış source/project/framework, stderr, nonzero exit, timeout, invalid UTF-8, canlı output/cache bound aşımı veya herhangi bilinen vulnerability sonucu reddedilir. Artifact yalnız repository-relative project adı, sayaç ve hash taşır; raw CLI çıktısını, absolute path'i ya da advisory URL'sini taşımaz. Offline Windows PowerShell 5.1 adversarial self-test'i `PASS`tir.
 
-Bu checkpoint yalnız producer contract'ıdır. Henüz clean hosted run/artifact kabulü, staleness/freshness acceptance ledger'ı veya required-check kararı yoktur; dolayısıyla `CveReviewPending` kapanmaz ve aşağıdaki `14` blocker aynen kalır. `0` bulgu yalnız tarama anında sorgulanan exact graph için bilinen vulnerability bulunmadığı anlamına gelir; genel “CVE-free”, lisans/NOTICE, redistribution veya codec/IP hukuk kabulü değildir.
+Clean commit `2053f4099819b3bb19bb9dd3370d60f0161098f1` için [run `#4` (`32912296486`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32912296486) ve job `98008739618`, bu contract'ı `PASS` tamamladı. Artifact ID `9586961516`, digest'i `4d0c0a2a928038721053a61a0931b6e1fcfdf57053383fa0db0c0b9bccbb9210`; tek `last-success.json` üyesi `2.403` byte ve SHA-256 `f62f147842bf2e8d3951fbaca103a6d4b2d485fa269fd972d7ae3360f754c553`dır. Evidence exact `4/0/4` audited restore, dört project/lockfile, `2 + 21 = 23` package, sıfır suppression/override ve direct/transitive/toplam `0/0/0` bilinen vulnerability kaydeder.
+
+SHA-256 `8c60360ae0dac240ef801688a04472266dabd16bfb1069a841b365b61c89a197` source-controlled acceptance ledger'ı önceki SBOM ledger'ına zincirlenir; exact 16 contract girdisini (`6b09978b5ee3ffc4d14e09458724a3d18fd1d23c5ec9ab3134dd25bfc7e91ff3`) ve production graph'ını (`760562b81e0097913e1daf4ec88c67596337dd6636ed6d88c8f645424dc50b6e`) yeniden hesaplatır. Validation yayımdan önce ikinci kez çalışır. Freshness süresi ledger-controlled değildir: validator run tamamlanmasından başlayan en fazla yedi günü uygular; bu exact run için `2026-09-01T23:48:39Z` sonrasında yalnız `CveReviewPending` yeniden açılır. Hash/schema/provenance, suppression, contract veya graph drift'i teknik invariant olarak fail-closed reddedilir.
+
+Bu hosted kabul fresh olduğu sürece yalnız `CveReviewPending` blocker'ını kapatır ve schema-v4 evidence'ta 13 blocker bırakır. Producer evidence'ındaki tarihsel `producerCheckpointOnly=true` ve `cveReviewPending=true` alanları değiştirilmez; ayrı ledger kabul kararını taşır. `0` bulgu yalnız tarama anında sorgulanan exact graph için bilinen vulnerability bulunmadığı anlamına gelir; genel “CVE-free”, lisans/NOTICE, redistribution veya codec/IP hukuk kabulü değildir. Final release öncesinde en fazla 24 saatlik yeni audit ayrıca gereklidir; required-check/perpetual freshness kararı bu checkpoint'in iddiası değildir.
 
 Resmî dayanaklar (erişim: `2026-08-26`): [.NET 10 `dotnet package list`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-package-list), [NuGet JSON v1 makine-okunur çıktı spec'i](https://github.com/NuGet/Home/wiki/%5BSpec%5D-Machine-readable-output-for-dotnet-list-package) ve [NuGet Audit / `VulnerabilityInfo` davranışı](https://learn.microsoft.com/en-us/nuget/concepts/auditing-packages).
 
 ## Exact açık blocker seti
 
-Aşağıdaki 14 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur:
+Aşağıdaki 13 kodun tamamı açıktır ve evidence'ta ordinal sıralı tutulur:
 
 1. `AssetProvenancePending`
 2. `CodecIpLegalReviewPending`
-3. `CveReviewPending`
-4. `LicenseFilePending`
-5. `NoticeFilePending`
-6. `PartnerCenterPrivateFlightPending`
-7. `PrivacyPolicyPending`
-8. `ProductionIdentityMigrationPending`
-9. `ProductionLifecycleMatrixPending`
-10. `ReleaseSigningPending`
-11. `ReviewerServiceAndRehearsalPending`
-12. `StoreListingPending`
-13. `SupportUrlPending`
-14. `WackPending`
+3. `LicenseFilePending`
+4. `NoticeFilePending`
+5. `PartnerCenterPrivateFlightPending`
+6. `PrivacyPolicyPending`
+7. `ProductionIdentityMigrationPending`
+8. `ProductionLifecycleMatrixPending`
+9. `ReleaseSigningPending`
+10. `ReviewerServiceAndRehearsalPending`
+11. `StoreListingPending`
+12. `SupportUrlPending`
+13. `WackPending`
 
 ## Non-claims ve sonraki kabul sınırı
 
 - Known-pattern source taraması ile exact installed-package runtime audit'i geçti. Runtime sonucu yalnız exact hosted package gözlem penceresindeki deterministic pre/post eşitliğini ve watcher'ın mutation görmediğini kanıtlar; clean VM'de install/update/reset/uninstall matrisi ve bütün olası write yolları ayrıca geçmelidir.
-- Exact 23-package inventory teknik dependency drift guard'ıdır ve tek başına SBOM değildir. Hosted kabul edilmiş package-bound companion SPDX de root `LICENSE`/`NOTICE`, asset provenance, CVE sonucu, redistribution kabulü veya codec/IP hukuk görüşü değildir.
+- Exact 23-package inventory teknik dependency drift guard'ıdır ve tek başına SBOM değildir. Hosted kabul edilmiş package-bound companion SPDX ile ayrı, fresh known-vulnerability incelemesi root `LICENSE`/`NOTICE`, asset provenance, genel “CVE-free” iddiası, redistribution kabulü veya codec/IP hukuk görüşü değildir.
 - Development identity ile mevcut disposable lifecycle kanıtları production identity/PFN, signing lineage, previous-package migration, repair veya private-flight sonucu değildir.
 - WACK, Partner Center private submission, privacy/support URL, Store listing/rating/reviewer notes ve geliştirici-owned reviewer service henüz kabul edilmemiştir.
 - ARM64 Windows MVP release setinde yoktur; deferred disposition gelecekte native ARM64 acceptance yapılmadan destek iddiasına dönüştürülemez.

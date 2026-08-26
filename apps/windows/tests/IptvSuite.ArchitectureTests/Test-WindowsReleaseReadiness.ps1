@@ -83,10 +83,12 @@ function Invoke-AllowedAudit {
         [string]$Root,
 
         [Parameter(Mandatory = $true)]
-        [string]$EvidencePath
+        [string]$EvidencePath,
+
+        [string]$ValidatorPath = $script:validatorPath
     )
 
-    & $script:validatorPath `
+    & $ValidatorPath `
         -RepositoryRoot $Root `
         -EvidencePath $EvidencePath `
         -AllowBlockedInventory | Out-Null
@@ -103,19 +105,21 @@ function Assert-AuditFailure {
         [Parameter(Mandatory = $true)]
         [string]$ExpectedMessage,
 
+        [string]$ValidatorPath = $script:validatorPath,
+
         [switch]$AllowBlockedInventory
     )
 
     $actualMessage = $null
     try {
         if ($AllowBlockedInventory) {
-            & $script:validatorPath `
+            & $ValidatorPath `
                 -RepositoryRoot $Root `
                 -EvidencePath $EvidencePath `
                 -AllowBlockedInventory | Out-Null
         }
         else {
-            & $script:validatorPath `
+            & $ValidatorPath `
                 -RepositoryRoot $Root `
                 -EvidencePath $EvidencePath | Out-Null
         }
@@ -196,9 +200,10 @@ function Read-AndAssertEvidence {
             "packageInventory",
             "packageInventoryPolicy",
             "packageSbomAcceptance",
+            "packageVulnerabilityAcceptance",
             "blockers") `
         -Message "evidence root schema changed."
-    Assert-TestCondition ($evidence.schemaVersion -eq 3) "schemaVersion must be 3."
+    Assert-TestCondition ($evidence.schemaVersion -eq 4) "schemaVersion must be 4."
     Assert-TestCondition ($evidence.result -ceq "blocked") "result must remain blocked."
     Assert-TestCondition `
         ($evidence.technicalBaselinePassed -is [bool] -and $evidence.technicalBaselinePassed) `
@@ -411,10 +416,141 @@ function Read-AndAssertEvidence {
          -not $packageSbomAcceptance.legalSbomComplete) `
         "the bounded package SBOM acceptance disposition changed."
 
+    $packageVulnerabilityAcceptance = $evidence.packageVulnerabilityAcceptance
+    Assert-ExactStringSet `
+        -Actual @($packageVulnerabilityAcceptance.PSObject.Properties.Name) `
+        -Expected @(
+            "ledgerSha256",
+            "decision",
+            "scope",
+            "runCompletedAtUtc",
+            "freshThroughUtc",
+            "freshnessPolicy",
+            "maximumAgeDays",
+            "freshAtEvaluation",
+            "repository",
+            "workflowPath",
+            "workflowName",
+            "workflowId",
+            "runId",
+            "runNumber",
+            "runAttempt",
+            "runHeadSha",
+            "runConclusion",
+            "jobId",
+            "jobName",
+            "jobConclusion",
+            "artifactId",
+            "artifactName",
+            "artifactDigestSha256",
+            "lastSuccessMemberLength",
+            "lastSuccessMemberSha256",
+            "packageSbomAcceptanceSha256",
+            "observedAtUtc",
+            "producerRepositoryCommitSha",
+            "dotNetSdk",
+            "projectPath",
+            "targetFramework",
+            "auditSourceId",
+            "auditSourceConfigSha256",
+            "restoreProjectCount",
+            "restoreSkippedCount",
+            "restoreProjectsAuditedCount",
+            "productionProjectCount",
+            "productionLockfileCount",
+            "productionPackageCount",
+            "topLevelPackageCount",
+            "transitivePackageCount",
+            "contractSnapshotSha256",
+            "productionPackageGraphSha256",
+            "knownDirectVulnerabilityCount",
+            "knownTransitiveVulnerabilityCount",
+            "knownVulnerabilityCount",
+            "officialOutputValidationPassed",
+            "strictValidationPassed",
+            "producerCheckpointOnly",
+            "producerCveReviewPending",
+            "effectiveClosedBlocker",
+            "cveFreeClaim",
+            "legalReviewComplete") `
+        -Message "the package vulnerability acceptance evidence schema changed."
+    Assert-TestCondition `
+        ($packageVulnerabilityAcceptance.ledgerSha256 -ceq
+            "8c60360ae0dac240ef801688a04472266dabd16bfb1069a841b365b61c89a197" -and
+         $packageVulnerabilityAcceptance.decision -ceq
+            "AcceptTechnicalKnownVulnerabilityReview" -and
+         $packageVulnerabilityAcceptance.scope -ceq
+            "ProductionWindowsLeafKnownVulnerabilityReviewOnly" -and
+         $packageVulnerabilityAcceptance.runCompletedAtUtc -ceq
+            "2026-08-25T23:48:39Z" -and
+         $packageVulnerabilityAcceptance.freshThroughUtc -ceq
+            "2026-09-01T23:48:39Z" -and
+         $packageVulnerabilityAcceptance.freshnessPolicy -ceq
+            "RunCompletionPlus7Days" -and
+         $packageVulnerabilityAcceptance.maximumAgeDays -eq 7 -and
+         $packageVulnerabilityAcceptance.freshAtEvaluation -is [bool]) `
+        "the bounded package vulnerability freshness disposition changed."
+    $expectedVulnerabilityFresh =
+        [bool]$packageVulnerabilityAcceptance.freshAtEvaluation
+    Assert-TestCondition `
+        ($packageVulnerabilityAcceptance.repository -ceq "serkankaracan/iptv-suite" -and
+         $packageVulnerabilityAcceptance.workflowPath -ceq
+            ".github/workflows/windows-cve-review.yml" -and
+         $packageVulnerabilityAcceptance.workflowName -ceq
+            "Windows known-vulnerability producer" -and
+         $packageVulnerabilityAcceptance.workflowId -eq 342499403 -and
+         $packageVulnerabilityAcceptance.runId -eq 32912296486 -and
+         $packageVulnerabilityAcceptance.runNumber -eq 4 -and
+         $packageVulnerabilityAcceptance.runAttempt -eq 1 -and
+         $packageVulnerabilityAcceptance.runHeadSha -ceq
+            "2053f4099819b3bb19bb9dd3370d60f0161098f1" -and
+         $packageVulnerabilityAcceptance.runConclusion -ceq "success" -and
+         $packageVulnerabilityAcceptance.jobId -eq 98008739618 -and
+         $packageVulnerabilityAcceptance.jobConclusion -ceq "success" -and
+         $packageVulnerabilityAcceptance.artifactId -eq 9586961516 -and
+         $packageVulnerabilityAcceptance.artifactDigestSha256 -ceq
+            "4d0c0a2a928038721053a61a0931b6e1fcfdf57053383fa0db0c0b9bccbb9210" -and
+         $packageVulnerabilityAcceptance.lastSuccessMemberLength -eq 2403 -and
+         $packageVulnerabilityAcceptance.lastSuccessMemberSha256 -ceq
+            "f62f147842bf2e8d3951fbaca103a6d4b2d485fa269fd972d7ae3360f754c553") `
+        "the hosted package vulnerability workflow or artifact evidence changed."
+    Assert-TestCondition `
+        ($packageVulnerabilityAcceptance.restoreProjectCount -eq 4 -and
+         $packageVulnerabilityAcceptance.auditSourceId -ceq
+            "nuget.org-audit-vulnerabilityinfo" -and
+         $packageVulnerabilityAcceptance.restoreSkippedCount -eq 0 -and
+         $packageVulnerabilityAcceptance.restoreProjectsAuditedCount -eq 4 -and
+         $packageVulnerabilityAcceptance.productionProjectCount -eq 4 -and
+         $packageVulnerabilityAcceptance.productionLockfileCount -eq 4 -and
+         $packageVulnerabilityAcceptance.productionPackageCount -eq 23 -and
+         $packageVulnerabilityAcceptance.topLevelPackageCount -eq 2 -and
+         $packageVulnerabilityAcceptance.transitivePackageCount -eq 21 -and
+         $packageVulnerabilityAcceptance.contractSnapshotSha256 -ceq
+            "6b09978b5ee3ffc4d14e09458724a3d18fd1d23c5ec9ab3134dd25bfc7e91ff3" -and
+         $packageVulnerabilityAcceptance.productionPackageGraphSha256 -ceq
+            "760562b81e0097913e1daf4ec88c67596337dd6636ed6d88c8f645424dc50b6e" -and
+         $packageVulnerabilityAcceptance.knownDirectVulnerabilityCount -eq 0 -and
+         $packageVulnerabilityAcceptance.knownTransitiveVulnerabilityCount -eq 0 -and
+         $packageVulnerabilityAcceptance.knownVulnerabilityCount -eq 0 -and
+         $packageVulnerabilityAcceptance.officialOutputValidationPassed -is [bool] -and
+         $packageVulnerabilityAcceptance.officialOutputValidationPassed -and
+         $packageVulnerabilityAcceptance.strictValidationPassed -is [bool] -and
+         $packageVulnerabilityAcceptance.strictValidationPassed -and
+         $packageVulnerabilityAcceptance.producerCheckpointOnly -is [bool] -and
+         $packageVulnerabilityAcceptance.producerCheckpointOnly -and
+         $packageVulnerabilityAcceptance.producerCveReviewPending -is [bool] -and
+         $packageVulnerabilityAcceptance.producerCveReviewPending -and
+         $packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
+            $(if ($expectedVulnerabilityFresh) { "CveReviewPending" } else { "None" }) -and
+         $packageVulnerabilityAcceptance.cveFreeClaim -is [bool] -and
+         -not $packageVulnerabilityAcceptance.cveFreeClaim -and
+         $packageVulnerabilityAcceptance.legalReviewComplete -is [bool] -and
+         -not $packageVulnerabilityAcceptance.legalReviewComplete) `
+        "the exact package vulnerability disposition changed."
+
     $expectedBlockers = @(
         "AssetProvenancePending",
         "CodecIpLegalReviewPending",
-        "CveReviewPending",
         "LicenseFilePending",
         "NoticeFilePending",
         "PartnerCenterPrivateFlightPending",
@@ -426,6 +562,9 @@ function Read-AndAssertEvidence {
         "StoreListingPending",
         "SupportUrlPending",
         "WackPending")
+    if (-not $expectedVulnerabilityFresh) {
+        $expectedBlockers += "CveReviewPending"
+    }
     Assert-ExactStringSet `
         -Actual @($evidence.blockers | ForEach-Object { [string]$_ }) `
         -Expected $expectedBlockers `
@@ -464,6 +603,7 @@ function Initialize-IsolatedFixture {
 
     $requiredFiles = @(
         ".config\dotnet-tools.json",
+        ".github\workflows\windows-cve-review.yml",
         ".github\workflows\windows-quality.yml",
         "global.json",
         "NuGet.config",
@@ -473,8 +613,12 @@ function Initialize-IsolatedFixture {
         "apps\windows\IptvSuite.Windows.sln",
         "eng\Invoke-WindowsPackageSbom.ps1",
         "eng\Invoke-WindowsPackageSmoke.ps1",
+        "eng\Invoke-WindowsPackageVulnerabilityAudit.ps1",
         "eng\WindowsPackageInstallRootAudit.ps1",
         "eng\WindowsPackageSbom.ps1",
+        "eng\WindowsPackageVulnerabilityAudit.ps1",
+        "eng\windows-package-vulnerability-audit.config",
+        "eng\windows-package-vulnerability-acceptance.json",
         "eng\windows-package-sbom-acceptance.json",
         "eng\windows-package-sbom-tool.json")
     foreach ($relativePath in $requiredFiles) {
@@ -510,6 +654,21 @@ Assert-TestCondition `
      $validatorText.Contains(
         '[System.IO.Directory]::EnumerateFileSystemEntries(')) `
     "the bounded two-pass package-producing snapshot contract changed."
+Assert-TestCondition `
+    ([regex]::Matches(
+        $validatorText,
+        'Read-PackageVulnerabilityAcceptance').Count -eq 3 -and
+     $validatorText.Contains(
+        '$publicationPackageVulnerabilityValidation.FreshAtEvaluation') -and
+     $validatorText.Contains(
+        '$publicationPackageVulnerabilityValidation.ContractSourceSetSha256')) `
+    "the bounded two-pass package vulnerability acceptance contract changed."
+Assert-TestCondition `
+    ($validatorText.Contains(
+        '$helperScriptBlock = [ScriptBlock]::Create($normalizedHelperText)') -and
+     $validatorText.Contains('-CapturedText $normalizedHelperText') -and
+     -not $validatorText.Contains('. $helperFile.FullName')) `
+    "the captured package vulnerability helper execution contract changed."
 
 try {
     [System.IO.Directory]::CreateDirectory($script:actualEvidenceRoot) | Out-Null
@@ -531,6 +690,40 @@ try {
     Read-AndAssertEvidence `
         -EvidencePath $fixtureEvidencePath `
         -ForbiddenRoot $script:fixtureRoot | Out-Null
+
+    $evaluationClockExpression =
+        '$evaluationUtcNow = [DateTimeOffset]::UtcNow'
+    Assert-TestCondition `
+        ([regex]::Matches(
+            $validatorText,
+            [regex]::Escape($evaluationClockExpression)).Count -eq 1) `
+        "the package vulnerability evaluation clock contract changed."
+    $staleValidatorText = $validatorText.Replace(
+        $evaluationClockExpression,
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 9, 2, 0, 0, 0, [TimeSpan]::Zero)')
+    Assert-TestCondition ($staleValidatorText -cne $validatorText) `
+        "the deterministic stale validator mutation was not applied."
+    $staleValidatorPath = $script:fixtureRoot + "-stale-validator.ps1"
+    Write-TestText -Path $staleValidatorPath -Value $staleValidatorText
+    try {
+        $staleEvidencePath = Join-Path $fixtureEvidenceRoot "stale.json"
+        Invoke-AllowedAudit `
+            -Root $script:fixtureRoot `
+            -EvidencePath $staleEvidencePath `
+            -ValidatorPath $staleValidatorPath
+        $staleEvidence = Read-AndAssertEvidence `
+            -EvidencePath $staleEvidencePath `
+            -ForbiddenRoot $script:fixtureRoot
+        Assert-TestCondition `
+            (-not $staleEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
+             $staleEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq "None" -and
+             @($staleEvidence.blockers).Count -eq 14 -and
+             @($staleEvidence.blockers) -ccontains "CveReviewPending") `
+            "stale package vulnerability acceptance did not reopen only its blocker."
+    }
+    finally {
+        Remove-Item -LiteralPath $staleValidatorPath -Force -ErrorAction SilentlyContinue
+    }
 
     $acceptanceRelativePath = "eng\windows-package-sbom-acceptance.json"
     $acceptancePath = Join-Path $script:fixtureRoot $acceptanceRelativePath
@@ -584,6 +777,107 @@ try {
         -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
         -AllowBlockedInventory
     Copy-TestFile -RelativePath $contractSourceRelativePath
+
+    $vulnerabilityAcceptanceRelativePath =
+        "eng\windows-package-vulnerability-acceptance.json"
+    $vulnerabilityAcceptancePath = Join-Path `
+        $script:fixtureRoot `
+        $vulnerabilityAcceptanceRelativePath
+    Remove-Item -LiteralPath $vulnerabilityAcceptancePath -Force
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "missing-cve-acceptance.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageVulnerabilityAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $vulnerabilityAcceptanceRelativePath
+
+    $vulnerabilityAcceptanceText =
+        [System.IO.File]::ReadAllText($vulnerabilityAcceptancePath)
+    $duplicateVulnerabilityAcceptanceText = $vulnerabilityAcceptanceText.Replace(
+        '  "decision": "AcceptTechnicalKnownVulnerabilityReview",',
+        ('  "duplicateProbe": { "value": 1, "value": 2 },' + "`n" +
+         '  "decision": "AcceptTechnicalKnownVulnerabilityReview",'))
+    Assert-TestCondition `
+        ($duplicateVulnerabilityAcceptanceText -cne $vulnerabilityAcceptanceText) `
+        "nested duplicate package vulnerability acceptance mutation was not applied."
+    Write-TestText `
+        -Path $vulnerabilityAcceptancePath `
+        -Value $duplicateVulnerabilityAcceptanceText
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "duplicate-cve-acceptance.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageVulnerabilityAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $vulnerabilityAcceptanceRelativePath
+
+    $tamperedVulnerabilityAcceptanceText = $vulnerabilityAcceptanceText.Replace(
+        '"knownVulnerabilityCount": 0',
+        '"knownVulnerabilityCount": 1')
+    Assert-TestCondition `
+        ($tamperedVulnerabilityAcceptanceText -cne $vulnerabilityAcceptanceText) `
+        "package vulnerability count mutation was not applied."
+    Write-TestText `
+        -Path $vulnerabilityAcceptancePath `
+        -Value $tamperedVulnerabilityAcceptanceText
+    $tamperedVulnerabilityAcceptanceSha256 =
+        (Get-FileHash `
+            -LiteralPath $vulnerabilityAcceptancePath `
+            -Algorithm SHA256).Hash.ToLowerInvariant()
+    $semanticValidatorText = $validatorText.Replace(
+        "8c60360ae0dac240ef801688a04472266dabd16bfb1069a841b365b61c89a197",
+        $tamperedVulnerabilityAcceptanceSha256)
+    Assert-TestCondition ($semanticValidatorText -cne $validatorText) `
+        "package vulnerability semantic validator mutation was not applied."
+    $semanticValidatorPath = Join-Path `
+        $script:fixtureRoot `
+        "eng\Test-WindowsReleaseReadiness.semantic.ps1"
+    Write-TestText -Path $semanticValidatorPath -Value $semanticValidatorText
+    try {
+        Assert-AuditFailure `
+            -Root $script:fixtureRoot `
+            -EvidencePath (Join-Path $fixtureEvidenceRoot "tampered-cve-acceptance.json") `
+            -ExpectedMessage "M15TechnicalInvariant:PackageVulnerabilityAcceptanceInvalid" `
+            -ValidatorPath $semanticValidatorPath `
+            -AllowBlockedInventory
+    }
+    finally {
+        Remove-Item -LiteralPath $semanticValidatorPath -Force -ErrorAction SilentlyContinue
+    }
+    Copy-TestFile -RelativePath $vulnerabilityAcceptanceRelativePath
+
+    $vulnerabilityContractRelativePath =
+        ".github\workflows\windows-cve-review.yml"
+    $vulnerabilityContractPath = Join-Path `
+        $script:fixtureRoot `
+        $vulnerabilityContractRelativePath
+    $vulnerabilityContractText =
+        [System.IO.File]::ReadAllText($vulnerabilityContractPath)
+    Write-TestText `
+        -Path $vulnerabilityContractPath `
+        -Value ($vulnerabilityContractText + "`n# package vulnerability acceptance mutation")
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "tampered-cve-contract.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageVulnerabilityAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $vulnerabilityContractRelativePath
+
+    $vulnerabilityHelperRelativePath =
+        "eng\WindowsPackageVulnerabilityAudit.ps1"
+    $vulnerabilityHelperPath = Join-Path `
+        $script:fixtureRoot `
+        $vulnerabilityHelperRelativePath
+    $vulnerabilityHelperText =
+        [System.IO.File]::ReadAllText($vulnerabilityHelperPath)
+    Write-TestText `
+        -Path $vulnerabilityHelperPath `
+        -Value ($vulnerabilityHelperText + "`n# captured helper mutation")
+    Assert-AuditFailure `
+        -Root $script:fixtureRoot `
+        -EvidencePath (Join-Path $fixtureEvidenceRoot "tampered-cve-helper.json") `
+        -ExpectedMessage "M15TechnicalInvariant:PackageVulnerabilityAcceptanceInvalid" `
+        -AllowBlockedInventory
+    Copy-TestFile -RelativePath $vulnerabilityHelperRelativePath
 
     $packageSourceRelativePath = "apps\windows\src\IptvSuite.Domain\AssemblyMarker.cs"
     $packageSourcePath = Join-Path $script:fixtureRoot $packageSourceRelativePath
