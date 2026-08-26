@@ -116,7 +116,7 @@ Bu exact SBOM ledger'ına zincirlenen clean `15826e5ecad4a4b5737aa7bf39d28c62b0e
 
 Resmî dayanaklar (erişim: `2026-08-26`): [.NET 10 `dotnet package list`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-package-list), [NuGet JSON v1 makine-okunur çıktı spec'i](https://github.com/NuGet/Home/wiki/%5BSpec%5D-Machine-readable-output-for-dotnet-list-package) ve [NuGet Audit / `VulnerabilityInfo` davranışı](https://learn.microsoft.com/en-us/nuget/concepts/auditing-packages).
 
-## Deterministic package asset provenance ara checkpoint'i
+## Deterministic package asset provenance ve güncel SBOM/CVE kabulü
 
 Manifestin exact sekiz PNG/ICO package asset'i artık `eng/New-WindowsProductionAssets.ps1` içindeki source-controlled `WindowsProductionAssets-Rgba8Filter0FixedHuffmanLz77-PngFrameIco-v1` tarifiyle üretilir. Tarif source asset dependency, üçüncü taraf asset girdisi, font, metin veya trademark girdisi kullanmaz; iki ayrı output root'unda byte-identical üretim ile existing-root verification destekler. Strict `eng/windows-production-asset-provenance.json` ledger'ı exact sekiz path'i, PNG dimension'larını, ICO frame setini, byte length/SHA-256 değerlerini, generator SHA-256 `4ac099e8da587b5df61817ab92071235e4e91408d891f5cafa3037599d7f603b` ve canonical asset-set SHA-256 `6338f26af851a45eb4c7da593430ef1eab5a34afa6013365c2621fbfa0957777` değerini fail-closed bağlar.
 
@@ -124,9 +124,11 @@ Bu bağ yalnız exact package asset origin'ini kanıtlar. Görseller `developmen
 
 Asset byte'ları önceki 111-dosyalık package-producing snapshot'ını değiştirdi. Yeni clean commit `b78c6c0512a91c9ab1fd86e18f703856a45a4b53` için [Windows package SBOM producer run `#2` (`32923642659`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32923642659), job `98042026161` ile `2026-08-26T02:48:32Z` zamanında `success` tamamlandı. Artifact ID `9590841342`, digest'i `66bb75c354f9c08c0002f0f3d0a390ecfe0326284928e2da91dc9836ffe41a33`; application MSIX SHA-256 `b23fba0be6bc56e450f0e9a45d5822dc3b400160f29c89c77a9df2231b136a4c`, SPDX SBOM SHA-256 `eeefe6c741b41fc630a089d41445498e919cc1f49ed4f5f3350c87439a789e16` ve exact 111-file package-producing snapshot SHA-256 `6b068e8ccb651159dc2bad754f370ba428c6c3087c01c6bc7e419e6095cfadcc`dır. Acceptance ledger raw SHA-256 `5ad87061b0586ad5d84f8f38d244bb3e9131358e27905bffd1f8b2648259bb47`dir. Official ve strict validation birlikte `PASS`tir; deterministic asset provenance bağıyla `AssetProvenancePending`, bu asset-bound package acceptance ile `SbomPending` teknik zincirde kapanır.
 
-Yukarıdaki run `#1`/run `#10` ve ledger'ları pre-asset tarihsel accepted checkpoint olarak korunur. Run `#10` CVE kabulü önceki SBOM ledger hash'ine bağlı olduğundan yeni asset-bound SBOM için stale'dir; fresh zincirli CVE producer ve acceptance beklenir. Bu ara durumda schema-v5 için final 12-blocker/readiness sonucu iddia edilmez.
+Yukarıdaki run `#1`/run `#10` ve ledger'ları pre-asset tarihsel accepted checkpoint olarak korunur. Yeni SBOM acceptance ledger raw SHA-256 `5ad87061b0586ad5d84f8f38d244bb3e9131358e27905bffd1f8b2648259bb47` değerine zincirlenen clean `58e0b615d1c531a9c94583772d4d80a5740eb3e3` için [known-vulnerability producer run `#13` (`32924589536`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32924589536), job `98044789701` ile `2026-08-26T02:58:07Z` zamanında `success` tamamlandı. Artifact ID `9591048689`, boyutu `1.120` byte, digest'i `29e3c4136c05c42849f7141530ed0ce073c279d4ad617c007c2733ccfe5e1ecb`; `last-success.json` SHA-256 `d8ef63b6a66c4cd8fa415c8f8d9f857f90125dfbd759c89dde5616cae4ee64f0`dır. Acceptance ledger raw SHA-256 `60aa4cf4a7d346b18e1301ec8e58151afed5c59ceea4e17cb308e21864c101cd`dir. Evidence `2026-08-26T02:57:54.2270308Z` zamanında gözlemlenen exact değişmemiş contract/graph için `4/0/4` audit, `2 + 21 = 23` package ve direct/transitive/toplam `0/0/0` known-vulnerability sonucu taşır; official ve strict validation `PASS`tir. Freshness sonu `2026-09-02T02:58:07Z`dir.
 
-## Son hosted-kabul checkpoint'indeki exact açık blocker seti
+Güncel schema-v5 readiness sonucu `technicalBaselinePassed=true`, `releaseReady=false` ve exact 12 remaining blocker'dır. `AssetProvenancePending`, `SbomPending` ve `CveReviewPending` teknik olarak kapanmıştır. Bu teknik zincir M15 completion, perpetual freshness veya genel “CVE-free” sonucu değildir.
+
+## Tarihsel pre-asset schema-v4 exact açık blocker seti
 
 Aşağıdaki 13 kod, asset byte değişiminden önceki son hosted-kabul schema-v4 evidence'ında açıktır ve ordinal sıralı tutulmuştur:
 
@@ -143,6 +145,23 @@ Aşağıdaki 13 kod, asset byte değişiminden önceki son hosted-kabul schema-v
 11. `StoreListingPending`
 12. `SupportUrlPending`
 13. `WackPending`
+
+## Güncel schema-v5 exact açık blocker seti
+
+Aşağıdaki 12 kod current evidence'ta açıktır ve ordinal sıralıdır:
+
+1. `CodecIpLegalReviewPending`
+2. `LicenseFilePending`
+3. `NoticeFilePending`
+4. `PartnerCenterPrivateFlightPending`
+5. `PrivacyPolicyPending`
+6. `ProductionIdentityMigrationPending`
+7. `ProductionLifecycleMatrixPending`
+8. `ReleaseSigningPending`
+9. `ReviewerServiceAndRehearsalPending`
+10. `StoreListingPending`
+11. `SupportUrlPending`
+12. `WackPending`
 
 ## Non-claims ve sonraki kabul sınırı
 
