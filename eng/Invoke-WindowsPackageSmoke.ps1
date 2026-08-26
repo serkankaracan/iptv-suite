@@ -766,6 +766,9 @@ $certificate = $null
 $installedPackage = $null
 $packageInstallRootAudit = $null
 $packageInstallRootAuditResult = $null
+$preResetPackageInstallRootAuditResult = $null
+$packageInstallRootAuditSegmentCount = 0
+$packageInstallRootResetBoundaryEquivalent = $false
 $packageInstallRootAuditCompletionAttempted = $false
 $launchedProcess = $null
 $playbackHarnessProcess = $null
@@ -1997,6 +2000,9 @@ function Invoke-ExactDevelopmentPackageReset {
         [string]$ExpectedPackageFamilyName,
 
         [Parameter(Mandatory)]
+        [string]$ExpectedInstallRoot,
+
+        [Parameter(Mandatory)]
         [string]$CatalogStatePath,
 
         [Parameter(Mandatory)]
@@ -2059,13 +2065,54 @@ function Invoke-ExactDevelopmentPackageReset {
         throw "The exact clean-install onboarding package reset failed."
     }
 
-    $registrations = @(Get-AppxPackage -Name $expectedName -ErrorAction Stop |
-        Where-Object {
+    $registrationDeadline = (Get-Date).AddSeconds(15)
+    $registrations = @()
+    $resetInstallRoot = $null
+    $canonicalExpectedInstallRoot = [System.IO.Path]::GetFullPath(
+        $ExpectedInstallRoot).TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar)
+    do {
+        $namedRegistrations = @(Get-AppxPackage -Name $expectedName -ErrorAction Stop)
+        $conflictingRegistrations = @($namedRegistrations | Where-Object {
+            $_.PackageFullName -cne $ExpectedPackageFullName -or
+            $_.PackageFamilyName -cne $ExpectedPackageFamilyName -or
+            $_.Publisher -cne $expectedPublisher
+        })
+        if ($conflictingRegistrations.Count -ne 0) {
+            throw "The exact package registration changed during onboarding reset."
+        }
+
+        $registrations = @($namedRegistrations | Where-Object {
             $_.PackageFullName -ceq $ExpectedPackageFullName -and
             $_.PackageFamilyName -ceq $ExpectedPackageFamilyName -and
             $_.Publisher -ceq $expectedPublisher
         })
-    if ($registrations.Count -ne 1) {
+        if ($registrations.Count -eq 1) {
+            $registrationInstallLocation = [string]$registrations[0].InstallLocation
+            if (-not [string]::IsNullOrWhiteSpace($registrationInstallLocation)) {
+                if (-not [System.IO.Path]::IsPathRooted($registrationInstallLocation)) {
+                    throw "The exact package install-root binding changed during onboarding reset."
+                }
+                $resetInstallRoot = [System.IO.Path]::GetFullPath(
+                    $registrationInstallLocation).TrimEnd(
+                        [System.IO.Path]::DirectorySeparatorChar,
+                        [System.IO.Path]::AltDirectorySeparatorChar)
+                if (-not $resetInstallRoot.Equals(
+                        $canonicalExpectedInstallRoot,
+                        [System.StringComparison]::OrdinalIgnoreCase)) {
+                    throw "The exact package install-root binding changed during onboarding reset."
+                }
+                break
+            }
+        }
+        if ($registrations.Count -gt 1) {
+            throw "The exact package registration changed during onboarding reset."
+        }
+
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $registrationDeadline)
+    if ($registrations.Count -ne 1 -or $null -eq $resetInstallRoot) {
         throw "The exact package registration changed during onboarding reset."
     }
 
@@ -2078,6 +2125,33 @@ function Invoke-ExactDevelopmentPackageReset {
     if ((Test-Path -LiteralPath $CatalogStatePath) -or
         (Test-Path -LiteralPath $ProtectedStorePath)) {
         throw "The exact onboarding-owned package state remained after reset."
+    }
+}
+
+function Assert-ExactPackageInstallRootAuditResult {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Result
+    )
+
+    if ($Result.SchemaVersion -ne 1 -or
+        $Result.Scope -cne "ExactRegisteredProductPackageInstallLocation" -or
+        $Result.ExcludedEntryCount -ne 0 -or
+        $Result.BaselineEntryCount -le 0 -or
+        $Result.BaselineFileCount -le 0 -or
+        $Result.BaselineTotalBytes -le 0 -or
+        $Result.FinalEntryCount -ne $Result.BaselineEntryCount -or
+        $Result.FinalFileCount -ne $Result.BaselineFileCount -or
+        $Result.FinalTotalBytes -ne $Result.BaselineTotalBytes -or
+        -not [System.Text.RegularExpressions.Regex]::IsMatch(
+            $Result.BaselineManifestSha256,
+            '\A[0-9a-f]{64}\z') -or
+        $Result.FinalManifestSha256 -cne $Result.BaselineManifestSha256 -or
+        $Result.MutationEventCount -ne 0 -or
+        $Result.WatcherOverflow -ne $false -or
+        $Result.SnapshotEquivalent -ne $true -or
+        $Result.RuntimeWriteAuditPassed -ne $true) {
+        throw "The packaged install-root runtime audit result is invalid."
     }
 }
 
@@ -3508,6 +3582,7 @@ try {
     }
     $packageInstallRootAudit = Start-WindowsPackageInstallRootAudit `
         -RootPath $canonicalInstalledPackageLocation
+    $packageInstallRootAuditSegmentCount = 1
 
     $packageFamilyName = $installedPackage.PackageFamilyName
     $catalogDatabasePath = Join-Path $env:LOCALAPPDATA `
@@ -3986,12 +4061,25 @@ try {
     $onboardingLoopbackCertificate = $null
     Remove-ExactOnboardingControlDirectory
 
+    $packageInstallRootAuditCompletionAttempted = $true
+    $preResetPackageInstallRootAuditResult =
+        Complete-WindowsPackageInstallRootAudit -Audit $packageInstallRootAudit
+    Assert-ExactPackageInstallRootAuditResult `
+        -Result $preResetPackageInstallRootAuditResult
+    $packageInstallRootAudit = $null
+    $packageInstallRootAuditCompletionAttempted = $false
+
     Invoke-ExactDevelopmentPackageReset `
         -ExpectedPackageFullName $installedPackageFullName `
         -ExpectedPackageFamilyName $packageFamilyName `
+        -ExpectedInstallRoot $canonicalInstalledPackageLocation `
         -CatalogStatePath $catalogStatePath `
         -ProtectedStorePath $protectedStorePath
     $cleanInstallOnboardingResetVerified = $true
+
+    $packageInstallRootAudit = Start-WindowsPackageInstallRootAudit `
+        -RootPath $canonicalInstalledPackageLocation
+    $packageInstallRootAuditSegmentCount = 2
 
     & $DotNetPath $catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $catalogDatabasePath -PathType Leaf)) {
@@ -6080,29 +6168,22 @@ try {
     $packageInstallRootAuditCompletionAttempted = $true
     $packageInstallRootAuditResult = Complete-WindowsPackageInstallRootAudit `
         -Audit $packageInstallRootAudit
-    if ($packageInstallRootAuditResult.SchemaVersion -ne 1 -or
-        $packageInstallRootAuditResult.Scope -cne
-            "ExactRegisteredProductPackageInstallLocation" -or
-        $packageInstallRootAuditResult.ExcludedEntryCount -ne 0 -or
-        $packageInstallRootAuditResult.BaselineEntryCount -le 0 -or
-        $packageInstallRootAuditResult.BaselineFileCount -le 0 -or
-        $packageInstallRootAuditResult.BaselineTotalBytes -le 0 -or
-        $packageInstallRootAuditResult.FinalEntryCount -ne
-            $packageInstallRootAuditResult.BaselineEntryCount -or
-        $packageInstallRootAuditResult.FinalFileCount -ne
-            $packageInstallRootAuditResult.BaselineFileCount -or
-        $packageInstallRootAuditResult.FinalTotalBytes -ne
-            $packageInstallRootAuditResult.BaselineTotalBytes -or
-        -not [System.Text.RegularExpressions.Regex]::IsMatch(
-            $packageInstallRootAuditResult.BaselineManifestSha256,
-            '\A[0-9a-f]{64}\z') -or
-        $packageInstallRootAuditResult.FinalManifestSha256 -cne
-            $packageInstallRootAuditResult.BaselineManifestSha256 -or
-        $packageInstallRootAuditResult.MutationEventCount -ne 0 -or
-        $packageInstallRootAuditResult.WatcherOverflow -ne $false -or
-        $packageInstallRootAuditResult.SnapshotEquivalent -ne $true -or
-        $packageInstallRootAuditResult.RuntimeWriteAuditPassed -ne $true) {
-        throw "The packaged install-root runtime audit result is invalid."
+    Assert-ExactPackageInstallRootAuditResult -Result $packageInstallRootAuditResult
+    if ($null -ne $preResetPackageInstallRootAuditResult) {
+        $packageInstallRootResetBoundaryEquivalent =
+            $preResetPackageInstallRootAuditResult.FinalEntryCount -eq
+                $packageInstallRootAuditResult.BaselineEntryCount -and
+            $preResetPackageInstallRootAuditResult.FinalFileCount -eq
+                $packageInstallRootAuditResult.BaselineFileCount -and
+            $preResetPackageInstallRootAuditResult.FinalTotalBytes -eq
+                $packageInstallRootAuditResult.BaselineTotalBytes -and
+            $preResetPackageInstallRootAuditResult.FinalManifestSha256 -ceq
+                $packageInstallRootAuditResult.BaselineManifestSha256
+    }
+    if ($packageInstallRootAuditSegmentCount -ne 2 -or
+        $null -eq $preResetPackageInstallRootAuditResult -or
+        -not $packageInstallRootResetBoundaryEquivalent) {
+        throw "The packaged install-root runtime audit segmentation is incomplete."
     }
 
     $packageFileName = $packages[0].Name
@@ -6157,6 +6238,21 @@ try {
         PackageSbomPackageCount = $packageSbomResult.PackageCount
         PackageSbomRelationshipCount = $packageSbomResult.RelationshipCount
         PackageSbomBlockerDisposition = $packageSbomResult.BlockerDisposition
+        PackageInstallRootAuditSegmentCount = $packageInstallRootAuditSegmentCount
+        PackageInstallRootResetBoundaryInventoryEquivalent =
+            $packageInstallRootResetBoundaryEquivalent
+        PackageInstallRootPreResetBaselineManifestSha256 =
+            $preResetPackageInstallRootAuditResult.BaselineManifestSha256
+        PackageInstallRootPreResetFinalManifestSha256 =
+            $preResetPackageInstallRootAuditResult.FinalManifestSha256
+        PackageInstallRootPreResetMutationEventCount =
+            $preResetPackageInstallRootAuditResult.MutationEventCount
+        PackageInstallRootPreResetWatcherOverflow =
+            $preResetPackageInstallRootAuditResult.WatcherOverflow
+        PackageInstallRootPreResetInventoryEquivalent =
+            $preResetPackageInstallRootAuditResult.SnapshotEquivalent
+        PackageInstallRootPreResetAuditPassed =
+            $preResetPackageInstallRootAuditResult.RuntimeWriteAuditPassed
         PackageInstallRootAuditSchemaVersion = $packageInstallRootAuditResult.SchemaVersion
         PackageInstallRootAuditScope = $packageInstallRootAuditResult.Scope
         PackageInstallRootAuditExcludedEntryCount =

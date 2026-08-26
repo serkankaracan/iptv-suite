@@ -4909,13 +4909,17 @@ public sealed class DependencyRulesTests
             packageSmoke,
             ". (Join-Path $PSScriptRoot \"WindowsPackageInstallRootAudit.ps1\")");
         Assert.AreEqual(
-            1,
-            Regex.Count(packageSmoke, @"\bStart-WindowsPackageInstallRootAudit\b"),
-            "The exact package install-root audit must start once.");
-        Assert.AreEqual(
             2,
+            Regex.Count(packageSmoke, @"\bStart-WindowsPackageInstallRootAudit\b"),
+            "The exact install root must have pre-reset and post-reset runtime audit segments.");
+        Assert.AreEqual(
+            3,
             Regex.Count(packageSmoke, @"\bComplete-WindowsPackageInstallRootAudit\b"),
-            "The audit needs one normal and one failure-path completion site.");
+            "The audit needs pre-reset, final, and failure-cleanup completion sites.");
+        Assert.AreEqual(
+            3,
+            Regex.Count(packageSmoke, @"\bAssert-ExactPackageInstallRootAuditResult\b"),
+            "Both normal runtime segments must use the shared strict result validator.");
         Assert.AreEqual(
             1,
             Regex.Count(packageSmoke, @"\bStop-WindowsPackageInstallRootAudit\b"),
@@ -4956,6 +4960,44 @@ public sealed class DependencyRulesTests
             startIndex < firstPlaybackInstanceIndex,
             "The audit must bind the exact installed package before every product activation.");
 
+        int preResetCompleteIndex = packageSmoke.IndexOf(
+            "$preResetPackageInstallRootAuditResult =\n        Complete-WindowsPackageInstallRootAudit",
+            startIndex,
+            StringComparison.Ordinal);
+        int preResetValidateIndex = packageSmoke.IndexOf(
+            "Assert-ExactPackageInstallRootAuditResult `\n        -Result $preResetPackageInstallRootAuditResult",
+            preResetCompleteIndex,
+            StringComparison.Ordinal);
+        int resetIndex = packageSmoke.IndexOf(
+            "Invoke-ExactDevelopmentPackageReset `",
+            preResetValidateIndex,
+            StringComparison.Ordinal);
+        int postResetStartIndex = packageSmoke.IndexOf(
+            "$packageInstallRootAudit = Start-WindowsPackageInstallRootAudit",
+            resetIndex,
+            StringComparison.Ordinal);
+        int seedIndex = packageSmoke.IndexOf(
+            "$catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000",
+            postResetStartIndex,
+            StringComparison.Ordinal);
+        int postResetActivationIndex = packageSmoke.IndexOf(
+            "::Activate($aumid)",
+            seedIndex,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            preResetCompleteIndex > startIndex &&
+            preResetValidateIndex > preResetCompleteIndex &&
+            resetIndex > preResetValidateIndex &&
+            postResetStartIndex > resetIndex &&
+            seedIndex > postResetStartIndex &&
+            postResetActivationIndex > seedIndex,
+            "The pre-reset audit must complete and validate before reset; post-reset audit must restart before seeding or activation.");
+        StringAssert.Contains(packageSmoke, "$packageInstallRootAuditSegmentCount = 1");
+        StringAssert.Contains(packageSmoke, "$packageInstallRootAuditSegmentCount = 2");
+        StringAssert.Contains(
+            packageSmoke,
+            "if ($packageInstallRootAuditSegmentCount -ne 2 -or\n        $null -eq $preResetPackageInstallRootAuditResult -or\n        -not $packageInstallRootResetBoundaryEquivalent)");
+
         int harnessExitIndex = packageSmoke.IndexOf(
             "$playbackHarnessProcess.WaitForExit(15000)",
             startIndex,
@@ -4972,9 +5014,21 @@ public sealed class DependencyRulesTests
             "$packageInstallRootAuditResult = Complete-WindowsPackageInstallRootAudit",
             normalAttemptIndex,
             StringComparison.Ordinal);
+        int normalValidateIndex = packageSmoke.IndexOf(
+            "Assert-ExactPackageInstallRootAuditResult -Result $packageInstallRootAuditResult",
+            normalCompleteIndex,
+            StringComparison.Ordinal);
+        int resetBoundaryCalculationIndex = packageSmoke.IndexOf(
+            "$packageInstallRootResetBoundaryEquivalent =",
+            normalValidateIndex,
+            StringComparison.Ordinal);
+        int resetBoundaryAdmissionIndex = packageSmoke.IndexOf(
+            "-not $packageInstallRootResetBoundaryEquivalent",
+            resetBoundaryCalculationIndex,
+            StringComparison.Ordinal);
         int normalRemoveIndex = packageSmoke.IndexOf(
             "    Remove-ExactDevelopmentPackage",
-            normalCompleteIndex,
+            resetBoundaryAdmissionIndex,
             StringComparison.Ordinal);
         int successEvidenceIndex = packageSmoke.IndexOf(
             "$successEvidence = [ordered]@{",
@@ -4985,9 +5039,34 @@ public sealed class DependencyRulesTests
             harnessExitIndex < resultValidationIndex &&
             resultValidationIndex < normalAttemptIndex &&
             normalAttemptIndex < normalCompleteIndex &&
-            normalCompleteIndex < normalRemoveIndex &&
+            normalCompleteIndex < normalValidateIndex &&
+            normalValidateIndex < resetBoundaryCalculationIndex &&
+            resetBoundaryCalculationIndex < resetBoundaryAdmissionIndex &&
+            resetBoundaryAdmissionIndex < normalRemoveIndex &&
             normalRemoveIndex < successEvidenceIndex,
-            "The normal path must stop workloads and complete the audit before uninstall.");
+            "The normal path must validate both segments and their reset boundary before uninstall.");
+        StringAssert.Contains(
+            packageSmoke[..startIndex],
+            "$packageInstallRootResetBoundaryEquivalent = $false");
+        string resetBoundaryCalculation = ExtractRequiredBlock(
+            packageSmoke,
+            "if ($null -ne $preResetPackageInstallRootAuditResult) {",
+            "$packageFileName = $packages[0].Name");
+        StringAssert.Contains(
+            resetBoundaryCalculation,
+            "$preResetPackageInstallRootAuditResult.FinalEntryCount -eq\n                $packageInstallRootAuditResult.BaselineEntryCount");
+        StringAssert.Contains(
+            resetBoundaryCalculation,
+            "$preResetPackageInstallRootAuditResult.FinalFileCount -eq\n                $packageInstallRootAuditResult.BaselineFileCount");
+        StringAssert.Contains(
+            resetBoundaryCalculation,
+            "$preResetPackageInstallRootAuditResult.FinalTotalBytes -eq\n                $packageInstallRootAuditResult.BaselineTotalBytes");
+        StringAssert.Contains(
+            resetBoundaryCalculation,
+            "$preResetPackageInstallRootAuditResult.FinalManifestSha256 -ceq\n                $packageInstallRootAuditResult.BaselineManifestSha256");
+        StringAssert.Contains(
+            resetBoundaryCalculation,
+            "$null -eq $preResetPackageInstallRootAuditResult -or\n        -not $packageInstallRootResetBoundaryEquivalent");
 
         int stopApplicationIndex = packageSmoke.IndexOf(
             "-Name \"Stop launched application\"",
@@ -5041,6 +5120,14 @@ public sealed class DependencyRulesTests
         }
         foreach (string requiredEvidenceTerm in new[]
                  {
+                     "PackageInstallRootAuditSegmentCount",
+                     "PackageInstallRootResetBoundaryInventoryEquivalent",
+                     "PackageInstallRootPreResetBaselineManifestSha256",
+                     "PackageInstallRootPreResetFinalManifestSha256",
+                     "PackageInstallRootPreResetMutationEventCount",
+                     "PackageInstallRootPreResetWatcherOverflow",
+                     "PackageInstallRootPreResetInventoryEquivalent",
+                     "PackageInstallRootPreResetAuditPassed",
                      "PackageInstallRootAuditScope",
                      "PackageInstallRootBaselineManifestSha256",
                      "PackageInstallRootFinalManifestSha256",
@@ -5052,6 +5139,20 @@ public sealed class DependencyRulesTests
         {
             StringAssert.Contains(successEvidenceBlock, requiredEvidenceTerm);
         }
+        int segmentCountEvidence = successEvidenceBlock.IndexOf(
+            "PackageInstallRootAuditSegmentCount",
+            StringComparison.Ordinal);
+        int resetBoundaryEvidence = successEvidenceBlock.IndexOf(
+            "PackageInstallRootResetBoundaryInventoryEquivalent",
+            StringComparison.Ordinal);
+        int preResetEvidence = successEvidenceBlock.IndexOf(
+            "PackageInstallRootPreResetBaselineManifestSha256",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            segmentCountEvidence >= 0 &&
+            resetBoundaryEvidence > segmentCountEvidence &&
+            preResetEvidence > resetBoundaryEvidence,
+            "Reset-boundary equivalence evidence must follow segment count and precede segment details.");
 
         string windowsPowerShell = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.System),
@@ -8243,13 +8344,67 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             resetFunction,
             "[System.IO.Path]::GetFullPath($ProtectedStorePath).Equals(");
+        StringAssert.Contains(resetFunction, "[string]$ExpectedInstallRoot");
         StringAssert.Contains(resetFunction, "Test-Path -LiteralPath $CatalogStatePath");
         StringAssert.Contains(resetFunction, "Test-Path -LiteralPath $ProtectedStorePath");
         Assert.IsFalse(
             resetFunction.Contains("catalog.db", StringComparison.OrdinalIgnoreCase) ||
             resetFunction.Contains("CatalogDatabasePath", StringComparison.Ordinal),
             "Reset must verify removal of the entire exact Catalog\\v2 state directory.");
+        string registrationRebind = ExtractRequiredBlock(
+            resetFunction,
+            "$registrationDeadline = (Get-Date).AddSeconds(15)",
+            "$stateDeadline = (Get-Date).AddSeconds(15)");
+        int queryExactName = registrationRebind.IndexOf(
+            "Get-AppxPackage -Name $expectedName -ErrorAction Stop",
+            StringComparison.Ordinal);
+        int rejectConflict = registrationRebind.IndexOf(
+            "$conflictingRegistrations = @($namedRegistrations | Where-Object",
+            StringComparison.Ordinal);
+        int selectExact = registrationRebind.IndexOf(
+            "$registrations = @($namedRegistrations | Where-Object",
+            StringComparison.Ordinal);
+        int requireOne = registrationRebind.IndexOf(
+            "if ($registrations.Count -ne 1",
+            StringComparison.Ordinal);
+        int bindInstallRoot = registrationRebind.IndexOf(
+            "$resetInstallRoot = [System.IO.Path]::GetFullPath(",
+            StringComparison.Ordinal);
+        int compareInstallRoot = registrationRebind.IndexOf(
+            "$resetInstallRoot.Equals(",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            queryExactName >= 0 &&
+            rejectConflict > queryExactName &&
+            selectExact > rejectConflict &&
+            bindInstallRoot > selectExact &&
+            compareInstallRoot > bindInstallRoot &&
+            requireOne > compareInstallRoot,
+            "Reset must poll, reject conflicts, admit one exact registration, and rebind its exact install root.");
+        StringAssert.Contains(registrationRebind, "$resetInstallRoot = $null");
+        StringAssert.Contains(
+            registrationRebind,
+            "$registrations.Count -ne 1 -or $null -eq $resetInstallRoot");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                registrationRebind,
+                @"\$_\.PackageFullName\s+-cne\s+\$ExpectedPackageFullName\s+-or\s+\$_\.PackageFamilyName\s+-cne\s+\$ExpectedPackageFamilyName\s+-or\s+\$_\.Publisher\s+-cne\s+\$expectedPublisher",
+                RegexOptions.CultureInvariant));
+        Assert.IsTrue(
+            Regex.IsMatch(
+                registrationRebind,
+                @"\$_\.PackageFullName\s+-ceq\s+\$ExpectedPackageFullName\s+-and\s+\$_\.PackageFamilyName\s+-ceq\s+\$ExpectedPackageFamilyName\s+-and\s+\$_\.Publisher\s+-ceq\s+\$expectedPublisher",
+                RegexOptions.CultureInvariant));
+        StringAssert.Contains(registrationRebind, "Start-Sleep -Milliseconds 250");
+        Assert.IsFalse(
+            registrationRebind.Contains("-ErrorAction SilentlyContinue", StringComparison.Ordinal) ||
+            registrationRebind.Contains("-like", StringComparison.OrdinalIgnoreCase) ||
+            registrationRebind.Contains(".StartsWith(", StringComparison.Ordinal),
+            "Reset registration rebind must not broadly admit delayed or conflicting identities.");
         string resetInvocation = packageSmoke[reset..seed50k];
+        StringAssert.Contains(
+            resetInvocation,
+            "-ExpectedInstallRoot $canonicalInstalledPackageLocation");
         StringAssert.Contains(resetInvocation, "-CatalogStatePath $catalogStatePath");
         StringAssert.Contains(resetInvocation, "-ProtectedStorePath $protectedStorePath");
 
