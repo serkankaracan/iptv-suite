@@ -136,8 +136,38 @@ try {
         ($runnerText.Contains("-Arguments 'reset'") -and
             $runnerText.Contains("'test -packagefullname '") -and
             $runnerText.Contains("' -reportoutputpath '") -and
+            $runnerText.Contains("'finalizereport -reportfilepath '") -and
             $runnerText.Contains('$tool = Resolve-WindowsWackTool')) `
         'Official reset/test command order changed.'
+
+    Assert-TestCondition `
+        ((Resolve-WindowsWackTestExitDisposition -ExitCode 0) -ceq 'ReportComplete') `
+        'Exit code zero was not classified as a complete report.'
+    Assert-TestCondition `
+        ((Resolve-WindowsWackTestExitDisposition -ExitCode 1) -ceq
+            'ReportFinalizationRequired') `
+        'Exit code one was not classified as report finalization.'
+    $testExitFailures = [ordered]@{
+        '-1' = 'TestInvalidCommandLine'
+        '-2' = 'TestInfrastructureError'
+        '-3' = 'TestUserInitiated'
+        '-4' = 'TestInstallationError'
+        '-5' = 'TestUnpackagingError'
+        '2' = 'TestExitCodeUnknown'
+    }
+    foreach ($entry in $testExitFailures.GetEnumerator()) {
+        Assert-FailsWithCode -Code $entry.Value -Action {
+            Resolve-WindowsWackTestExitDisposition -ExitCode ([int]$entry.Key)
+        }
+    }
+    Assert-WindowsWackCommandCompleted -Phase 'Reset' -ExitCode 0
+    Assert-WindowsWackCommandCompleted -Phase 'Finalize' -ExitCode 0
+    Assert-FailsWithCode -Code 'ResetInfrastructureError' -Action {
+        Assert-WindowsWackCommandCompleted -Phase 'Reset' -ExitCode -2
+    }
+    Assert-FailsWithCode -Code 'FinalizeExitCodeUnknown' -Action {
+        Assert-WindowsWackCommandCompleted -Phase 'Finalize' -ExitCode 1
+    }
 
     $validText = @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -232,6 +262,47 @@ try {
             $summary.TestExitCode -eq 0 -and
             $summary.TestTimedOut -eq $false) `
         'Exact package hash or process result binding changed.'
+    $finalizedSummary = New-WindowsWackDevelopmentIdentitySummary `
+        -Tool ([pscustomobject]@{
+                Version = '10.0.26100.1'
+                Length = 123456L
+                Sha256 = ('1' * 64)
+            }) `
+        -Report $validResult `
+        -PackageSha256 $packageSha256 `
+        -ResetResult ([pscustomobject]@{ ExitCode = 0; TimedOut = $false }) `
+        -TestResult ([pscustomobject]@{ ExitCode = 1; TimedOut = $false }) `
+        -FinalizeResult ([pscustomobject]@{ ExitCode = 0; TimedOut = $false })
+    Assert-TestCondition `
+        ($finalizedSummary.SchemaVersion -eq 1 -and
+            $finalizedSummary.TestExitCode -eq 1 -and
+            $finalizedSummary.TestTimedOut -eq $false) `
+        'Finalized report process binding is invalid.'
+    Assert-FailsWithCode -Code 'FinalizeFailed' -Action {
+        New-WindowsWackDevelopmentIdentitySummary `
+            -Tool ([pscustomobject]@{
+                    Version = '10.0.26100.1'
+                    Length = 123456L
+                    Sha256 = ('1' * 64)
+                }) `
+            -Report $validResult `
+            -PackageSha256 $packageSha256 `
+            -ResetResult ([pscustomobject]@{ ExitCode = 0; TimedOut = $false }) `
+            -TestResult ([pscustomobject]@{ ExitCode = 1; TimedOut = $false })
+    }
+    Assert-FailsWithCode -Code 'FinalizeUnexpected' -Action {
+        New-WindowsWackDevelopmentIdentitySummary `
+            -Tool ([pscustomobject]@{
+                    Version = '10.0.26100.1'
+                    Length = 123456L
+                    Sha256 = ('1' * 64)
+                }) `
+            -Report $validResult `
+            -PackageSha256 $packageSha256 `
+            -ResetResult ([pscustomobject]@{ ExitCode = 0; TimedOut = $false }) `
+            -TestResult ([pscustomobject]@{ ExitCode = 0; TimedOut = $false }) `
+            -FinalizeResult ([pscustomobject]@{ ExitCode = 0; TimedOut = $false })
+    }
     $summaryJson = $summary | ConvertTo-Json -Depth 4 -Compress
     Assert-TestCondition `
         (-not $summaryJson.Contains($script:rawMarker) -and
@@ -274,6 +345,10 @@ try {
         -Name 'overall-fail' `
         -Code 'OverallResultFailed' `
         -Text '<REPORT OVERALL_RESULT="FAIL" PARTIAL_RUN="FALSE" />'
+    Assert-ReportTextFails `
+        -Name 'overall-warning' `
+        -Code 'OverallResultWarning' `
+        -Text '<REPORT OVERALL_RESULT="WARNING" PARTIAL_RUN="FALSE" />'
     Assert-ReportTextFails `
         -Name 'overall-unknown' `
         -Code 'OverallResultUnknown' `

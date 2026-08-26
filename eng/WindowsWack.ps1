@@ -700,6 +700,9 @@ function Assert-WindowsWackReport {
         if ($overallResult -ceq 'FAIL') {
             Fail-WindowsWack -Code 'OverallResultFailed'
         }
+        if ($overallResult -ceq 'WARNING') {
+            Fail-WindowsWack -Code 'OverallResultWarning'
+        }
         Assert-WindowsWackCondition ($overallResult -ceq 'PASS') 'OverallResultUnknown'
         if ($partialRun -ceq 'TRUE') {
             Fail-WindowsWack -Code 'PartialRunDetected'
@@ -863,7 +866,7 @@ function Invoke-WindowsWackBoundedProcess {
         [string]$StandardErrorPath,
 
         [Parameter(Mandatory)]
-        [ValidateSet('Reset', 'Test')]
+        [ValidateSet('Reset', 'Test', 'Finalize')]
         [string]$Phase
     )
 
@@ -895,6 +898,67 @@ function Invoke-WindowsWackBoundedProcess {
     }
 }
 
+function Resolve-WindowsWackTestExitDisposition {
+    param(
+        [Parameter(Mandatory)]
+        [int]$ExitCode
+    )
+
+    if ($ExitCode -eq 0) {
+        return 'ReportComplete'
+    }
+    if ($ExitCode -eq 1) {
+        return 'ReportFinalizationRequired'
+    }
+    if ($ExitCode -eq -1) {
+        Fail-WindowsWack -Code 'TestInvalidCommandLine'
+    }
+    if ($ExitCode -eq -2) {
+        Fail-WindowsWack -Code 'TestInfrastructureError'
+    }
+    if ($ExitCode -eq -3) {
+        Fail-WindowsWack -Code 'TestUserInitiated'
+    }
+    if ($ExitCode -eq -4) {
+        Fail-WindowsWack -Code 'TestInstallationError'
+    }
+    if ($ExitCode -eq -5) {
+        Fail-WindowsWack -Code 'TestUnpackagingError'
+    }
+    Fail-WindowsWack -Code 'TestExitCodeUnknown'
+}
+
+function Assert-WindowsWackCommandCompleted {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Reset', 'Finalize')]
+        [string]$Phase,
+
+        [Parameter(Mandatory)]
+        [int]$ExitCode
+    )
+
+    if ($ExitCode -eq 0) {
+        return
+    }
+    if ($ExitCode -eq -1) {
+        Fail-WindowsWack -Code ($Phase + 'InvalidCommandLine')
+    }
+    if ($ExitCode -eq -2) {
+        Fail-WindowsWack -Code ($Phase + 'InfrastructureError')
+    }
+    if ($ExitCode -eq -3) {
+        Fail-WindowsWack -Code ($Phase + 'UserInitiated')
+    }
+    if ($ExitCode -eq -4) {
+        Fail-WindowsWack -Code ($Phase + 'InstallationError')
+    }
+    if ($ExitCode -eq -5) {
+        Fail-WindowsWack -Code ($Phase + 'UnpackagingError')
+    }
+    Fail-WindowsWack -Code ($Phase + 'ExitCodeUnknown')
+}
+
 function New-WindowsWackDevelopmentIdentitySummary {
     param(
         [Parameter(Mandatory)]
@@ -910,7 +974,9 @@ function New-WindowsWackDevelopmentIdentitySummary {
         [object]$ResetResult,
 
         [Parameter(Mandatory)]
-        [object]$TestResult
+        [object]$TestResult,
+
+        [object]$FinalizeResult = $null
     )
 
     Assert-WindowsWackCondition `
@@ -941,9 +1007,22 @@ function New-WindowsWackDevelopmentIdentitySummary {
     Assert-WindowsWackCondition `
         ([int]$ResetResult.ExitCode -eq 0 -and -not [bool]$ResetResult.TimedOut) `
         'ResetFailed'
+    $reportFinalizationRequired = [int]$TestResult.ExitCode -eq 1
     Assert-WindowsWackCondition `
-        ([int]$TestResult.ExitCode -eq 0 -and -not [bool]$TestResult.TimedOut) `
+        (([int]$TestResult.ExitCode -eq 0 -or
+                $reportFinalizationRequired) -and
+            -not [bool]$TestResult.TimedOut) `
         'TestFailed'
+    if ($reportFinalizationRequired) {
+        Assert-WindowsWackCondition `
+            ($null -ne $FinalizeResult -and
+                [int]$FinalizeResult.ExitCode -eq 0 -and
+                -not [bool]$FinalizeResult.TimedOut) `
+            'FinalizeFailed'
+    }
+    else {
+        Assert-WindowsWackCondition ($null -eq $FinalizeResult) 'FinalizeUnexpected'
+    }
 
     return [pscustomobject][ordered]@{
         SchemaVersion = 1
@@ -961,7 +1040,7 @@ function New-WindowsWackDevelopmentIdentitySummary {
         LatestVersion = if ($null -eq $Report.LatestVersion) { $null } else { 'TRUE' }
         ResetExitCode = 0
         ResetTimedOut = $false
-        TestExitCode = 0
+        TestExitCode = [int]$TestResult.ExitCode
         TestTimedOut = $false
         TestCount = [int]$Report.TestCount
         PassedTestCount = [int]$Report.PassedTestCount
@@ -1011,12 +1090,16 @@ function Invoke-WindowsWackDevelopmentIdentityPreflight {
     $resetErrorPath = Join-Path $artifact.FullName ("wack-$runId-reset.stderr.raw")
     $testOutputPath = Join-Path $artifact.FullName ("wack-$runId-test.stdout.raw")
     $testErrorPath = Join-Path $artifact.FullName ("wack-$runId-test.stderr.raw")
+    $finalizeOutputPath = Join-Path $artifact.FullName ("wack-$runId-finalize.stdout.raw")
+    $finalizeErrorPath = Join-Path $artifact.FullName ("wack-$runId-finalize.stderr.raw")
     $rawPaths = @(
         $reportPath,
         $resetOutputPath,
         $resetErrorPath,
         $testOutputPath,
-        $testErrorPath)
+        $testErrorPath,
+        $finalizeOutputPath,
+        $finalizeErrorPath)
     foreach ($rawPath in $rawPaths) {
         Assert-WindowsWackPathWithinRoot `
             -Root $artifact `
@@ -1043,7 +1126,9 @@ function Invoke-WindowsWackDevelopmentIdentityPreflight {
             -StandardOutputPath $resetOutputPath `
             -StandardErrorPath $resetErrorPath `
             -Phase 'Reset'
-        Assert-WindowsWackCondition ($resetResult.ExitCode -eq 0) 'ResetFailed'
+        Assert-WindowsWackCommandCompleted `
+            -Phase 'Reset' `
+            -ExitCode $resetResult.ExitCode
 
         [long]$remainingMilliseconds = [long]$timeoutMilliseconds - $clock.ElapsedMilliseconds
         if ($remainingMilliseconds -le 0) {
@@ -1060,7 +1145,27 @@ function Invoke-WindowsWackDevelopmentIdentityPreflight {
             -StandardOutputPath $testOutputPath `
             -StandardErrorPath $testErrorPath `
             -Phase 'Test'
-        Assert-WindowsWackCondition ($testResult.ExitCode -eq 0) 'TestFailed'
+        $testDisposition = Resolve-WindowsWackTestExitDisposition `
+            -ExitCode $testResult.ExitCode
+        $finalizeResult = $null
+        if ($testDisposition -ceq 'ReportFinalizationRequired') {
+            $remainingMilliseconds = [long]$timeoutMilliseconds - $clock.ElapsedMilliseconds
+            if ($remainingMilliseconds -le 0) {
+                Fail-WindowsWack -Code 'FinalizeTimeout'
+            }
+            $finalizeArguments = 'finalizereport -reportfilepath ' +
+                (ConvertTo-WindowsWackQuotedArgument -Value $reportPath)
+            $finalizeResult = Invoke-WindowsWackBoundedProcess `
+                -ToolFile $tool.File `
+                -Arguments $finalizeArguments `
+                -TimeoutMilliseconds ([int]$remainingMilliseconds) `
+                -StandardOutputPath $finalizeOutputPath `
+                -StandardErrorPath $finalizeErrorPath `
+                -Phase 'Finalize'
+            Assert-WindowsWackCommandCompleted `
+                -Phase 'Finalize' `
+                -ExitCode $finalizeResult.ExitCode
+        }
 
         $report = Assert-WindowsWackReport `
             -ReportPath $reportPath `
@@ -1070,7 +1175,8 @@ function Invoke-WindowsWackDevelopmentIdentityPreflight {
             -Report $report `
             -PackageSha256 $packageHash `
             -ResetResult $resetResult `
-            -TestResult $testResult
+            -TestResult $testResult `
+            -FinalizeResult $finalizeResult
     }
     catch {
         $operationError = $_

@@ -4361,6 +4361,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(helper, "-Arguments 'reset'");
         StringAssert.Contains(helper, "'test -packagefullname '");
         StringAssert.Contains(helper, "' -reportoutputpath '");
+        StringAssert.Contains(helper, "'finalizereport -reportfilepath '");
+        StringAssert.Contains(helper, "Resolve-WindowsWackTestExitDisposition");
+        StringAssert.Contains(helper, "ReportFinalizationRequired");
         StringAssert.Contains(helper, "$script:windowsWackMaximumReportBytes = 16MB");
         StringAssert.Contains(helper, "$script:windowsWackMaximumProcessOutputBytes = 4MB");
         StringAssert.Contains(helper, "Scope = 'DevelopmentIdentityWackPreflightOnly'");
