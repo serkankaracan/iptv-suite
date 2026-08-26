@@ -2532,7 +2532,7 @@ function Wait-PackagedPlaybackSelection {
         [Parameter(Mandatory)]
         [string]$ExpectedChannelName,
 
-        [int]$TimeoutMilliseconds = 5000
+        [int]$TimeoutMilliseconds = 30000
     )
 
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)

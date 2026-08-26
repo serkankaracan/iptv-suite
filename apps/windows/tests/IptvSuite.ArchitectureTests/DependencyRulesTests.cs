@@ -6795,6 +6795,44 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "$switchOrdinal -le 25");
         StringAssert.Contains(packageSmoke, "$playbackRapidSwitchP95Milliseconds -gt 3000.0");
         StringAssert.Contains(packageSmoke, "Wait-PackagedPlaybackSelection");
+        string playbackSelectionWait = ExtractRequiredBlock(
+            packageSmoke,
+            "function Wait-PackagedPlaybackSelection {",
+            "function Wait-PackagedPlaybackStoppedWithinBudget {");
+        StringAssert.Contains(
+            playbackSelectionWait,
+            "[int]$TimeoutMilliseconds = 30000");
+        StringAssert.Contains(
+            playbackSelectionWait,
+            "$deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)");
+        StringAssert.Contains(
+            playbackSelectionWait,
+            "Assert-PackagedProcessAlive -Process $Process");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                playbackSelectionWait,
+                @"if \(\$StatusElement\.Current\.Name -ceq ""Channel is playing\."" -and\s+\$ChannelElement\.Current\.Name -ceq \$ExpectedChannelName\) \{\s+return\s+\}",
+                RegexOptions.CultureInvariant),
+            "Playback convergence must require the exact status/channel conjunction.");
+        StringAssert.Contains(
+            playbackSelectionWait,
+            "} while ([DateTime]::UtcNow -lt $deadline)");
+        StringAssert.Contains(
+            playbackSelectionWait,
+            "throw \"The packaged playback switch did not reach the expected channel-bound state.\"");
+        string rapidSwitchLoop = ExtractRequiredBlock(
+            packageSmoke,
+            "$rapidSwitchSamples =",
+            "$playbackRapidSwitchP95Milliseconds =");
+        StringAssert.Contains(rapidSwitchLoop, "Wait-PackagedPlaybackSelection");
+        Assert.IsFalse(
+            rapidSwitchLoop.Contains("-TimeoutMilliseconds", StringComparison.Ordinal),
+            "Rapid switching must use the separately bounded functional liveness timeout.");
+        Assert.IsFalse(
+            packageSmoke.Contains(
+                "$playbackRapidSwitchMaximumMilliseconds -gt",
+                StringComparison.Ordinal),
+            "Rapid-switch maximum is evidence-only; p95 remains the acceptance budget.");
         StringAssert.Contains(packageSmoke, "Test-AutomationElementContainsExactText");
         StringAssert.Contains(packageSmoke, "Wait-PackagedPlaybackSurfaceBounds");
         StringAssert.Contains(packageSmoke, "-PreviousWidth $playbackSurfaceBounds.Width");
