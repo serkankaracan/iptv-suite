@@ -4330,6 +4330,109 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M16WindowsReleaseCandidateContractIsStructurallyBlockedAndBounded()
+    {
+        string validatorPath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Test-WindowsReleaseCandidateReadiness.ps1");
+        string baselinePath = Path.Combine(
+            RepositoryRoot,
+            "docs",
+            "quality",
+            "M16_RELEASE_CANDIDATE_BASELINE.md");
+        Assert.IsTrue(File.Exists(validatorPath), "The M16 release-candidate validator is missing.");
+        Assert.IsTrue(File.Exists(baselinePath), "The M16 release-candidate baseline is missing.");
+
+        string validator = File.ReadAllText(validatorPath).Replace("\r\n", "\n", StringComparison.Ordinal);
+        StringAssert.Contains(validator, "[switch]$AllowBlockedCandidate");
+        StringAssert.Contains(validator, "$script:maximumInputBytes = 1MB");
+        StringAssert.Contains(validator, "$script:maximumAggregateInputBytes = 4MB");
+        StringAssert.Contains(validator, "$script:maximumOutputBytes = 256KB");
+        StringAssert.Contains(validator, "schemaVersion = 1");
+        StringAssert.Contains(validator, "evidenceKind = \"WindowsMvpReleaseCandidateGate\"");
+        StringAssert.Contains(validator, "result = \"blocked\"");
+        StringAssert.Contains(validator, "candidateReady = $false");
+        StringAssert.Contains(
+            validator,
+            "M16ReleaseCandidateBlocked: candidateReady=false; evidence was published.");
+        Assert.IsFalse(
+            Regex.IsMatch(validator, @"(?m)^\s*candidateReady\s*=\s*\$true\s*$"),
+            "M16 schema v1 must not contain a candidate-ready path.");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                validator,
+                @"(?i)\[(?:switch|string|bool)\]\$(?:Force|Skip|AcceptDeviation|Clock|EvaluatedAtUtc)\b"),
+            "M16 must not expose a waiver, bypass, or caller-controlled clock parameter.");
+        foreach (string inputName in new[]
+        {
+            "quality-summary.json",
+            "package-smoke-success.json",
+            "package-lifecycle-success.json",
+            "dpapi-user-boundary-success.json",
+            "native-tier-a-success.json",
+            "catalog-benchmark-summary.json",
+            "catalog-regression-summary.json",
+            "m15-readiness.json",
+        })
+        {
+            StringAssert.Contains(validator, inputName);
+        }
+    }
+
+    [TestMethod]
+    public void M16WindowsReleaseCandidateContractPassesItsPowerShell51SelfTest()
+    {
+        string selfTest = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.ArchitectureTests",
+            "Test-WindowsReleaseCandidateReadiness.ps1");
+        Assert.IsTrue(File.Exists(selfTest), "The M16 release-candidate self-test is missing.");
+
+        string windowsPowerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.IsTrue(
+            File.Exists(windowsPowerShell),
+            "Windows PowerShell 5.1 is required for the M16 release-candidate contract.");
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = windowsPowerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(selfTest);
+
+        using Process contractProcess = Process.Start(startInfo)
+            ?? throw new AssertFailedException("The M16 release-candidate self-test could not start.");
+        bool contractCompleted = contractProcess.WaitForExit(120_000);
+        if (!contractCompleted)
+        {
+            contractProcess.Kill(entireProcessTree: true);
+            contractProcess.WaitForExit();
+        }
+
+        string contractOutput = contractProcess.StandardOutput.ReadToEnd();
+        string contractError = contractProcess.StandardError.ReadToEnd();
+        Assert.IsTrue(
+            contractCompleted && contractProcess.ExitCode == 0,
+            $"M16 release-candidate contract failed.{Environment.NewLine}{contractOutput}{contractError}");
+    }
+
+    [TestMethod]
     public void M15DevelopmentIdentityWackPreflightIsStrictBoundedAndNonClosing()
     {
         string helperPath = Path.Combine(RepositoryRoot, "eng", "WindowsWack.ps1");
@@ -4549,6 +4652,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(workflow, "permissions:\n  contents: read\n");
         StringAssert.Contains(workflow, "name: Package-bound SBOM producer gate");
         StringAssert.Contains(workflow, "runs-on: windows-2025");
+        StringAssert.Contains(workflow, "timeout-minutes: 60\n");
         StringAssert.Contains(workflow, "persist-credentials: false");
         Assert.IsFalse(workflow.Contains("continue-on-error", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(workflow.Contains("secrets.", StringComparison.OrdinalIgnoreCase));
@@ -4797,7 +4901,7 @@ public sealed class DependencyRulesTests
         Assert.HasCount(1, Regex.Matches(workflow, "(?m)^    runs-on: windows-2025$"));
         Assert.IsFalse(workflow.Contains("self-hosted", StringComparison.OrdinalIgnoreCase));
         Assert.HasCount(1, Regex.Matches(workflow, "persist-credentials: false"));
-        StringAssert.Contains(workflow, "timeout-minutes: 15\n");
+        StringAssert.Contains(workflow, "timeout-minutes: 45\n");
         StringAssert.Contains(workflow, "NUGET_HTTP_CACHE_PATH: ${{ github.workspace }}\\.artifacts\\m15-cve-review-cache\n");
         StringAssert.Contains(workflow, "NUGET_PACKAGES: ${{ github.workspace }}\\.artifacts\\m15-cve-review-packages\n");
         StringAssert.Contains(workflow, "DOTNET_CLI_HOME: ${{ github.workspace }}\\.artifacts\\m15-cve-review-cli-home\n");

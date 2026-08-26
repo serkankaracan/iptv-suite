@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M1–M9, M11, M13 ve M14 completed; M10 conditional success; M12 partial verified; M15 `IN PROGRESS / BLOCKED`
+**Durum:** M1–M9, M11, M13 ve M14 completed; M10 conditional success; M12 partial verified; M15 ve M16 `IN PROGRESS / BLOCKED`
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -862,6 +862,8 @@ Private Store flight'tan kurulmuş build'de sentetik source ekleme, 50k catalog 
 ### Amaç
 
 Kapsamı dondurulmuş, geri alınabilir ve yayımlama kararına hazır Windows MVP adayı üretmek.
+
+**Current milestone status — `IMPLEMENTED LOCALLY / BLOCKED; clean-commit evidence pending, 2026-08-26`:** Schema-v1 RC aggregator, sabit ve bounded sekiz predecessor evidence girdisini fail-closed doğrulayıp sanitized `result=blocked`, `m16TechnicalGateSetPassed=false` ve `candidateReady=false` özeti üretir. Schema v1 yapısal olarak release-ready sonuç veremez. `-AllowBlockedCandidate` yalnız blocked evidence yayımlandıktan sonraki exit davranışını değiştirir; blocker kabulü veya waiver değildir. Exact 12 M15 blocker'ı değiştirmeden taşınır ve feature freeze, sentetik end-to-end journey, final canary/security scan, 24 saat soak, fiziksel device/accessibility matrisi ile release-operations planı için exact yedi M16 blocker'ı eklenir. Bu checkpoint M15/M16 completion, private-flight/WACK/Store, hukuk/signing, fiziksel cihaz veya uzun-soak kabulü değildir. Clean-commit evidence henüz üretilmemiştir. [Blocked baseline ve non-claim'ler](../quality/M16_RELEASE_CANDIDATE_BASELINE.md).
 
 ### Kapsam
 

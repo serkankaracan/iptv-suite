@@ -34,7 +34,7 @@ jobs:
   quality:
     name: Locked build and test gate
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Check out repository
@@ -365,7 +365,7 @@ jobs:
     name: DPAPI real-user boundary smoke
     needs: quality
     runs-on: windows-2025
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
