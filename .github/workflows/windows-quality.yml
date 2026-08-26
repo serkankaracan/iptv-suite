@@ -128,6 +128,76 @@ jobs:
         shell: powershell
         run: .\eng\Invoke-WindowsPackageSmoke.ps1 -Configuration Release -RunWack
 
+      - name: Prepare sanitized development-identity WACK failure evidence
+        id: wack_failure_evidence
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.run_wack }}
+        shell: powershell
+        run: |
+          $sourcePath = '.\.artifacts\msix-smoke\last-failure.json'
+          $destinationPath =
+            '.\.artifacts\msix-smoke\wack-development-preflight-failure-summary.json'
+          $available = $false
+          if ([System.IO.File]::Exists($sourcePath)) {
+            $source = Get-Item -LiteralPath $sourcePath -Force -ErrorAction Stop
+            if ($source -is [System.IO.FileInfo] -and
+                -not $source.PSIsContainer -and
+                ($source.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0 -and
+                $source.Length -gt 0 -and
+                $source.Length -le 4096) {
+              $candidate = ConvertFrom-Json -InputObject (
+                [System.IO.File]::ReadAllText($source.FullName))
+              $propertyNames = @($candidate.PSObject.Properties.Name)
+              $expectedPropertyNames = @('RunId', 'FailedAt', 'Configuration', 'Error')
+              $failureCode = [System.Text.RegularExpressions.Regex]::Match(
+                [string]$candidate.Error,
+                '\AWindowsWack:([A-Za-z][A-Za-z0-9]+)\z',
+                [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+              $failedAt = [System.DateTimeOffset]::MinValue
+              $validFailedAt = [System.DateTimeOffset]::TryParseExact(
+                [string]$candidate.FailedAt,
+                'O',
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::RoundtripKind,
+                [ref]$failedAt)
+              if (($propertyNames -join "`n") -ceq ($expectedPropertyNames -join "`n") -and
+                  [string]$candidate.RunId -cmatch '\A[0-9a-f]{32}\z' -and
+                  $validFailedAt -and
+                  [string]$candidate.Configuration -ceq 'Release' -and
+                  $failureCode.Success) {
+                $summary = [ordered]@{
+                  SchemaVersion = 1
+                  Scope = 'DevelopmentIdentityWackPreflightOnly'
+                  ClosedBlocker = 'None'
+                  ReleaseReady = $false
+                  Status = 'FAIL'
+                  FailureCode = $failureCode.Groups[1].Value
+                  Configuration = 'Release'
+                }
+                $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+                [System.IO.File]::WriteAllText(
+                  $destinationPath,
+                  ($summary | ConvertTo-Json -Depth 3 -Compress),
+                  $utf8NoBom)
+                $available = $true
+              }
+            }
+          }
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::AppendAllText(
+            $env:GITHUB_OUTPUT,
+            "available=$($available.ToString().ToLowerInvariant())$([Environment]::NewLine)",
+            $utf8NoBom)
+
+      - name: Upload sanitized development-identity WACK failure evidence
+        if: ${{ always() && steps.wack_failure_evidence.outputs.available == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-wack-development-preflight-failure-evidence
+          path: .artifacts/msix-smoke/wack-development-preflight-failure-summary.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
       - name: Verify packaged protected-store process lifecycle
         shell: powershell
         run: .\eng\Invoke-WindowsPackageLifecycleSmoke.ps1 -Configuration Release

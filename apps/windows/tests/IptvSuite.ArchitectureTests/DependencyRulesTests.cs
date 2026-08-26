@@ -4406,6 +4406,22 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             workflow,
             ".artifacts/msix-smoke/wack-development-preflight-summary.json");
+        StringAssert.Contains(
+            workflow,
+            "if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.run_wack }}");
+        StringAssert.Contains(
+            workflow,
+            "\\AWindowsWack:([A-Za-z][A-Za-z0-9]+)\\z");
+        StringAssert.Contains(
+            workflow,
+            "name: windows-wack-development-preflight-failure-evidence");
+        StringAssert.Contains(
+            workflow,
+            ".artifacts/msix-smoke/wack-development-preflight-failure-summary.json");
+        StringAssert.Contains(
+            workflow,
+            "if: ${{ always() && steps.wack_failure_evidence.outputs.available == 'true' }}");
+        Assert.IsFalse(workflow.Contains("continue-on-error", StringComparison.Ordinal));
         Assert.IsFalse(workflow.Contains("report.xml", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(workflow.Contains("stdout.raw", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(workflow.Contains("stderr.raw", StringComparison.OrdinalIgnoreCase));
@@ -7581,7 +7597,7 @@ public sealed class DependencyRulesTests
         MatchCollection pinnedUses = Regex.Matches(
             workflow,
             @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
-        Assert.HasCount(14, allUses);
+        Assert.HasCount(15, allUses);
         Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
     }
 
