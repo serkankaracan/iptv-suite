@@ -14,6 +14,12 @@ Default invocation, geçerli blocked evidence'ı atomik yayımladıktan sonra no
 
 Bu primitive tek başına `M16FinalArtifactCanaryScanPending` blocker'ını kapatmaz. Aynı final commit/build için full log, owned app-data, exact package ve support-export yüzeylerinin sabit inventory ile taranması ve commit-bound sanitized evidence üretilmesi hâlâ gereklidir.
 
+## Bounded sentetik uçtan uca entegrasyon journey'si
+
+`PARTIAL VERIFIED — local deterministic integration, 2026-08-26`: `M16SyntheticEndToEndJourneyTests`, tamamen sentetik ve TLS certificate-pin'li loopback veriyle production onboarding, bounded transport/probe, protected-reference import, SQLite browse/search, playback coordinator control, watchdog fault/reconnect ve source deletion/tombstone zincirini tek bounded testte yürütür. Exact HTTP istek sırası, ikinci fiziksel playback session'ına control restore sırası, stop-before-reopen, retired-source non-admission, disposed lease'ler, protected-record zeroization ve ana SQLite dosyasıyla mevcut `-journal`/`-wal`/`-shm` yan yüzeylerinde raw locator yokluğu doğrulanır. Test timeout'u sabit `60 s`dir; son hedef koşu `1/1 PASS` ve hedef build `0 warning / 0 error` vermiştir.
+
+Bu journey in-memory secret store ve deterministik playback-engine seam'i kullanır; gerçek DPAPI, native decoder, WinUI veya packaged acceptance kanıtı değildir. Loopback fault, gerçek provider/network/device uyumluluğu ya da 24 saat soak yerine geçmez. `M16SyntheticEndToEndJourneyPending`, temiz commit üzerinde full gate ve commit-bound RC evidence zinciri tamamlanana kadar fail-closed açık kalır.
+
 Blocked baseline üretim çağrısı repository kökünden şöyledir:
 
 ```powershell

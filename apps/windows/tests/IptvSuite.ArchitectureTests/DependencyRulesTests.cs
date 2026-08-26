@@ -4488,6 +4488,53 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
+    public void M16SyntheticJourneyIsBoundedSanitizedAndScopedToDeterministicIntegration()
+    {
+        string journeyPath = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.IntegrationTests",
+            "M16SyntheticEndToEndJourneyTests.cs");
+        string baselinePath = Path.Combine(
+            RepositoryRoot,
+            "docs",
+            "quality",
+            "M16_RELEASE_CANDIDATE_BASELINE.md");
+        Assert.IsTrue(File.Exists(journeyPath), "The M16 synthetic integration journey is missing.");
+        Assert.IsTrue(File.Exists(baselinePath), "The M16 release-candidate baseline is missing.");
+
+        string journey = File.ReadAllText(journeyPath)
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        foreach (string invariant in new[]
+        {
+            "[Timeout(60_000)]",
+            "LocalHttpFixtureServer.StartHttpsAsync(routes)",
+            "new RemotePlaylistSourceOnboardingService(",
+            "new SqliteRemotePlaylistCatalogImporter(",
+            "new CatalogBrowseCoordinator(",
+            "new PlaybackSessionCoordinator(",
+            "new SourceDeletionCoordinator(",
+            "CryptographicOperations.FixedTimeEquals(",
+            "CryptographicOperations.ZeroMemory(expectedBytes)",
+            "databaseName + \"*\"",
+            "Reconnect did not restore controls on the second physical session before play.",
+            "Assert.DoesNotContain(\"catalog.m3u\", observable",
+        })
+        {
+            StringAssert.Contains(journey, invariant);
+        }
+
+        Assert.IsFalse(
+            journey.Contains("DataProtectionScope.LocalMachine", StringComparison.Ordinal),
+            "The deterministic journey must not weaken the CurrentUser security boundary.");
+        string baseline = File.ReadAllText(baselinePath);
+        StringAssert.Contains(baseline, "## Bounded sentetik uçtan uca entegrasyon journey'si");
+        StringAssert.Contains(baseline, "gerçek DPAPI, native decoder, WinUI veya packaged acceptance kanıtı değildir");
+    }
+
+    [TestMethod]
     public void M15DevelopmentIdentityWackPreflightIsStrictBoundedAndNonClosing()
     {
         string helperPath = Path.Combine(RepositoryRoot, "eng", "WindowsWack.ps1");
