@@ -476,6 +476,9 @@ public sealed class M16FinalArtifactCanaryControllerTests
         startInfo.ArgumentList.Add("Bypass");
         startInfo.ArgumentList.Add("-File");
         startInfo.ArgumentList.Add(selfTest);
+        startInfo.Environment["PSModulePath"] = Path.Combine(
+            Path.GetTempPath(),
+            "IptvSuite-M16-Missing-PSModulePath-" + Guid.NewGuid().ToString("N"));
 
         using Process process = Process.Start(startInfo)
             ?? throw new AssertFailedException(

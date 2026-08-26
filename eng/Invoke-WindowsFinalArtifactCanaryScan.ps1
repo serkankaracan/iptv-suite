@@ -658,6 +658,43 @@ function Remove-WindowsFinalOwnedCertificate {
     Remove-Item -LiteralPath $certificatePath -Force -ErrorAction Stop
 }
 
+function Initialize-WindowsFinalCertificateProvider {
+    $certificateProviders = @(
+        Get-PSProvider `
+            -PSProvider "Certificate" `
+            -ErrorAction SilentlyContinue)
+    if ($certificateProviders.Count -eq 0) {
+        $securityModulePath = [System.IO.Path]::Combine(
+            $PSHOME,
+            "Modules",
+            "Microsoft.PowerShell.Security",
+            "Microsoft.PowerShell.Security.psd1")
+        Assert-WindowsFinalCondition `
+            (Test-Path -LiteralPath $securityModulePath -PathType Leaf) `
+            "CertificateProviderUnavailable"
+        try {
+            Import-Module `
+                -Name $securityModulePath `
+                -ErrorAction Stop
+        }
+        catch {
+            Fail-WindowsFinalArtifactCanaryScan `
+                -Code "CertificateProviderUnavailable"
+        }
+        $certificateProviders = @(
+            Get-PSProvider `
+                -PSProvider "Certificate" `
+                -ErrorAction SilentlyContinue)
+    }
+
+    Assert-WindowsFinalCondition `
+        ($certificateProviders.Count -eq 1 -and
+         $certificateProviders[0].Name -ceq "Certificate" -and
+         $certificateProviders[0].ModuleName -ceq
+            "Microsoft.PowerShell.Security") `
+        "CertificateProviderUnavailable"
+}
+
 function Stop-WindowsFinalExactPackageProcesses {
     param(
         [Parameter(Mandatory = $true)][string]$InstallLocation,
@@ -836,6 +873,7 @@ function Remove-WindowsFinalPackageSideState {
     $expectedPublisher = "CN=IptvSuite Local Development"
     $expectedLoopbackSubject = "CN=IPTVSuite Synthetic Loopback"
     $expectedSigningFriendlyName = "IptvSuite M16 Final Artifact $RunToken"
+    Initialize-WindowsFinalCertificateProvider
 
     $signingThumbprint = Get-WindowsFinalOwnershipValue `
         -Path $RunPaths.SigningThumbprint `
