@@ -498,15 +498,15 @@ function Read-AndAssertEvidence {
         -Message "the package vulnerability acceptance evidence schema changed."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.ledgerSha256 -ceq
-            "8c60360ae0dac240ef801688a04472266dabd16bfb1069a841b365b61c89a197" -and
+            "01180e5c90816fda2f1712a2ecd5ed634399caee76d68b7ffeb47c178e2aa208" -and
          $packageVulnerabilityAcceptance.decision -ceq
             "AcceptTechnicalKnownVulnerabilityReview" -and
          $packageVulnerabilityAcceptance.scope -ceq
             "ProductionWindowsLeafKnownVulnerabilityReviewOnly" -and
          $packageVulnerabilityAcceptance.runCompletedAtUtc -ceq
-            "2026-08-25T23:48:39Z" -and
+            "2026-08-26T01:38:42Z" -and
          $packageVulnerabilityAcceptance.freshThroughUtc -ceq
-            "2026-09-01T23:48:39Z" -and
+            "2026-09-02T01:38:42Z" -and
          $packageVulnerabilityAcceptance.freshnessPolicy -ceq
             "RunCompletionPlus7Days" -and
          $packageVulnerabilityAcceptance.maximumAgeDays -eq 7 -and
@@ -521,20 +521,20 @@ function Read-AndAssertEvidence {
          $packageVulnerabilityAcceptance.workflowName -ceq
             "Windows known-vulnerability producer" -and
          $packageVulnerabilityAcceptance.workflowId -eq 342499403 -and
-         $packageVulnerabilityAcceptance.runId -eq 32912296486 -and
-         $packageVulnerabilityAcceptance.runNumber -eq 4 -and
+         $packageVulnerabilityAcceptance.runId -eq 32919649968 -and
+         $packageVulnerabilityAcceptance.runNumber -eq 10 -and
          $packageVulnerabilityAcceptance.runAttempt -eq 1 -and
          $packageVulnerabilityAcceptance.runHeadSha -ceq
-            "2053f4099819b3bb19bb9dd3370d60f0161098f1" -and
+            "15826e5ecad4a4b5737aa7bf39d28c62b0e71de7" -and
          $packageVulnerabilityAcceptance.runConclusion -ceq "success" -and
-         $packageVulnerabilityAcceptance.jobId -eq 98008739618 -and
+         $packageVulnerabilityAcceptance.jobId -eq 98030516890 -and
          $packageVulnerabilityAcceptance.jobConclusion -ceq "success" -and
-         $packageVulnerabilityAcceptance.artifactId -eq 9586961516 -and
+         $packageVulnerabilityAcceptance.artifactId -eq 9589408603 -and
          $packageVulnerabilityAcceptance.artifactDigestSha256 -ceq
-            "4d0c0a2a928038721053a61a0931b6e1fcfdf57053383fa0db0c0b9bccbb9210" -and
+            "45e628c6dcfee4ddd9cc1b45c93074883c1f99e78f0d9580decc848f1f69d4ad" -and
          $packageVulnerabilityAcceptance.lastSuccessMemberLength -eq 2403 -and
          $packageVulnerabilityAcceptance.lastSuccessMemberSha256 -ceq
-            "f62f147842bf2e8d3951fbaca103a6d4b2d485fa269fd972d7ae3360f754c553") `
+            "8670c3e3442cd7342a0bb6e51f44fc4b31a1cf29f7da27ad523e87e6f7a8d316") `
         "the hosted package vulnerability workflow or artifact evidence changed."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.restoreProjectCount -eq 4 -and
@@ -722,7 +722,7 @@ try {
         "the package vulnerability evaluation clock contract changed."
     $staleValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 9, 2, 0, 0, 0, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 9, 3, 0, 0, 0, [TimeSpan]::Zero)')
     Assert-TestCondition ($staleValidatorText -cne $validatorText) `
         "the deterministic stale validator mutation was not applied."
     $staleValidatorPath = $script:fixtureRoot + "-stale-validator.ps1"
@@ -844,7 +844,7 @@ try {
     $tamperedVulnerabilityAcceptanceSha256 = Get-TestFileSha256 `
         -Path $vulnerabilityAcceptancePath
     $semanticValidatorText = $validatorText.Replace(
-        "8c60360ae0dac240ef801688a04472266dabd16bfb1069a841b365b61c89a197",
+        "01180e5c90816fda2f1712a2ecd5ed634399caee76d68b7ffeb47c178e2aa208",
         $tamperedVulnerabilityAcceptanceSha256)
     Assert-TestCondition ($semanticValidatorText -cne $validatorText) `
         "package vulnerability semantic validator mutation was not applied."
