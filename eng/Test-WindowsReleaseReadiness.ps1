@@ -32,7 +32,10 @@ $script:packageVulnerabilityContractSourceSetSha256 =
     "6b09978b5ee3ffc4d14e09458724a3d18fd1d23c5ec9ab3134dd25bfc7e91ff3"
 $script:packageVulnerabilityHelperSourceSha256 =
     "3321951caee1745d644e6333ab0a7b8546f905ce2a54b92e686e7b7f104db057"
+# Technical acceptance remains reusable for seven days, while a release
+# decision requires a review no older than 24 hours.
 $script:packageVulnerabilityMaximumAgeDays = 7
+$script:packageVulnerabilityFinalReleaseMaximumAgeHours = 24
 $script:packageSbomContractSourceCount = 7
 $script:packageSbomContractSourceSetSha256 = "e5324fafa743cd003af480ab2c521ae2181a306fd67704c221d905025a7fccae"
 $script:packageSbomProductionInputSetSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
@@ -1954,6 +1957,10 @@ function Read-PackageVulnerabilityAcceptance {
             Acceptance = $acceptance
             ContractSourceSetSha256 = $contractSourceSetSha256
             FreshAtEvaluation = ($evaluationUtcNow -le $freshThrough)
+            FinalReleaseFreshAtEvaluation =
+                ($evaluationUtcNow -le
+                    $runCompleted.AddHours(
+                        $script:packageVulnerabilityFinalReleaseMaximumAgeHours))
         }
     }
     catch {
@@ -2953,6 +2960,12 @@ try {
         $packageVulnerabilityAcceptanceValidation.Acceptance
     $packageVulnerabilityFreshAtEvaluation =
         $packageVulnerabilityAcceptanceValidation.FreshAtEvaluation
+    $packageVulnerabilityFinalReleaseFreshAtEvaluation =
+        $packageVulnerabilityAcceptanceValidation.FinalReleaseFreshAtEvaluation
+    Assert-Condition `
+        (-not $packageVulnerabilityFinalReleaseFreshAtEvaluation -or
+         $packageVulnerabilityFreshAtEvaluation) `
+        "PackageVulnerabilityAcceptanceInvalid"
 
     $script:technicalStage = "EvidenceComposition"
     $baseBlockers = @(
@@ -2970,7 +2983,7 @@ try {
         "SupportUrlPending",
         "WackPending"
     )
-    $effectiveBlockers = if ($packageVulnerabilityFreshAtEvaluation) {
+    $effectiveBlockers = if ($packageVulnerabilityFinalReleaseFreshAtEvaluation) {
         @($baseBlockers | Where-Object { $_ -cne "CveReviewPending" })
     }
     else {
@@ -2978,11 +2991,11 @@ try {
     }
     $blockers = Get-OrdinalSortedStrings -Values $effectiveBlockers
     Assert-Condition `
-        ($blockers.Count -eq $(if ($packageVulnerabilityFreshAtEvaluation) { 12 } else { 13 })) `
+        ($blockers.Count -eq $(if ($packageVulnerabilityFinalReleaseFreshAtEvaluation) { 12 } else { 13 })) `
         "PackageVulnerabilityAcceptanceInvalid"
 
     $summary = [ordered]@{
-        schemaVersion = 5
+        schemaVersion = 6
         result = "blocked"
         technicalBaselinePassed = $true
         releaseReady = $false
@@ -3131,6 +3144,10 @@ try {
             freshnessPolicy = $packageVulnerabilityAcceptance.freshnessPolicy
             maximumAgeDays = $packageVulnerabilityAcceptance.maximumAgeDays
             freshAtEvaluation = $packageVulnerabilityFreshAtEvaluation
+            finalReleaseMaximumAgeHours =
+                $script:packageVulnerabilityFinalReleaseMaximumAgeHours
+            finalReleaseFreshAtEvaluation =
+                $packageVulnerabilityFinalReleaseFreshAtEvaluation
             repository = $packageVulnerabilityAcceptance.repository
             workflowPath = $packageVulnerabilityAcceptance.workflowPath
             workflowName = $packageVulnerabilityAcceptance.workflowName
@@ -3186,7 +3203,7 @@ try {
                 $packageVulnerabilityAcceptance.producerCheckpointOnly
             producerCveReviewPending =
                 $packageVulnerabilityAcceptance.producerCveReviewPending
-            effectiveClosedBlocker = if ($packageVulnerabilityFreshAtEvaluation) {
+            effectiveClosedBlocker = if ($packageVulnerabilityFinalReleaseFreshAtEvaluation) {
                 "CveReviewPending"
             }
             else {
@@ -3234,7 +3251,9 @@ try {
         ($publicationPackageVulnerabilityValidation.ContractSourceSetSha256 -ceq
             $packageVulnerabilityAcceptanceValidation.ContractSourceSetSha256 -and
          $publicationPackageVulnerabilityValidation.FreshAtEvaluation -eq
-            $packageVulnerabilityFreshAtEvaluation) `
+            $packageVulnerabilityFreshAtEvaluation -and
+         $publicationPackageVulnerabilityValidation.FinalReleaseFreshAtEvaluation -eq
+            $packageVulnerabilityFinalReleaseFreshAtEvaluation) `
         "PackageVulnerabilityAcceptanceInvalid"
 
     $script:technicalStage = "EvidencePublication"

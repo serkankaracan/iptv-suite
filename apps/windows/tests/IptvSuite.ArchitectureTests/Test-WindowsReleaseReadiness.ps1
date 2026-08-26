@@ -186,7 +186,9 @@ function Read-AndAssertEvidence {
         [string]$EvidencePath,
 
         [Parameter(Mandatory = $true)]
-        [string]$ForbiddenRoot
+        [string]$ForbiddenRoot,
+
+        [Nullable[bool]]$ExpectedFinalReleaseFreshAtEvaluation
     )
 
     Assert-TestCondition (Test-Path -LiteralPath $EvidencePath -PathType Leaf) "evidence was not published."
@@ -226,7 +228,7 @@ function Read-AndAssertEvidence {
             "packageVulnerabilityAcceptance",
             "blockers") `
         -Message "evidence root schema changed."
-    Assert-TestCondition ($evidence.schemaVersion -eq 5) "schemaVersion must be 5."
+    Assert-TestCondition ($evidence.schemaVersion -eq 6) "schemaVersion must be 6."
     Assert-TestCondition ($evidence.result -ceq "blocked") "result must remain blocked."
     Assert-TestCondition `
         ($evidence.technicalBaselinePassed -is [bool] -and $evidence.technicalBaselinePassed) `
@@ -512,6 +514,8 @@ function Read-AndAssertEvidence {
             "freshnessPolicy",
             "maximumAgeDays",
             "freshAtEvaluation",
+            "finalReleaseMaximumAgeHours",
+            "finalReleaseFreshAtEvaluation",
             "repository",
             "workflowPath",
             "workflowName",
@@ -572,10 +576,27 @@ function Read-AndAssertEvidence {
          $packageVulnerabilityAcceptance.freshnessPolicy -ceq
             "RunCompletionPlus7Days" -and
          $packageVulnerabilityAcceptance.maximumAgeDays -eq 7 -and
-         $packageVulnerabilityAcceptance.freshAtEvaluation -is [bool]) `
+         $packageVulnerabilityAcceptance.freshAtEvaluation -is [bool] -and
+         $packageVulnerabilityAcceptance.finalReleaseMaximumAgeHours -eq 24 -and
+         $packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -is [bool]) `
         "the bounded package vulnerability freshness disposition changed."
     $expectedVulnerabilityFresh =
         [bool]$packageVulnerabilityAcceptance.freshAtEvaluation
+    if ($null -eq $ExpectedFinalReleaseFreshAtEvaluation) {
+        $expectedFinalReleaseFresh =
+            [bool]$packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation
+    }
+    else {
+        $expectedFinalReleaseFresh =
+            [bool]$ExpectedFinalReleaseFreshAtEvaluation
+        Assert-TestCondition `
+            ($packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -eq
+                $expectedFinalReleaseFresh) `
+            "the final-release freshness evidence changed."
+    }
+    Assert-TestCondition `
+        (-not $expectedFinalReleaseFresh -or $expectedVulnerabilityFresh) `
+        "final-release freshness cannot outlive technical freshness."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.repository -ceq "serkankaracan/iptv-suite" -and
          $packageVulnerabilityAcceptance.workflowPath -ceq
@@ -635,7 +656,7 @@ function Read-AndAssertEvidence {
          $packageVulnerabilityAcceptance.producerCveReviewPending -is [bool] -and
          $packageVulnerabilityAcceptance.producerCveReviewPending -and
          $packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
-            $(if ($expectedVulnerabilityFresh) { "CveReviewPending" } else { "None" }) -and
+            $(if ($expectedFinalReleaseFresh) { "CveReviewPending" } else { "None" }) -and
          $packageVulnerabilityAcceptance.cveFreeClaim -is [bool] -and
          -not $packageVulnerabilityAcceptance.cveFreeClaim -and
          $packageVulnerabilityAcceptance.legalReviewComplete -is [bool] -and
@@ -655,7 +676,7 @@ function Read-AndAssertEvidence {
         "StoreListingPending",
         "SupportUrlPending",
         "WackPending")
-    if (-not $expectedVulnerabilityFresh) {
+    if (-not $expectedFinalReleaseFresh) {
         $expectedBlockers += "CveReviewPending"
     }
     Assert-ExactStringSet `
@@ -754,9 +775,11 @@ Assert-TestCondition `
         $validatorText,
         'Read-PackageVulnerabilityAcceptance').Count -eq 3 -and
      $validatorText.Contains(
-        '$publicationPackageVulnerabilityValidation.FreshAtEvaluation') -and
+         '$publicationPackageVulnerabilityValidation.FreshAtEvaluation') -and
      $validatorText.Contains(
-        '$publicationPackageVulnerabilityValidation.ContractSourceSetSha256')) `
+         '$publicationPackageVulnerabilityValidation.FinalReleaseFreshAtEvaluation') -and
+     $validatorText.Contains(
+         '$publicationPackageVulnerabilityValidation.ContractSourceSetSha256')) `
     "the bounded two-pass package vulnerability acceptance contract changed."
 Assert-TestCondition `
     ($validatorText.Contains(
@@ -999,6 +1022,85 @@ try {
         '$evaluationUtcNow = [DateTimeOffset]::new(2026, 9, 3, 0, 0, 0, [TimeSpan]::Zero)')
     Assert-TestCondition ($staleValidatorText -cne $validatorText) `
         "the deterministic stale validator mutation was not applied."
+
+    $finalReleaseBoundaryValidatorText = $validatorText.Replace(
+        $evaluationClockExpression,
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 27, 2, 58, 7, [TimeSpan]::Zero)')
+    Assert-TestCondition `
+        ($finalReleaseBoundaryValidatorText -cne $validatorText) `
+        "the exact final-release freshness boundary mutation was not applied."
+    $finalReleaseBoundaryValidatorPath =
+        $script:fixtureRoot + "-final-release-boundary-validator.ps1"
+    Write-TestText `
+        -Path $finalReleaseBoundaryValidatorPath `
+        -Value $finalReleaseBoundaryValidatorText
+    try {
+        $finalReleaseBoundaryEvidencePath = Join-Path `
+            $fixtureEvidenceRoot `
+            "final-release-boundary.json"
+        Invoke-AllowedAudit `
+            -Root $script:fixtureRoot `
+            -EvidencePath $finalReleaseBoundaryEvidencePath `
+            -ValidatorPath $finalReleaseBoundaryValidatorPath
+        $finalReleaseBoundaryEvidence = Read-AndAssertEvidence `
+            -EvidencePath $finalReleaseBoundaryEvidencePath `
+            -ForbiddenRoot $script:fixtureRoot `
+            -ExpectedFinalReleaseFreshAtEvaluation $true
+        Assert-TestCondition `
+            ($finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
+             $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
+             $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
+                "CveReviewPending" -and
+             @($finalReleaseBoundaryEvidence.blockers).Count -eq 12 -and
+             @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "CveReviewPending") `
+            "the exact 24-hour final-release boundary did not remain accepted."
+    }
+    finally {
+        Remove-Item `
+            -LiteralPath $finalReleaseBoundaryValidatorPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+
+    $finalReleaseExpiredValidatorText = $validatorText.Replace(
+        $evaluationClockExpression,
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 27, 2, 58, 8, [TimeSpan]::Zero)')
+    Assert-TestCondition `
+        ($finalReleaseExpiredValidatorText -cne $validatorText) `
+        "the final-release freshness plus-one-second mutation was not applied."
+    $finalReleaseExpiredValidatorPath =
+        $script:fixtureRoot + "-final-release-expired-validator.ps1"
+    Write-TestText `
+        -Path $finalReleaseExpiredValidatorPath `
+        -Value $finalReleaseExpiredValidatorText
+    try {
+        $finalReleaseExpiredEvidencePath = Join-Path `
+            $fixtureEvidenceRoot `
+            "final-release-expired.json"
+        Invoke-AllowedAudit `
+            -Root $script:fixtureRoot `
+            -EvidencePath $finalReleaseExpiredEvidencePath `
+            -ValidatorPath $finalReleaseExpiredValidatorPath
+        $finalReleaseExpiredEvidence = Read-AndAssertEvidence `
+            -EvidencePath $finalReleaseExpiredEvidencePath `
+            -ForbiddenRoot $script:fixtureRoot `
+            -ExpectedFinalReleaseFreshAtEvaluation $false
+        Assert-TestCondition `
+            ($finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
+             -not $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
+             $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
+                "None" -and
+             @($finalReleaseExpiredEvidence.blockers).Count -eq 13 -and
+             @($finalReleaseExpiredEvidence.blockers) -ccontains "CveReviewPending") `
+            "the final-release blocker did not reopen at 24 hours plus one second."
+    }
+    finally {
+        Remove-Item `
+            -LiteralPath $finalReleaseExpiredValidatorPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+
     $staleValidatorPath = $script:fixtureRoot + "-stale-validator.ps1"
     Write-TestText -Path $staleValidatorPath -Value $staleValidatorText
     try {
@@ -1009,9 +1111,11 @@ try {
             -ValidatorPath $staleValidatorPath
         $staleEvidence = Read-AndAssertEvidence `
             -EvidencePath $staleEvidencePath `
-            -ForbiddenRoot $script:fixtureRoot
+            -ForbiddenRoot $script:fixtureRoot `
+            -ExpectedFinalReleaseFreshAtEvaluation $false
         Assert-TestCondition `
             (-not $staleEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
+             -not $staleEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $staleEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq "None" -and
              @($staleEvidence.blockers).Count -eq 13 -and
              @($staleEvidence.blockers) -ccontains "CveReviewPending") `
