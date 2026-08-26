@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_m16_final_artifacts:
+        description: Run the bounded M16 four-surface final-artifact canary scan
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -56,6 +61,11 @@ jobs:
           if ($actualSdk -ne "10.0.302") {
             throw "Expected .NET SDK 10.0.302, received '$actualSdk'."
           }
+
+      - name: Reject incompatible package acceptance modes
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_wack && inputs.run_m16_final_artifacts }}
+        shell: pwsh
+        run: throw "WACK and M16 final-artifact modes must run independently."
 
       - name: Run Windows quality gate and artifact scanner
         shell: pwsh
@@ -119,14 +129,19 @@ jobs:
           --configfile .\NuGet.config
 
       - name: Build, scan, install, launch, and remove signed MSIX
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_wack }}
+        if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.run_wack && !inputs.run_m16_final_artifacts) }}
         shell: powershell
         run: .\eng\Invoke-WindowsPackageSmoke.ps1 -Configuration Release
 
       - name: Build, scan, install, launch, run development WACK preflight, and remove signed MSIX
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_wack }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_wack && !inputs.run_m16_final_artifacts }}
         shell: powershell
         run: .\eng\Invoke-WindowsPackageSmoke.ps1 -Configuration Release -RunWack
+
+      - name: Build and scan M16 package-bound final-artifact surfaces
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_m16_final_artifacts && !inputs.run_wack }}
+        shell: powershell
+        run: .\eng\Invoke-WindowsFinalArtifactCanaryScan.ps1
 
       - name: Prepare sanitized development-identity WACK failure evidence
         id: wack_failure_evidence
@@ -242,6 +257,16 @@ jobs:
         with:
           name: windows-package-lifecycle-evidence
           path: .artifacts/package-lifecycle/last-success.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Upload sanitized M16 final-artifact evidence
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.run_m16_final_artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-m16-final-artifact-evidence
+          path: .artifacts/m16-final-artifact-scan/last-success.json
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7

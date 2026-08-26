@@ -7,7 +7,12 @@ param(
 
     [switch]$EmitM14TraceMarkers,
 
-    [switch]$RunWack
+    [switch]$RunWack,
+
+    [switch]$EmitM16FinalArtifactSurfaces,
+
+    [ValidatePattern('\A[0-9a-f]{32}\z')]
+    [string]$M16RunToken
 )
 
 Set-StrictMode -Version Latest
@@ -19,6 +24,7 @@ Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
 $activationInterop = @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace IptvSuite.PackageSmoke
 {
@@ -44,10 +50,33 @@ namespace IptvSuite.PackageSmoke
     public static class PackagedApplicationActivator
     {
         private const uint LocalServer = 0x00000004;
+        private const int ErrorInsufficientBuffer = 122;
         private static readonly Guid ClassId =
             new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C");
         private static readonly Guid InterfaceId =
             new Guid("2E941141-7F97-4756-BA1D-9DECDE894A3D");
+
+        [StructLayout(LayoutKind.Explicit, Size = 8)]
+        private struct PackageVersionNative
+        {
+            [FieldOffset(0)] internal ulong Value;
+            [FieldOffset(0)] internal ushort Revision;
+            [FieldOffset(2)] internal ushort Build;
+            [FieldOffset(4)] internal ushort Minor;
+            [FieldOffset(6)] internal ushort Major;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PackageIdNative
+        {
+            internal uint Reserved;
+            internal uint ProcessorArchitecture;
+            internal PackageVersionNative Version;
+            [MarshalAs(UnmanagedType.LPWStr)] internal string Name;
+            [MarshalAs(UnmanagedType.LPWStr)] internal string Publisher;
+            [MarshalAs(UnmanagedType.LPWStr)] internal string ResourceId;
+            [MarshalAs(UnmanagedType.LPWStr)] internal string PublisherId;
+        }
 
         [DllImport("ole32.dll", ExactSpelling = true, PreserveSig = true)]
         private static extern int CoCreateInstance(
@@ -56,6 +85,58 @@ namespace IptvSuite.PackageSmoke
             uint classContext,
             [In] ref Guid interfaceId,
             [MarshalAs(UnmanagedType.Interface)] out object value);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern int PackageFullNameFromId(
+            ref PackageIdNative packageId,
+            ref uint packageFullNameLength,
+            [Out] StringBuilder packageFullName);
+
+        public static string GetPackageFullName(
+            string name,
+            string publisher,
+            ushort major,
+            ushort minor,
+            ushort build,
+            ushort revision)
+        {
+            if (String.IsNullOrWhiteSpace(name) || String.IsNullOrWhiteSpace(publisher))
+            {
+                throw new ArgumentException("An exact package identity is required.");
+            }
+
+            var id = new PackageIdNative
+            {
+                Reserved = 0,
+                ProcessorArchitecture = 9,
+                Version = new PackageVersionNative
+                {
+                    Major = major,
+                    Minor = minor,
+                    Build = build,
+                    Revision = revision,
+                },
+                Name = name,
+                Publisher = publisher,
+                ResourceId = null,
+                PublisherId = null,
+            };
+            uint length = 0;
+            int result = PackageFullNameFromId(ref id, ref length, null);
+            if (result != ErrorInsufficientBuffer || length < 18 || length > 256)
+            {
+                throw new InvalidOperationException("Package full-name sizing failed.");
+            }
+
+            var value = new StringBuilder(checked((int)length));
+            result = PackageFullNameFromId(ref id, ref length, value);
+            if (result != 0 || value.Length + 1 != length)
+            {
+                throw new InvalidOperationException("Package full-name calculation failed.");
+            }
+
+            return value.ToString();
+        }
 
         public static int Activate(string appUserModelId)
         {
@@ -686,9 +767,20 @@ namespace IptvSuite.PackageSmoke
 Add-Type -TypeDefinition $activationInterop -Language CSharp -ErrorAction Stop
 . (Join-Path $PSScriptRoot "WindowsPackageInstallRootAudit.ps1")
 . (Join-Path $PSScriptRoot "WindowsWack.ps1")
+if ($EmitM16FinalArtifactSurfaces) {
+    . (Join-Path $PSScriptRoot "WindowsM16FinalArtifactEvidence.ps1")
+    . (Join-Path $PSScriptRoot "WindowsBoundedProcess.ps1")
+}
+
+$m16RunTokenProvided = -not [string]::IsNullOrEmpty($M16RunToken)
+if ([bool]$EmitM16FinalArtifactSurfaces -ne $m16RunTokenProvided) {
+    throw "The M16 final-artifact mode requires one exact controller-issued run token."
+}
 
 $expectedName = "IptvSuite.LocalDev.6f0d9a64"
 $expectedPublisher = "CN=IptvSuite Local Development"
+$packageIdentityMutexName =
+    "Global\IptvSuite.PackageSmoke.IptvSuite.LocalDev.6f0d9a64"
 $expectedApplicationId = "App"
 $testCanaryMarker = "IPTVSUITE_TEST_ONLY_CANARY_V1"
 $expectedRuntimeDependencyName = "Microsoft.WindowsAppRuntime.2"
@@ -701,6 +793,12 @@ $expectedPlaybackChannelAName = "Synthetic protected Tier A channel A"
 $expectedPlaybackChannelBName = "Synthetic protected Tier A channel B"
 $expectedOnboardingEmptyStatus = "No imported Live TV catalog is available."
 $expectedOnboardingCatalogStatus = "Showing 1$([char]0x2013)2 of 2 channels."
+$expectedOnboardingPlaylistPath = if ($EmitM16FinalArtifactSurfaces) {
+    "/$testCanaryMarker/synthetic-onboarding.m3u"
+}
+else {
+    "/synthetic-onboarding.m3u"
+}
 $expectedPlaybackCertificateSubject = "CN=IPTVSuite Synthetic Loopback"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"
@@ -708,10 +806,17 @@ $catalogUiHarnessProjectPath = Join-Path $repositoryRoot "apps\windows\tests\Ipt
 $catalogUiHarnessAssemblyPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.CatalogUiAcceptanceHarness\bin\x64\$Configuration\net10.0\IptvSuite.CatalogUiAcceptanceHarness.dll"
 $playbackUiHarnessProjectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.PlaybackUiAcceptanceHarness\IptvSuite.PlaybackUiAcceptanceHarness.csproj"
 $playbackUiHarnessAssemblyPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.PlaybackUiAcceptanceHarness\bin\x64\$Configuration\net10.0\IptvSuite.PlaybackUiAcceptanceHarness.dll"
+$testingProjectPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.Testing\IptvSuite.Testing.csproj"
+$testingAssemblyPath = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.Testing\bin\x64\$Configuration\net10.0\IptvSuite.Testing.dll"
 $playbackFixtureRoot = Join-Path $repositoryRoot "apps\windows\tests\fixtures\playback\tier-a"
 $sourceManifestPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\Package.appxmanifest"
 $artifactRoot = Join-Path $repositoryRoot ".artifacts\msix-smoke"
-$runId = [Guid]::NewGuid().ToString("N")
+$runId = if ($EmitM16FinalArtifactSurfaces) {
+    $M16RunToken
+}
+else {
+    [Guid]::NewGuid().ToString("N")
+}
 $packageOutput = Join-Path $artifactRoot "packages\$runId"
 $playbackControlRoot = Join-Path $artifactRoot "playback-ui"
 $playbackControlDirectory = Join-Path $playbackControlRoot $runId
@@ -761,6 +866,30 @@ $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
 $packageSbomPath = Join-Path $artifactRoot "package-sbom.spdx.json"
 $packageSbomSummaryPath = Join-Path $artifactRoot "package-sbom-summary.json"
 $wackEvidencePath = Join-Path $artifactRoot "wack-development-preflight-summary.json"
+$m16SurfaceEvidencePath = Join-Path $artifactRoot "m16-final-artifact-surfaces.json"
+$m16BindingEvidencePath = Join-Path $artifactRoot "m16-final-artifact-binding.json"
+$m16CaptureParent = Join-Path $artifactRoot "m16-final-artifact-capture"
+$m16CaptureRoot = Join-Path $m16CaptureParent $runId
+$m16OwnershipParent = Join-Path $artifactRoot "m16-final-artifact-ownership"
+$m16OwnershipRoot = Join-Path $m16OwnershipParent $runId
+$m16SigningThumbprintPath = Join-Path `
+    $m16OwnershipRoot `
+    "signing-certificate.thumbprint"
+$m16PackageRegistrationIntentPath = Join-Path `
+    $m16OwnershipRoot `
+    "package-registration.intent"
+$m16OnboardingThumbprintPath = Join-Path `
+    $m16OwnershipRoot `
+    "onboarding-loopback.thumbprint"
+$m16PlaybackThumbprintPath = Join-Path `
+    $m16OwnershipRoot `
+    "playback-loopback.thumbprint"
+$certificateFriendlyName = if ($EmitM16FinalArtifactSurfaces) {
+    "IptvSuite M16 Final Artifact $runId"
+}
+else {
+    "IptvSuite Local Development Package Smoke $runId"
+}
 
 $certificate = $null
 $installedPackage = $null
@@ -790,6 +919,9 @@ $successEvidence = $null
 $successMessage = $null
 $packageSbomResult = $null
 $wackDevelopmentIdentityResult = $null
+$m16CommitSha = $null
+$m16SurfaceReports = $null
+$m16PostScanPackageSha256 = $null
 $protectedStoreDirectoryInitialized = $false
 $catalogUiaContractVerified = $false
 $catalogKeyboardFocusOrderVerified = $false
@@ -924,7 +1056,64 @@ $msBuildEnvironment = @{
     UapAppxPackageBuildMode       = "SideloadOnly"
 }
 
-New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+function Enter-WindowsPackageIdentityMutex {
+    $mutex = [System.Threading.Mutex]::new(
+        $false,
+        $packageIdentityMutexName)
+    try {
+        $acquired = $mutex.WaitOne(0)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $acquired = $true
+    }
+    if (-not $acquired) {
+        $mutex.Dispose()
+        throw "Another package-smoke process owns the disposable package identity."
+    }
+
+    return $mutex
+}
+
+function Assert-WindowsPackageIdentityMutexOwnedByController {
+    $probeMutex = [System.Threading.Mutex]::new(
+        $false,
+        $packageIdentityMutexName)
+    $unexpectedlyAcquired = $false
+    try {
+        try {
+            $unexpectedlyAcquired = $probeMutex.WaitOne(0)
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            $unexpectedlyAcquired = $true
+        }
+        if ($unexpectedlyAcquired) {
+            $probeMutex.ReleaseMutex()
+            throw "M16 package-smoke mode requires the controller-owned package-identity mutex."
+        }
+    }
+    finally {
+        $probeMutex.Dispose()
+    }
+}
+
+function Exit-WindowsPackageIdentityMutex {
+    param(
+        [Parameter(Mandatory)]
+        [System.Threading.Mutex]$Mutex
+    )
+
+    $released = $false
+    try {
+        $Mutex.ReleaseMutex()
+        $released = $true
+    }
+    finally {
+        $Mutex.Dispose()
+    }
+    if (-not $released) {
+        throw "The disposable package-identity mutex could not be released."
+    }
+}
 
 function Assert-ManifestPolicy {
     param(
@@ -1728,6 +1917,638 @@ function Write-JsonAtomically {
     }
 }
 
+function Write-M16PrivateEvidenceAtomically {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Value,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationPath
+    )
+
+    if (-not $EmitM16FinalArtifactSurfaces) {
+        throw "M16 surface evidence cannot be written outside the explicit capture mode."
+    }
+
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($artifactRoot)
+    $resolvedDestination = [System.IO.Path]::GetFullPath($DestinationPath)
+    $allowedDestinations = @(
+        [System.IO.Path]::GetFullPath($m16SurfaceEvidencePath),
+        [System.IO.Path]::GetFullPath($m16BindingEvidencePath))
+    if ($allowedDestinations -cnotcontains $resolvedDestination -or
+        -not [System.IO.Directory]::GetParent($resolvedDestination).FullName.Equals(
+            $resolvedArtifactRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $resolvedArtifactRoot -PathType Container) -or
+        (([System.IO.File]::GetAttributes($resolvedArtifactRoot) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "Refusing to write M16 evidence through an unsafe artifact root."
+    }
+    if (Test-Path -LiteralPath $resolvedDestination) {
+        throw "Refusing to overwrite existing M16 surface evidence."
+    }
+
+    $temporaryPath = "$resolvedDestination.$runId.tmp"
+    if (-not [System.IO.Directory]::GetParent($temporaryPath).FullName.Equals(
+            $resolvedArtifactRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        [System.IO.Path]::GetFileName($temporaryPath) -cne
+            "$([System.IO.Path]::GetFileName($resolvedDestination)).$runId.tmp" -or
+        (Test-Path -LiteralPath $temporaryPath)) {
+        throw "Refusing to use an unexpected M16 evidence temporary path."
+    }
+
+    $json = $Value | ConvertTo-Json -Depth 6 -Compress
+    $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+    $bytes = $strictUtf8.GetBytes($json + [Environment]::NewLine)
+    $stream = $null
+    try {
+        if ($bytes.Length -le 0 -or $bytes.Length -gt 65536) {
+            throw "The M16 surface evidence exceeds its fixed byte budget."
+        }
+        $stream = [System.IO.File]::Open(
+            $temporaryPath,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+        $stream.Dispose()
+        $stream = $null
+        [System.IO.File]::Move($temporaryPath, $resolvedDestination)
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+        [System.Array]::Clear($bytes, 0, $bytes.Length)
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction Stop
+        }
+    }
+}
+
+function Write-M16SurfaceEvidenceAtomically {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Value
+    )
+
+    Write-M16PrivateEvidenceAtomically `
+        -Value $Value `
+        -DestinationPath $m16SurfaceEvidencePath
+}
+
+function Write-M16BindingEvidenceAtomically {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Value
+    )
+
+    Write-M16PrivateEvidenceAtomically `
+        -Value $Value `
+        -DestinationPath $m16BindingEvidencePath
+}
+
+function Write-M16CleanupOwnershipValue {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet(
+            "signing-certificate.thumbprint",
+            "package-registration.intent",
+            "onboarding-loopback.thumbprint",
+            "playback-loopback.thumbprint")]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    if (-not $EmitM16FinalArtifactSurfaces) {
+        throw "M16 cleanup ownership cannot be written outside the explicit capture mode."
+    }
+    $pattern = if ($Name -ceq "package-registration.intent") {
+        '\AIptvSuite\.LocalDev\.6f0d9a64_[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+_x64__[0-9a-z]{13}\z'
+    }
+    else {
+        '\A[0-9A-F]{40}\z'
+    }
+    if (-not [System.Text.RegularExpressions.Regex]::IsMatch($Value, $pattern)) {
+        throw "The M16 cleanup ownership value is invalid."
+    }
+
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($artifactRoot)
+    $resolvedParent = [System.IO.Path]::GetFullPath($m16OwnershipParent)
+    $resolvedRoot = [System.IO.Path]::GetFullPath($m16OwnershipRoot)
+    $resolvedDestination = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($resolvedRoot, $Name))
+    $expectedParent = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine(
+            $resolvedArtifactRoot,
+            "m16-final-artifact-ownership"))
+    $expectedRoot = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($expectedParent, $runId))
+    if (-not $resolvedParent.Equals(
+            $expectedParent,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not $resolvedRoot.Equals(
+            $expectedRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [System.IO.Directory]::GetParent($resolvedDestination).FullName.Equals(
+            $resolvedRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $resolvedRoot -PathType Container) -or
+        (([System.IO.File]::GetAttributes($resolvedParent) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0) -or
+        (([System.IO.File]::GetAttributes($resolvedRoot) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0) -or
+        (Test-Path -LiteralPath $resolvedDestination)) {
+        throw "The M16 cleanup ownership destination is unsafe."
+    }
+
+    $serializedValue = if ($Name -ceq "package-registration.intent") {
+        [ordered]@{
+            SchemaVersion = 1
+            RunToken = $runId
+            ExpectedPackageFullName = $Value
+        } | ConvertTo-Json -Depth 2 -Compress
+    }
+    else {
+        $Value
+    }
+    $maximumBytes = if ($Name -ceq "package-registration.intent") { 512 } else { 128 }
+    $bytes = [System.Text.UTF8Encoding]::new($false, $true).GetBytes($serializedValue)
+    $stream = $null
+    try {
+        if ($bytes.Length -le 0 -or $bytes.Length -gt $maximumBytes) {
+            throw "The M16 cleanup ownership value exceeds its fixed byte budget."
+        }
+        $stream = [System.IO.File]::Open(
+            $resolvedDestination,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+        $stream.Dispose()
+        $stream = $null
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+        [System.Array]::Clear($bytes, 0, $bytes.Length)
+    }
+}
+
+function Initialize-M16CaptureRoot {
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($artifactRoot)
+    $resolvedParent = [System.IO.Path]::GetFullPath($m16CaptureParent)
+    $resolvedCapture = [System.IO.Path]::GetFullPath($m16CaptureRoot)
+    $expectedParent = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($resolvedArtifactRoot, "m16-final-artifact-capture"))
+    $expectedCapture = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($expectedParent, $runId))
+    if (-not $resolvedParent.Equals(
+            $expectedParent,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not $resolvedCapture.Equals(
+            $expectedCapture,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $resolvedArtifactRoot -PathType Container) -or
+        (([System.IO.File]::GetAttributes($resolvedArtifactRoot) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The M16 capture root is invalid."
+    }
+
+    if (Test-Path -LiteralPath $resolvedParent) {
+        if (-not (Test-Path -LiteralPath $resolvedParent -PathType Container) -or
+            (([System.IO.File]::GetAttributes($resolvedParent) -band
+                    [System.IO.FileAttributes]::ReparsePoint) -ne 0) -or
+            @(Get-ChildItem -LiteralPath $resolvedParent -Force).Count -ne 0) {
+            throw "The M16 capture parent is unsafe or contains stale raw artifacts."
+        }
+    }
+    else {
+        [System.IO.Directory]::CreateDirectory($resolvedParent) | Out-Null
+    }
+
+    [System.IO.Directory]::CreateDirectory($resolvedCapture) | Out-Null
+    [System.IO.Directory]::CreateDirectory(
+        [System.IO.Path]::Combine($resolvedCapture, "scanner-io")) | Out-Null
+    foreach ($createdPath in @(
+            $resolvedParent,
+            $resolvedCapture,
+            [System.IO.Path]::Combine($resolvedCapture, "scanner-io"))) {
+        if (-not (Test-Path -LiteralPath $createdPath -PathType Container) -or
+            (([System.IO.File]::GetAttributes($createdPath) -band
+                    [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "An M16 capture directory is unsafe."
+        }
+    }
+}
+
+function Get-M16CleanRepositoryCommit {
+    $status = @(& git -C $repositoryRoot status --porcelain=v1 --untracked-files=all 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "M16 final artifact capture could not inspect the repository."
+    }
+    if ($status.Count -ne 0) {
+        throw "M16 final artifact capture requires a clean repository."
+    }
+
+    $commitOutput = @(& git -C $repositoryRoot rev-parse HEAD 2>&1)
+    if ($LASTEXITCODE -ne 0 -or $commitOutput.Count -ne 1) {
+        throw "M16 final artifact capture could not bind the repository commit."
+    }
+    $commit = ([string]$commitOutput[0]).Trim().ToLowerInvariant()
+    if (-not [System.Text.RegularExpressions.Regex]::IsMatch(
+            $commit,
+            '\A[0-9a-f]{40}\z')) {
+        throw "M16 final artifact capture received an invalid repository commit."
+    }
+
+    $githubSha = [Environment]::GetEnvironmentVariable("GITHUB_SHA", "Process")
+    if (-not [string]::IsNullOrWhiteSpace($githubSha) -and
+        $githubSha.ToLowerInvariant() -cne $commit) {
+        throw "M16 final artifact capture does not match GITHUB_SHA."
+    }
+
+    return $commit
+}
+
+function Assert-M16RepositoryStable {
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('\A[0-9a-f]{40}\z')]
+        [string]$ExpectedCommit
+    )
+
+    $actualCommit = Get-M16CleanRepositoryCommit
+    if ($actualCommit -cne $ExpectedCommit) {
+        throw "M16 final artifact capture repository commit changed during execution."
+    }
+}
+
+function Remove-ExactM16CaptureRoot {
+    param(
+        [switch]$RetainExactPackage
+    )
+
+    if (-not (Test-Path -LiteralPath $m16CaptureRoot)) {
+        return
+    }
+    if (-not [System.Text.RegularExpressions.Regex]::IsMatch($runId, '\A[0-9a-f]{32}\z')) {
+        throw "Refusing M16 capture cleanup because the run id is invalid."
+    }
+
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($artifactRoot)
+    $resolvedParent = [System.IO.Path]::GetFullPath($m16CaptureParent)
+    $resolvedCapture = [System.IO.Path]::GetFullPath($m16CaptureRoot)
+    $expectedParent = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($resolvedArtifactRoot, "m16-final-artifact-capture"))
+    $expectedCapture = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($expectedParent, $runId))
+    if (-not $resolvedParent.Equals(
+            $expectedParent,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not $resolvedCapture.Equals(
+            $expectedCapture,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [System.IO.Directory]::GetParent($resolvedCapture).FullName.Equals(
+            $resolvedParent,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing cleanup of an unexpected M16 capture directory."
+    }
+
+    foreach ($protectedPath in @($resolvedArtifactRoot, $resolvedParent, $resolvedCapture)) {
+        if (-not (Test-Path -LiteralPath $protectedPath -PathType Container) -or
+            ([System.IO.File]::GetAttributes($protectedPath) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing M16 capture cleanup through an unsafe directory."
+        }
+    }
+
+    $captureEntries = @(
+        Get-ChildItem -LiteralPath $resolvedCapture -Force -Recurse)
+    if ($captureEntries.Count -gt 26000) {
+        throw "Refusing M16 capture cleanup because the tree exceeds its entry budget."
+    }
+    [long]$captureBytes = 0
+    foreach ($entry in $captureEntries) {
+        if (-not $entry.PSIsContainer) {
+            if ($entry.Length -gt (9GB - $captureBytes)) {
+                throw "Refusing M16 capture cleanup because the tree exceeds its byte budget."
+            }
+            $captureBytes += $entry.Length
+        }
+    }
+
+    $unsafeEntries = @(
+        $captureEntries |
+            Where-Object {
+                ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+            })
+    if ($unsafeEntries.Count -ne 0) {
+        throw "Refusing M16 capture cleanup because the tree contains a reparse point."
+    }
+
+    if ($RetainExactPackage) {
+        $directEntries = @(Get-ChildItem -LiteralPath $resolvedCapture -Force)
+        $directNames = @($directEntries | ForEach-Object { $_.Name } | Sort-Object)
+        if (($directNames -join "`n") -cne
+                (@("exact-package", "scanner-io", "support-artifact") -join "`n") -or
+            @($directEntries | Where-Object { -not $_.PSIsContainer }).Count -ne 0) {
+            throw "The successful M16 capture has an unexpected retained surface layout."
+        }
+        foreach ($name in @("scanner-io", "support-artifact")) {
+            $transientPath = [System.IO.Path]::GetFullPath(
+                [System.IO.Path]::Combine($resolvedCapture, $name))
+            if (-not [System.IO.Directory]::GetParent($transientPath).FullName.Equals(
+                    $resolvedCapture,
+                    [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing cleanup of an unexpected M16 transient surface."
+            }
+            Remove-Item -LiteralPath $transientPath -Recurse -Force -ErrorAction Stop
+        }
+        $retainedEntries = @(Get-ChildItem -LiteralPath $resolvedCapture -Force)
+        if ($retainedEntries.Count -ne 1 -or
+            $retainedEntries[0].Name -cne "exact-package" -or
+            -not $retainedEntries[0].PSIsContainer -or
+            (($retainedEntries[0].Attributes -band
+                    [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "The exact M16 package surface was not retained exclusively."
+        }
+        return
+    }
+
+    Remove-Item -LiteralPath $resolvedCapture -Recurse -Force -ErrorAction Stop
+    if (@(Get-ChildItem -LiteralPath $resolvedParent -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $resolvedParent -Force -ErrorAction Stop
+    }
+}
+
+function Assert-M16ReleaseAcceptanceSupportArtifact {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary]$ExpectedArtifact,
+
+        [string]$ExpectedSha256
+    )
+
+    $record = Read-WindowsM16FinalStrictJson `
+        -Path $Path `
+        -InputRoot $m16CaptureRoot
+    Assert-WindowsM16FinalExactPropertySet `
+        -Value $record.Value `
+        -Expected @($ExpectedArtifact.Keys)
+    foreach ($name in @($ExpectedArtifact.Keys)) {
+        $expected = $ExpectedArtifact[$name]
+        $actual = Get-WindowsM16FinalExactProperty $record.Value $name
+        if ($expected -is [bool]) {
+            if ($actual -isnot [bool] -or $actual -ne $expected) {
+                throw "The M16 support artifact boolean contract is invalid."
+            }
+        }
+        elseif ($expected -is [byte] -or $expected -is [int16] -or
+            $expected -is [int32] -or $expected -is [int64]) {
+            if (($actual -isnot [int32] -and $actual -isnot [int64]) -or
+                [long]$actual -ne [long]$expected) {
+                throw "The M16 support artifact integer contract is invalid."
+            }
+        }
+        elseif ($expected -is [string]) {
+            if ($actual -isnot [string] -or $actual -cne $expected) {
+                throw "The M16 support artifact string contract is invalid."
+            }
+        }
+        else {
+            throw "The M16 support artifact contains an unsupported value type."
+        }
+    }
+    if (-not [string]::IsNullOrEmpty($ExpectedSha256) -and
+        $record.Sha256 -cne $ExpectedSha256) {
+        throw "The M16 support artifact changed after validation."
+    }
+    return $record
+}
+
+function New-M16ReleaseAcceptanceSupportArtifact {
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('\A[0-9a-f]{64}\z')]
+        [string]$PackageSha256,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationDirectory
+    )
+
+    $resolvedCapture = [System.IO.Path]::GetFullPath($m16CaptureRoot)
+    $resolvedDestination = [System.IO.Path]::GetFullPath($DestinationDirectory)
+    $expectedDestination = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($resolvedCapture, "support-artifact"))
+    if (-not $resolvedDestination.Equals(
+            $expectedDestination,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        (Test-Path -LiteralPath $resolvedDestination)) {
+        throw "The M16 support-artifact destination is invalid."
+    }
+
+    [System.IO.Directory]::CreateDirectory($resolvedDestination) | Out-Null
+    if (([System.IO.File]::GetAttributes($resolvedDestination) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The M16 support-artifact destination is unsafe."
+    }
+
+    $artifact = [ordered]@{
+        SchemaVersion = 1
+        Milestone = "M16"
+        Scope = "ReleaseAcceptanceSupportArtifact"
+        RunId = $runId
+        PackageSha256 = $PackageSha256
+        CleanInstallOnboardingVerified = $cleanInstallOnboardingVerified
+        CleanInstallOnboardingRequestCount = $cleanInstallOnboardingRequestCount
+        CatalogUiaContractVerified = $catalogUiaContractVerified
+        CatalogKeyboardFocusOrderVerified = $catalogKeyboardFocusOrderVerified
+        Catalog50kSeedVerified = $catalog50kSeedVerified
+        CatalogRealizedContainerBoundVerified = $catalogRealizedContainerBoundVerified
+        PlaybackUiAcceptanceVerified = $playbackUiAcceptanceVerified
+        PlaybackRapidSwitchVerified = $playbackRapidSwitchVerified
+        PlaybackRapidSwitchCount = $playbackRapidSwitchCount
+        PlaybackResourceBudgetVerified = $playbackResourceBudgetVerified
+        PlaybackReconnectRecoveryVerified = $playbackReconnectRecoveryVerified
+        PlaybackReconnectCancelVerified = $playbackReconnectCancelVerified
+        PlaybackReconnectNoLaterOpenVerified = $playbackReconnectNoLaterOpenVerified
+        SourceDeletionCancelNoMutationVerified = $sourceDeletionCancelNoMutationVerified
+        SourceDeletionDialogCloseNoMutationVerified = $sourceDeletionDialogCloseNoMutationVerified
+        SourceDeletionPendingFailureVerified = $sourceDeletionPendingFailureVerified
+        SourceDeletionManualRetryVerified = $sourceDeletionManualRetryVerified
+        SourceDeletionTargetCatalogDeleted = $sourceDeletionTargetCatalogDeleted
+        SourceDeletionProtectedRecordsDeleted = $sourceDeletionProtectedRecordsDeleted
+        SourceDeletionSiblingCatalogRetained = $sourceDeletionSiblingCatalogRetained
+        RawLocatorIncluded = $false
+        RequestHeadersOrBodiesIncluded = $false
+        FullMemoryDumpIncluded = $false
+        AutomatedUploadEnabled = $false
+    }
+    $json = $artifact | ConvertTo-Json -Depth 3 -Compress
+    $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+    $bytes = $utf8.GetBytes($json + [Environment]::NewLine)
+    $destinationPath = [System.IO.Path]::Combine(
+        $resolvedDestination,
+        "release-acceptance-summary.json")
+    $stream = $null
+    try {
+        if ($bytes.Length -le 0 -or $bytes.Length -gt 65536) {
+            throw "The M16 support artifact exceeds its fixed byte budget."
+        }
+        $stream = [System.IO.File]::Open(
+            $destinationPath,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+        $stream.Dispose()
+        $stream = $null
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+        [System.Array]::Clear($bytes, 0, $bytes.Length)
+    }
+
+    $record = Assert-M16ReleaseAcceptanceSupportArtifact `
+        -Path $destinationPath `
+        -ExpectedArtifact $artifact
+    return [pscustomobject][ordered]@{
+        RootPath = $resolvedDestination
+        FilePath = $destinationPath
+        Sha256 = $record.Sha256
+        ExpectedArtifact = $artifact
+    }
+}
+
+function Invoke-M16ReleaseSurfaceScan {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("owned-app-data", "exact-package", "support-artifact")]
+        [string]$SurfaceId,
+
+        [Parameter(Mandatory)]
+        [string]$RootPath
+    )
+
+    if (-not [System.IO.File]::Exists($testingAssemblyPath)) {
+        throw "The M16 artifact scanner assembly is unavailable."
+    }
+    $resolvedRoot = [System.IO.Path]::GetFullPath($RootPath)
+    if (-not (Test-Path -LiteralPath $resolvedRoot -PathType Container) -or
+        ([System.IO.File]::GetAttributes($resolvedRoot) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The M16 artifact scan surface is invalid."
+    }
+
+    $scannerIoRoot = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($m16CaptureRoot, "scanner-io"))
+    if (-not (Test-Path -LiteralPath $scannerIoRoot -PathType Container) -or
+        ([System.IO.File]::GetAttributes($scannerIoRoot) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The M16 scanner I/O root is invalid."
+    }
+    $standardOutputPath = [System.IO.Path]::Combine($scannerIoRoot, "$SurfaceId.stdout")
+    $standardErrorPath = [System.IO.Path]::Combine($scannerIoRoot, "$SurfaceId.stderr")
+    if ((Test-Path -LiteralPath $standardOutputPath) -or
+        (Test-Path -LiteralPath $standardErrorPath)) {
+        throw "The M16 scanner output already exists."
+    }
+
+    $argumentValues = @(
+        $testingAssemblyPath,
+        "scan-release-artifacts",
+        $resolvedRoot,
+        "M16",
+        "FINAL_ARTIFACTS")
+    foreach ($argumentValue in $argumentValues) {
+        if ([string]::IsNullOrWhiteSpace($argumentValue) -or $argumentValue.Contains('"')) {
+            throw "An M16 scanner argument is invalid."
+        }
+    }
+    $scannerArguments = ($argumentValues | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $scannerProcess = Invoke-WindowsBoundedProcess `
+        -FilePath ([System.IO.Path]::GetFullPath($DotNetPath)) `
+        -ArgumentString $scannerArguments `
+        -WorkingDirectory $repositoryRoot `
+        -StandardOutputPath $standardOutputPath `
+        -StandardErrorPath $standardErrorPath `
+        -TimeoutMilliseconds 600000 `
+        -MaximumOutputBytes 131072
+    if ([int]$scannerProcess.ExitCode -ne 0) {
+        throw "The M16 artifact scanner rejected a final surface."
+    }
+
+    foreach ($outputPath in @($standardOutputPath, $standardErrorPath)) {
+        if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf) -or
+            ([System.IO.File]::GetAttributes($outputPath) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "The M16 scanner output is invalid."
+        }
+    }
+    $standardOutputFile = Get-Item -LiteralPath $standardOutputPath -Force
+    $standardErrorFile = Get-Item -LiteralPath $standardErrorPath -Force
+    if ($standardOutputFile.Length -le 0 -or $standardOutputFile.Length -gt 4096 -or
+        $standardErrorFile.Length -ne 0) {
+        throw "The M16 scanner output contract is invalid."
+    }
+
+    $scannerRecord = Read-WindowsM16FinalStrictJson `
+        -Path $standardOutputPath `
+        -InputRoot $m16CaptureRoot
+    $report = $scannerRecord.Value
+    $allowedProperties = @(
+        "schemaVersion",
+        "profile",
+        "result",
+        "fileCount",
+        "directoryCount",
+        "totalFileBytes",
+        "inventorySha256",
+        "findingCount")
+    Assert-WindowsM16FinalExactPropertySet `
+        -Value $report `
+        -Expected $allowedProperties
+    if ($report.schemaVersion -isnot [int] -or $report.schemaVersion -ne 1 -or
+        $report.profile -isnot [string] -or $report.profile -cne "M16ReleaseCandidate" -or
+        $report.result -isnot [string] -or $report.result -cne "clean" -or
+        $report.fileCount -isnot [int] -or $report.fileCount -le 0 -or
+        $report.directoryCount -isnot [int] -or $report.directoryCount -lt 0 -or
+        ($report.totalFileBytes -isnot [int] -and $report.totalFileBytes -isnot [long]) -or
+        [long]$report.totalFileBytes -le 0 -or
+        $report.inventorySha256 -isnot [string] -or
+        -not [System.Text.RegularExpressions.Regex]::IsMatch(
+            $report.inventorySha256,
+            '\A[0-9a-f]{64}\z') -or
+        $report.findingCount -isnot [int] -or $report.findingCount -ne 0) {
+        throw "The M16 scanner report schema is invalid."
+    }
+
+    return [pscustomobject][ordered]@{
+        SurfaceId = $SurfaceId
+        SchemaVersion = 1
+        Profile = "M16ReleaseCandidate"
+        Result = "clean"
+        FileCount = [int]$report.fileCount
+        DirectoryCount = [int]$report.directoryCount
+        TotalFileBytes = [long]$report.totalFileBytes
+        InventorySha256 = [string]$report.inventorySha256
+        FindingCount = 0
+    }
+}
+
 function Remove-ExactDevelopmentPackage {
     $packages = @(
         Get-AppxPackage -Name $expectedName -ErrorAction SilentlyContinue |
@@ -1910,7 +2731,7 @@ function Read-ExactOnboardingLocator {
             $uri.Scheme -cne "https" -or
             -not [System.Net.IPAddress]::IsLoopback(
                 [System.Net.IPAddress]::Parse($uri.Host)) -or
-            $uri.AbsolutePath -cne "/synthetic-onboarding.m3u" -or
+            $uri.AbsolutePath -cne $expectedOnboardingPlaylistPath -or
             -not [string]::IsNullOrEmpty($uri.Query) -or
             -not [string]::IsNullOrEmpty($uri.Fragment) -or
             -not [string]::IsNullOrEmpty($uri.UserInfo)) {
@@ -3365,13 +4186,33 @@ function Wait-PackagedDeletedSourceState {
     throw "The deleted source remained admitted to the packaged catalog."
 }
 
+$packageIdentityMutex = $null
 try {
-    foreach ($staleEvidencePath in @(
+    if ($EmitM16FinalArtifactSurfaces) {
+        Assert-WindowsPackageIdentityMutexOwnedByController
+    }
+    else {
+        $packageIdentityMutex = Enter-WindowsPackageIdentityMutex
+    }
+    New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+
+try {
+    if ($EmitM16FinalArtifactSurfaces) {
+        $m16CommitSha = Get-M16CleanRepositoryCommit
+    }
+
+    $staleEvidencePaths = @(
         $evidencePath,
         $failureEvidencePath,
         $packageSbomPath,
         $packageSbomSummaryPath,
-        $wackEvidencePath)) {
+        $wackEvidencePath)
+    if ($EmitM16FinalArtifactSurfaces) {
+        $staleEvidencePaths += @(
+            $m16SurfaceEvidencePath,
+            $m16BindingEvidencePath)
+    }
+    foreach ($staleEvidencePath in $staleEvidencePaths) {
         if (Test-Path -LiteralPath $staleEvidencePath) {
             Remove-Item -LiteralPath $staleEvidencePath -Force -ErrorAction Stop
         }
@@ -3399,6 +4240,21 @@ try {
 
     [xml]$sourceManifest = Get-Content -Raw $sourceManifestPath
     Assert-ManifestPolicy -Manifest $sourceManifest
+    $sourceIdentity = $sourceManifest.SelectSingleNode(
+        "/*[local-name()='Package']/*[local-name()='Identity']")
+    $sourcePackageVersion = [version]$sourceIdentity.GetAttribute("Version")
+    $expectedPackageFullName =
+        [IptvSuite.PackageSmoke.PackagedApplicationActivator]::GetPackageFullName(
+            $expectedName,
+            $expectedPublisher,
+            [ushort]$sourcePackageVersion.Major,
+            [ushort]$sourcePackageVersion.Minor,
+            [ushort]$sourcePackageVersion.Build,
+            [ushort]$sourcePackageVersion.Revision)
+    if ($expectedPackageFullName -cnotmatch
+            '\AIptvSuite\.LocalDev\.6f0d9a64_[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+_x64__[0-9a-z]{13}\z') {
+        throw "The expected disposable package full name is invalid."
+    }
 
     if (Get-ChildItem -Path (Join-Path $repositoryRoot "apps") -Filter "Package.StoreAssociation.xml" -Recurse -File) {
         throw "Package.StoreAssociation.xml is forbidden for the disposable M1 identity."
@@ -3406,10 +4262,14 @@ try {
 
     New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $packageOutput -Force | Out-Null
+    if ($EmitM16FinalArtifactSurfaces) {
+        Initialize-M16CaptureRoot
+    }
 
     $certificate = New-SelfSignedCertificate `
         -Type Custom `
         -Subject $expectedPublisher `
+        -FriendlyName $certificateFriendlyName `
         -CertStoreLocation "Cert:\CurrentUser\My" `
         -KeyAlgorithm RSA `
         -KeyLength 2048 `
@@ -3424,6 +4284,11 @@ try {
 
     if (-not $certificate.HasPrivateKey -or $certificate.Subject -ne $expectedPublisher) {
         throw "The local signing certificate does not match the manifest publisher."
+    }
+    if ($EmitM16FinalArtifactSurfaces) {
+        Write-M16CleanupOwnershipValue `
+            -Name "signing-certificate.thumbprint" `
+            -Value $certificate.Thumbprint
     }
 
     $enhancedKeyUsageExtension = $certificate.Extensions |
@@ -3460,6 +4325,15 @@ try {
     if ($LASTEXITCODE -ne 0 -or
         -not (Test-Path -LiteralPath $playbackUiHarnessAssemblyPath -PathType Leaf)) {
         throw "The playback UI acceptance harness build failed."
+    }
+
+    if ($EmitM16FinalArtifactSurfaces) {
+        & $DotNetPath build $testingProjectPath -c $Configuration -p:Platform=x64 `
+            --no-restore --nologo -m:1 -nr:false
+        if ($LASTEXITCODE -ne 0 -or
+            -not (Test-Path -LiteralPath $testingAssemblyPath -PathType Leaf)) {
+            throw "The M16 artifact scanner build failed."
+        }
     }
 
     $packages = @(
@@ -3528,6 +4402,11 @@ try {
         }).Count -gt 0
 
     Remove-ExactDevelopmentPackage
+    if ($EmitM16FinalArtifactSurfaces) {
+        Write-M16CleanupOwnershipValue `
+            -Name "package-registration.intent" `
+            -Value $expectedPackageFullName
+    }
     $installAttempted = $true
     if ($compatibleRuntimeDependencyRegistered) {
         Write-Host "Compatible Windows App Runtime dependency is already registered; package install will reuse it."
@@ -3558,7 +4437,7 @@ try {
 
     $installedPackageFullName = [string]$installedPackage.PackageFullName
     $installedPackageLocation = [string]$installedPackage.InstallLocation
-    if ([string]::IsNullOrWhiteSpace($installedPackageFullName) -or
+    if ($installedPackageFullName -cne $expectedPackageFullName -or
         [string]::IsNullOrWhiteSpace($installedPackageLocation) -or
         -not [System.IO.Path]::IsPathRooted($installedPackageLocation)) {
         throw "The exact installed development package has no auditable install-root binding."
@@ -3628,6 +4507,9 @@ try {
         $onboardingControlDirectory,
         $onboardingPipeName
     )
+    if ($EmitM16FinalArtifactSurfaces) {
+        $onboardingHarnessArgumentValues += $testCanaryMarker
+    }
     foreach ($argumentValue in $onboardingHarnessArgumentValues) {
         if ([string]::IsNullOrWhiteSpace($argumentValue) -or $argumentValue.Contains('"')) {
             throw "An onboarding acceptance harness argument is invalid."
@@ -3747,6 +4629,11 @@ try {
         "Cert:\LocalMachine\Root\$onboardingLoopbackCertificateThumbprint"
     if (Test-Path -LiteralPath $onboardingRootCertificatePath) {
         throw "The exact onboarding acceptance certificate is already trusted."
+    }
+    if ($EmitM16FinalArtifactSurfaces) {
+        Write-M16CleanupOwnershipValue `
+            -Name "onboarding-loopback.thumbprint" `
+            -Value $onboardingLoopbackCertificateThumbprint
     }
     $onboardingLoopbackCertificateImported = $true
     try {
@@ -4726,6 +5613,11 @@ try {
         "Cert:\LocalMachine\Root\$playbackLoopbackCertificateThumbprint"
     if (Test-Path -LiteralPath $playbackRootCertificatePath) {
         throw "The exact playback acceptance certificate is already trusted."
+    }
+    if ($EmitM16FinalArtifactSurfaces) {
+        Write-M16CleanupOwnershipValue `
+            -Name "playback-loopback.thumbprint" `
+            -Value $playbackLoopbackCertificateThumbprint
     }
     $playbackLoopbackCertificateImported = $true
     try {
@@ -6190,6 +7082,119 @@ try {
         throw "The packaged install-root runtime audit segmentation is incomplete."
     }
 
+    if ($EmitM16FinalArtifactSurfaces) {
+        if ($packageSbomResult.ApplicationPackageSha256 -cne $packageSha256) {
+            throw "The M16 exact package does not match its package-bound SBOM."
+        }
+
+        $ownedAppDataSurfaceRoot = [System.IO.Path]::GetFullPath(
+            (Join-Path $env:LOCALAPPDATA "Packages\$packageFamilyName"))
+        if (-not (Test-Path -LiteralPath $ownedAppDataSurfaceRoot -PathType Container) -or
+            (([System.IO.File]::GetAttributes($ownedAppDataSurfaceRoot) -band
+                    [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "The exact package app-data surface is unavailable or unsafe."
+        }
+
+        $exactPackageSurfaceRoot = [System.IO.Path]::GetFullPath(
+            [System.IO.Path]::Combine($m16CaptureRoot, "exact-package"))
+        $expectedExactPackageSurfaceRoot = [System.IO.Path]::GetFullPath(
+            [System.IO.Path]::Combine(
+                [System.IO.Path]::GetFullPath($m16CaptureRoot),
+                "exact-package"))
+        if (-not $exactPackageSurfaceRoot.Equals(
+                $expectedExactPackageSurfaceRoot,
+                [System.StringComparison]::OrdinalIgnoreCase) -or
+            (Test-Path -LiteralPath $exactPackageSurfaceRoot) -or
+            (($packages[0].Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "The M16 exact-package staging surface is invalid."
+        }
+        [System.IO.Directory]::CreateDirectory($exactPackageSurfaceRoot) | Out-Null
+        if (([System.IO.File]::GetAttributes($exactPackageSurfaceRoot) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "The M16 exact-package staging surface is unsafe."
+        }
+
+        $stagedPackagePath = [System.IO.Path]::Combine(
+            $exactPackageSurfaceRoot,
+            "package.msix")
+        Copy-Item -LiteralPath $packages[0].FullName -Destination $stagedPackagePath
+        $stagedPackageLock = $null
+        try {
+            $stagedPackageLock = [System.IO.File]::Open(
+                $stagedPackagePath,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::Read)
+            if (-not (Test-Path -LiteralPath $stagedPackagePath -PathType Leaf) -or
+                (([System.IO.File]::GetAttributes($stagedPackagePath) -band
+                        [System.IO.FileAttributes]::ReparsePoint) -ne 0) -or
+                (Get-FileHash -LiteralPath $stagedPackagePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                    $packageSha256) {
+                throw "The staged M16 package is not bound to the signed package bytes."
+            }
+            Expand-MsixForInspection `
+                -PackagePath $stagedPackagePath `
+                -DestinationPath ([System.IO.Path]::Combine(
+                    $exactPackageSurfaceRoot,
+                    "expanded"))
+
+            $supportArtifactSurface = New-M16ReleaseAcceptanceSupportArtifact `
+                -PackageSha256 $packageSha256 `
+                -DestinationDirectory ([System.IO.Path]::Combine(
+                    $m16CaptureRoot,
+                    "support-artifact"))
+
+            $ownedAppDataSurfaceReport = Invoke-M16ReleaseSurfaceScan `
+                -SurfaceId "owned-app-data" `
+                -RootPath $ownedAppDataSurfaceRoot
+            $exactPackageSurfaceReport = Invoke-M16ReleaseSurfaceScan `
+                -SurfaceId "exact-package" `
+                -RootPath $exactPackageSurfaceRoot
+            $supportArtifactSurfaceReport = Invoke-M16ReleaseSurfaceScan `
+                -SurfaceId "support-artifact" `
+                -RootPath $supportArtifactSurface.RootPath
+            $m16PostScanPackageSha256 = (Get-FileHash `
+                    -LiteralPath $stagedPackagePath `
+                    -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($m16PostScanPackageSha256 -cne $packageSha256) {
+                throw "The staged M16 package changed during its exact-package scan."
+            }
+            $supportArtifactAfterScan = Assert-M16ReleaseAcceptanceSupportArtifact `
+                -Path $supportArtifactSurface.FilePath `
+                -ExpectedArtifact $supportArtifactSurface.ExpectedArtifact `
+                -ExpectedSha256 $supportArtifactSurface.Sha256
+            if ($supportArtifactAfterScan.Sha256 -cne $supportArtifactSurface.Sha256) {
+                throw "The M16 support artifact changed during its scan."
+            }
+        }
+        finally {
+            if ($null -ne $stagedPackageLock) {
+                $stagedPackageLock.Dispose()
+            }
+        }
+        $m16SurfaceReports = @(
+            $ownedAppDataSurfaceReport,
+            $exactPackageSurfaceReport,
+            $supportArtifactSurfaceReport)
+
+        [long]$m16AggregateEntryCount = 0
+        [long]$m16AggregateFileBytes = 0
+        foreach ($surfaceReport in $m16SurfaceReports) {
+            $m16AggregateEntryCount +=
+                [long]$surfaceReport.FileCount + [long]$surfaceReport.DirectoryCount
+            $m16AggregateFileBytes += [long]$surfaceReport.TotalFileBytes
+        }
+        if ($m16SurfaceReports.Count -ne 3 -or
+            $m16SurfaceReports[0].SurfaceId -cne "owned-app-data" -or
+            $m16SurfaceReports[1].SurfaceId -cne "exact-package" -or
+            $m16SurfaceReports[2].SurfaceId -cne "support-artifact" -or
+            $m16AggregateEntryCount -gt 25000 -or
+            $m16AggregateFileBytes -gt 8589934592) {
+            throw "The M16 package-side surface aggregate is invalid or exceeds its fixed bounds."
+        }
+        Assert-M16RepositoryStable -ExpectedCommit $m16CommitSha
+    }
+
     $packageFileName = $packages[0].Name
     Remove-ExactDevelopmentPackage
 
@@ -6710,6 +7715,14 @@ finally {
     }
 }
 
+if ($EmitM16FinalArtifactSurfaces -and
+    ($null -ne $primaryFailure -or $cleanupFailures.Count -ne 0)) {
+    Invoke-CleanupStep `
+        -Failures $cleanupFailures `
+        -Name "Remove failed M16 final-artifact capture" `
+        -Action { Remove-ExactM16CaptureRoot }
+}
+
 if ($null -ne $primaryFailure -or $cleanupFailures.Count -ne 0) {
     $failureMessage = if ($null -ne $primaryFailure) {
         $primaryFailure.Exception.Message
@@ -6743,6 +7756,45 @@ if ($null -ne $primaryFailure -or $cleanupFailures.Count -ne 0) {
 }
 
 try {
+    if ($EmitM16FinalArtifactSurfaces) {
+        if ($null -eq $m16SurfaceReports -or $m16SurfaceReports.Count -ne 3 -or
+            $m16PostScanPackageSha256 -cne $packageSha256) {
+            throw "The M16 package-side surface reports are incomplete."
+        }
+        Assert-M16RepositoryStable -ExpectedCommit $m16CommitSha
+        $m16BindingEvidence = [ordered]@{
+            SchemaVersion = 1
+            EvidenceKind = "PackageBoundFinalArtifactBinding"
+            RunId = $runId
+            CommitSha = $m16CommitSha
+            PackageSha256 = $m16PostScanPackageSha256
+            PackageSbomApplicationPackageSha256 =
+                $packageSbomResult.ApplicationPackageSha256
+            ExactPackageInventorySha256 =
+                $m16SurfaceReports[1].InventorySha256
+            PostScanPackageRehashPassed = $true
+        }
+        $m16SurfaceEvidence = [ordered]@{
+            SchemaVersion = 1
+            Milestone = "M16"
+            EvidenceKind = "PackageBoundFinalArtifactSurfaces"
+            Result = "passed"
+            RunId = $runId
+            CommitSha = $m16CommitSha
+            PackageSha256 = $packageSha256
+            PackageSbomApplicationPackageSha256 =
+                $packageSbomResult.ApplicationPackageSha256
+            ScannerProfile = "M16ReleaseCandidate"
+            Surfaces = @($m16SurfaceReports)
+            SameBuildBindingPassed = $true
+            RepositoryStable = $true
+            RawSurfacesUploaded = $false
+            SupportArtifactScope = "ReleaseAcceptanceOnly"
+        }
+        Write-M16BindingEvidenceAtomically -Value $m16BindingEvidence
+        Write-M16SurfaceEvidenceAtomically -Value $m16SurfaceEvidence
+        Remove-ExactM16CaptureRoot -RetainExactPackage
+    }
     if ($RunWack) {
         Write-JsonAtomically `
             -Value $wackDevelopmentIdentityResult `
@@ -6752,11 +7804,43 @@ try {
 }
 catch {
     $successEvidenceFailure = $_
+    $successEvidenceCleanupFailures = [System.Collections.Generic.List[string]]::new()
+    $partialEvidencePaths = @(
+        $evidencePath,
+        $wackEvidencePath)
+    if ($EmitM16FinalArtifactSurfaces) {
+        $partialEvidencePaths += @(
+            $m16SurfaceEvidencePath,
+            $m16BindingEvidencePath)
+    }
+    foreach ($partialEvidencePath in $partialEvidencePaths) {
+        $ownedPartialEvidencePath = $partialEvidencePath
+        Invoke-CleanupStep `
+            -Failures $successEvidenceCleanupFailures `
+            -Name "Remove partial success evidence" `
+            -Action {
+                if (Test-Path -LiteralPath $ownedPartialEvidencePath -PathType Leaf) {
+                    Remove-Item `
+                        -LiteralPath $ownedPartialEvidencePath `
+                        -Force `
+                        -ErrorAction Stop
+                }
+            }
+    }
+    if ($EmitM16FinalArtifactSurfaces) {
+        Invoke-CleanupStep `
+            -Failures $successEvidenceCleanupFailures `
+            -Name "Remove failed M16 final-artifact capture" `
+            -Action { Remove-ExactM16CaptureRoot }
+    }
     $failureEvidence = [ordered]@{
         RunId         = $runId
         FailedAt      = (Get-Date).ToUniversalTime().ToString("O")
         Configuration = $Configuration
         Error         = "Atomic success-evidence write failed: $($_.Exception.Message)"
+    }
+    if ($successEvidenceCleanupFailures.Count -ne 0) {
+        $failureEvidence.CleanupFailures = @($successEvidenceCleanupFailures)
     }
     try {
         Write-JsonAtomically -Value $failureEvidence -DestinationPath $failureEvidencePath
@@ -6767,7 +7851,19 @@ catch {
             $successEvidenceFailure.Exception)
     }
 
+    if ($successEvidenceCleanupFailures.Count -ne 0) {
+        throw [System.InvalidOperationException]::new(
+            "Success evidence cleanup failed: $($successEvidenceCleanupFailures -join ' | ')",
+            $successEvidenceFailure.Exception)
+    }
+
     throw $successEvidenceFailure
 }
 
 Write-Host $successMessage
+}
+finally {
+    if ($null -ne $packageIdentityMutex) {
+        Exit-WindowsPackageIdentityMutex -Mutex $packageIdentityMutex
+    }
+}

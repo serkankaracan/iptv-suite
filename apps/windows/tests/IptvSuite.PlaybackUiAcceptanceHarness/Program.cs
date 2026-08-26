@@ -26,6 +26,9 @@ internal static class Program
     private const string MediaRouteA = "/direct-h264-aac-a.ts";
     private const string MediaRouteB = "/direct-h264-aac-b.ts";
     private const string OnboardingPlaylistRoute = "/synthetic-onboarding.m3u";
+    private const string M16CanaryOnboardingToken = TestCanary.Marker;
+    private const string M16CanaryOnboardingPlaylistRoute =
+        "/" + TestCanary.Marker + OnboardingPlaylistRoute;
     private const string FixtureId = "iptvsuite-tier-a-synthetic-v1";
     private const string FixtureLicense = "CC0-1.0";
     private const string FixtureFileName = "direct-h264-aac.ts";
@@ -96,6 +99,24 @@ internal static class Program
                     onboardingFixtureRoot,
                     onboardingControlDirectory,
                     pipeName,
+                    OnboardingPlaylistRoute,
+                    cancellation.Token).ConfigureAwait(false);
+            }
+
+            if (args is
+                [OnboardingCommand, string canaryOnboardingFixtureRoot,
+                    string canaryOnboardingControlDirectory, string canaryPipeName,
+                    string canaryToken] &&
+                string.Equals(
+                    canaryToken,
+                    M16CanaryOnboardingToken,
+                    StringComparison.Ordinal))
+            {
+                return await RunOnboardingAsync(
+                    canaryOnboardingFixtureRoot,
+                    canaryOnboardingControlDirectory,
+                    canaryPipeName,
+                    M16CanaryOnboardingPlaylistRoute,
                     cancellation.Token).ConfigureAwait(false);
             }
 
@@ -115,6 +136,7 @@ internal static class Program
         string fixtureRoot,
         string controlDirectory,
         string pipeName,
+        string onboardingPlaylistRoute,
         CancellationToken cancellationToken)
     {
         OnboardingPaths paths = ValidateOnboardingPaths(
@@ -138,7 +160,7 @@ internal static class Program
                 server = await LocalHttpFixtureServer.StartHttpsAsync(
                     new Dictionary<string, FixtureHttpResponse>(StringComparer.Ordinal)
                     {
-                        [OnboardingPlaylistRoute] = new FixtureHttpResponse(
+                        [onboardingPlaylistRoute] = new FixtureHttpResponse(
                             200,
                             "audio/x-mpegurl",
                             playlist,
@@ -187,8 +209,13 @@ internal static class Program
                 transferTimeout.CancelAfter(PhaseTimeout);
                 await pipe.WaitForConnectionAsync(transferTimeout.Token).ConfigureAwait(false);
 
-                byte[] locator = Encoding.UTF8.GetBytes(
-                    new Uri(server.BaseAddress, OnboardingPlaylistRoute).AbsoluteUri);
+                string absolutePlaylistUri = string.Equals(
+                    onboardingPlaylistRoute,
+                    OnboardingPlaylistRoute,
+                    StringComparison.Ordinal)
+                    ? new Uri(server.BaseAddress, OnboardingPlaylistRoute).AbsoluteUri
+                    : new Uri(server.BaseAddress, M16CanaryOnboardingPlaylistRoute).AbsoluteUri;
+                byte[] locator = Encoding.UTF8.GetBytes(absolutePlaylistUri);
                 byte[] length = new byte[sizeof(int)];
                 try
                 {
@@ -211,7 +238,7 @@ internal static class Program
             IReadOnlyList<FixtureHttpRequest> requests = server.Requests;
             int playlistRequestCount = requests.Count(request =>
                 string.Equals(request.Method, "GET", StringComparison.Ordinal) &&
-                string.Equals(request.Path, OnboardingPlaylistRoute, StringComparison.Ordinal));
+                string.Equals(request.Path, onboardingPlaylistRoute, StringComparison.Ordinal));
             int mediaRequestCount = requests.Count(request =>
                 string.Equals(request.Path, MediaRouteA, StringComparison.Ordinal) ||
                 string.Equals(request.Path, MediaRouteB, StringComparison.Ordinal));
@@ -264,7 +291,7 @@ internal static class Program
                             string.Equals(request.Method, "GET", StringComparison.Ordinal) &&
                             string.Equals(
                                 request.Path,
-                                OnboardingPlaylistRoute,
+                                onboardingPlaylistRoute,
                                 StringComparison.Ordinal)),
                         MediaRequestCount: requests.Count(request =>
                             string.Equals(request.Path, MediaRouteA, StringComparison.Ordinal) ||

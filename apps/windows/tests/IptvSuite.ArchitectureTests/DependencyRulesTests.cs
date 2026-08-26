@@ -4680,7 +4680,7 @@ public sealed class DependencyRulesTests
             "run_wack:\n        description: Run the development-identity WACK preflight without closing the final WACK blocker");
         StringAssert.Contains(
             workflow,
-            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_wack }}\n" +
+            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_wack && !inputs.run_m16_final_artifacts }}\n" +
             "        shell: powershell\n" +
             "        run: .\\eng\\Invoke-WindowsPackageSmoke.ps1 -Configuration Release -RunWack");
         StringAssert.Contains(workflow, "name: windows-wack-development-preflight-evidence");
@@ -8021,7 +8021,7 @@ public sealed class DependencyRulesTests
         MatchCollection pinnedUses = Regex.Matches(
             workflow,
             @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
-        Assert.HasCount(15, allUses);
+        Assert.HasCount(16, allUses);
         Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
     }
 
