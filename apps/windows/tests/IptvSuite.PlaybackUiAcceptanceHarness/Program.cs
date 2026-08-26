@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -16,12 +18,14 @@ namespace IptvSuite.PlaybackUiAcceptanceHarness;
 internal static class Program
 {
     private const string Command = "serve-and-seed";
+    private const string OnboardingCommand = "serve-onboarding";
     private const string ExistingCatalogSourceName = "Synthetic 50k source";
     private const string PlaybackSourceName = "00 Synthetic protected playback source";
     private const string PlaybackChannelAName = "Synthetic protected Tier A channel A";
     private const string PlaybackChannelBName = "Synthetic protected Tier A channel B";
     private const string MediaRouteA = "/direct-h264-aac-a.ts";
     private const string MediaRouteB = "/direct-h264-aac-b.ts";
+    private const string OnboardingPlaylistRoute = "/synthetic-onboarding.m3u";
     private const string FixtureId = "iptvsuite-tier-a-synthetic-v1";
     private const string FixtureLicense = "CC0-1.0";
     private const string FixtureFileName = "direct-h264-aac.ts";
@@ -58,13 +62,6 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
-        if (args is not
-            [Command, string catalogDatabasePath, string protectedStorePath,
-                string fixtureRoot, string controlDirectory])
-        {
-            return 2;
-        }
-
         if (!OperatingSystem.IsWindows())
         {
             return 3;
@@ -79,12 +76,30 @@ internal static class Program
         Console.CancelKeyPress += cancelHandler;
         try
         {
-            return await RunAsync(
-                catalogDatabasePath,
-                protectedStorePath,
-                fixtureRoot,
-                controlDirectory,
-                cancellation.Token).ConfigureAwait(false);
+            if (args is
+                [Command, string catalogDatabasePath, string protectedStorePath,
+                    string fixtureRoot, string controlDirectory])
+            {
+                return await RunAsync(
+                    catalogDatabasePath,
+                    protectedStorePath,
+                    fixtureRoot,
+                    controlDirectory,
+                    cancellation.Token).ConfigureAwait(false);
+            }
+
+            if (args is
+                [OnboardingCommand, string onboardingFixtureRoot,
+                    string onboardingControlDirectory, string pipeName])
+            {
+                return await RunOnboardingAsync(
+                    onboardingFixtureRoot,
+                    onboardingControlDirectory,
+                    pipeName,
+                    cancellation.Token).ConfigureAwait(false);
+            }
+
+            return 2;
         }
         catch
         {
@@ -94,6 +109,175 @@ internal static class Program
         {
             Console.CancelKeyPress -= cancelHandler;
         }
+    }
+
+    private static async Task<int> RunOnboardingAsync(
+        string fixtureRoot,
+        string controlDirectory,
+        string pipeName,
+        CancellationToken cancellationToken)
+    {
+        OnboardingPaths paths = ValidateOnboardingPaths(
+            fixtureRoot,
+            controlDirectory,
+            pipeName);
+        LocalHttpFixtureServer? server = null;
+        bool readyPublished = false;
+        bool locatorTransferred = false;
+        bool stopObserved = false;
+        bool stoppedGracefully = false;
+        string? certificateThumbprint = null;
+        int exitCode = 0;
+
+        try
+        {
+            byte[] fixture = LoadValidatedFixture(paths.FixtureRoot);
+            byte[] playlist = BuildOnboardingPlaylist();
+            try
+            {
+                server = await LocalHttpFixtureServer.StartHttpsAsync(
+                    new Dictionary<string, FixtureHttpResponse>(StringComparer.Ordinal)
+                    {
+                        [OnboardingPlaylistRoute] = new FixtureHttpResponse(
+                            200,
+                            "audio/x-mpegurl",
+                            playlist,
+                            SupportsByteRanges: false),
+                        [MediaRouteA] = new FixtureHttpResponse(
+                            200,
+                            "video/mp2t",
+                            fixture,
+                            SupportsByteRanges: true),
+                        [MediaRouteB] = new FixtureHttpResponse(
+                            200,
+                            "video/mp2t",
+                            fixture,
+                            SupportsByteRanges: true),
+                    },
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(playlist);
+                CryptographicOperations.ZeroMemory(fixture);
+            }
+
+            X509Certificate2 certificate = server.Certificate ??
+                throw new InvalidOperationException("The loopback certificate is unavailable.");
+            certificateThumbprint = NormalizeThumbprint(certificate.Thumbprint);
+            WritePublicCertificate(certificate, paths.PublicCertificatePath);
+            WriteJsonAtomically(
+                new OnboardingReadyTicket(
+                    IsReady: true,
+                    CertificateThumbprint: certificateThumbprint),
+                paths.ReadyTicketPath);
+            readyPublished = true;
+
+            await using (var pipe = new NamedPipeServerStream(
+                paths.PipeName,
+                PipeDirection.Out,
+                maxNumberOfServerInstances: 1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly,
+                inBufferSize: 4096,
+                outBufferSize: 4096))
+            {
+                using var transferTimeout = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken);
+                transferTimeout.CancelAfter(PhaseTimeout);
+                await pipe.WaitForConnectionAsync(transferTimeout.Token).ConfigureAwait(false);
+
+                byte[] locator = Encoding.UTF8.GetBytes(
+                    new Uri(server.BaseAddress, OnboardingPlaylistRoute).AbsoluteUri);
+                byte[] length = new byte[sizeof(int)];
+                try
+                {
+                    BinaryPrimitives.WriteInt32LittleEndian(length, locator.Length);
+                    await pipe.WriteAsync(length, transferTimeout.Token).ConfigureAwait(false);
+                    await pipe.WriteAsync(locator, transferTimeout.Token).ConfigureAwait(false);
+                    await pipe.FlushAsync(transferTimeout.Token).ConfigureAwait(false);
+                    locatorTransferred = true;
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(length);
+                    CryptographicOperations.ZeroMemory(locator);
+                }
+            }
+
+            await WaitForOnboardingStopSignalAsync(paths, cancellationToken).ConfigureAwait(false);
+            stopObserved = true;
+
+            IReadOnlyList<FixtureHttpRequest> requests = server.Requests;
+            int playlistRequestCount = requests.Count(request =>
+                string.Equals(request.Method, "GET", StringComparison.Ordinal) &&
+                string.Equals(request.Path, OnboardingPlaylistRoute, StringComparison.Ordinal));
+            int mediaRequestCount = requests.Count(request =>
+                string.Equals(request.Path, MediaRouteA, StringComparison.Ordinal) ||
+                string.Equals(request.Path, MediaRouteB, StringComparison.Ordinal));
+            if (server.RequestCount != 2 ||
+                playlistRequestCount != 2 ||
+                mediaRequestCount != 0 ||
+                server.CompletedResponseCount != 2 ||
+                server.FailureCount != 0)
+            {
+                throw new InvalidDataException(
+                    "The clean-install onboarding transport accounting is invalid.");
+            }
+
+            await server.DisposeAsync().ConfigureAwait(false);
+            stoppedGracefully = true;
+        }
+        catch
+        {
+            exitCode = 1;
+        }
+        finally
+        {
+            if (server is not null && !stoppedGracefully)
+            {
+                try
+                {
+                    await server.DisposeAsync().ConfigureAwait(false);
+                    stoppedGracefully = stopObserved;
+                }
+                catch
+                {
+                    exitCode = 1;
+                }
+            }
+
+            try
+            {
+                IReadOnlyList<FixtureHttpRequest> requests = server?.Requests ?? [];
+                WriteJsonAtomically(
+                    new OnboardingResultTicket(
+                        ReadyPublished: readyPublished,
+                        LocatorTransferred: locatorTransferred,
+                        StopObserved: stopObserved,
+                        StoppedGracefully: stoppedGracefully,
+                        CertificateThumbprint: certificateThumbprint,
+                        RequestCount: server?.RequestCount ?? 0,
+                        CompletedResponseCount: server?.CompletedResponseCount ?? 0,
+                        FailureCount: server?.FailureCount ?? 0,
+                        PlaylistRequestCount: requests.Count(request =>
+                            string.Equals(request.Method, "GET", StringComparison.Ordinal) &&
+                            string.Equals(
+                                request.Path,
+                                OnboardingPlaylistRoute,
+                                StringComparison.Ordinal)),
+                        MediaRequestCount: requests.Count(request =>
+                            string.Equals(request.Path, MediaRouteA, StringComparison.Ordinal) ||
+                            string.Equals(request.Path, MediaRouteB, StringComparison.Ordinal))),
+                    paths.ResultTicketPath);
+            }
+            catch
+            {
+                exitCode = 1;
+            }
+        }
+
+        return exitCode;
     }
 
     private static async Task<int> RunAsync(
@@ -1676,6 +1860,20 @@ internal static class Program
             mediaUriB.AbsoluteUri,
             "\n"));
 
+    private static byte[] BuildOnboardingPlaylist() => Encoding.UTF8.GetBytes(
+        string.Concat(
+            "#EXTM3U\n",
+            "#EXTINF:-1 tvg-id=\"m16-onboarding-a\" group-title=\"Synthetic\",",
+            PlaybackChannelAName,
+            "\n",
+            MediaRouteA,
+            "\n",
+            "#EXTINF:-1 tvg-id=\"m16-onboarding-b\" group-title=\"Synthetic\",",
+            PlaybackChannelBName,
+            "\n",
+            MediaRouteB,
+            "\n"));
+
     private static byte[] LoadValidatedFixture(string fixtureRoot)
     {
         string manifestPath = Path.Combine(fixtureRoot, FixtureManifestName);
@@ -1815,6 +2013,41 @@ internal static class Program
             Path.Combine(controlPath, StreamCancelReadyTicketName),
             Path.Combine(controlPath, StreamCancelVerificationSignalName),
             Path.Combine(controlPath, StreamCancelResultTicketName),
+            Path.Combine(controlPath, PublicCertificateName));
+    }
+
+    private static OnboardingPaths ValidateOnboardingPaths(
+        string fixtureRoot,
+        string controlDirectory,
+        string pipeName)
+    {
+        string fixturePath = Path.TrimEndingDirectorySeparator(
+            NormalizeAbsolutePath(fixtureRoot));
+        string controlPath = Path.TrimEndingDirectorySeparator(
+            NormalizeAbsolutePath(controlDirectory));
+        if (!Directory.Exists(fixturePath) ||
+            !string.Equals(Path.GetFileName(fixturePath), "tier-a", StringComparison.Ordinal) ||
+            !Directory.Exists(controlPath) ||
+            Path.GetFileName(controlPath).Length != 32 ||
+            Path.GetFileName(controlPath).Any(character => !Uri.IsHexDigit(character)) ||
+            Directory.EnumerateFileSystemEntries(controlPath).Any() ||
+            pipeName.Length != "iptvsuite-onboarding-".Length + 32 ||
+            !pipeName.StartsWith("iptvsuite-onboarding-", StringComparison.Ordinal) ||
+            pipeName["iptvsuite-onboarding-".Length..].Any(character =>
+                character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+        {
+            throw new IOException("The clean-install onboarding inputs are invalid.");
+        }
+
+        EnsureNoReparsePoints(fixturePath);
+        EnsureNoReparsePoints(controlPath);
+        return new OnboardingPaths(
+            fixturePath,
+            controlPath,
+            pipeName,
+            Path.Combine(controlPath, ReadyTicketName),
+            Path.Combine(controlPath, ResultTicketName),
+            Path.Combine(controlPath, StopSignalName),
             Path.Combine(controlPath, PublicCertificateName));
     }
 
@@ -2083,6 +2316,33 @@ internal static class Program
         throw new TimeoutException("The bounded acceptance stop phase timed out.");
     }
 
+    private static async Task WaitForOnboardingStopSignalAsync(
+        OnboardingPaths paths,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + PhaseTimeout;
+        string[] allowedNames =
+        [
+            ReadyTicketName,
+            PublicCertificateName,
+            StopSignalName,
+        ];
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AssertAllowedControlEntries(paths.ControlDirectory, allowedNames);
+            if (TryValidateSignal(paths.StopSignalPath))
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        throw new TimeoutException("The bounded onboarding stop phase timed out.");
+    }
+
     private static bool TryValidateSignal(string signalPath)
     {
         if (Directory.Exists(signalPath))
@@ -2187,6 +2447,15 @@ internal static class Program
         string StreamCancelResultTicketPath,
         string PublicCertificatePath);
 
+    private sealed record OnboardingPaths(
+        string FixtureRoot,
+        string ControlDirectory,
+        string PipeName,
+        string ReadyTicketPath,
+        string ResultTicketPath,
+        string StopSignalPath,
+        string PublicCertificatePath);
+
     private sealed record SeedBaseline(
         string ConfigurationReference,
         SnapshotId SnapshotId,
@@ -2265,6 +2534,22 @@ internal static class Program
         bool IsReady,
         bool SeedCompleted,
         string CertificateThumbprint);
+
+    private sealed record OnboardingReadyTicket(
+        bool IsReady,
+        string CertificateThumbprint);
+
+    private sealed record OnboardingResultTicket(
+        bool ReadyPublished,
+        bool LocatorTransferred,
+        bool StopObserved,
+        bool StoppedGracefully,
+        string? CertificateThumbprint,
+        int RequestCount,
+        int CompletedResponseCount,
+        int FailureCount,
+        int PlaylistRequestCount,
+        int MediaRequestCount);
 
     private sealed record ResultTicket(
         bool ReadyPublished,

@@ -51,6 +51,21 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="Errors.Generic" xml:space="preserve"><value>The operation could not be completed safely.</value></data>
+  <data name="Errors.Source.NameRequired" xml:space="preserve"><value>Enter a name for the source.</value></data>
+  <data name="Errors.Source.NameInvalid" xml:space="preserve"><value>The source name contains unsupported characters.</value></data>
+  <data name="Errors.Source.NameTooLong" xml:space="preserve"><value>The source name is too long.</value></data>
+  <data name="Errors.Endpoint.Required" xml:space="preserve"><value>Enter the HTTPS URL for the source.</value></data>
+  <data name="Errors.Endpoint.Malformed" xml:space="preserve"><value>The source URL is not valid.</value></data>
+  <data name="Errors.Endpoint.TooLong" xml:space="preserve"><value>The source URL is too long.</value></data>
+  <data name="Errors.Endpoint.SchemeUnsupported" xml:space="preserve"><value>The source URL uses an unsupported scheme.</value></data>
+  <data name="Errors.Endpoint.InsecureTransportRejected" xml:space="preserve"><value>The source must use a secure HTTPS URL.</value></data>
+  <data name="Errors.Endpoint.UserInfoNotAllowed" xml:space="preserve"><value>Credentials embedded in the source URL are not supported.</value></data>
+  <data name="Errors.Endpoint.FragmentNotAllowed" xml:space="preserve"><value>The source URL must not contain a fragment.</value></data>
+  <data name="Errors.Credentials.UsernameRequired" xml:space="preserve"><value>Enter the account username.</value></data>
+  <data name="Errors.Credentials.PasswordRequired" xml:space="preserve"><value>Enter the account password.</value></data>
+  <data name="Errors.Credentials.Invalid" xml:space="preserve"><value>The account credentials are not valid.</value></data>
+  <data name="Errors.Credentials.TooLong" xml:space="preserve"><value>The account credentials exceed the supported length.</value></data>
+  <data name="Errors.SecretReference.Invalid" xml:space="preserve"><value>The protected source configuration is not valid.</value></data>
   <data name="Errors.Domain.InvariantViolation" xml:space="preserve"><value>The operation could not be completed safely.</value></data>
   <data name="Errors.Network.Unreachable" xml:space="preserve"><value>The source could not be reached. Check your connection and try again.</value></data>
   <data name="Errors.Authentication.Rejected" xml:space="preserve"><value>The source rejected the sign-in details. Check them and try again.</value></data>

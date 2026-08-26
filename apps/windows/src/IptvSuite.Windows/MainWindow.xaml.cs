@@ -77,6 +77,8 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             _mainPage.ConfigureSourceDeletion(
                 RetryPendingSourceCleanupAsync,
                 DeleteSourceAsync);
+            _mainPage.ConfigureSourceOnboarding(
+                _catalogServices.Onboarding.AddAsync);
             _mainPage.FullscreenToggleRequested += MainPage_FullscreenToggleRequested;
             AppWindow.Changed += AppWindow_Changed;
             AppWindow.Closing += AppWindow_Closing;

@@ -34,8 +34,11 @@ public sealed partial class MainPage : Page, IDisposable
     private INetworkAvailabilityHintSource? _networkAvailabilityHintSource;
     private Func<Task<SourceDeletionReconciliationResult>>? _retryPendingSourceCleanup;
     private Func<SourceId, CancellationToken, ValueTask<SourceDeletionResult>>? _deleteSource;
+    private Func<string?, string?, CancellationToken,
+        ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>>? _addRemotePlaylist;
     private ChannelRow? _playbackChannel;
     private ContentDialog? _sourceDeletionDialog;
+    private CancellationTokenSource? _sourceOnboardingCancellation;
     private CancellationTokenSource _logoPageCancellation = new();
     private int _offset;
     private bool _updatingSelectors;
@@ -51,6 +54,8 @@ public sealed partial class MainPage : Page, IDisposable
     private TaskCompletionSource? _catalogOperationsDrained;
     private TaskCompletionSource? _operationsDrained;
     private bool _sourceDeletionOperationPending;
+    private bool _sourceOnboardingOperationPending;
+    private bool _sourceOnboardingPanelOpen;
     private bool _playbackControlGateDisposed;
     private PlaybackSessionSnapshot? _presentedFailureSnapshot;
     private DomainErrorPresentation? _presentedFailure;
@@ -137,6 +142,22 @@ public sealed partial class MainPage : Page, IDisposable
         _deleteSource = deleteSource;
     }
 
+    internal void ConfigureSourceOnboarding(
+        Func<string?, string?, CancellationToken,
+            ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>> addRemotePlaylist)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(addRemotePlaylist);
+        if (_addRemotePlaylist is not null)
+        {
+            throw new InvalidOperationException(
+                "The source-onboarding route is already configured.");
+        }
+
+        _addRemotePlaylist = addRemotePlaylist;
+        UpdateSourceMutationControls();
+    }
+
     internal void SetFullscreenState(bool isFullscreen)
     {
         if (_disposed)
@@ -153,6 +174,9 @@ public sealed partial class MainPage : Page, IDisposable
             : Visibility.Visible;
         HeaderPanel.Visibility = catalogVisibility;
         FilterPanel.Visibility = catalogVisibility;
+        RemotePlaylistOnboardingPanel.Visibility = !isFullscreen && _sourceOnboardingPanelOpen
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         ChannelList.Visibility = catalogVisibility;
         CatalogStatusPanel.Visibility = catalogVisibility;
         CatalogPagingPanel.Visibility = catalogVisibility;
@@ -215,6 +239,7 @@ public sealed partial class MainPage : Page, IDisposable
         _playback.StateChanged += Playback_StateChanged;
         ApplyPlaybackState(_playback.Current);
         await LoadSourcesAsync();
+        UpdateSourceMutationControls();
     }
 
     internal void ReportPendingSourceCleanup()
@@ -224,6 +249,7 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
 
+        HideSourceOnboardingPanel(clearStatus: true);
         _catalogAdmissionReady = false;
         SourceSelector.IsEnabled = false;
         CategorySelector.IsEnabled = false;
@@ -232,6 +258,9 @@ public sealed partial class MainPage : Page, IDisposable
         PreviousButton.IsEnabled = false;
         NextButton.IsEnabled = false;
         DeleteSourceButton.IsEnabled = false;
+        AddRemotePlaylistButton.IsEnabled = false;
+        RemotePlaylistAddButton.IsEnabled = false;
+        RemotePlaylistCancelButton.IsEnabled = false;
         RetryPendingDeletionButton.Visibility = Visibility.Visible;
         RetryPendingDeletionButton.IsEnabled = !_sourceDeletionOperationPending &&
             _retryPendingSourceCleanup is not null;
@@ -258,10 +287,10 @@ public sealed partial class MainPage : Page, IDisposable
         RetryPendingDeletionButton.Visibility = Visibility.Collapsed;
         RetryPendingDeletionButton.IsEnabled = false;
         await LoadSourcesAsync();
-        UpdateSourceDeletionControls();
+        UpdateSourceMutationControls();
     }
 
-    private async Task LoadSourcesAsync()
+    private async Task LoadSourcesAsync(SourceId? preferredSourceId = null)
     {
         using AsyncOperationLease operation = BeginAsyncOperation();
         using CatalogOperationLease catalogOperation = BeginCatalogOperation();
@@ -272,7 +301,12 @@ public sealed partial class MainPage : Page, IDisposable
             IReadOnlyList<CatalogSourceItem> sources = await coordinator.ReadSourcesAsync(_lifetime.Token);
             _updatingSelectors = true;
             SourceSelector.ItemsSource = sources;
-            SourceSelector.SelectedIndex = sources.Count == 0 ? -1 : 0;
+            int preferredIndex = preferredSourceId.HasValue
+                ? sources.ToList().FindIndex(source => source.SourceId.Equals(preferredSourceId.Value))
+                : -1;
+            SourceSelector.SelectedIndex = sources.Count == 0
+                ? -1
+                : Math.Max(0, preferredIndex);
             _updatingSelectors = false;
             if (sources.Count == 0)
             {
@@ -339,6 +373,8 @@ public sealed partial class MainPage : Page, IDisposable
         CategorySelector.IsEnabled = false;
         SearchBox.IsEnabled = false;
         DeleteSourceButton.IsEnabled = false;
+        AddRemotePlaylistButton.IsEnabled = false;
+        RemotePlaylistAddButton.IsEnabled = false;
         return generation;
     }
 
@@ -355,13 +391,169 @@ public sealed partial class MainPage : Page, IDisposable
         SourceSelector.IsEnabled = true;
         CategorySelector.IsEnabled = true;
         SearchBox.IsEnabled = true;
-        UpdateSourceDeletionControls();
+        UpdateSourceMutationControls();
     }
 
     private void UpdatePaging(int totalCount)
     {
         PreviousButton.IsEnabled = _offset > 0;
         NextButton.IsEnabled = _offset + PageSize < totalCount;
+    }
+
+    private void AddRemotePlaylistButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_disposed || !_catalogAdmissionReady || _addRemotePlaylist is null ||
+            _sourceDeletionOperationPending || _sourceOnboardingOperationPending ||
+            LoadingIndicator.IsActive)
+        {
+            return;
+        }
+
+        _sourceOnboardingPanelOpen = true;
+        RemotePlaylistOnboardingPanel.Visibility = _isFullscreen
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        RemotePlaylistStatusText.Text = string.Empty;
+        RemotePlaylistAuthorizationCheckBox.IsChecked = false;
+        UpdateSourceMutationControls();
+        _ = RemotePlaylistSourceNameTextBox.Focus(FocusState.Programmatic);
+    }
+
+    private void RemotePlaylistAuthorizationCheckBox_Changed(
+        object sender,
+        RoutedEventArgs e) =>
+        UpdateSourceMutationControls();
+
+    private async void RemotePlaylistAddButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_disposed || !_catalogAdmissionReady ||
+            !_sourceOnboardingPanelOpen || LoadingIndicator.IsActive ||
+            RemotePlaylistAuthorizationCheckBox.IsChecked is not true ||
+            _addRemotePlaylist is not { } addRemotePlaylist ||
+            !TryBeginSourceOnboardingOperation())
+        {
+            return;
+        }
+
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        string? displayName = RemotePlaylistSourceNameTextBox.Text;
+        string? locator = RemotePlaylistLocatorTextBox.Text;
+        RemotePlaylistSourceNameTextBox.Text = string.Empty;
+        RemotePlaylistLocatorTextBox.Text = string.Empty;
+        RemotePlaylistAuthorizationCheckBox.IsChecked = false;
+        RemotePlaylistStatusText.Text = "Validating and importing the authorized source.";
+        try
+        {
+            CancellationToken cancellationToken =
+                _sourceOnboardingCancellation?.Token ?? _lifetime.Token;
+            DomainResult<RemotePlaylistSourceOnboardingResult> result =
+                await addRemotePlaylist(displayName, locator, cancellationToken);
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (!result.IsSuccess)
+            {
+                DomainErrorPresentation? presentation = _domainErrorPresenter?.Present(
+                    result.Error!,
+                    ReadNetworkAvailabilityHint());
+                RemotePlaylistStatusText.Text = presentation is null
+                    ? "The source could not be added safely."
+                    : $"{presentation.Message} {presentation.OperationIdLabel}: " +
+                        presentation.OperationId.Value;
+                await LoadSourcesAsync();
+                return;
+            }
+
+            SourceId sourceId = result.Value!.SourceId;
+            HideSourceOnboardingPanel(clearStatus: true);
+            ResetLogoPageCancellation();
+            ClearCatalogView();
+            await LoadSourcesAsync(sourceId);
+        }
+        catch (OperationCanceledException) when (
+            _sourceOnboardingCancellation?.IsCancellationRequested is true ||
+            _lifetime.IsCancellationRequested)
+        {
+            if (!_disposed)
+            {
+                RemotePlaylistStatusText.Text = "Source import was cancelled.";
+                await LoadSourcesAsync();
+            }
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            if (!_disposed)
+            {
+                RemotePlaylistStatusText.Text =
+                    "The source could not be added safely.";
+                await LoadSourcesAsync();
+            }
+        }
+        finally
+        {
+            displayName = null;
+            locator = null;
+            EndSourceOnboardingOperation();
+        }
+    }
+
+    private void RemotePlaylistCancelButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOnboardingOperationPending)
+        {
+            RemotePlaylistStatusText.Text = "Cancelling source import.";
+            RemotePlaylistCancelButton.IsEnabled = false;
+            _sourceOnboardingCancellation?.Cancel();
+            return;
+        }
+
+        HideSourceOnboardingPanel(clearStatus: true);
+        UpdateSourceMutationControls();
+        _ = AddRemotePlaylistButton.Focus(FocusState.Programmatic);
+    }
+
+    private bool TryBeginSourceOnboardingOperation()
+    {
+        if (_disposed || !_catalogAdmissionReady || LoadingIndicator.IsActive ||
+            !_sourceOnboardingPanelOpen ||
+            _sourceOnboardingOperationPending || _sourceDeletionOperationPending ||
+            _addRemotePlaylist is null)
+        {
+            return false;
+        }
+
+        _sourceOnboardingOperationPending = true;
+        _sourceOnboardingCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetime.Token);
+        UpdateSourceMutationControls();
+        return true;
+    }
+
+    private void EndSourceOnboardingOperation()
+    {
+        CancellationTokenSource? cancellation = _sourceOnboardingCancellation;
+        _sourceOnboardingCancellation = null;
+        _sourceOnboardingOperationPending = false;
+        cancellation?.Dispose();
+        if (!_disposed)
+        {
+            UpdateSourceMutationControls();
+        }
+    }
+
+    private void HideSourceOnboardingPanel(bool clearStatus)
+    {
+        _sourceOnboardingPanelOpen = false;
+        RemotePlaylistOnboardingPanel.Visibility = Visibility.Collapsed;
+        RemotePlaylistSourceNameTextBox.Text = string.Empty;
+        RemotePlaylistLocatorTextBox.Text = string.Empty;
+        RemotePlaylistAuthorizationCheckBox.IsChecked = false;
+        if (clearStatus)
+        {
+            RemotePlaylistStatusText.Text = string.Empty;
+        }
     }
 
     private async void DeleteSourceButton_Click(object sender, RoutedEventArgs e)
@@ -565,34 +757,48 @@ public sealed partial class MainPage : Page, IDisposable
 
     private bool TryBeginSourceDeletionOperation()
     {
-        if (_sourceDeletionOperationPending)
+        if (_sourceDeletionOperationPending || _sourceOnboardingOperationPending ||
+            _sourceOnboardingPanelOpen)
         {
             return false;
         }
 
         _sourceDeletionOperationPending = true;
-        DeleteSourceButton.IsEnabled = false;
-        RetryPendingDeletionButton.IsEnabled = false;
+        UpdateSourceMutationControls();
         return true;
     }
 
     private void EndSourceDeletionOperation()
     {
         _sourceDeletionOperationPending = false;
-        UpdateSourceDeletionControls();
+        UpdateSourceMutationControls();
     }
 
-    private void UpdateSourceDeletionControls()
+    private void UpdateSourceMutationControls()
     {
-        DeleteSourceButton.IsEnabled = !_disposed &&
+        bool mutationIdle = !_disposed &&
             !_sourceDeletionOperationPending &&
-            _catalogAdmissionReady &&
+            !_sourceOnboardingOperationPending &&
+            !LoadingIndicator.IsActive;
+        bool commonAdmission = mutationIdle && _catalogAdmissionReady;
+        AddRemotePlaylistButton.IsEnabled = commonAdmission &&
+            _addRemotePlaylist is not null &&
+            !_sourceOnboardingPanelOpen;
+        DeleteSourceButton.IsEnabled = commonAdmission &&
+            !_sourceOnboardingPanelOpen &&
             _deleteSource is not null &&
             SourceSelector.SelectedItem is CatalogSourceItem;
-        RetryPendingDeletionButton.IsEnabled = !_disposed &&
-            !_sourceDeletionOperationPending &&
+        RetryPendingDeletionButton.IsEnabled = mutationIdle &&
+            !_sourceOnboardingPanelOpen &&
             RetryPendingDeletionButton.Visibility == Visibility.Visible &&
             _retryPendingSourceCleanup is not null;
+        RemotePlaylistSourceNameTextBox.IsEnabled = !_sourceOnboardingOperationPending;
+        RemotePlaylistLocatorTextBox.IsEnabled = !_sourceOnboardingOperationPending;
+        RemotePlaylistAuthorizationCheckBox.IsEnabled = !_sourceOnboardingOperationPending;
+        RemotePlaylistAddButton.IsEnabled = commonAdmission &&
+            _sourceOnboardingPanelOpen &&
+            RemotePlaylistAuthorizationCheckBox.IsChecked is true;
+        RemotePlaylistCancelButton.IsEnabled = _sourceOnboardingPanelOpen;
     }
 
     private void ClearCatalogView()
@@ -621,7 +827,7 @@ public sealed partial class MainPage : Page, IDisposable
         object sender,
         SelectionChangedEventArgs e)
     {
-        UpdateSourceDeletionControls();
+        UpdateSourceMutationControls();
         if (!_updatingSelectors)
         {
             _offset = 0;
@@ -1242,6 +1448,8 @@ public sealed partial class MainPage : Page, IDisposable
         _sourceDeletionDialog = null;
         _disposed = true;
         _catalogAdmissionReady = false;
+        _sourceOnboardingCancellation?.Cancel();
+        HideSourceOnboardingPanel(clearStatus: true);
         if (_playback is not null)
         {
             _playback.StateChanged -= Playback_StateChanged;
@@ -1257,6 +1465,7 @@ public sealed partial class MainPage : Page, IDisposable
         _coordinator?.Dispose();
         _retryPendingSourceCleanup = null;
         _deleteSource = null;
+        _addRemotePlaylist = null;
         FullscreenToggleRequested = null;
         _lifetime.Dispose();
         _logoPageCancellation.Dispose();

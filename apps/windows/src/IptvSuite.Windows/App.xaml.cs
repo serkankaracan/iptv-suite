@@ -20,7 +20,7 @@ public partial class App : Microsoft.UI.Xaml.Application
         ISecretStore secretStore = secretStoreInitialization.Store ??
             throw new InvalidOperationException("Protected storage is unavailable.");
         _secretStore = secretStore;
-        WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create();
+        WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create(secretStore);
         MainWindow? window = null;
         try
         {

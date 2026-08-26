@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,6 +10,19 @@ using IptvSuite.Domain;
 using Microsoft.Data.Sqlite;
 
 namespace IptvSuite.Infrastructure;
+
+internal enum SqliteImportCommitDisposition
+{
+    NotCommitted,
+    Indeterminate,
+    Committed,
+}
+
+internal enum SqliteRemoteImportFaultPoint
+{
+    None,
+    SessionTeardown,
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDisposable
@@ -20,6 +34,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private readonly string _databasePath;
     private readonly SqliteCatalogDatabase _database;
     private readonly bool _measureWriteAllocations;
+    private readonly SqliteRemoteImportFaultPoint _faultPoint;
     private readonly Dictionary<string, CategoryBinding> _categories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _stableKeyOccurrences = new(StringComparer.Ordinal);
     private readonly HashSet<Nonce96> _nonces = [];
@@ -52,16 +67,33 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private long _measuredLocatorAllocatedBytes;
     private long _measuredChannelAllocatedBytes;
     private long _measuredHashAllocatedBytes;
+    private SqliteImportCommitDisposition _commitDisposition;
+    private int? _committedChannelCount;
+    private int? _committedWarningCount;
 
     internal SqliteRemoteM3uImportSink(string databasePath) : this(databasePath, false)
     {
     }
 
     internal SqliteRemoteM3uImportSink(string databasePath, bool measureWriteAllocations)
+        : this(databasePath, measureWriteAllocations, SqliteRemoteImportFaultPoint.None)
     {
+    }
+
+    internal SqliteRemoteM3uImportSink(
+        string databasePath,
+        bool measureWriteAllocations,
+        SqliteRemoteImportFaultPoint faultPoint)
+    {
+        if (!Enum.IsDefined(faultPoint))
+        {
+            throw new ArgumentOutOfRangeException(nameof(faultPoint));
+        }
+
         _database = new SqliteCatalogDatabase(databasePath);
         _databasePath = Path.GetFullPath(databasePath);
         _measureWriteAllocations = measureWriteAllocations;
+        _faultPoint = faultPoint;
     }
 
     internal long MeasuredWriteAllocatedBytes => _measuredWriteAllocatedBytes;
@@ -69,6 +101,9 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     internal long MeasuredLocatorAllocatedBytes => _measuredLocatorAllocatedBytes;
     internal long MeasuredChannelAllocatedBytes => _measuredChannelAllocatedBytes;
     internal long MeasuredHashAllocatedBytes => _measuredHashAllocatedBytes;
+    internal SqliteImportCommitDisposition CommitDisposition => _commitDisposition;
+    internal int? CommittedChannelCount => _committedChannelCount;
+    internal int? CommittedWarningCount => _committedWarningCount;
 
     public async ValueTask<DomainResult<bool>> BeginAsync(
         ContentSource source,
@@ -353,7 +388,11 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     """, cancellationToken,
                     ("$items", _written), ("$warnings", _warnings), ("$run", Id(_syncRunId)),
                     ("$completed", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))).ConfigureAwait(false);
+                _commitDisposition = SqliteImportCommitDisposition.Indeterminate;
                 await _transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                _commitDisposition = SqliteImportCommitDisposition.Committed;
+                _committedChannelCount = _written;
+                _committedWarningCount = _warnings;
                 await DisposeSessionAsync().ConfigureAwait(false);
                 return DomainResult.Success(true);
             }
@@ -375,15 +414,16 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
 
     public async ValueTask AbortAsync(CancellationToken cancellationToken)
     {
-        if (_transaction is not null)
+        if (_transaction is not null &&
+            _commitDisposition == SqliteImportCommitDisposition.NotCommitted)
         {
             try
             {
                 await _transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (SqliteException)
+            catch (Exception exception) when (exception is SqliteException or OperationCanceledException)
             {
-                // Dispose still closes the transaction and connection fail-closed.
+                _commitDisposition = SqliteImportCommitDisposition.Indeterminate;
             }
         }
 
@@ -670,21 +710,50 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         _categoryInsert = null;
         _locatorInsert = null;
         _channelInsert = null;
-        if (_transaction is not null)
+        Exception? cleanupFailure = null;
+        if (_transaction is { } transaction)
         {
-            await _transaction.DisposeAsync().ConfigureAwait(false);
+            _transaction = null;
+            try
+            {
+                await transaction.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsRecoverableCleanup(exception))
+            {
+                cleanupFailure = exception;
+            }
         }
 
-        if (_connection is not null)
+        if (_connection is { } connection)
         {
-            await _connection.DisposeAsync().ConfigureAwait(false);
+            _connection = null;
+            try
+            {
+                await connection.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsRecoverableCleanup(exception))
+            {
+                cleanupFailure ??= exception;
+            }
         }
 
-        _transaction = null;
-        _connection = null;
-        _contentHash?.Dispose();
+        try
+        {
+            _contentHash?.Dispose();
+        }
+        catch (Exception exception) when (IsRecoverableCleanup(exception))
+        {
+            cleanupFailure ??= exception;
+        }
         _contentHash = null;
-        _aes?.Dispose();
+        try
+        {
+            _aes?.Dispose();
+        }
+        catch (Exception exception) when (IsRecoverableCleanup(exception))
+        {
+            cleanupFailure ??= exception;
+        }
         _aes = null;
         _categories.Clear();
         _stableKeyOccurrences.Clear();
@@ -708,7 +777,23 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         Zero(_aadBuffer);
         _dek = null;
         _wrappedDek = null;
+
+        if (_faultPoint is SqliteRemoteImportFaultPoint.SessionTeardown)
+        {
+            cleanupFailure ??= new IOException(
+                "Injected remote-playlist import session teardown failure.");
+        }
+
+        if (cleanupFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(cleanupFailure).Throw();
+        }
     }
+
+    private static bool IsRecoverableCleanup(Exception exception) =>
+        exception is not OutOfMemoryException and
+        not StackOverflowException and
+        not AccessViolationException;
 
     private static byte[] BuildEntropy(Guid sourceId, Guid snapshotId)
     {

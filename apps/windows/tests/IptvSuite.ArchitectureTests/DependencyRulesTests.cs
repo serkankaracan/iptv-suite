@@ -584,7 +584,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(app, compositionSequence);
         StringAssert.Contains(
             app,
-            "WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create();");
+            "WindowsCatalogServices catalogServices = WindowsCatalogBrowserFactory.Create(secretStore);");
         StringAssert.Contains(app, "window = new MainWindow(catalogServices, secretStore);");
         StringAssert.Contains(app, "_window = window;");
         StringAssert.Contains(app, "catalogServices.Dispose();");
@@ -7605,6 +7605,664 @@ public sealed class DependencyRulesTests
             @"(?m)^\s*uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$");
         Assert.HasCount(15, allUses);
         Assert.AreEqual(allUses.Count, pinnedUses.Count, "Every action must use a full commit SHA.");
+    }
+
+    [TestMethod]
+    public void M16RemotePlaylistOnboardingPreservesProbeProtectImportAndCommitBoundaries()
+    {
+        string application = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "RemotePlaylistSourceOnboarding.cs"));
+        string importer = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "SqliteRemotePlaylistCatalogImporter.cs"));
+        string sink = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "SqliteRemoteM3uImportSink.cs"));
+
+        string add = ExtractRequiredBlock(
+            application,
+            "public async ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddAsync(",
+            "private async ValueTask<bool> TryDeleteProtectedConfigurationAsync(");
+        int prepare = add.IndexOf(
+            "SourceConfigurationValidator.PrepareRemotePlaylist(",
+            StringComparison.Ordinal);
+        int rejectUserInfo = add.IndexOf(
+            "!string.IsNullOrEmpty(requestUri.UserInfo)",
+            StringComparison.Ordinal);
+        int probe = add.IndexOf("_probeService.ProbeAsync(", StringComparison.Ordinal);
+        int protect = add.IndexOf(".ProtectRemotePlaylistAsync(", StringComparison.Ordinal);
+        int createTestingSource = add.IndexOf(
+            "ContentSourceStatus.Testing",
+            StringComparison.Ordinal);
+        int import = add.IndexOf("_importer.ImportAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(
+            prepare >= 0 &&
+            rejectUserInfo > prepare &&
+            probe > rejectUserInfo &&
+            protect > probe &&
+            createTestingSource > protect &&
+            import > createTestingSource,
+            "Remote onboarding must validate and probe before protecting the locator and importing the catalog.");
+        StringAssert.Contains(add, "HttpTransportLimits.MaximumAllowedResponseBytes");
+
+        int committed = add.IndexOf(
+            "if (import.Disposition is CatalogImportCommitDisposition.Committed)",
+            StringComparison.Ordinal);
+        int indeterminate = add.IndexOf(
+            "if (import.Disposition is CatalogImportCommitDisposition.Indeterminate)",
+            StringComparison.Ordinal);
+        int notCommitted = add.IndexOf(
+            "import.Disposition is not CatalogImportCommitDisposition.NotCommitted",
+            StringComparison.Ordinal);
+        int cleanup = add.IndexOf(
+            "bool deleted = await TryDeleteProtectedConfigurationAsync(",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            committed > import &&
+            indeterminate > committed &&
+            notCommitted > indeterminate &&
+            cleanup > notCommitted,
+            "Only an explicitly not-committed import may remove its protected configuration.");
+        string indeterminateBranch = add[indeterminate..notCommitted];
+        Assert.IsFalse(
+            indeterminateBranch.Contains("TryDeleteProtectedConfigurationAsync", StringComparison.Ordinal),
+            "An indeterminate commit must preserve the protected locator for catalog recovery.");
+
+        string cleanupHelper = ExtractRequiredBlock(
+            application,
+            "private async ValueTask<bool> TryDeleteProtectedConfigurationAsync(",
+            "private static DomainResult<RemotePlaylistSourceOnboardingResult> StorageUnavailable()");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                cleanupHelper,
+                @"ContentSource\.Create\(\s*draft,\s*ContentSourceStatus\.DeletionPending,\s*now,\s*now\)",
+                RegexOptions.CultureInvariant),
+            "Cleanup must bind the exact protected draft to a deletion-pending source aggregate.");
+        StringAssert.Contains(
+            cleanupHelper,
+            "new SourceConfigurationProtectedRecordDeletionService(_secretStore)");
+        StringAssert.Contains(
+            cleanupHelper,
+            ".DeleteAsync(deletionPending.Value!, CancellationToken.None)");
+        Assert.IsFalse(
+            cleanupHelper.Contains("_secretStore.Delete", StringComparison.Ordinal),
+            "Onboarding cleanup must use the source-configuration aggregate deletion contract.");
+
+        string complete = ExtractRequiredBlock(
+            sink,
+            "public async ValueTask<DomainResult<bool>> CompleteAsync(",
+            "public async ValueTask AbortAsync(");
+        int commitIndeterminate = complete.IndexOf(
+            "_commitDisposition = SqliteImportCommitDisposition.Indeterminate;",
+            StringComparison.Ordinal);
+        int commitCall = complete.IndexOf("_transaction.CommitAsync(", StringComparison.Ordinal);
+        int commitCompleted = complete.IndexOf(
+            "_commitDisposition = SqliteImportCommitDisposition.Committed;",
+            StringComparison.Ordinal);
+        int committedCount = complete.IndexOf("_committedChannelCount = _written;", StringComparison.Ordinal);
+        int disposeSession = complete.IndexOf("await DisposeSessionAsync()", StringComparison.Ordinal);
+        Assert.IsTrue(
+            commitIndeterminate >= 0 &&
+            commitCall > commitIndeterminate &&
+            commitCompleted > commitCall &&
+            committedCount > commitCompleted &&
+            disposeSession > committedCount,
+            "SQLite commit state must become indeterminate before commit and committed only after commit returns.");
+        Assert.IsFalse(
+            complete[commitIndeterminate..].Contains("await AbortAsync(", StringComparison.Ordinal),
+            "An indeterminate or committed transaction must not be rolled back by the sink.");
+
+        string abort = ExtractRequiredBlock(
+            sink,
+            "public async ValueTask AbortAsync(",
+            "public async ValueTask DisposeAsync()");
+        StringAssert.Contains(
+            abort,
+            "_commitDisposition == SqliteImportCommitDisposition.NotCommitted");
+        StringAssert.Contains(abort, "_transaction.RollbackAsync(");
+        StringAssert.Contains(
+            abort,
+            "_commitDisposition = SqliteImportCommitDisposition.Indeterminate;");
+
+        int importerCommittedCheck = importer.IndexOf(
+            "sink.CommitDisposition == SqliteImportCommitDisposition.Committed",
+            StringComparison.Ordinal);
+        int importerFailureCheck = importer.IndexOf("if (!loaded.IsSuccess)", StringComparison.Ordinal);
+        Assert.IsTrue(
+            Regex.IsMatch(
+                importer,
+                @"var sink = new SqliteRemoteM3uImportSink\(\s*_databasePath(?:\s*[,\)])",
+                RegexOptions.CultureInvariant) &&
+            importerCommittedCheck >= 0 &&
+            importerFailureCheck > importerCommittedCheck,
+            "Each import needs a fresh sink and must preserve a committed result after post-commit teardown failure.");
+        Assert.IsFalse(
+            importer.Contains("await using", StringComparison.Ordinal),
+            "Compiler-generated await-using teardown must not clobber the mapped import result.");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                importer,
+                @"SqliteImportCommitDisposition\.Indeterminate\s*=>\s*RemotePlaylistCatalogImportResult\.Indeterminate\(error\)",
+                RegexOptions.CultureInvariant));
+
+        string importLifecycle = ExtractRequiredBlock(
+            importer,
+            "public async ValueTask<RemotePlaylistCatalogImportResult> ImportAsync(",
+            "private async ValueTask<RemotePlaylistCatalogImportResult> ImportCoreAsync(");
+        int importCoreCall = importLifecycle.IndexOf(
+            "result = await ImportCoreAsync(sink, source, cancellationToken)",
+            StringComparison.Ordinal);
+        int finalizeResultCall = importLifecycle.IndexOf(
+            "return await FinalizeResultAsync(sink, result)",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            importCoreCall >= 0 && finalizeResultCall > importCoreCall,
+            "The core import result must pass through explicit teardown finalization.");
+        StringAssert.Contains(importLifecycle, "await sink.DisposeAsync().ConfigureAwait(false);");
+        StringAssert.Contains(importLifecycle, "throw;");
+
+        string importCore = ExtractRequiredBlock(
+            importer,
+            "private async ValueTask<RemotePlaylistCatalogImportResult> ImportCoreAsync(",
+            "private static RemotePlaylistCatalogImportResult MapCommitted(");
+        StringAssert.Contains(importCore, "FinalizeFailureAsync(");
+        Assert.IsFalse(
+            importCore.Contains("MapFailure(", StringComparison.Ordinal),
+            "Failure disposition must not be mapped before rollback finalization.");
+        int finalizeFailure = importer.IndexOf(
+            "private static async ValueTask<RemotePlaylistCatalogImportResult> FinalizeFailureAsync(",
+            StringComparison.Ordinal);
+        Assert.IsTrue(finalizeFailure >= 0, "The failure finalizer is missing.");
+        string failureFinalizer = importer[finalizeFailure..];
+        int abortFailure = failureFinalizer.IndexOf(
+            "await sink.AbortAsync(CancellationToken.None)",
+            StringComparison.Ordinal);
+        int mapFinalDisposition = failureFinalizer.IndexOf(
+            "return MapFailure(sink, error);",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            abortFailure >= 0 && mapFinalDisposition > abortFailure,
+            "Rollback must finalize the sink disposition before the failure result is mapped.");
+        StringAssert.Contains(
+            failureFinalizer,
+            "RemotePlaylistCatalogImportResult.Indeterminate(");
+
+        string resultFinalizer = ExtractRequiredBlock(
+            importer,
+            "private static async ValueTask<RemotePlaylistCatalogImportResult> FinalizeResultAsync(",
+            "private static bool IsRecoverable(Exception exception)");
+        int disposeResult = resultFinalizer.IndexOf(
+            "await sink.DisposeAsync().ConfigureAwait(false);",
+            StringComparison.Ordinal);
+        int mapAfterDisposeFailure = resultFinalizer.IndexOf(
+            "RemotePlaylistCatalogImportResult mapped = MapFailure(",
+            StringComparison.Ordinal);
+        int preserveCommitted = resultFinalizer.IndexOf(
+            "mapped.Disposition is CatalogImportCommitDisposition.Committed",
+            StringComparison.Ordinal);
+        int mapCommittedAfterSuccessfulDispose = resultFinalizer.IndexOf(
+            "sink.CommitDisposition is SqliteImportCommitDisposition.Committed",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            disposeResult >= 0 &&
+            mapAfterDisposeFailure > disposeResult &&
+            preserveCommitted > mapAfterDisposeFailure &&
+            mapCommittedAfterSuccessfulDispose > preserveCommitted,
+            "Teardown success and failure must both re-read committed sink disposition before returning.");
+        StringAssert.Contains(resultFinalizer, "? mapped");
+        StringAssert.Contains(resultFinalizer, "? MapCommitted(sink)");
+
+        string disposeSessionBlock = ExtractRequiredBlock(
+            sink,
+            "private async ValueTask DisposeSessionAsync()",
+            "private static bool IsRecoverableCleanup(Exception exception)");
+        Assert.HasCount(
+            4,
+            Regex.Matches(
+                disposeSessionBlock,
+                @"catch \(Exception exception\) when \(IsRecoverableCleanup\(exception\)\)",
+                RegexOptions.CultureInvariant));
+        int transactionDispose = disposeSessionBlock.IndexOf(
+            "await transaction.DisposeAsync()",
+            StringComparison.Ordinal);
+        int connectionDispose = disposeSessionBlock.IndexOf(
+            "await connection.DisposeAsync()",
+            StringComparison.Ordinal);
+        int hashDispose = disposeSessionBlock.IndexOf("_contentHash?.Dispose();", StringComparison.Ordinal);
+        int aesDispose = disposeSessionBlock.IndexOf("_aes?.Dispose();", StringComparison.Ordinal);
+        int clearState = disposeSessionBlock.IndexOf("_categories.Clear();", StringComparison.Ordinal);
+        int zeroSecrets = disposeSessionBlock.IndexOf("Zero(_dek);", StringComparison.Ordinal);
+        int clearSecretReferences = disposeSessionBlock.IndexOf("_dek = null;", StringComparison.Ordinal);
+        int rethrowCleanup = disposeSessionBlock.IndexOf(
+            "ExceptionDispatchInfo.Capture(cleanupFailure).Throw();",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            transactionDispose >= 0 &&
+            connectionDispose > transactionDispose &&
+            hashDispose > connectionDispose &&
+            aesDispose > hashDispose &&
+            clearState > aesDispose &&
+            zeroSecrets > clearState &&
+            clearSecretReferences > zeroSecrets &&
+            rethrowCleanup > clearSecretReferences,
+            "Session teardown must attempt every owner, clear state and secrets, then rethrow its first recoverable failure.");
+        StringAssert.Contains(disposeSessionBlock, "_transaction = null;");
+        StringAssert.Contains(disposeSessionBlock, "_connection = null;");
+        StringAssert.Contains(disposeSessionBlock, "cleanupFailure ??= exception;");
+        StringAssert.Contains(disposeSessionBlock, "Zero(_wrappedDek);");
+        StringAssert.Contains(disposeSessionBlock, "Zero(_nonceBuffer);");
+        StringAssert.Contains(disposeSessionBlock, "Zero(_authenticationTagBuffer);");
+        StringAssert.Contains(disposeSessionBlock, "Zero(_aadBuffer);");
+        StringAssert.Contains(disposeSessionBlock, "_source = null;");
+        StringAssert.Contains(disposeSessionBlock, "_sourceText = null;");
+    }
+
+    [TestMethod]
+    public void M16RemotePlaylistOnboardingCompositionSharesTransportAndProtectedStore()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string app = File.ReadAllText(Path.Combine(windowsRoot, "App.xaml.cs"));
+        string factory = File.ReadAllText(Path.Combine(windowsRoot, "WindowsCatalogBrowserFactory.cs"));
+        string window = File.ReadAllText(Path.Combine(windowsRoot, "MainWindow.xaml.cs"));
+
+        Assert.HasCount(
+            1,
+            Regex.Matches(factory, @"new BoundedHttpTransport\s*\(", RegexOptions.CultureInvariant));
+        Assert.IsTrue(
+            Regex.IsMatch(
+                factory,
+                @"new SqliteChannelLogoProvider\(databasePath,\s*transport\)",
+                RegexOptions.CultureInvariant));
+        Assert.IsTrue(
+            Regex.IsMatch(
+                factory,
+                @"new SqliteRemotePlaylistCatalogImporter\(\s*databasePath,\s*secretStore,\s*transport\s*\)",
+                RegexOptions.CultureInvariant));
+        Assert.IsTrue(
+            Regex.IsMatch(
+                factory,
+                @"new RemotePlaylistSourceOnboardingService\(\s*secretStore,\s*transport,\s*importer,\s*TimeProvider\.System\s*\)",
+                RegexOptions.CultureInvariant));
+        Assert.IsTrue(
+            Regex.IsMatch(
+                factory,
+                @"new WindowsCatalogServices\(\s*new SqliteCatalogQuery\(databasePath\),\s*logoCache,\s*onboarding,\s*transport,\s*databasePath\s*\)",
+                RegexOptions.CultureInvariant));
+        StringAssert.Contains(app, "WindowsCatalogBrowserFactory.Create(secretStore)");
+        StringAssert.Contains(app, "new MainWindow(catalogServices, secretStore)");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                window,
+                @"_mainPage\.ConfigureSourceOnboarding\(\s*_catalogServices\.Onboarding\.AddAsync\s*\)",
+                RegexOptions.CultureInvariant));
+    }
+
+    [TestMethod]
+    public void M16RemotePlaylistOnboardingUiRequiresAuthorizationAndDoesNotEchoLocator()
+    {
+        string windowsRoot = Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows");
+        string markupPath = Path.Combine(windowsRoot, "MainPage.xaml");
+        XDocument markup = XDocument.Load(markupPath, LoadOptions.PreserveWhitespace);
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+
+        XElement RequiredNamedElement(string name) => markup
+            .Descendants()
+            .Single(element => string.Equals(
+                element.Attribute(x + "Name")?.Value,
+                name,
+                StringComparison.Ordinal));
+
+        (string Name, string AutomationId)[] automationContracts =
+        [
+            ("AddRemotePlaylistButton", "CatalogAddSourceButton"),
+            ("RemotePlaylistSourceNameTextBox", "RemotePlaylistSourceNameTextBox"),
+            ("RemotePlaylistLocatorTextBox", "RemotePlaylistLocatorTextBox"),
+            ("RemotePlaylistAuthorizationCheckBox", "RemotePlaylistAuthorizationCheckBox"),
+            ("RemotePlaylistAddButton", "RemotePlaylistAddButton"),
+            ("RemotePlaylistCancelButton", "RemotePlaylistCancelButton"),
+            ("RemotePlaylistStatusText", "RemotePlaylistStatusText"),
+        ];
+        foreach ((string name, string automationId) in automationContracts)
+        {
+            Assert.AreEqual(
+                automationId,
+                RequiredNamedElement(name).Attribute("AutomationProperties.AutomationId")?.Value,
+                $"The packaged onboarding automation contract changed for {name}.");
+        }
+
+        XElement locatorInput = RequiredNamedElement("RemotePlaylistLocatorTextBox");
+        Assert.AreEqual("4096", locatorInput.Attribute("MaxLength")?.Value);
+        Assert.AreEqual("False", locatorInput.Attribute("IsSpellCheckEnabled")?.Value);
+        XElement authorization = RequiredNamedElement("RemotePlaylistAuthorizationCheckBox");
+        StringAssert.Contains(
+            authorization.Attribute("Content")?.Value ?? string.Empty,
+            "authorized");
+        Assert.AreEqual(
+            "RemotePlaylistAuthorizationCheckBox_Changed",
+            authorization.Attribute("Checked")?.Value);
+        Assert.AreEqual(
+            authorization.Attribute("Checked")?.Value,
+            authorization.Attribute("Unchecked")?.Value);
+        Assert.AreEqual(
+            "False",
+            RequiredNamedElement("RemotePlaylistAddButton").Attribute("IsEnabled")?.Value);
+
+        string addHandler = ExtractRequiredBlock(
+            codeBehind,
+            "private async void RemotePlaylistAddButton_Click(",
+            "private void RemotePlaylistCancelButton_Click(");
+        string beginLoading = ExtractRequiredBlock(
+            codeBehind,
+            "private long BeginLoading()",
+            "private void EndLoading(");
+        StringAssert.Contains(beginLoading, "RemotePlaylistAddButton.IsEnabled = false;");
+        int authorizationGate = addHandler.IndexOf(
+            "RemotePlaylistAuthorizationCheckBox.IsChecked is not true",
+            StringComparison.Ordinal);
+        int captureLocator = addHandler.IndexOf(
+            "string? locator = RemotePlaylistLocatorTextBox.Text;",
+            StringComparison.Ordinal);
+        int clearLocator = addHandler.IndexOf(
+            "RemotePlaylistLocatorTextBox.Text = string.Empty;",
+            StringComparison.Ordinal);
+        int invokeOnboarding = addHandler.IndexOf(
+            "await addRemotePlaylist(displayName, locator, cancellationToken)",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            authorizationGate >= 0 &&
+            captureLocator > authorizationGate &&
+            clearLocator > captureLocator &&
+            invokeOnboarding > clearLocator,
+            "The UI must require explicit authorization and clear the locator field before asynchronous onboarding.");
+        int operationLease = addHandler.IndexOf(
+            "using AsyncOperationLease operation = BeginAsyncOperation();",
+            StringComparison.Ordinal);
+        Assert.IsTrue(operationLease > 0, "The onboarding operation lease is missing.");
+        string submitAdmission = addHandler[..operationLease];
+        StringAssert.Contains(submitAdmission, "_sourceOnboardingPanelOpen");
+        StringAssert.Contains(submitAdmission, "LoadingIndicator.IsActive");
+        StringAssert.Contains(addHandler, "_domainErrorPresenter?.Present(");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                addHandler,
+                @"RemotePlaylistStatusText\.Text\s*=\s*[^;]*(?:\blocator\b|RemotePlaylistLocatorTextBox)",
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Singleline),
+            "The raw remote locator must not be echoed through onboarding status text.");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                addHandler,
+                "\\$\"[^\"]*\\{(?:locator|displayName)\\}",
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase),
+            "Raw onboarding input must not enter an interpolated UI or diagnostic string.");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                addHandler,
+                @"\b(?:Console|Trace|Debug)\.",
+                RegexOptions.CultureInvariant),
+            "The onboarding UI must not log user input.");
+
+        string mutationControls = ExtractRequiredBlock(
+            codeBehind,
+            "private void UpdateSourceMutationControls()",
+            "private void ResetLogoPageCancellation()");
+        Match retryEligibility = Regex.Match(
+            mutationControls,
+            @"RetryPendingDeletionButton\.IsEnabled\s*=\s*(?<condition>[^;]+);",
+            RegexOptions.CultureInvariant);
+        Assert.IsTrue(retryEligibility.Success, "The pending-cleanup retry eligibility is missing.");
+        StringAssert.Contains(retryEligibility.Groups["condition"].Value, "_retryPendingSourceCleanup");
+        Assert.IsFalse(
+            retryEligibility.Groups["condition"].Value.Contains(
+                "_catalogAdmissionReady",
+                StringComparison.Ordinal) ||
+            retryEligibility.Groups["condition"].Value.Contains(
+                "commonAdmission",
+                StringComparison.Ordinal),
+            "Pending cleanup must remain retryable while catalog admission is intentionally blocked.");
+    }
+
+    [TestMethod]
+    public void M16PackagedCleanInstallOnboardingUsesTransientLocatorChannelAndExactReset()
+    {
+        string harness = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "tests",
+            "IptvSuite.PlaybackUiAcceptanceHarness",
+            "Program.cs"));
+        string packageSmoke = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "Invoke-WindowsPackageSmoke.ps1"));
+
+        StringAssert.Contains(harness, "private const string OnboardingCommand = \"serve-onboarding\";");
+        StringAssert.Contains(harness, "PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly");
+        StringAssert.Contains(harness, "new Uri(server.BaseAddress, OnboardingPlaylistRoute).AbsoluteUri");
+        StringAssert.Contains(harness, "CryptographicOperations.ZeroMemory(locator);");
+        StringAssert.Contains(harness, "PlaylistRequestCount:");
+        StringAssert.Contains(harness, "MediaRequestCount:");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                harness,
+                @"(?:OnboardingReadyTicket|OnboardingResultTicket)\s*\([^)]*\b(?:Locator|Port|Path)\b",
+                RegexOptions.CultureInvariant | RegexOptions.Singleline),
+            "The onboarding locator, port, and path must not enter control tickets.");
+        Assert.IsFalse(
+            harness.Contains("Console.Write", StringComparison.Ordinal),
+            "The acceptance harness must not write the transient locator to stdout.");
+
+        int startHarness = packageSmoke.IndexOf(
+            "\"serve-onboarding\"",
+            StringComparison.Ordinal);
+        int readLocator = packageSmoke.IndexOf(
+            "$onboardingLocator = Read-ExactOnboardingLocator",
+            startHarness,
+            StringComparison.Ordinal);
+        int openPanel = packageSmoke.IndexOf(
+            "\"CatalogAddSourceButton\"",
+            readLocator,
+            StringComparison.Ordinal);
+        int setLocator = packageSmoke.IndexOf(
+            "-Value $onboardingLocator",
+            openPanel,
+            StringComparison.Ordinal);
+        int authorization = packageSmoke.IndexOf(
+            "[System.Windows.Automation.TogglePattern]::Pattern",
+            setLocator,
+            StringComparison.Ordinal);
+        int invokeSubmit = packageSmoke.IndexOf(
+            "-ButtonElement $onboardingSubmitButton",
+            authorization,
+            StringComparison.Ordinal);
+        int clearLocator = packageSmoke.IndexOf(
+            "$onboardingLocator = $null",
+            invokeSubmit,
+            StringComparison.Ordinal);
+        int reset = packageSmoke.IndexOf(
+            "Invoke-ExactDevelopmentPackageReset",
+            clearLocator,
+            StringComparison.Ordinal);
+        int seed50k = packageSmoke.IndexOf(
+            "$catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000",
+            reset,
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            startHarness >= 0 &&
+            readLocator > startHarness &&
+            openPanel > readLocator &&
+            setLocator > openPanel &&
+            authorization > setLocator &&
+            invokeSubmit > authorization &&
+            clearLocator > invokeSubmit &&
+            reset > clearLocator &&
+            seed50k > reset,
+            "Clean-install onboarding must authorize and import through UIA, clear the locator, then reset before legacy seeding.");
+
+        StringAssert.Contains(packageSmoke, "RemotePlaylistSourceNameTextBox");
+        StringAssert.Contains(packageSmoke, "RemotePlaylistLocatorTextBox");
+        StringAssert.Contains(packageSmoke, "RemotePlaylistAuthorizationCheckBox");
+        StringAssert.Contains(packageSmoke, "[System.Net.IPAddress]::IsLoopback(");
+        StringAssert.Contains(packageSmoke, "Reset-AppxPackage `");
+        StringAssert.Contains(packageSmoke, "CleanInstallOnboardingVerified = $cleanInstallOnboardingVerified");
+        StringAssert.Contains(packageSmoke, "CleanInstallOnboardingResetVerified = $cleanInstallOnboardingResetVerified");
+
+        string locatorChannel = ExtractRequiredBlock(
+            packageSmoke,
+            "function Read-ExactOnboardingLocator {",
+            "function Invoke-PackagedOnboardingButton {");
+        string boundedPipeReader = ExtractRequiredBlock(
+            packageSmoke,
+            "function Read-BoundedOnboardingPipeChunk {",
+            "function Read-ExactOnboardingLocator {");
+        StringAssert.Contains(
+            boundedPipeReader,
+            "$remaining = $Deadline - [System.DateTimeOffset]::UtcNow");
+        int asyncRead = boundedPipeReader.IndexOf(
+            "$Pipe.ReadAsync($Buffer, $Offset, $Count)",
+            StringComparison.Ordinal);
+        int timedWait = boundedPipeReader.IndexOf(
+            "$readTask.Wait($remainingMilliseconds)",
+            StringComparison.Ordinal);
+        int disposeTimedOutRead = boundedPipeReader.IndexOf(
+            "$Pipe.Dispose()",
+            StringComparison.Ordinal);
+        int settleTimedOutRead = boundedPipeReader.IndexOf(
+            "$readTask.Wait(1000)",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            asyncRead >= 0 &&
+            timedWait > asyncRead &&
+            disposeTimedOutRead > timedWait &&
+            settleTimedOutRead > disposeTimedOutRead,
+            "A timed-out asynchronous pipe read must be cancelled by disposing its pipe before bounded task settlement.");
+        Assert.HasCount(
+            1,
+            Regex.Matches(
+                locatorChannel,
+                @"\$readDeadline\s*=\s*\[System\.DateTimeOffset\]::UtcNow\.AddSeconds\(",
+                RegexOptions.CultureInvariant));
+        Assert.HasCount(
+            3,
+            Regex.Matches(
+                locatorChannel,
+                @"-Deadline\s+\$readDeadline\b",
+                RegexOptions.CultureInvariant));
+        Assert.IsFalse(
+            Regex.IsMatch(
+                locatorChannel,
+                @"\$pipe\.(?:Read|ReadByte)\s*\(",
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase),
+            "Every locator read after connect must use the single-deadline asynchronous helper.");
+        StringAssert.Contains(
+            locatorChannel,
+            "[System.Array]::Clear($locatorBytes, 0, $locatorBytes.Length)");
+        StringAssert.Contains(
+            locatorChannel,
+            "[System.Array]::Clear($lengthBytes, 0, $lengthBytes.Length)");
+        Assert.IsFalse(
+            locatorChannel.Contains("CryptographicOperations", StringComparison.Ordinal),
+            "Windows PowerShell 5.1 must clear onboarding byte buffers with System.Array.");
+
+        string onboardingResultValidation = ExtractRequiredBlock(
+            packageSmoke,
+            "$onboardingResult = Read-StrictOnboardingJsonTicket `",
+            "$cleanInstallOnboardingRequestCount = [int]$onboardingResult.RequestCount");
+        string[] onboardingCounters =
+        [
+            "RequestCount",
+            "CompletedResponseCount",
+            "FailureCount",
+            "PlaylistRequestCount",
+            "MediaRequestCount",
+        ];
+        foreach (string counter in onboardingCounters)
+        {
+            Assert.IsTrue(
+                Regex.IsMatch(
+                    onboardingResultValidation,
+                    $@"\(\$onboardingResult\.{counter}\s+-isnot \[int\]\s+-and\s+\$onboardingResult\.{counter}\s+-isnot \[long\]\)",
+                    RegexOptions.CultureInvariant),
+                $"PS5.1 JSON counter {counter} must accept both Int32 and Int64.");
+        }
+
+        string statePathBinding = ExtractRequiredBlock(
+            packageSmoke,
+            "$catalogDatabasePath = Join-Path $env:LOCALAPPDATA `",
+            "$aumid = \"$($installedPackage.PackageFamilyName)!$expectedApplicationId\"");
+        StringAssert.Contains(
+            statePathBinding,
+            "$catalogStatePath = Split-Path -Parent $catalogDatabasePath");
+        string freshStateCheck = ExtractRequiredBlock(
+            packageSmoke,
+            "$freshStateDeadline = (Get-Date).AddSeconds(15)",
+            "if (-not (Test-Path -LiteralPath $playbackFixtureRoot -PathType Container)");
+        StringAssert.Contains(freshStateCheck, "Test-Path -LiteralPath $catalogStatePath");
+        StringAssert.Contains(freshStateCheck, "Test-Path -LiteralPath $protectedStorePath");
+        Assert.IsFalse(
+            freshStateCheck.Contains("$catalogDatabasePath", StringComparison.Ordinal),
+            "Clean-install admission must reject any residual Catalog\\v2 state, including WAL and SHM sidecars.");
+
+        string resetFunction = ExtractRequiredBlock(
+            packageSmoke,
+            "function Invoke-ExactDevelopmentPackageReset {",
+            "function Test-AutomationElementContainsExactText {");
+        StringAssert.Contains(
+            resetFunction,
+            "Packages\\$ExpectedPackageFamilyName\\LocalCache\\Catalog\\v2");
+        StringAssert.Contains(
+            resetFunction,
+            "Packages\\$ExpectedPackageFamilyName\\LocalCache\\ProtectedStore\\v2");
+        StringAssert.Contains(
+            resetFunction,
+            "[System.IO.Path]::GetFullPath($CatalogStatePath).Equals(");
+        StringAssert.Contains(
+            resetFunction,
+            "[System.IO.Path]::GetFullPath($ProtectedStorePath).Equals(");
+        StringAssert.Contains(resetFunction, "Test-Path -LiteralPath $CatalogStatePath");
+        StringAssert.Contains(resetFunction, "Test-Path -LiteralPath $ProtectedStorePath");
+        Assert.IsFalse(
+            resetFunction.Contains("catalog.db", StringComparison.OrdinalIgnoreCase) ||
+            resetFunction.Contains("CatalogDatabasePath", StringComparison.Ordinal),
+            "Reset must verify removal of the entire exact Catalog\\v2 state directory.");
+        string resetInvocation = packageSmoke[reset..seed50k];
+        StringAssert.Contains(resetInvocation, "-CatalogStatePath $catalogStatePath");
+        StringAssert.Contains(resetInvocation, "-ProtectedStorePath $protectedStorePath");
+
+        string successEvidence = ExtractRequiredBlock(
+            packageSmoke,
+            "$successEvidence = [ordered]@{",
+            "$githubSha = [Environment]::GetEnvironmentVariable");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                successEvidence,
+                @"\b(?:onboardingLocator|onboardingPipeName|Port|Path)\b",
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase),
+            "Success evidence must not contain the transient onboarding locator or channel details.");
     }
 
     private static XDocument LoadXml(string relativePath)

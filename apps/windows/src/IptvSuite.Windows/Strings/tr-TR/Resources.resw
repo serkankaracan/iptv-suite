@@ -51,6 +51,21 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="Errors.Generic" xml:space="preserve"><value>İşlem güvenli bir şekilde tamamlanamadı.</value></data>
+  <data name="Errors.Source.NameRequired" xml:space="preserve"><value>Kaynak için bir ad girin.</value></data>
+  <data name="Errors.Source.NameInvalid" xml:space="preserve"><value>Kaynak adı desteklenmeyen karakterler içeriyor.</value></data>
+  <data name="Errors.Source.NameTooLong" xml:space="preserve"><value>Kaynak adı çok uzun.</value></data>
+  <data name="Errors.Endpoint.Required" xml:space="preserve"><value>Kaynağın HTTPS adresini girin.</value></data>
+  <data name="Errors.Endpoint.Malformed" xml:space="preserve"><value>Kaynak adresi geçerli değil.</value></data>
+  <data name="Errors.Endpoint.TooLong" xml:space="preserve"><value>Kaynak adresi çok uzun.</value></data>
+  <data name="Errors.Endpoint.SchemeUnsupported" xml:space="preserve"><value>Kaynak adresi desteklenmeyen bir şema kullanıyor.</value></data>
+  <data name="Errors.Endpoint.InsecureTransportRejected" xml:space="preserve"><value>Kaynak güvenli bir HTTPS adresi kullanmalıdır.</value></data>
+  <data name="Errors.Endpoint.UserInfoNotAllowed" xml:space="preserve"><value>Kaynak adresine gömülü kimlik bilgileri desteklenmiyor.</value></data>
+  <data name="Errors.Endpoint.FragmentNotAllowed" xml:space="preserve"><value>Kaynak adresi fragment içermemelidir.</value></data>
+  <data name="Errors.Credentials.UsernameRequired" xml:space="preserve"><value>Hesap kullanıcı adını girin.</value></data>
+  <data name="Errors.Credentials.PasswordRequired" xml:space="preserve"><value>Hesap parolasını girin.</value></data>
+  <data name="Errors.Credentials.Invalid" xml:space="preserve"><value>Hesap kimlik bilgileri geçerli değil.</value></data>
+  <data name="Errors.Credentials.TooLong" xml:space="preserve"><value>Hesap kimlik bilgileri desteklenen uzunluğu aşıyor.</value></data>
+  <data name="Errors.SecretReference.Invalid" xml:space="preserve"><value>Korunan kaynak yapılandırması geçerli değil.</value></data>
   <data name="Errors.Domain.InvariantViolation" xml:space="preserve"><value>İşlem güvenli bir şekilde tamamlanamadı.</value></data>
   <data name="Errors.Network.Unreachable" xml:space="preserve"><value>Kaynağa ulaşılamadı. Bağlantınızı denetleyip yeniden deneyin.</value></data>
   <data name="Errors.Authentication.Rejected" xml:space="preserve"><value>Kaynak oturum açma bilgilerini reddetti. Bilgileri denetleyip yeniden deneyin.</value></data>

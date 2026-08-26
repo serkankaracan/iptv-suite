@@ -699,6 +699,8 @@ $expectedCatalogSourceName = "Synthetic 50k source"
 $expectedPlaybackSourceName = "00 Synthetic protected playback source"
 $expectedPlaybackChannelAName = "Synthetic protected Tier A channel A"
 $expectedPlaybackChannelBName = "Synthetic protected Tier A channel B"
+$expectedOnboardingEmptyStatus = "No imported Live TV catalog is available."
+$expectedOnboardingCatalogStatus = "Showing 1$([char]0x2013)2 of 2 channels."
 $expectedPlaybackCertificateSubject = "CN=IPTVSuite Synthetic Loopback"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "apps\windows\src\IptvSuite.Windows\IptvSuite.Windows.csproj"
@@ -746,6 +748,13 @@ $playbackStreamProtocolControlNames = @(
     "verify-stream-cancel.signal",
     "stream-cancel-result.json")
 $playbackPublicCertificatePath = Join-Path $playbackControlDirectory "loopback.cer"
+$onboardingControlRoot = Join-Path $artifactRoot "onboarding-ui"
+$onboardingControlDirectory = Join-Path $onboardingControlRoot $runId
+$onboardingReadyPath = Join-Path $onboardingControlDirectory "ready.json"
+$onboardingResultPath = Join-Path $onboardingControlDirectory "result.json"
+$onboardingStopSignalPath = Join-Path $onboardingControlDirectory "stop.signal"
+$onboardingPublicCertificatePath = Join-Path $onboardingControlDirectory "loopback.cer"
+$onboardingPipeName = "iptvsuite-onboarding-$runId"
 $publicCertificatePath = Join-Path $artifactRoot "$runId.cer"
 $evidencePath = Join-Path $artifactRoot "last-success.json"
 $failureEvidencePath = Join-Path $artifactRoot "last-failure.json"
@@ -760,11 +769,17 @@ $packageInstallRootAuditResult = $null
 $packageInstallRootAuditCompletionAttempted = $false
 $launchedProcess = $null
 $playbackHarnessProcess = $null
+$onboardingHarnessProcess = $null
 $playbackLoopbackCertificate = $null
+$onboardingLoopbackCertificate = $null
 $playbackLoopbackCertificateThumbprint = $null
+$onboardingLoopbackCertificateThumbprint = $null
 $playbackLoopbackCertificateImported = $false
+$onboardingLoopbackCertificateImported = $false
 $playbackHarnessReady = $false
+$onboardingHarnessReady = $false
 $playbackStopSignalCreated = $false
+$onboardingStopSignalCreated = $false
 $installAttempted = $false
 $environmentBackup = @{}
 $primaryFailure = $null
@@ -776,6 +791,12 @@ $protectedStoreDirectoryInitialized = $false
 $catalogUiaContractVerified = $false
 $catalogKeyboardFocusOrderVerified = $false
 $catalog50kSeedVerified = $false
+$cleanInstallOnboardingVerified = $false
+$cleanInstallOnboardingAuthorizationVerified = $false
+$cleanInstallOnboardingSourceVerified = $false
+$cleanInstallOnboardingChannelsVerified = $false
+$cleanInstallOnboardingResetVerified = $false
+$cleanInstallOnboardingRequestCount = 0
 $catalogRealizedContainerBoundVerified = $false
 $catalogRealizedContainerCount = 0
 $catalogTraceMarkersRequested = [bool]$EmitM14TraceMarkers
@@ -1424,6 +1445,138 @@ function Remove-ExactPlaybackControlDirectory {
     Remove-Item -LiteralPath $resolvedControlDirectory -Recurse -Force -ErrorAction Stop
 }
 
+function Remove-ExactOnboardingControlDirectory {
+    if (-not [System.Text.RegularExpressions.Regex]::IsMatch($runId, '\A[0-9a-f]{32}\z')) {
+        throw "Refusing onboarding-control cleanup because the run id is invalid."
+    }
+
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($artifactRoot)
+    $resolvedControlRoot = [System.IO.Path]::GetFullPath($onboardingControlRoot)
+    $resolvedControlDirectory = [System.IO.Path]::GetFullPath($onboardingControlDirectory)
+    $expectedControlRoot = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($resolvedArtifactRoot, 'onboarding-ui'))
+    $expectedControlDirectory = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::Combine($expectedControlRoot, $runId))
+    $controlParent = [System.IO.Directory]::GetParent($resolvedControlDirectory)
+    if (-not $resolvedControlRoot.Equals(
+            $expectedControlRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not $resolvedControlDirectory.Equals(
+            $expectedControlDirectory,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        $null -eq $controlParent -or
+        -not $controlParent.FullName.Equals(
+            $resolvedControlRoot,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        [System.IO.Path]::GetFileName($resolvedControlDirectory) -cne $runId) {
+        throw "Refusing cleanup of an unexpected onboarding-control directory."
+    }
+
+    if (-not (Test-Path -LiteralPath $resolvedControlDirectory)) {
+        return
+    }
+
+    foreach ($protectedPath in @(
+            $resolvedArtifactRoot,
+            $resolvedControlRoot,
+            $resolvedControlDirectory)) {
+        if (-not (Test-Path -LiteralPath $protectedPath -PathType Container) -or
+            ([System.IO.File]::GetAttributes($protectedPath) -band
+                [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing onboarding-control cleanup through an unsafe directory."
+        }
+    }
+
+    Remove-Item -LiteralPath $resolvedControlDirectory -Recurse -Force -ErrorAction Stop
+}
+
+function Assert-ExactOnboardingControlEntries {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$AllowedNames
+    )
+
+    if (-not (Test-Path -LiteralPath $onboardingControlDirectory -PathType Container) -or
+        ([System.IO.File]::GetAttributes($onboardingControlDirectory) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The onboarding acceptance control directory is invalid."
+    }
+
+    $entries = @(Get-ChildItem -LiteralPath $onboardingControlDirectory -Force)
+    if ($entries.Count -ne $AllowedNames.Count) {
+        throw "The onboarding acceptance control directory has an invalid schema."
+    }
+
+    foreach ($entry in $entries) {
+        if ($entry.PSIsContainer -or
+            ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $AllowedNames -cnotcontains $entry.Name) {
+            throw "The onboarding acceptance control directory has an invalid schema."
+        }
+    }
+}
+
+function Read-StrictOnboardingJsonTicket {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedProperties
+    )
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $allowedPaths = @(
+        [System.IO.Path]::GetFullPath($onboardingReadyPath),
+        [System.IO.Path]::GetFullPath($onboardingResultPath)
+    )
+    if ($allowedPaths -notcontains $resolvedPath -or
+        -not [System.IO.Directory]::GetParent($resolvedPath).FullName.Equals(
+            [System.IO.Path]::GetFullPath($onboardingControlDirectory),
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        throw "The onboarding acceptance ticket path is invalid."
+    }
+
+    $ticketFile = Get-Item -LiteralPath $resolvedPath -Force
+    if (($ticketFile.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $ticketFile.Length -le 0 -or
+        $ticketFile.Length -gt 4096) {
+        throw "The onboarding acceptance ticket is invalid."
+    }
+
+    try {
+        $ticket = [System.IO.File]::ReadAllText(
+            $resolvedPath,
+            [System.Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "The onboarding acceptance ticket is not valid JSON."
+    }
+
+    if ($ticket -isnot [pscustomobject]) {
+        throw "The onboarding acceptance ticket root is invalid."
+    }
+
+    $properties = @($ticket.PSObject.Properties)
+    if ($properties.Count -ne $AllowedProperties.Count) {
+        throw "The onboarding acceptance ticket schema is invalid."
+    }
+    foreach ($property in $properties) {
+        if ($AllowedProperties -cnotcontains $property.Name) {
+            throw "The onboarding acceptance ticket schema is invalid."
+        }
+    }
+    foreach ($allowedProperty in $AllowedProperties) {
+        if (@($properties.Name) -cnotcontains $allowedProperty) {
+            throw "The onboarding acceptance ticket schema is invalid."
+        }
+    }
+
+    return $ticket
+}
+
 function Assert-ExactPlaybackControlEntries {
     param(
         [Parameter(Mandatory)]
@@ -1644,6 +1797,288 @@ function Get-AutomationElementById {
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
         $AutomationId)
     return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+}
+
+function Read-BoundedOnboardingPipeChunk {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.Pipes.NamedPipeClientStream]$Pipe,
+
+        [Parameter(Mandatory)]
+        [byte[]]$Buffer,
+
+        [Parameter(Mandatory)]
+        [int]$Offset,
+
+        [Parameter(Mandatory)]
+        [int]$Count,
+
+        [Parameter(Mandatory)]
+        [System.DateTimeOffset]$Deadline
+    )
+
+    if ($Offset -lt 0 -or $Count -le 0 -or
+        $Offset -gt $Buffer.Length - $Count) {
+        throw "The onboarding locator channel read bounds are invalid."
+    }
+
+    $remaining = $Deadline - [System.DateTimeOffset]::UtcNow
+    if ($remaining -le [TimeSpan]::Zero) {
+        throw "The onboarding locator channel read timed out."
+    }
+    $remainingMilliseconds = [int][Math]::Min(
+        [int]::MaxValue,
+        [Math]::Max(1, [Math]::Ceiling($remaining.TotalMilliseconds)))
+    $readTask = $Pipe.ReadAsync($Buffer, $Offset, $Count)
+    if (-not $readTask.Wait($remainingMilliseconds)) {
+        $Pipe.Dispose()
+        try {
+            [void]$readTask.Wait(1000)
+        }
+        catch {
+        }
+        throw "The onboarding locator channel read timed out."
+    }
+
+    return [int]$readTask.GetAwaiter().GetResult()
+}
+
+function Read-ExactOnboardingLocator {
+    if (-not [System.Text.RegularExpressions.Regex]::IsMatch(
+            $onboardingPipeName,
+            '\Aiptvsuite-onboarding-[0-9a-f]{32}\z')) {
+        throw "The onboarding locator channel identity is invalid."
+    }
+
+    $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
+        ".",
+        $onboardingPipeName,
+        [System.IO.Pipes.PipeDirection]::In,
+        [System.IO.Pipes.PipeOptions]::Asynchronous)
+    $lengthBytes = [byte[]]::new(4)
+    $locatorBytes = $null
+    try {
+        $pipe.Connect(10000)
+        $readDeadline = [System.DateTimeOffset]::UtcNow.AddSeconds(10)
+        $lengthOffset = 0
+        while ($lengthOffset -lt $lengthBytes.Length) {
+            $read = Read-BoundedOnboardingPipeChunk `
+                -Pipe $pipe `
+                -Buffer $lengthBytes `
+                -Offset $lengthOffset `
+                -Count ($lengthBytes.Length - $lengthOffset) `
+                -Deadline $readDeadline
+            if ($read -le 0) {
+                throw "The onboarding locator channel ended before its length was received."
+            }
+            $lengthOffset += $read
+        }
+
+        if (-not [System.BitConverter]::IsLittleEndian) {
+            throw "The onboarding locator channel byte order is unsupported."
+        }
+        $locatorLength = [System.BitConverter]::ToInt32($lengthBytes, 0)
+        if ($locatorLength -le 0 -or $locatorLength -gt 4096) {
+            throw "The onboarding locator channel length is invalid."
+        }
+
+        $locatorBytes = [byte[]]::new($locatorLength)
+        $locatorOffset = 0
+        while ($locatorOffset -lt $locatorBytes.Length) {
+            $read = Read-BoundedOnboardingPipeChunk `
+                -Pipe $pipe `
+                -Buffer $locatorBytes `
+                -Offset $locatorOffset `
+                -Count ($locatorBytes.Length - $locatorOffset) `
+                -Deadline $readDeadline
+            if ($read -le 0) {
+                throw "The onboarding locator channel ended before its payload was received."
+            }
+            $locatorOffset += $read
+        }
+
+        $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+        $locator = $strictUtf8.GetString($locatorBytes)
+        $uri = $null
+        if (-not [System.Uri]::TryCreate(
+                $locator,
+                [System.UriKind]::Absolute,
+                [ref]$uri) -or
+            $uri.Scheme -cne "https" -or
+            -not [System.Net.IPAddress]::IsLoopback(
+                [System.Net.IPAddress]::Parse($uri.Host)) -or
+            $uri.AbsolutePath -cne "/synthetic-onboarding.m3u" -or
+            -not [string]::IsNullOrEmpty($uri.Query) -or
+            -not [string]::IsNullOrEmpty($uri.Fragment) -or
+            -not [string]::IsNullOrEmpty($uri.UserInfo)) {
+            $locator = $null
+            throw "The onboarding locator channel payload is invalid."
+        }
+
+        [System.Array]::Clear($lengthBytes, 0, $lengthBytes.Length)
+        $trailingByteCount = Read-BoundedOnboardingPipeChunk `
+            -Pipe $pipe `
+            -Buffer $lengthBytes `
+            -Offset 0 `
+            -Count 1 `
+            -Deadline $readDeadline
+        if ($trailingByteCount -ne 0) {
+            $locator = $null
+            throw "The onboarding locator channel contains trailing data."
+        }
+
+        return $locator
+    }
+    catch {
+        throw "The onboarding locator could not be received through the transient channel."
+    }
+    finally {
+        if ($null -ne $locatorBytes) {
+            [System.Array]::Clear($locatorBytes, 0, $locatorBytes.Length)
+        }
+        [System.Array]::Clear($lengthBytes, 0, $lengthBytes.Length)
+        $pipe.Dispose()
+    }
+}
+
+function Invoke-PackagedOnboardingButton {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$ButtonElement
+    )
+
+    Assert-PackagedProcessAlive -Process $Process
+    if (-not $ButtonElement.Current.IsEnabled -or
+        $ButtonElement.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Button) {
+        throw "A packaged onboarding command is unavailable."
+    }
+
+    $invokePatternObject = $null
+    if (-not $ButtonElement.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern,
+            [ref]$invokePatternObject)) {
+        throw "A packaged onboarding command has no InvokePattern."
+    }
+    ([System.Windows.Automation.InvokePattern]$invokePatternObject).Invoke()
+}
+
+function Set-PackagedOnboardingText {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Element,
+
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    if (-not $Element.Current.IsEnabled -or
+        $Element.Current.ControlType -ne [System.Windows.Automation.ControlType]::Edit) {
+        throw "A packaged onboarding input is unavailable."
+    }
+    $valuePatternObject = $null
+    if (-not $Element.TryGetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern,
+            [ref]$valuePatternObject)) {
+        throw "A packaged onboarding input has no ValuePattern."
+    }
+    ([System.Windows.Automation.ValuePattern]$valuePatternObject).SetValue($Value)
+}
+
+function Invoke-ExactDevelopmentPackageReset {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ExpectedPackageFullName,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedPackageFamilyName,
+
+        [Parameter(Mandatory)]
+        [string]$CatalogStatePath,
+
+        [Parameter(Mandatory)]
+        [string]$ProtectedStorePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedPackageFullName) -or
+        [string]::IsNullOrWhiteSpace($ExpectedPackageFamilyName)) {
+        throw "The exact development package identity is unavailable for reset."
+    }
+
+    $expectedCatalogStatePath = [System.IO.Path]::GetFullPath(
+        (Join-Path $env:LOCALAPPDATA `
+            "Packages\$ExpectedPackageFamilyName\LocalCache\Catalog\v2"))
+    $expectedProtectedStorePath = [System.IO.Path]::GetFullPath(
+        (Join-Path $env:LOCALAPPDATA `
+            "Packages\$ExpectedPackageFamilyName\LocalCache\ProtectedStore\v2"))
+    if (-not [System.IO.Path]::GetFullPath($CatalogStatePath).Equals(
+            $expectedCatalogStatePath,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [System.IO.Path]::GetFullPath($ProtectedStorePath).Equals(
+            $expectedProtectedStorePath,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The exact onboarding-owned package state paths are invalid."
+    }
+
+    $deadline = (Get-Date).AddSeconds(5)
+    $consecutiveAbsentObservations = 0
+    while ((Get-Date) -lt $deadline) {
+        $processes = @([System.Diagnostics.Process]::GetProcessesByName("IptvSuite.Windows"))
+        try {
+            if ($processes.Count -eq 0) {
+                $consecutiveAbsentObservations++
+                if ($consecutiveAbsentObservations -ge 3) {
+                    break
+                }
+            }
+            else {
+                $consecutiveAbsentObservations = 0
+            }
+        }
+        finally {
+            foreach ($process in $processes) {
+                $process.Dispose()
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    if ($consecutiveAbsentObservations -lt 3) {
+        throw "The exact packaged application did not become quiescent before reset."
+    }
+
+    try {
+        Reset-AppxPackage `
+            -Package $ExpectedPackageFullName `
+            -Confirm:$false `
+            -ErrorAction Stop
+    }
+    catch {
+        throw "The exact clean-install onboarding package reset failed."
+    }
+
+    $registrations = @(Get-AppxPackage -Name $expectedName -ErrorAction Stop |
+        Where-Object {
+            $_.PackageFullName -ceq $ExpectedPackageFullName -and
+            $_.PackageFamilyName -ceq $ExpectedPackageFamilyName -and
+            $_.Publisher -ceq $expectedPublisher
+        })
+    if ($registrations.Count -ne 1) {
+        throw "The exact package registration changed during onboarding reset."
+    }
+
+    $stateDeadline = (Get-Date).AddSeconds(15)
+    while (((Test-Path -LiteralPath $CatalogStatePath) -or
+            (Test-Path -LiteralPath $ProtectedStorePath)) -and
+        (Get-Date) -lt $stateDeadline) {
+        Start-Sleep -Milliseconds 250
+    }
+    if ((Test-Path -LiteralPath $CatalogStatePath) -or
+        (Test-Path -LiteralPath $ProtectedStorePath)) {
+        throw "The exact onboarding-owned package state remained after reset."
+    }
 }
 
 function Test-AutomationElementContainsExactText {
@@ -3077,6 +3512,487 @@ try {
     $packageFamilyName = $installedPackage.PackageFamilyName
     $catalogDatabasePath = Join-Path $env:LOCALAPPDATA `
         "Packages\$packageFamilyName\LocalCache\Catalog\v2\catalog.db"
+    $catalogStatePath = Split-Path -Parent $catalogDatabasePath
+    $protectedStorePath = Join-Path $env:LOCALAPPDATA `
+        "Packages\$packageFamilyName\LocalCache\ProtectedStore\v2"
+    $aumid = "$($installedPackage.PackageFamilyName)!$expectedApplicationId"
+
+    $freshStateDeadline = (Get-Date).AddSeconds(15)
+    while (((Test-Path -LiteralPath $catalogStatePath) -or
+            (Test-Path -LiteralPath $protectedStorePath)) -and
+        (Get-Date) -lt $freshStateDeadline) {
+        Start-Sleep -Milliseconds 250
+    }
+    if ((Test-Path -LiteralPath $catalogStatePath) -or
+        (Test-Path -LiteralPath $protectedStorePath)) {
+        throw "The clean-install onboarding acceptance did not begin from fresh package state."
+    }
+    if (-not (Test-Path -LiteralPath $playbackFixtureRoot -PathType Container) -or
+        ([System.IO.File]::GetAttributes($playbackFixtureRoot) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The committed onboarding acceptance fixture root is invalid."
+    }
+    if (Test-Path -LiteralPath $onboardingControlDirectory) {
+        throw "The onboarding acceptance control directory already exists."
+    }
+
+    New-Item -ItemType Directory -Path $onboardingControlRoot -Force | Out-Null
+    if (([System.IO.File]::GetAttributes($artifactRoot) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        ([System.IO.File]::GetAttributes($onboardingControlRoot) -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The onboarding acceptance control root is invalid."
+    }
+    New-Item -ItemType Directory -Path $onboardingControlDirectory | Out-Null
+    Assert-ExactOnboardingControlEntries -AllowedNames @()
+
+    $onboardingHarnessArgumentValues = @(
+        $playbackUiHarnessAssemblyPath,
+        "serve-onboarding",
+        $playbackFixtureRoot,
+        $onboardingControlDirectory,
+        $onboardingPipeName
+    )
+    foreach ($argumentValue in $onboardingHarnessArgumentValues) {
+        if ([string]::IsNullOrWhiteSpace($argumentValue) -or $argumentValue.Contains('"')) {
+            throw "An onboarding acceptance harness argument is invalid."
+        }
+    }
+    $onboardingHarnessArguments = ($onboardingHarnessArgumentValues |
+        ForEach-Object { '"' + $_ + '"' }) -join ' '
+    try {
+        $onboardingHarnessProcess = Start-Process `
+            -FilePath $DotNetPath `
+            -ArgumentList $onboardingHarnessArguments `
+            -WorkingDirectory $repositoryRoot `
+            -WindowStyle Hidden `
+            -PassThru
+    }
+    catch {
+        throw "The onboarding acceptance harness could not be started."
+    }
+    try {
+        $null = $onboardingHarnessProcess.Handle
+    }
+    catch {
+        throw "The onboarding acceptance harness exited before its process handle could be retained."
+    }
+
+    $onboardingReadyDeadline = (Get-Date).AddSeconds(60)
+    do {
+        $onboardingHarnessProcess.Refresh()
+        if ($onboardingHarnessProcess.HasExited) {
+            throw "The onboarding acceptance harness exited before publishing readiness."
+        }
+        if ((Test-Path -LiteralPath $onboardingReadyPath -PathType Leaf) -and
+            (Test-Path -LiteralPath $onboardingPublicCertificatePath -PathType Leaf)) {
+            $onboardingHarnessReady = $true
+            break
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $onboardingReadyDeadline)
+    if (-not $onboardingHarnessReady) {
+        throw "The onboarding acceptance harness did not publish readiness before the deadline."
+    }
+
+    Assert-ExactOnboardingControlEntries -AllowedNames @("loopback.cer", "ready.json")
+    $onboardingReadyTicket = Read-StrictOnboardingJsonTicket `
+        -Path $onboardingReadyPath `
+        -AllowedProperties @("IsReady", "CertificateThumbprint")
+    if ($onboardingReadyTicket.IsReady -isnot [bool] -or
+        $onboardingReadyTicket.CertificateThumbprint -isnot [string] -or
+        -not $onboardingReadyTicket.IsReady -or
+        -not [System.Text.RegularExpressions.Regex]::IsMatch(
+            $onboardingReadyTicket.CertificateThumbprint,
+            '\A[0-9A-F]{40}\z')) {
+        throw "The onboarding acceptance readiness ticket is invalid."
+    }
+
+    $onboardingLoopbackCertificateThumbprint =
+        $onboardingReadyTicket.CertificateThumbprint
+    try {
+        $onboardingLoopbackCertificate =
+            [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                $onboardingPublicCertificatePath)
+    }
+    catch {
+        throw "The onboarding acceptance public certificate is invalid."
+    }
+    $onboardingNow = Get-Date
+    if ($onboardingLoopbackCertificate.HasPrivateKey -or
+        $onboardingLoopbackCertificate.Subject -cne $expectedPlaybackCertificateSubject -or
+        $onboardingLoopbackCertificate.Issuer -cne $expectedPlaybackCertificateSubject -or
+        $onboardingLoopbackCertificate.Thumbprint -cne
+            $onboardingLoopbackCertificateThumbprint -or
+        $onboardingLoopbackCertificate.NotBefore -gt $onboardingNow -or
+        $onboardingLoopbackCertificate.NotAfter -le $onboardingNow) {
+        throw "The onboarding acceptance public certificate does not match readiness."
+    }
+
+    $onboardingServerAuthenticationExtensions = @(
+        $onboardingLoopbackCertificate.Extensions |
+            Where-Object { $_.Oid.Value -eq "2.5.29.37" }
+    )
+    $onboardingBasicConstraintExtensions = @(
+        $onboardingLoopbackCertificate.Extensions |
+            Where-Object { $_.Oid.Value -eq "2.5.29.19" }
+    )
+    $onboardingKeyUsageExtensions = @(
+        $onboardingLoopbackCertificate.Extensions |
+            Where-Object { $_.Oid.Value -eq "2.5.29.15" }
+    )
+    if ($onboardingServerAuthenticationExtensions.Count -ne 1 -or
+        $onboardingBasicConstraintExtensions.Count -ne 1 -or
+        $onboardingKeyUsageExtensions.Count -ne 1) {
+        throw "The onboarding acceptance public certificate constraints are invalid."
+    }
+    $onboardingServerAuthenticationExtension =
+        [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]$onboardingServerAuthenticationExtensions[0]
+    $onboardingServerAuthenticationUsages = @(
+        $onboardingServerAuthenticationExtension.EnhancedKeyUsages |
+            ForEach-Object { $_.Value }
+    )
+    $onboardingBasicConstraintExtension =
+        [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]$onboardingBasicConstraintExtensions[0]
+    $onboardingKeyUsageExtension =
+        [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]$onboardingKeyUsageExtensions[0]
+    if (-not $onboardingServerAuthenticationExtension.Critical -or
+        $onboardingServerAuthenticationUsages.Count -ne 1 -or
+        $onboardingServerAuthenticationUsages[0] -cne "1.3.6.1.5.5.7.3.1" -or
+        -not $onboardingBasicConstraintExtension.Critical -or
+        $onboardingBasicConstraintExtension.CertificateAuthority -or
+        -not $onboardingKeyUsageExtension.Critical -or
+        $onboardingKeyUsageExtension.KeyUsages -ne
+            [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature) {
+        throw "The onboarding acceptance public certificate constraints are invalid."
+    }
+
+    $onboardingRootCertificatePath =
+        "Cert:\LocalMachine\Root\$onboardingLoopbackCertificateThumbprint"
+    if (Test-Path -LiteralPath $onboardingRootCertificatePath) {
+        throw "The exact onboarding acceptance certificate is already trusted."
+    }
+    $onboardingLoopbackCertificateImported = $true
+    try {
+        $importedOnboardingCertificates = @(
+            Import-Certificate `
+                -FilePath $onboardingPublicCertificatePath `
+                -CertStoreLocation "Cert:\LocalMachine\Root"
+        )
+    }
+    catch {
+        throw "The onboarding acceptance public certificate could not be trusted."
+    }
+    if ($importedOnboardingCertificates.Count -ne 1 -or
+        $importedOnboardingCertificates[0].Thumbprint -cne
+            $onboardingLoopbackCertificateThumbprint) {
+        throw "The onboarding acceptance public certificate import is invalid."
+    }
+
+    $onboardingLocator = Read-ExactOnboardingLocator
+    try {
+        $onboardingInstance = Start-PackagedPlaybackApplicationInstance
+        $launchedProcess = $onboardingInstance.Process
+        $onboardingRoot = $onboardingInstance.Root
+        $onboardingWindowHandle = $onboardingInstance.WindowHandle
+        $onboardingProcessId = $onboardingInstance.ProcessId
+
+        $onboardingStatusElement = Get-AutomationElementById `
+            $onboardingRoot `
+            "CatalogStatusText"
+        $onboardingEmptyDeadline = (Get-Date).AddSeconds(30)
+        while (($null -eq $onboardingStatusElement -or
+                $onboardingStatusElement.Current.Name -cne $expectedOnboardingEmptyStatus) -and
+            (Get-Date) -lt $onboardingEmptyDeadline) {
+            Assert-PackagedProcessAlive -Process $launchedProcess
+            if ($null -eq $onboardingStatusElement) {
+                $onboardingStatusElement = Get-AutomationElementById `
+                    $onboardingRoot `
+                    "CatalogStatusText"
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if ($null -eq $onboardingStatusElement -or
+            $onboardingStatusElement.Current.Name -cne $expectedOnboardingEmptyStatus) {
+            throw "The clean-install packaged catalog did not expose its exact empty state."
+        }
+
+        $onboardingOpenButton = Get-RequiredAutomationElement `
+            $onboardingRoot `
+            "CatalogAddSourceButton" `
+            ([System.Windows.Automation.ControlType]::Button) `
+            "Add authorized remote M3U catalog"
+        Invoke-PackagedOnboardingButton `
+            -Process $launchedProcess `
+            -ButtonElement $onboardingOpenButton
+
+        $onboardingNameInput = Get-RequiredAutomationElement `
+            $onboardingRoot `
+            "RemotePlaylistSourceNameTextBox" `
+            ([System.Windows.Automation.ControlType]::Edit) `
+            "Source name"
+        $onboardingLocatorInput = Get-RequiredAutomationElement `
+            $onboardingRoot `
+            "RemotePlaylistLocatorTextBox" `
+            ([System.Windows.Automation.ControlType]::Edit) `
+            "Secure playlist URL"
+        $onboardingAuthorization = Get-RequiredAutomationElement `
+            $onboardingRoot `
+            "RemotePlaylistAuthorizationCheckBox" `
+            ([System.Windows.Automation.ControlType]::CheckBox) `
+            "Confirm authorization to access this source"
+        $onboardingSubmitButton = Get-RequiredAutomationElement `
+            $onboardingRoot `
+            "RemotePlaylistAddButton" `
+            ([System.Windows.Automation.ControlType]::Button) `
+            "Validate and add source"
+        if ($onboardingSubmitButton.Current.IsEnabled) {
+            throw "The packaged onboarding command did not require explicit authorization."
+        }
+
+        Set-PackagedOnboardingText `
+            -Element $onboardingNameInput `
+            -Value $expectedPlaybackSourceName
+        Set-PackagedOnboardingText `
+            -Element $onboardingLocatorInput `
+            -Value $onboardingLocator
+
+        $togglePatternObject = $null
+        if (-not $onboardingAuthorization.TryGetCurrentPattern(
+                [System.Windows.Automation.TogglePattern]::Pattern,
+                [ref]$togglePatternObject)) {
+            throw "The packaged onboarding authorization has no TogglePattern."
+        }
+        $togglePattern = [System.Windows.Automation.TogglePattern]$togglePatternObject
+        if ($togglePattern.Current.ToggleState -ne
+            [System.Windows.Automation.ToggleState]::Off) {
+            throw "The packaged onboarding authorization was not initially clear."
+        }
+        $togglePattern.Toggle()
+        $authorizationDeadline = (Get-Date).AddSeconds(5)
+        while (($togglePattern.Current.ToggleState -ne
+                [System.Windows.Automation.ToggleState]::On -or
+                -not $onboardingSubmitButton.Current.IsEnabled) -and
+            (Get-Date) -lt $authorizationDeadline) {
+            Assert-PackagedProcessAlive -Process $launchedProcess
+            Start-Sleep -Milliseconds 50
+        }
+        if ($togglePattern.Current.ToggleState -ne
+                [System.Windows.Automation.ToggleState]::On -or
+            -not $onboardingSubmitButton.Current.IsEnabled) {
+            throw "The packaged onboarding authorization did not enable the exact command."
+        }
+        $cleanInstallOnboardingAuthorizationVerified = $true
+
+        Invoke-PackagedOnboardingButton `
+            -Process $launchedProcess `
+            -ButtonElement $onboardingSubmitButton
+        $onboardingLocator = $null
+
+        $onboardingSourceSelector = Get-RequiredAutomationElement `
+            $onboardingRoot `
+            "CatalogSourceSelector" `
+            ([System.Windows.Automation.ControlType]::ComboBox) `
+            "Playlist source"
+        $onboardingChannelList = Get-RequiredAutomationElement `
+            $onboardingRoot `
+            "CatalogChannelList" `
+            ([System.Windows.Automation.ControlType]::List) `
+            "Channels"
+        $onboardingListItemCondition =
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::ListItem)
+        $onboardingCatalogDeadline = (Get-Date).AddSeconds(60)
+        $onboardingCatalogReady = $false
+        do {
+            Assert-PackagedProcessAlive -Process $launchedProcess
+            $onboardingStatusElement = Get-AutomationElementById `
+                $onboardingRoot `
+                "CatalogStatusText"
+            $onboardingChannelItems = $onboardingChannelList.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $onboardingListItemCondition)
+            if ($null -ne $onboardingStatusElement -and
+                $onboardingStatusElement.Current.Name -ceq
+                    $expectedOnboardingCatalogStatus -and
+                $onboardingChannelItems.Count -eq 2) {
+                $onboardingCatalogReady = $true
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        } while ((Get-Date) -lt $onboardingCatalogDeadline)
+        if (-not $onboardingCatalogReady) {
+            throw "The packaged onboarding import did not expose exactly two channels."
+        }
+
+        $onboardingSourceExpandObject = $null
+        if (-not $onboardingSourceSelector.TryGetCurrentPattern(
+                [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+                [ref]$onboardingSourceExpandObject)) {
+            throw "The packaged onboarding source selector has no ExpandCollapsePattern."
+        }
+        $onboardingSourceExpand =
+            [System.Windows.Automation.ExpandCollapsePattern]$onboardingSourceExpandObject
+        $onboardingSourceExpand.Expand()
+        $sourceDeadline = (Get-Date).AddSeconds(10)
+        do {
+            $onboardingSourceItems = $onboardingSourceSelector.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $onboardingListItemCondition)
+            if ($onboardingSourceItems.Count -eq 1) {
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        } while ((Get-Date) -lt $sourceDeadline)
+        if ($onboardingSourceItems.Count -ne 1 -or
+            $onboardingSourceItems[0].Current.Name -cne $expectedPlaybackSourceName) {
+            throw "The packaged onboarding source binding is not exact."
+        }
+        $onboardingSourceExpand.Collapse()
+        $cleanInstallOnboardingSourceVerified = $true
+
+        $channelAFound = $false
+        $channelBFound = $false
+        for ($channelIndex = 0;
+            $channelIndex -lt $onboardingChannelItems.Count;
+            $channelIndex++) {
+            $channelItem = $onboardingChannelItems[$channelIndex]
+            if (Test-AutomationElementContainsExactText `
+                    -Root $channelItem `
+                    -ExpectedText $expectedPlaybackChannelAName) {
+                if ($channelAFound) {
+                    throw "The packaged onboarding catalog contains a duplicate channel."
+                }
+                $channelAFound = $true
+            }
+            elseif (Test-AutomationElementContainsExactText `
+                    -Root $channelItem `
+                    -ExpectedText $expectedPlaybackChannelBName) {
+                if ($channelBFound) {
+                    throw "The packaged onboarding catalog contains a duplicate channel."
+                }
+                $channelBFound = $true
+            }
+            else {
+                throw "The packaged onboarding catalog contains an unexpected channel."
+            }
+        }
+        if (-not $channelAFound -or -not $channelBFound) {
+            throw "The packaged onboarding catalog channel binding is incomplete."
+        }
+        $cleanInstallOnboardingChannelsVerified = $true
+
+        if (-not $launchedProcess.CloseMainWindow() -or
+            -not $launchedProcess.WaitForExit(10000)) {
+            throw "The packaged onboarding application did not close normally."
+        }
+        $launchedProcess.Refresh()
+        if ([int]$launchedProcess.ExitCode -ne 0) {
+            throw "The packaged onboarding application returned a non-zero exit code."
+        }
+        $launchedProcess.Dispose()
+        $launchedProcess = $null
+    }
+    finally {
+        $onboardingLocator = $null
+    }
+
+    $onboardingStopSignalStream = [System.IO.File]::Open(
+        $onboardingStopSignalPath,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None)
+    $onboardingStopSignalStream.Dispose()
+    $onboardingStopSignalCreated = $true
+    if (-not $onboardingHarnessProcess.WaitForExit(10000)) {
+        throw "The onboarding acceptance harness did not stop after exact verification."
+    }
+    $onboardingHarnessProcess.Refresh()
+    if ([int]$onboardingHarnessProcess.ExitCode -ne 0) {
+        throw "The onboarding acceptance harness returned a failure result."
+    }
+    $onboardingHarnessProcess.Dispose()
+    $onboardingHarnessProcess = $null
+
+    Assert-ExactOnboardingControlEntries `
+        -AllowedNames @("loopback.cer", "ready.json", "result.json", "stop.signal")
+    $onboardingResult = Read-StrictOnboardingJsonTicket `
+        -Path $onboardingResultPath `
+        -AllowedProperties @(
+            "ReadyPublished",
+            "LocatorTransferred",
+            "StopObserved",
+            "StoppedGracefully",
+            "CertificateThumbprint",
+            "RequestCount",
+            "CompletedResponseCount",
+            "FailureCount",
+            "PlaylistRequestCount",
+            "MediaRequestCount")
+    if ($onboardingResult.ReadyPublished -isnot [bool] -or
+        $onboardingResult.LocatorTransferred -isnot [bool] -or
+        $onboardingResult.StopObserved -isnot [bool] -or
+        $onboardingResult.StoppedGracefully -isnot [bool] -or
+        $onboardingResult.CertificateThumbprint -isnot [string] -or
+        ($onboardingResult.RequestCount -isnot [int] -and
+            $onboardingResult.RequestCount -isnot [long]) -or
+        ($onboardingResult.CompletedResponseCount -isnot [int] -and
+            $onboardingResult.CompletedResponseCount -isnot [long]) -or
+        ($onboardingResult.FailureCount -isnot [int] -and
+            $onboardingResult.FailureCount -isnot [long]) -or
+        ($onboardingResult.PlaylistRequestCount -isnot [int] -and
+            $onboardingResult.PlaylistRequestCount -isnot [long]) -or
+        ($onboardingResult.MediaRequestCount -isnot [int] -and
+            $onboardingResult.MediaRequestCount -isnot [long]) -or
+        -not $onboardingResult.ReadyPublished -or
+        -not $onboardingResult.LocatorTransferred -or
+        -not $onboardingResult.StopObserved -or
+        -not $onboardingResult.StoppedGracefully -or
+        $onboardingResult.CertificateThumbprint -cne
+            $onboardingLoopbackCertificateThumbprint -or
+        [int]$onboardingResult.RequestCount -ne 2 -or
+        [int]$onboardingResult.CompletedResponseCount -ne 2 -or
+        [int]$onboardingResult.FailureCount -ne 0 -or
+        [int]$onboardingResult.PlaylistRequestCount -ne 2 -or
+        [int]$onboardingResult.MediaRequestCount -ne 0) {
+        throw "The clean-install onboarding acceptance result is invalid."
+    }
+    $cleanInstallOnboardingRequestCount = [int]$onboardingResult.RequestCount
+    $cleanInstallOnboardingVerified =
+        $cleanInstallOnboardingAuthorizationVerified -and
+        $cleanInstallOnboardingSourceVerified -and
+        $cleanInstallOnboardingChannelsVerified
+    if (-not $cleanInstallOnboardingVerified) {
+        throw "The clean-install onboarding UI acceptance is incomplete."
+    }
+
+    $onboardingCertificatePath =
+        "Cert:\LocalMachine\Root\$onboardingLoopbackCertificateThumbprint"
+    $onboardingCertificateCandidate = Get-Item `
+        -LiteralPath $onboardingCertificatePath `
+        -ErrorAction SilentlyContinue
+    if ($null -eq $onboardingCertificateCandidate -or
+        $onboardingCertificateCandidate.Subject -cne
+            $expectedPlaybackCertificateSubject -or
+        $onboardingCertificateCandidate.Thumbprint -cne
+            $onboardingLoopbackCertificateThumbprint) {
+        throw "The exact onboarding certificate identity changed before cleanup."
+    }
+    Remove-Item -LiteralPath $onboardingCertificatePath -Force -ErrorAction Stop
+    $onboardingLoopbackCertificateImported = $false
+    $onboardingLoopbackCertificate.Dispose()
+    $onboardingLoopbackCertificate = $null
+    Remove-ExactOnboardingControlDirectory
+
+    Invoke-ExactDevelopmentPackageReset `
+        -ExpectedPackageFullName $installedPackageFullName `
+        -ExpectedPackageFamilyName $packageFamilyName `
+        -CatalogStatePath $catalogStatePath `
+        -ProtectedStorePath $protectedStorePath
+    $cleanInstallOnboardingResetVerified = $true
+
     & $DotNetPath $catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $catalogDatabasePath -PathType Leaf)) {
         throw "The disposable 50k packaged catalog seed failed."
@@ -3088,7 +4004,6 @@ try {
         throw "IptvSuite.Windows is already running; refusing an ambiguous launch smoke."
     }
 
-    $aumid = "$($installedPackage.PackageFamilyName)!$expectedApplicationId"
     $activationProcessId = [IptvSuite.PackageSmoke.PackagedApplicationActivator]::Activate($aumid)
     $launchedProcess = Get-Process -Id $activationProcessId -ErrorAction SilentlyContinue
     if ($null -eq $launchedProcess) {
@@ -5271,6 +6186,13 @@ try {
         PackageInstallRootAuditPassed =
             $packageInstallRootAuditResult.RuntimeWriteAuditPassed
         ProtectedStoreDirectoryInitialized = $protectedStoreDirectoryInitialized
+        CleanInstallOnboardingVerified = $cleanInstallOnboardingVerified
+        CleanInstallOnboardingAuthorizationVerified =
+            $cleanInstallOnboardingAuthorizationVerified
+        CleanInstallOnboardingSourceVerified = $cleanInstallOnboardingSourceVerified
+        CleanInstallOnboardingChannelsVerified = $cleanInstallOnboardingChannelsVerified
+        CleanInstallOnboardingResetVerified = $cleanInstallOnboardingResetVerified
+        CleanInstallOnboardingRequestCount = $cleanInstallOnboardingRequestCount
         CatalogUiaContractVerified = $catalogUiaContractVerified
         CatalogKeyboardFocusOrderVerified = $catalogKeyboardFocusOrderVerified
         Catalog50kSeedVerified = $catalog50kSeedVerified
@@ -5471,6 +6393,49 @@ finally {
         }
     }
 
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Stop onboarding acceptance harness" -Action {
+        if ($null -ne $onboardingHarnessProcess) {
+            try {
+                $onboardingHarnessProcess.Refresh()
+                if (-not $onboardingHarnessProcess.HasExited) {
+                    if ($onboardingHarnessReady -and -not $onboardingStopSignalCreated) {
+                        if (Test-Path -LiteralPath $onboardingStopSignalPath) {
+                            $existingStopSignal = Get-Item `
+                                -LiteralPath $onboardingStopSignalPath `
+                                -Force
+                            if ($existingStopSignal.PSIsContainer -or
+                                ($existingStopSignal.Attributes -band
+                                    [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                                $existingStopSignal.Length -ne 0) {
+                                throw "The onboarding acceptance stop signal is invalid during cleanup."
+                            }
+                        }
+                        else {
+                            $cleanupStopSignalStream = [System.IO.File]::Open(
+                                $onboardingStopSignalPath,
+                                [System.IO.FileMode]::CreateNew,
+                                [System.IO.FileAccess]::Write,
+                                [System.IO.FileShare]::None)
+                            $cleanupStopSignalStream.Dispose()
+                        }
+                        $onboardingStopSignalCreated = $true
+                    }
+
+                    if (-not $onboardingHarnessReady -or
+                        -not $onboardingHarnessProcess.WaitForExit(10000)) {
+                        $onboardingHarnessProcess.Kill()
+                        if (-not $onboardingHarnessProcess.WaitForExit(10000)) {
+                            throw "The exact onboarding acceptance harness process did not stop during cleanup."
+                        }
+                    }
+                }
+            }
+            finally {
+                $onboardingHarnessProcess.Dispose()
+            }
+        }
+    }
+
     Invoke-CleanupStep -Failures $cleanupFailures -Name "Stop playback acceptance harness" -Action {
         if ($null -ne $playbackHarnessProcess) {
             try {
@@ -5570,9 +6535,42 @@ finally {
         }
     }
 
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact onboarding acceptance certificate" -Action {
+        if ($onboardingLoopbackCertificateImported) {
+            if ([string]::IsNullOrWhiteSpace($onboardingLoopbackCertificateThumbprint) -or
+                -not [System.Text.RegularExpressions.Regex]::IsMatch(
+                    $onboardingLoopbackCertificateThumbprint,
+                    '\A[0-9A-F]{40}\z')) {
+                throw "Refusing onboarding certificate cleanup because the thumbprint is invalid."
+            }
+
+            $onboardingCertificatePath =
+                "Cert:\LocalMachine\Root\$onboardingLoopbackCertificateThumbprint"
+            $onboardingCertificateCandidate = Get-Item `
+                -LiteralPath $onboardingCertificatePath `
+                -ErrorAction SilentlyContinue
+            if ($null -ne $onboardingCertificateCandidate) {
+                if ($onboardingCertificateCandidate.Subject -cne
+                        $expectedPlaybackCertificateSubject -or
+                    $onboardingCertificateCandidate.Thumbprint -cne
+                        $onboardingLoopbackCertificateThumbprint) {
+                    throw "Refusing onboarding certificate cleanup because its identity does not match."
+                }
+
+                Remove-Item -LiteralPath $onboardingCertificatePath -Force -ErrorAction Stop
+            }
+        }
+    }
+
     Invoke-CleanupStep -Failures $cleanupFailures -Name "Dispose playback acceptance certificate" -Action {
         if ($null -ne $playbackLoopbackCertificate) {
             $playbackLoopbackCertificate.Dispose()
+        }
+    }
+
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Dispose onboarding acceptance certificate" -Action {
+        if ($null -ne $onboardingLoopbackCertificate) {
+            $onboardingLoopbackCertificate.Dispose()
         }
     }
 
@@ -5601,6 +6599,10 @@ finally {
 
     Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact playback-control directory" -Action {
         Remove-ExactPlaybackControlDirectory
+    }
+
+    Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact onboarding-control directory" -Action {
+        Remove-ExactOnboardingControlDirectory
     }
 
     Invoke-CleanupStep -Failures $cleanupFailures -Name "Remove exact package-output directory" -Action {
