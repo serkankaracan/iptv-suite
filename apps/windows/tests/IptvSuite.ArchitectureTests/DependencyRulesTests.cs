@@ -13,6 +13,10 @@ public sealed class DependencyRulesTests
     private const string DevelopmentPublisher = "CN=IptvSuite Local Development";
     private const string LifecycleHarnessIdentity = "ProtectedStore.PackageLifecycleTest.Local.5d8c7a91";
     private const string LifecycleHarnessPublisher = "CN=Protected Store Package Lifecycle Local Test";
+    private const string ExpectedAuthorizationAccessibleName =
+        "Kaynak erişim ve özel veya yerel ağ güvenini onayla";
+    private const string ExpectedAuthorizationAccessibleNameUtf8Base64 =
+        "S2F5bmFrIGVyacWfaW0gdmUgw7Z6ZWwgdmV5YSB5ZXJlbCBhxJ8gZ8O8dmVuaW5pIG9uYXlsYQ==";
 
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string[] RequiredCapabilities = ["runFullTrust"];
@@ -8536,10 +8540,12 @@ public sealed class DependencyRulesTests
         Assert.AreEqual("4096", locatorInput.Attribute("MaxLength")?.Value);
         Assert.AreEqual("False", locatorInput.Attribute("IsSpellCheckEnabled")?.Value);
         XElement authorization = RequiredNamedElement("RemotePlaylistAuthorizationCheckBox");
-        const string expectedAuthorizationAccessibleName =
-            "Kaynak erişim ve özel veya yerel ağ güvenini onayla";
         Assert.AreEqual(
-            expectedAuthorizationAccessibleName,
+            ExpectedAuthorizationAccessibleName,
+            System.Text.Encoding.UTF8.GetString(
+                Convert.FromBase64String(ExpectedAuthorizationAccessibleNameUtf8Base64)));
+        Assert.AreEqual(
+            ExpectedAuthorizationAccessibleName,
             authorization.Attribute("AutomationProperties.Name")?.Value);
         StringAssert.Contains(
             authorization.Attribute("Content")?.Value ?? string.Empty,
@@ -8714,7 +8720,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "RemotePlaylistAuthorizationCheckBox");
         StringAssert.Contains(
             packageSmoke,
-            "\"Kaynak erişim ve özel veya yerel ağ güvenini onayla\"");
+            $"\"{ExpectedAuthorizationAccessibleNameUtf8Base64}\"");
         StringAssert.Contains(packageSmoke, "[System.Net.IPAddress]::IsLoopback(");
         StringAssert.Contains(packageSmoke, "Reset-AppxPackage `");
         StringAssert.Contains(packageSmoke, "CleanInstallOnboardingVerified = $cleanInstallOnboardingVerified");
