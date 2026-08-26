@@ -22,7 +22,7 @@ $script:technicalStage = "Initialization"
 $script:utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
 $script:utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:packageSbomAcceptanceRelativePath = "eng/windows-package-sbom-acceptance.json"
-$script:packageSbomAcceptanceSha256 = "69bfd62dc8145ba280c1aa45c92dde15173440d4378cb568df68beef3f814c80"
+$script:packageSbomAcceptanceSha256 = "2377d35b7ec9d270bd49c63bce30d3a12d67b2570fafa5c28d0fe7998646813a"
 $script:packageVulnerabilityAcceptanceRelativePath =
     "eng/windows-package-vulnerability-acceptance.json"
 $script:packageVulnerabilityAcceptanceSha256 =
@@ -37,10 +37,10 @@ $script:packageVulnerabilityHelperSourceSha256 =
 $script:packageVulnerabilityMaximumAgeDays = 7
 $script:packageVulnerabilityFinalReleaseMaximumAgeHours = 24
 $script:packageSbomContractSourceCount = 7
-$script:packageSbomContractSourceSetSha256 = "4896d447e53b075f48c0bbad7fe9336a64c2d8789b12c000e7b3c8a21c65e5fe"
+$script:packageSbomContractSourceSetSha256 = "72c195557451beed09a43740036f186ff4c0091d14148024a995e3f90d20342d"
 $script:packageSbomProductionInputSetSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
-$script:packageProducingSnapshotFileCount = 111
-$script:packageProducingSnapshotSha256 = "6b068e8ccb651159dc2bad754f370ba428c6c3087c01c6bc7e419e6095cfadcc"
+$script:packageProducingSnapshotFileCount = 113
+$script:packageProducingSnapshotSha256 = "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
 $script:assetProvenanceRelativePath = "eng/windows-production-asset-provenance.json"
 $script:assetProvenanceSha256 = "8006c56170202457815f3768dfcff56236b661a4dbb57aa7b7bf3a5acdcc6412"
 $script:assetGeneratorSha256 = "4ac099e8da587b5df61817ab92071235e4e91408d891f5cafa3037599d7f603b"
@@ -1406,28 +1406,28 @@ function Read-PackageSbomAcceptance {
         $expectedStrings = [ordered]@{
             decision = "AcceptTechnicalPackageBoundSbom"
             scope = "TechnicalPackageBoundSbomOnly"
-            runCompletedAtUtc = "2026-08-26T04:08:48Z"
+            runCompletedAtUtc = "2026-08-26T14:18:56Z"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-package-sbom.yml"
             workflowName = "Windows package SBOM producer"
             runEvent = "workflow_dispatch"
             runBranch = "main"
-            runHeadSha = "becd2cb408982eb34b1bf62de67cb628c9408055"
+            runHeadSha = "62b601e871ca41a6d2100dfb2375b683bbd8e0ca"
             runConclusion = "success"
             packageJobName = "Package-bound SBOM producer gate"
             packageJobConclusion = "success"
             artifactName = "windows-msix-smoke-evidence"
-            artifactDigestSha256 = "9acfb539f9bdc68819e30a14d5e098173dbb8158ed51fa45dd1e675a8a960459"
+            artifactDigestSha256 = "79786ab5bbabde942d6f45cb9e47bbee814980be11a7817b208259d88ca03926"
             lastSuccessMemberName = "last-success.json"
-            lastSuccessMemberSha256 = "878bd5a09f5de7fbb5557c1d3316a2d79dc0752dc25070dee159351236f73f9a"
+            lastSuccessMemberSha256 = "39ff344dc33ecd3b943c37ec70f9d73d296726b57b3c5bb10503ab4d143895ca"
             sbomSummaryMemberName = "package-sbom-summary.json"
-            sbomSummaryMemberSha256 = "6674b064a8e33479d5183015a345bf4cf14678572f2c1d6166fbffdbf1137937"
+            sbomSummaryMemberSha256 = "7553492ee17022d73d5801ee75fee5be1230d1b85fa3c6f8071aecdd9be0cfc2"
             sbomMemberName = "package-sbom.spdx.json"
-            sbomMemberSha256 = "523cf20fe68f4e86f051a89b711e4da68d77b3ba81973ef74d6ee955d1c9ec39"
+            sbomMemberSha256 = "03c29c18da6b0323c88149805e6eeef6f43d35ec329c08d2b93fc5247b04a903"
             configuration = "Release"
             dotNetSdk = "10.0.302"
             sbomFormat = "SPDX-2.2"
-            documentNamespace = "https://github.com/serkankaracan/iptv-suite/sbom/IptvSuite.Windows.ReleaseSet/0.1.0.0/becd2cb408982eb34b1bf62de67cb628c9408055-911d807f6f02b9bc1575d05b19f5f66e3a7c4d615c46b5750224536a8b12fd95-a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf"
+            documentNamespace = "https://github.com/serkankaracan/iptv-suite/sbom/IptvSuite.Windows.ReleaseSet/0.1.0.0/62b601e871ca41a6d2100dfb2375b683bbd8e0ca-2fcfbd3cd59501e605596a6e77d567979993e78d9986566964cb21a0f2229a3a-a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf"
             toolPackageId = "microsoft.sbom.dotnettool"
             toolVersion = "4.1.5"
             toolNupkgSha256 = "00e1fb81c01f4e9ad7a9d00f365bb3f3776cde6fecdd15cc3adbbce1f83d14bb"
@@ -1436,7 +1436,7 @@ function Read-PackageSbomAcceptance {
             contractSourceSetCanonicalSha256 = $script:packageSbomContractSourceSetSha256
             packageProducingSnapshotSha256 = $script:packageProducingSnapshotSha256
             applicationPackageFile = "IptvSuite.Windows_0.1.0.0_x64.msix"
-            applicationPackageSha256 = "911d807f6f02b9bc1575d05b19f5f66e3a7c4d615c46b5750224536a8b12fd95"
+            applicationPackageSha256 = "2fcfbd3cd59501e605596a6e77d567979993e78d9986566964cb21a0f2229a3a"
             applicationIdentityName = "IptvSuite.LocalDev.6f0d9a64"
             applicationVersion = "0.1.0.0"
             applicationSignatureStatus = "Valid"
@@ -1460,16 +1460,16 @@ function Read-PackageSbomAcceptance {
         $expectedInt32 = [ordered]@{
             schemaVersion = 1
             repositoryId = 1328998460
-            runNumber = 3
+            runNumber = 5
             runAttempt = 1
-            artifactSizeBytes = 7724
-            lastSuccessMemberLength = 17817
+            artifactSizeBytes = 7740
+            lastSuccessMemberLength = 18711
             sbomSummaryMemberLength = 1985
             sbomMemberLength = 50566
             productionInputCount = 10
             contractSourceCount = $script:packageSbomContractSourceCount
             packageProducingSnapshotFileCount = $script:packageProducingSnapshotFileCount
-            applicationPackageLength = 29843501
+            applicationPackageLength = 29852385
             runtimePackageLength = 46787781
             fileCount = 2
             componentCount = 24
@@ -1485,9 +1485,9 @@ function Read-PackageSbomAcceptance {
         }
 
         $expectedInt64 = [ordered]@{
-            runId = [long]32928618825
-            packageJobId = [long]98056394177
-            artifactId = [long]9592556048
+            runId = [long]32978788187
+            packageJobId = [long]98209973083
+            artifactId = [long]9610820189
         }
         foreach ($expected in $expectedInt64.GetEnumerator()) {
             Assert-Condition `
