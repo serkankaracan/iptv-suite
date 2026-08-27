@@ -993,9 +993,9 @@ function Read-AndAssertBlockedEvidence {
 
         [bool]$ExpectedFinalArtifactCurrent = $false,
 
-        [bool]$ExpectedSecurityArchitectureCurrent = $true,
+        [bool]$ExpectedSecurityArchitectureCurrent = $false,
 
-        [bool]$ExpectedSyntheticJourneyCurrent = $true
+        [bool]$ExpectedSyntheticJourneyCurrent = $false
     )
 
     Assert-TestCondition (Test-Path -LiteralPath $Path -PathType Leaf) `

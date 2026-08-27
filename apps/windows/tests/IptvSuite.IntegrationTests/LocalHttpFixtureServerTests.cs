@@ -9,6 +9,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace IptvSuite.IntegrationTests;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class LocalHttpFixtureServerTests
 {
     [TestMethod]
