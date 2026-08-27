@@ -1862,11 +1862,11 @@ try {
             -Path $currentSbomPath `
             -ExpectedSbomCurrentAtEvaluation $true `
             -ExpectedCveFinalReleaseFreshAtEvaluation $true `
-            -ExpectedFinalArtifactCurrent $true
+            -ExpectedFinalArtifactCurrent $false
         Assert-TestCondition `
             ($currentSbomEvidence.m1ToM15AutomatedGateSetPassed -and
-             $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
-            "M15 aggregate or current final-artifact acceptance changed."
+             -not $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
+            "M15 aggregate or stale final-artifact acceptance changed."
     }
     finally {
         Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue
