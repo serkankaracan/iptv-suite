@@ -1,6 +1,6 @@
 # M16 Windows MVP Release Candidate blocked baseline'i
 
-**Durum:** `HARDENING SOURCE DRIFT / HOSTED EVIDENCE RENEWAL REQUIRED / BLOCKED — 7 M16 blocker açık, 2026-08-27`
+**Durum:** `M15 TECHNICAL CHAIN RENEWED / M16 HOSTED EVIDENCE RENEWAL REQUIRED / BLOCKED — 7 M16 blocker açık, 2026-08-27`
 
 ## Checkpoint kararı
 
@@ -68,13 +68,13 @@ Inputlar strict UTF-8/schema, duplicate-property, bounded boyut/yapı, containme
 ## Gate alanlarının anlamı
 
 - `aggregationIntegrityPassed=true`, inputların beklenen schema, provenance, commit/package ve bounded publication sözleşmesini geçtiğini gösterir; ürün veya Store acceptance sonucu değildir.
-- `m1ToM15AutomatedGateSetPassed=false`, current hardening source snapshot'ı için hosted SBOM kabulünün stale olduğunu ve `SbomPending` predecessor kapısının yeniden açıldığını gösterir. Bu beklenen drift blocked evidence üretimini durdurmaz.
+- Son historical RC evidence'ındaki `m1ToM15AutomatedGateSetPassed=false`, o evaluation anındaki stale SBOM predecessor sonucunu kaydeder. Current source-controlled M15 zinciri hosted SBOM run `33022220105` ve CVE run `33021741188` ile `technicalBaselinePassed=true` durumuna yenilenmiştir; bu alan ancak current aynı-commit RC input seti yeniden aggregate edildiğinde değişebilir.
 - `m16TechnicalGateSetPassed=false`, M16'nın kendi hard gate setinin tamamlanmadığını açıkça kaydeder.
 - `candidateReady=false`, schema v1'in değişmez ve fail-closed sonucudur.
 
 ## Değişmeden taşınan M15 blocker'ları
 
-M16 aggregator aşağıdaki exact 13 M15 blocker'ı kapatmaz, yeniden adlandırmaz veya daha düşük öneme çevirmez:
+M16 aggregator aşağıdaki exact 12 M15 blocker'ı kapatmaz, yeniden adlandırmaz veya daha düşük öneme çevirmez:
 
 1. `CodecIpLegalReviewPending`
 2. `LicenseFilePending`
@@ -85,10 +85,9 @@ M16 aggregator aşağıdaki exact 13 M15 blocker'ı kapatmaz, yeniden adlandırm
 7. `ProductionLifecycleMatrixPending`
 8. `ReleaseSigningPending`
 9. `ReviewerServiceAndRehearsalPending`
-10. `SbomPending`
-11. `StoreListingPending`
-12. `SupportUrlPending`
-13. `WackPending`
+10. `StoreListingPending`
+11. `SupportUrlPending`
+12. `WackPending`
 
 M15'in final-release CVE freshness predicate'i evaluation anında geçmezse `CveReviewPending` de M15 kaynağından yeniden açılır; M16 allow modu bunu kabul edilmiş sayamaz.
 

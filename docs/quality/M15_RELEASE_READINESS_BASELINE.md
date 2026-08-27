@@ -1,6 +1,6 @@
 # M15 MSIX ve Store release-readiness teknik baseline'i
 
-**Durum:** `HARDENING SOURCE DRIFT / HOSTED SBOM RENEWAL REQUIRED — technicalBaselinePassed=false; releaseReady=false, 2026-08-27`
+**Durum:** `HOSTED SBOM/CVE RENEWED — technicalBaselinePassed=true; releaseReady=false; 12 external blocker açık, 2026-08-27`
 
 ## Checkpoint kararı
 
@@ -128,7 +128,9 @@ Yukarıdaki run `#1`/run `#10` ve ledger'ları pre-asset tarihsel accepted check
 
 Commit `c686424ea43be3a01b5fb364b2115cc84319b242` üzerindeki schema-v5 predecessor, aynı accepted asset/SBOM/CVE zinciriyle evaluation anında exact 12 blocker üretmiştir. O tarihsel şema yedi günlük `freshAtEvaluation` alanını taşıyor, fakat 24 saatlik final-release predicate'ini evidence içinde ayrı göstermiyordu; schema-v6 bu sözleşme boşluğunu kapatır. Schema-v5 sonucu tarihsel teknik checkpoint'tir ve geriye dönük final-release kabulü sayılmaz.
 
-Sonraki security hardening package-producing source snapshot'ını değiştirdi. Schema-v7 validator, exact ledger ile SBOM contract/workflow bağını doğrulamayı sürdürür; sağlam ledger ile current source arasındaki bu beklenen drift'i `result=stale-reopen`, `currentAtEvaluation=false`, `effectiveClosedBlocker=None` olarak yayımlar ve `SbomPending` kapısını yeniden açar. Böylece yeni clean commit hosted SBOM renewal üretebilir. Ledger eksikliği/tahrifi/duplicate property, contract/workflow drift'i, daha yakın package override ve iki geçiş arasındaki TOCTOU değişimi hard-invalid kalır. Final-release CVE freshness geçerliyken current sonuç `technicalBaselinePassed=false`, `releaseReady=false` ve exact 13 blocker'dır; freshness sona ererse `CveReviewPending` ayrıca yeniden açılır.
+Security hardening sonrasında clean `293e35c41aa247cb66744d8572da7902df2fbf7b` için [Windows package SBOM producer run `#12` (`33022220105`)](https://github.com/serkankaracan/iptv-suite/actions/runs/33022220105), job `98355122971` ile `success` tamamlandı. Artifact `9627162339`, digest `b5b1ae6d237368d04a1cb5c110e7eb7524507d6553c434154a08bfc9436ff21d`; application MSIX SHA-256 `67e22fcd3a9766de94ce6a1ea2405bcf7b2c5c33607f4cbf47f7c12da2799b51` ve SPDX SHA-256 `7b4c18b3572788743455d1f1d6e8c6de76020082d27fa8744209e6880c2790fc`dır. Acceptance ledger raw SHA-256 `c6b8bdacd2d250088ceab9caa073ffadc9ea6cdb14934bad805289f8df8d7b20`; exact `115` dosyalık current package-producing snapshot `5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810` ve exact yedi-file contract `252868d77d47f9e92c63d0b359f0337aa0ae60a59553c12145a1b6ceac434c86` ile fail-closed bağlıdır.
+
+Bu ledger'a zincirlenen [known-vulnerability producer run `#49` (`33021741188`)](https://github.com/serkankaracan/iptv-suite/actions/runs/33021741188), clean `f8780657636266350778480c30c080ad64aa8dcd` üzerinde job `98353520241` ve artifact `9626815227` ile exact `4/0/4` audited restore, 23-package graph ve direct/transitive/toplam `0/0/0` bilinen vulnerability sonucunu geçti. CVE acceptance ledger raw SHA-256 `f15bc8fefc49938fc66e67a8d51e28ed4b9f40dffdd1c7411e47e81be8e80707`; yedi günlük teknik freshness sonu `2026-09-02T23:02:56Z`dir. Ayrı final-release freshness sınırı inclusive `2026-08-27T23:02:56Z`dir: bu anda schema-v7 local doğrulama `packageSbomAcceptance.result=accepted-current`, `technicalBaselinePassed=true`, `releaseReady=false` ve exact 12 external blocker üretir; bir saniye sonrasında `CveReviewPending` yeniden açılır ve blocker sayısı 13 olur. Ledger/schema/contract tahrifi, daha yakın package override ve iki geçiş arasındaki TOCTOU değişimi hard-invalid kalır; bu teknik yenileme M15 completion, hukuk/Store/signing ya da genel “CVE-free” iddiası değildir.
 
 ## Development identity WACK preflight — EXECUTED / TEST FAILED
 
@@ -162,7 +164,7 @@ Aşağıdaki 13 kod, asset byte değişiminden önceki son hosted-kabul schema-v
 
 ## Güncel schema-v7 exact açık blocker seti
 
-Aşağıdaki 13 kod, final-release CVE freshness geçerliyken current evidence'ta açıktır ve ordinal sıralıdır:
+Aşağıdaki 12 kod, final-release CVE freshness geçerliyken current evidence'ta açıktır ve ordinal sıralıdır:
 
 1. `CodecIpLegalReviewPending`
 2. `LicenseFilePending`
@@ -173,10 +175,9 @@ Aşağıdaki 13 kod, final-release CVE freshness geçerliyken current evidence't
 7. `ProductionLifecycleMatrixPending`
 8. `ReleaseSigningPending`
 9. `ReviewerServiceAndRehearsalPending`
-10. `SbomPending`
-11. `StoreListingPending`
-12. `SupportUrlPending`
-13. `WackPending`
+10. `StoreListingPending`
+11. `SupportUrlPending`
+12. `WackPending`
 
 ## Non-claims ve sonraki kabul sınırı
 

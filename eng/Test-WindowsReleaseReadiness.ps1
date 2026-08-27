@@ -22,11 +22,11 @@ $script:technicalStage = "Initialization"
 $script:utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
 $script:utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:packageSbomAcceptanceRelativePath = "eng/windows-package-sbom-acceptance.json"
-$script:packageSbomAcceptanceSha256 = "05969121eee3fed429e53d9348f0234dee52c47b0ab7eee1517302b36cd0ce81"
+$script:packageSbomAcceptanceSha256 = "c6b8bdacd2d250088ceab9caa073ffadc9ea6cdb14934bad805289f8df8d7b20"
 $script:packageVulnerabilityAcceptanceRelativePath =
     "eng/windows-package-vulnerability-acceptance.json"
 $script:packageVulnerabilityAcceptanceSha256 =
-    "90cce5b435d36bc363a9e84027a9f3d9f27cde9775e6e0a24c442073ea342028"
+    "f15bc8fefc49938fc66e67a8d51e28ed4b9f40dffdd1c7411e47e81be8e80707"
 $script:packageVulnerabilityContractSourceCount = 16
 $script:packageVulnerabilityContractSourceSetSha256 =
     "2183ea7fd3ddcd48f98966f1475276da49dfe8157b1f430f78a7ac7dc6e5787b"
@@ -37,10 +37,10 @@ $script:packageVulnerabilityHelperSourceSha256 =
 $script:packageVulnerabilityMaximumAgeDays = 7
 $script:packageVulnerabilityFinalReleaseMaximumAgeHours = 24
 $script:packageSbomContractSourceCount = 7
-$script:packageSbomContractSourceSetSha256 = "82048e4c81c59706d1e42dff9b653c378e934d37d9f7163e821009a29bd402cb"
+$script:packageSbomContractSourceSetSha256 = "252868d77d47f9e92c63d0b359f0337aa0ae60a59553c12145a1b6ceac434c86"
 $script:packageSbomProductionInputSetSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
-$script:packageProducingSnapshotFileCount = 113
-$script:packageProducingSnapshotSha256 = "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
+$script:packageProducingSnapshotFileCount = 115
+$script:packageProducingSnapshotSha256 = "5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810"
 $script:assetProvenanceRelativePath = "eng/windows-production-asset-provenance.json"
 $script:assetProvenanceSha256 = "8006c56170202457815f3768dfcff56236b661a4dbb57aa7b7bf3a5acdcc6412"
 $script:assetGeneratorSha256 = "4ac099e8da587b5df61817ab92071235e4e91408d891f5cafa3037599d7f603b"
@@ -1405,28 +1405,28 @@ function Read-PackageSbomAcceptance {
         $expectedStrings = [ordered]@{
             decision = "AcceptTechnicalPackageBoundSbom"
             scope = "TechnicalPackageBoundSbomOnly"
-            runCompletedAtUtc = "2026-08-26T19:31:00Z"
+            runCompletedAtUtc = "2026-08-26T23:17:08Z"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-package-sbom.yml"
             workflowName = "Windows package SBOM producer"
             runEvent = "workflow_dispatch"
             runBranch = "main"
-            runHeadSha = "7f941b3ae74f1d988cb43f5a95e90e70c2819f9d"
+            runHeadSha = "293e35c41aa247cb66744d8572da7902df2fbf7b"
             runConclusion = "success"
             packageJobName = "Package-bound SBOM producer gate"
             packageJobConclusion = "success"
             artifactName = "windows-msix-smoke-evidence"
-            artifactDigestSha256 = "56eb45f325032fc1b7f2b0db20ffc9f9c8585b3fe71e772ce65b444138bd777c"
+            artifactDigestSha256 = "b5b1ae6d237368d04a1cb5c110e7eb7524507d6553c434154a08bfc9436ff21d"
             lastSuccessMemberName = "last-success.json"
-            lastSuccessMemberSha256 = "02b206f46bdafdca6b22fb15ac37d38710769471eb5c2c2125a7d5be0399d391"
+            lastSuccessMemberSha256 = "3c2c6e3b5d12e9192b5f4a506151969118c6eb4c7538b49d0a25ce8385254ee6"
             sbomSummaryMemberName = "package-sbom-summary.json"
-            sbomSummaryMemberSha256 = "864138ee033e3d0d977d5c410744c0fd1fdebba2c8dcc9606cb2e50e3bfde952"
+            sbomSummaryMemberSha256 = "bb3c9fd832431b26568e2524e1e12d5dc0e964fd2eb109d480002ac48f2c4058"
             sbomMemberName = "package-sbom.spdx.json"
-            sbomMemberSha256 = "8ab9de699ee61eefe56dbe7530c410babff4e0b90a0f855b3cf175bcd394569c"
+            sbomMemberSha256 = "7b4c18b3572788743455d1f1d6e8c6de76020082d27fa8744209e6880c2790fc"
             configuration = "Release"
             dotNetSdk = "10.0.302"
             sbomFormat = "SPDX-2.2"
-            documentNamespace = "https://github.com/serkankaracan/iptv-suite/sbom/IptvSuite.Windows.ReleaseSet/0.1.0.0/7f941b3ae74f1d988cb43f5a95e90e70c2819f9d-76b8734134d9086ec1ec18e40e4193f0834d0c115364681cc49edf22f905f75a-a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf"
+            documentNamespace = "https://github.com/serkankaracan/iptv-suite/sbom/IptvSuite.Windows.ReleaseSet/0.1.0.0/293e35c41aa247cb66744d8572da7902df2fbf7b-67e22fcd3a9766de94ce6a1ea2405bcf7b2c5c33607f4cbf47f7c12da2799b51-a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf"
             toolPackageId = "microsoft.sbom.dotnettool"
             toolVersion = "4.1.5"
             toolNupkgSha256 = "00e1fb81c01f4e9ad7a9d00f365bb3f3776cde6fecdd15cc3adbbce1f83d14bb"
@@ -1435,7 +1435,7 @@ function Read-PackageSbomAcceptance {
             contractSourceSetCanonicalSha256 = $script:packageSbomContractSourceSetSha256
             packageProducingSnapshotSha256 = $script:packageProducingSnapshotSha256
             applicationPackageFile = "IptvSuite.Windows_0.1.0.0_x64.msix"
-            applicationPackageSha256 = "76b8734134d9086ec1ec18e40e4193f0834d0c115364681cc49edf22f905f75a"
+            applicationPackageSha256 = "67e22fcd3a9766de94ce6a1ea2405bcf7b2c5c33607f4cbf47f7c12da2799b51"
             applicationIdentityName = "IptvSuite.LocalDev.6f0d9a64"
             applicationVersion = "0.1.0.0"
             applicationSignatureStatus = "Valid"
@@ -1459,16 +1459,16 @@ function Read-PackageSbomAcceptance {
         $expectedInt32 = [ordered]@{
             schemaVersion = 1
             repositoryId = 1328998460
-            runNumber = 10
+            runNumber = 12
             runAttempt = 1
-            artifactSizeBytes = 7768
-            lastSuccessMemberLength = 18711
+            artifactSizeBytes = 7793
+            lastSuccessMemberLength = 18713
             sbomSummaryMemberLength = 1985
             sbomMemberLength = 50566
             productionInputCount = 10
             contractSourceCount = $script:packageSbomContractSourceCount
             packageProducingSnapshotFileCount = $script:packageProducingSnapshotFileCount
-            applicationPackageLength = 29852396
+            applicationPackageLength = 29857920
             runtimePackageLength = 46787781
             fileCount = 2
             componentCount = 24
@@ -1484,9 +1484,9 @@ function Read-PackageSbomAcceptance {
         }
 
         $expectedInt64 = [ordered]@{
-            runId = [long]33004715987
-            packageJobId = [long]98295237971
-            artifactId = [long]9620368129
+            runId = [long]33022220105
+            packageJobId = [long]98355122971
+            artifactId = [long]9627162339
         }
         foreach ($expected in $expectedInt64.GetEnumerator()) {
             Assert-Condition `
@@ -1708,27 +1708,27 @@ function Read-PackageVulnerabilityAcceptance {
         $expectedStrings = [ordered]@{
             decision = "AcceptTechnicalKnownVulnerabilityReview"
             scope = "ProductionWindowsLeafKnownVulnerabilityReviewOnly"
-            runCompletedAtUtc = "2026-08-26T19:39:20Z"
-            freshThroughUtc = "2026-09-02T19:39:20Z"
+            runCompletedAtUtc = "2026-08-26T23:02:56Z"
+            freshThroughUtc = "2026-09-02T23:02:56Z"
             freshnessPolicy = "RunCompletionPlus7Days"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-cve-review.yml"
             workflowName = "Windows known-vulnerability producer"
             runEvent = "workflow_dispatch"
             runBranch = "main"
-            runHeadSha = "a2fba9e2194d8f81f719c8a658ca95d0ab6d02df"
+            runHeadSha = "f8780657636266350778480c30c080ad64aa8dcd"
             runConclusion = "success"
             jobName = "Known-vulnerability producer gate"
             jobConclusion = "success"
             artifactName = "windows-cve-review-evidence"
-            artifactDigestSha256 = "6969384d726b8f53503f03ddaf97c38b384c2105152f34403885259429e32042"
+            artifactDigestSha256 = "96e6e34b96e2a6daf7e214f6e24e2278a55a5db4f6083db50258da55e5910175"
             lastSuccessMemberName = "last-success.json"
-            lastSuccessMemberSha256 = "bb918674ff53a9d3f866d54db4d09f4fddb1ea13339e1b9992851bfb44d609c5"
+            lastSuccessMemberSha256 = "836b738af446cf4e7dc10ce81d5fbb01cb5645681074ba469bc14d0cc45a9b7c"
             packageSbomAcceptanceSha256 = $script:packageSbomAcceptanceSha256
-            observedAtUtc = "2026-08-26T19:39:07.0940955Z"
+            observedAtUtc = "2026-08-26T23:02:43.5370755Z"
             producerResult = "passed"
             producerScope = "ProductionWindowsLeafKnownVulnerabilityProducer"
-            producerRepositoryCommitSha = "a2fba9e2194d8f81f719c8a658ca95d0ab6d02df"
+            producerRepositoryCommitSha = "f8780657636266350778480c30c080ad64aa8dcd"
             dotNetSdk = "10.0.302"
             projectPath = "apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj"
             targetFramework = "net10.0-windows10.0.26100.0"
@@ -1756,9 +1756,9 @@ function Read-PackageVulnerabilityAcceptance {
             maximumAgeDays = $script:packageVulnerabilityMaximumAgeDays
             repositoryId = 1328998460
             workflowId = 342499403
-            runNumber = 42
+            runNumber = 49
             runAttempt = 1
-            artifactSizeBytes = 1123
+            artifactSizeBytes = 1122
             lastSuccessMemberLength = 2403
             outputVersion = 1
             restoreProjectCount = 4
@@ -1789,9 +1789,9 @@ function Read-PackageVulnerabilityAcceptance {
         }
 
         $expectedInt64 = [ordered]@{
-            runId = [long]33006146259
-            jobId = [long]98300315018
-            artifactId = [long]9620658659
+            runId = [long]33021741188
+            jobId = [long]98353520241
+            artifactId = [long]9626815227
         }
         foreach ($expected in $expectedInt64.GetEnumerator()) {
             Assert-Condition `

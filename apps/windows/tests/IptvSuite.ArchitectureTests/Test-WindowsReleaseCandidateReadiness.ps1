@@ -305,11 +305,11 @@ $summary = [ordered]@{
         result = if ($sbomCurrentAtEvaluation) { "accepted-current" } else { "stale-reopen" }
         currentAtEvaluation = $sbomCurrentAtEvaluation
         effectiveClosedBlocker = if ($sbomCurrentAtEvaluation) { "SbomPending" } else { "None" }
-        packageProducingSnapshotFileCount = 113
-        packageProducingSnapshotSha256 = "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
-        currentPackageProducingSnapshotFileCount = if ($sbomCurrentAtEvaluation) { 113 } else { 115 }
+        packageProducingSnapshotFileCount = 115
+        packageProducingSnapshotSha256 = "5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810"
+        currentPackageProducingSnapshotFileCount = if ($sbomCurrentAtEvaluation) { 115 } else { 116 }
         currentPackageProducingSnapshotSha256 = if ($sbomCurrentAtEvaluation) {
-            "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
+            "5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810"
         }
         else {
             ("c" * 64)

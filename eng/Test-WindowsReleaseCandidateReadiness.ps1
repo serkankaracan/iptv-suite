@@ -30,8 +30,11 @@ $script:finalArtifactAcceptanceSha256 =
 $script:finalArtifactProducerContractSourceCount = 39
 $script:finalArtifactProducerContractSourceSetSha256 =
     "3318bf8638903bd05f509e29d4d6281e945773d0833003e3379a266f7b9ae2bb"
-$script:packageProducingSnapshotFileCount = 113
+$script:packageProducingSnapshotFileCount = 115
 $script:packageProducingSnapshotSha256 =
+    "5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810"
+$script:historicalFinalArtifactPackageProducingSnapshotFileCount = 113
+$script:historicalFinalArtifactPackageProducingSnapshotSha256 =
     "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
 $script:syntheticJourneyAcceptanceRelativePath =
     "eng/windows-m16-synthetic-journey-acceptance.json"
@@ -2188,7 +2191,7 @@ function Read-M16FinalArtifactAcceptance {
             producerContractSourceSetSha256 =
                 $script:finalArtifactProducerContractSourceSetSha256
             packageProducingSnapshotSha256 =
-                $script:packageProducingSnapshotSha256
+                $script:historicalFinalArtifactPackageProducingSnapshotSha256
             closedBlocker = "M16FinalArtifactCanaryScanPending"
         }
         foreach ($expected in $expectedRootStrings.GetEnumerator()) {
@@ -2214,7 +2217,7 @@ function Read-M16FinalArtifactAcceptance {
             producerContractSourceCount =
                 $script:finalArtifactProducerContractSourceCount
             packageProducingSnapshotFileCount =
-                $script:packageProducingSnapshotFileCount
+                $script:historicalFinalArtifactPackageProducingSnapshotFileCount
         }
         foreach ($expected in $expectedRootIntegers.GetEnumerator()) {
             Assert-ExactInteger `

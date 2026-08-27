@@ -190,7 +190,7 @@ function Read-AndAssertEvidence {
 
         [Nullable[bool]]$ExpectedFinalReleaseFreshAtEvaluation,
 
-        [bool]$ExpectedSbomCurrentAtEvaluation = $false
+        [bool]$ExpectedSbomCurrentAtEvaluation = $true
     )
 
     Assert-TestCondition (Test-Path -LiteralPath $EvidencePath -PathType Leaf) "evidence was not published."
@@ -444,38 +444,38 @@ function Read-AndAssertEvidence {
          $packageSbomAcceptance.currentAtEvaluation -eq
             $ExpectedSbomCurrentAtEvaluation -and
          $packageSbomAcceptance.ledgerSha256 -ceq
-            "05969121eee3fed429e53d9348f0234dee52c47b0ab7eee1517302b36cd0ce81" -and
+            "c6b8bdacd2d250088ceab9caa073ffadc9ea6cdb14934bad805289f8df8d7b20" -and
          $packageSbomAcceptance.decision -ceq "AcceptTechnicalPackageBoundSbom" -and
          $packageSbomAcceptance.scope -ceq "TechnicalPackageBoundSbomOnly" -and
-         $packageSbomAcceptance.runCompletedAtUtc -ceq "2026-08-26T19:31:00Z" -and
+         $packageSbomAcceptance.runCompletedAtUtc -ceq "2026-08-26T23:17:08Z" -and
          $packageSbomAcceptance.repository -ceq "serkankaracan/iptv-suite" -and
          $packageSbomAcceptance.workflowPath -ceq ".github/workflows/windows-package-sbom.yml" -and
          $packageSbomAcceptance.workflowName -ceq "Windows package SBOM producer" -and
-         $packageSbomAcceptance.runId -eq 33004715987 -and
-         $packageSbomAcceptance.runNumber -eq 10 -and
+         $packageSbomAcceptance.runId -eq 33022220105 -and
+         $packageSbomAcceptance.runNumber -eq 12 -and
          $packageSbomAcceptance.runAttempt -eq 1 -and
          $packageSbomAcceptance.runEvent -ceq "workflow_dispatch" -and
          $packageSbomAcceptance.runBranch -ceq "main" -and
-         $packageSbomAcceptance.runHeadSha -ceq "7f941b3ae74f1d988cb43f5a95e90e70c2819f9d" -and
+         $packageSbomAcceptance.runHeadSha -ceq "293e35c41aa247cb66744d8572da7902df2fbf7b" -and
          $packageSbomAcceptance.runConclusion -ceq "success" -and
-         $packageSbomAcceptance.packageJobId -eq 98295237971 -and
+         $packageSbomAcceptance.packageJobId -eq 98355122971 -and
          $packageSbomAcceptance.packageJobName -ceq "Package-bound SBOM producer gate" -and
          $packageSbomAcceptance.packageJobConclusion -ceq "success" -and
-         $packageSbomAcceptance.artifactId -eq 9620368129 -and
+         $packageSbomAcceptance.artifactId -eq 9627162339 -and
          $packageSbomAcceptance.artifactName -ceq "windows-msix-smoke-evidence" -and
-         $packageSbomAcceptance.artifactSizeBytes -eq 7768 -and
-         $packageSbomAcceptance.artifactDigestSha256 -ceq "56eb45f325032fc1b7f2b0db20ffc9f9c8585b3fe71e772ce65b444138bd777c") `
+         $packageSbomAcceptance.artifactSizeBytes -eq 7793 -and
+         $packageSbomAcceptance.artifactDigestSha256 -ceq "b5b1ae6d237368d04a1cb5c110e7eb7524507d6553c434154a08bfc9436ff21d") `
         "the hosted package SBOM workflow evidence changed."
     Assert-TestCondition `
         ($packageSbomAcceptance.lastSuccessMemberName -ceq "last-success.json" -and
-         $packageSbomAcceptance.lastSuccessMemberLength -eq 18711 -and
-         $packageSbomAcceptance.lastSuccessMemberSha256 -ceq "02b206f46bdafdca6b22fb15ac37d38710769471eb5c2c2125a7d5be0399d391" -and
+         $packageSbomAcceptance.lastSuccessMemberLength -eq 18713 -and
+         $packageSbomAcceptance.lastSuccessMemberSha256 -ceq "3c2c6e3b5d12e9192b5f4a506151969118c6eb4c7538b49d0a25ce8385254ee6" -and
          $packageSbomAcceptance.sbomSummaryMemberName -ceq "package-sbom-summary.json" -and
          $packageSbomAcceptance.sbomSummaryMemberLength -eq 1985 -and
-         $packageSbomAcceptance.sbomSummaryMemberSha256 -ceq "864138ee033e3d0d977d5c410744c0fd1fdebba2c8dcc9606cb2e50e3bfde952" -and
+         $packageSbomAcceptance.sbomSummaryMemberSha256 -ceq "bb3c9fd832431b26568e2524e1e12d5dc0e964fd2eb109d480002ac48f2c4058" -and
          $packageSbomAcceptance.sbomMemberName -ceq "package-sbom.spdx.json" -and
          $packageSbomAcceptance.sbomMemberLength -eq 50566 -and
-         $packageSbomAcceptance.sbomMemberSha256 -ceq "8ab9de699ee61eefe56dbe7530c410babff4e0b90a0f855b3cf175bcd394569c") `
+         $packageSbomAcceptance.sbomMemberSha256 -ceq "7b4c18b3572788743455d1f1d6e8c6de76020082d27fa8744209e6880c2790fc") `
         "the hosted package SBOM artifact member evidence changed."
     Assert-TestCondition `
         ($packageSbomAcceptance.configuration -ceq "Release" -and
@@ -492,9 +492,9 @@ function Read-AndAssertEvidence {
          $packageSbomAcceptance.productionInputCount -eq 10 -and
          $packageSbomAcceptance.productionInputSetCanonicalSha256 -ceq "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df" -and
          $packageSbomAcceptance.contractSourceCount -eq 7 -and
-         $packageSbomAcceptance.contractSourceSetCanonicalSha256 -ceq "82048e4c81c59706d1e42dff9b653c378e934d37d9f7163e821009a29bd402cb" -and
-         $packageSbomAcceptance.packageProducingSnapshotFileCount -eq 113 -and
-         $packageSbomAcceptance.packageProducingSnapshotSha256 -ceq "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493") `
+         $packageSbomAcceptance.contractSourceSetCanonicalSha256 -ceq "252868d77d47f9e92c63d0b359f0337aa0ae60a59553c12145a1b6ceac434c86" -and
+         $packageSbomAcceptance.packageProducingSnapshotFileCount -eq 115 -and
+         $packageSbomAcceptance.packageProducingSnapshotSha256 -ceq "5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810") `
         "the package SBOM tool or source binding evidence changed."
     Assert-TestCondition `
         ($packageSbomAcceptance.currentPackageProducingSnapshotFileCount -is [int] -and
@@ -509,8 +509,8 @@ function Read-AndAssertEvidence {
         "the current package-producing source binding is invalid."
     Assert-TestCondition `
         ($packageSbomAcceptance.applicationPackageFile -ceq "IptvSuite.Windows_0.1.0.0_x64.msix" -and
-         $packageSbomAcceptance.applicationPackageLength -eq 29852396 -and
-         $packageSbomAcceptance.applicationPackageSha256 -ceq "76b8734134d9086ec1ec18e40e4193f0834d0c115364681cc49edf22f905f75a" -and
+         $packageSbomAcceptance.applicationPackageLength -eq 29857920 -and
+         $packageSbomAcceptance.applicationPackageSha256 -ceq "67e22fcd3a9766de94ce6a1ea2405bcf7b2c5c33607f4cbf47f7c12da2799b51" -and
          $packageSbomAcceptance.applicationIdentityName -ceq "IptvSuite.LocalDev.6f0d9a64" -and
          $packageSbomAcceptance.applicationVersion -ceq "0.1.0.0" -and
          $packageSbomAcceptance.applicationSignatureStatus -ceq "Valid" -and
@@ -599,15 +599,15 @@ function Read-AndAssertEvidence {
         -Message "the package vulnerability acceptance evidence schema changed."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.ledgerSha256 -ceq
-            "90cce5b435d36bc363a9e84027a9f3d9f27cde9775e6e0a24c442073ea342028" -and
+            "f15bc8fefc49938fc66e67a8d51e28ed4b9f40dffdd1c7411e47e81be8e80707" -and
          $packageVulnerabilityAcceptance.decision -ceq
             "AcceptTechnicalKnownVulnerabilityReview" -and
          $packageVulnerabilityAcceptance.scope -ceq
             "ProductionWindowsLeafKnownVulnerabilityReviewOnly" -and
          $packageVulnerabilityAcceptance.runCompletedAtUtc -ceq
-            "2026-08-26T19:39:20Z" -and
+            "2026-08-26T23:02:56Z" -and
          $packageVulnerabilityAcceptance.freshThroughUtc -ceq
-            "2026-09-02T19:39:20Z" -and
+            "2026-09-02T23:02:56Z" -and
          $packageVulnerabilityAcceptance.freshnessPolicy -ceq
             "RunCompletionPlus7Days" -and
          $packageVulnerabilityAcceptance.maximumAgeDays -eq 7 -and
@@ -639,30 +639,30 @@ function Read-AndAssertEvidence {
          $packageVulnerabilityAcceptance.workflowName -ceq
             "Windows known-vulnerability producer" -and
          $packageVulnerabilityAcceptance.workflowId -eq 342499403 -and
-         $packageVulnerabilityAcceptance.runId -eq 33006146259 -and
-         $packageVulnerabilityAcceptance.runNumber -eq 42 -and
+         $packageVulnerabilityAcceptance.runId -eq 33021741188 -and
+         $packageVulnerabilityAcceptance.runNumber -eq 49 -and
          $packageVulnerabilityAcceptance.runAttempt -eq 1 -and
          $packageVulnerabilityAcceptance.runHeadSha -ceq
-            "a2fba9e2194d8f81f719c8a658ca95d0ab6d02df" -and
+            "f8780657636266350778480c30c080ad64aa8dcd" -and
          $packageVulnerabilityAcceptance.runConclusion -ceq "success" -and
-         $packageVulnerabilityAcceptance.jobId -eq 98300315018 -and
+         $packageVulnerabilityAcceptance.jobId -eq 98353520241 -and
          $packageVulnerabilityAcceptance.jobName -ceq
             "Known-vulnerability producer gate" -and
          $packageVulnerabilityAcceptance.jobConclusion -ceq "success" -and
-         $packageVulnerabilityAcceptance.artifactId -eq 9620658659 -and
+         $packageVulnerabilityAcceptance.artifactId -eq 9626815227 -and
          $packageVulnerabilityAcceptance.artifactName -ceq
             "windows-cve-review-evidence" -and
          $packageVulnerabilityAcceptance.artifactDigestSha256 -ceq
-            "6969384d726b8f53503f03ddaf97c38b384c2105152f34403885259429e32042" -and
+            "96e6e34b96e2a6daf7e214f6e24e2278a55a5db4f6083db50258da55e5910175" -and
          $packageVulnerabilityAcceptance.lastSuccessMemberLength -eq 2403 -and
          $packageVulnerabilityAcceptance.lastSuccessMemberSha256 -ceq
-            "bb918674ff53a9d3f866d54db4d09f4fddb1ea13339e1b9992851bfb44d609c5" -and
+            "836b738af446cf4e7dc10ce81d5fbb01cb5645681074ba469bc14d0cc45a9b7c" -and
          $packageVulnerabilityAcceptance.packageSbomAcceptanceSha256 -ceq
-            "05969121eee3fed429e53d9348f0234dee52c47b0ab7eee1517302b36cd0ce81" -and
+            "c6b8bdacd2d250088ceab9caa073ffadc9ea6cdb14934bad805289f8df8d7b20" -and
          $packageVulnerabilityAcceptance.observedAtUtc -ceq
-            "2026-08-26T19:39:07.0940955Z" -and
+            "2026-08-26T23:02:43.5370755Z" -and
          $packageVulnerabilityAcceptance.producerRepositoryCommitSha -ceq
-            "a2fba9e2194d8f81f719c8a658ca95d0ab6d02df") `
+            "f8780657636266350778480c30c080ad64aa8dcd") `
         "the hosted package vulnerability workflow or artifact evidence changed."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.restoreProjectCount -eq 4 -and
@@ -1074,7 +1074,7 @@ try {
 
     $finalReleaseBoundaryValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 27, 19, 39, 20, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 27, 23, 2, 56, [TimeSpan]::Zero)')
     Assert-TestCondition `
         ($finalReleaseBoundaryValidatorText -cne $validatorText) `
         "the exact final-release freshness boundary mutation was not applied."
@@ -1100,9 +1100,9 @@ try {
              $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
                 "CveReviewPending" -and
-             @($finalReleaseBoundaryEvidence.blockers).Count -eq 13 -and
+             @($finalReleaseBoundaryEvidence.blockers).Count -eq 12 -and
              @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "CveReviewPending" -and
-             @($finalReleaseBoundaryEvidence.blockers) -ccontains "SbomPending") `
+             @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "SbomPending") `
             "the exact 24-hour final-release boundary did not remain accepted."
     }
     finally {
@@ -1114,7 +1114,7 @@ try {
 
     $finalReleaseExpiredValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 27, 19, 39, 21, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 27, 23, 2, 57, [TimeSpan]::Zero)')
     Assert-TestCondition `
         ($finalReleaseExpiredValidatorText -cne $validatorText) `
         "the final-release freshness plus-one-second mutation was not applied."
@@ -1140,9 +1140,9 @@ try {
              -not $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
                 "None" -and
-             @($finalReleaseExpiredEvidence.blockers).Count -eq 14 -and
+             @($finalReleaseExpiredEvidence.blockers).Count -eq 13 -and
              @($finalReleaseExpiredEvidence.blockers) -ccontains "CveReviewPending" -and
-             @($finalReleaseExpiredEvidence.blockers) -ccontains "SbomPending") `
+             @($finalReleaseExpiredEvidence.blockers) -cnotcontains "SbomPending") `
             "the final-release blocker did not reopen at 24 hours plus one second."
     }
     finally {
@@ -1168,9 +1168,9 @@ try {
             (-not $staleEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              -not $staleEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $staleEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq "None" -and
-             @($staleEvidence.blockers).Count -eq 14 -and
+             @($staleEvidence.blockers).Count -eq 13 -and
              @($staleEvidence.blockers) -ccontains "CveReviewPending" -and
-             @($staleEvidence.blockers) -ccontains "SbomPending") `
+             @($staleEvidence.blockers) -cnotcontains "SbomPending") `
             "stale package vulnerability acceptance did not reopen only its blocker."
     }
     finally {
@@ -1274,7 +1274,7 @@ try {
     $tamperedVulnerabilityAcceptanceSha256 = Get-TestFileSha256 `
         -Path $vulnerabilityAcceptancePath
     $semanticValidatorText = $validatorText.Replace(
-        "90cce5b435d36bc363a9e84027a9f3d9f27cde9775e6e0a24c442073ea342028",
+        "f15bc8fefc49938fc66e67a8d51e28ed4b9f40dffdd1c7411e47e81be8e80707",
         $tamperedVulnerabilityAcceptanceSha256)
     Assert-TestCondition ($semanticValidatorText -cne $validatorText) `
         "package vulnerability semantic validator mutation was not applied."
