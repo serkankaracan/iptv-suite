@@ -800,7 +800,7 @@ function Write-ValidInputs {
         -Value $native
 
     $benchmark = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         commitSha = $script:originalCommit
         milestone = "M14"
         evidenceKind = "catalog-performance-benchmark"
@@ -858,7 +858,26 @@ function Write-ValidInputs {
         }
         query50k = [ordered]@{
             recordCount = 50000
-            iterations = 20
+            catalogSchemaVersion = 5
+            warmupIterations = 5
+            iterations = 100
+            warmupSampleRole = "non-authoritative"
+            authoritativeSampleRole = "authoritative-warm"
+            percentileEstimator = "nearest-rank-ceiling"
+            operationOrder = @(
+                "FirstPage",
+                "CategoryPage",
+                "Search",
+                "ReopenFirstVisible")
+            rawSamples = @(1..100 | ForEach-Object {
+                    [ordered]@{
+                        iteration = $_
+                        firstPageMilliseconds = 1.0
+                        categoryPageMilliseconds = 1.0
+                        searchMilliseconds = 1.0
+                        reopenFirstVisibleMilliseconds = 1.0
+                    }
+                })
         }
         cancellation = [ordered]@{
             recordCount = 50000
@@ -1436,6 +1455,15 @@ function Read-TestJson {
     return [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json
 }
 
+function Update-TestCatalogRegressionBinding {
+    $benchmarkPath = Join-Path $script:inputRoot "catalog-benchmark-summary.json"
+    $regressionPath = Join-Path $script:inputRoot "catalog-regression-summary.json"
+    $regression = Read-TestJson -Path $regressionPath
+    $regression.candidate.sha256 = Get-TestFileSha256 -Path $benchmarkPath
+    $regression.candidate.byteLength = (Get-Item -LiteralPath $benchmarkPath).Length
+    Write-TestJson -Path $regressionPath -Value $regression
+}
+
 Assert-TestCondition (Test-Path -LiteralPath $script:validatorPath -PathType Leaf) `
     "M16 release-candidate validator is missing."
 $validatorText = [System.IO.File]::ReadAllText($script:validatorPath)
@@ -1798,13 +1826,77 @@ try {
     Write-ValidInputs
     $benchmarkPath = Join-Path $script:inputRoot "catalog-benchmark-summary.json"
     $benchmark = Read-TestJson -Path $benchmarkPath
-    $benchmark.schemaVersion = 1
+    $benchmark.schemaVersion = 2
     Write-TestJson -Path $benchmarkPath -Value $benchmark
     $regressionPath = Join-Path $script:inputRoot "catalog-regression-summary.json"
-    $regression = Read-TestJson -Path $regressionPath
-    $regression.candidate.sha256 = Get-TestFileSha256 -Path $benchmarkPath
-    $regression.candidate.byteLength = (Get-Item -LiteralPath $benchmarkPath).Length
-    Write-TestJson -Path $regressionPath -Value $regression
+    Update-TestCatalogRegressionBinding
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.query50k.catalogSchemaVersion = 6
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    Update-TestCatalogRegressionBinding
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.query50k.PSObject.Properties.Remove("warmupIterations")
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    Update-TestCatalogRegressionBinding
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.query50k.percentileEstimator = "linear-interpolation"
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    Update-TestCatalogRegressionBinding
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.query50k.iterations = 99
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    Update-TestCatalogRegressionBinding
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.query50k.operationOrder = @(
+        "CategoryPage",
+        "FirstPage",
+        "Search",
+        "ReopenFirstVisible")
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    Update-TestCatalogRegressionBinding
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.query50k.operationOrder = @("FirstPage", "CategoryPage", "Search")
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    Update-TestCatalogRegressionBinding
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.query50k.rawSamples = @($benchmark.query50k.rawSamples | Select-Object -First 99)
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    Update-TestCatalogRegressionBinding
     Assert-CandidateFailure `
         -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
         -AllowBlockedCandidate

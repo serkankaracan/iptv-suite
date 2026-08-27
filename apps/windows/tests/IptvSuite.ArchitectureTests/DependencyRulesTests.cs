@@ -2274,15 +2274,25 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(regressionHelper, "$script:M14CatalogRegressionMaximumIncreasePercent = 10.0");
         StringAssert.Contains(regressionHelper, "function Get-M14CatalogBoolean");
         StringAssert.Contains(regressionHelper, "$result -isnot [bool]");
-        StringAssert.Contains(regressionHelper, "query50k = [ordered]@{");
+        StringAssert.Contains(regressionHelper, "query50k = Get-M14CatalogQueryContract $Evidence");
         StringAssert.Contains(regressionHelper, "cancellation = [ordered]@{");
         StringAssert.Contains(
             regressionHelper,
-            "(Get-M14CatalogInteger $evidence 'schemaVersion') -ne 2");
+            "(Get-M14CatalogInteger $evidence 'schemaVersion') -ne 3");
         StringAssert.Contains(
             regressionHelper,
             "measurementBoundary = Get-M14CatalogString $cancellation 'measurementBoundary'");
         StringAssert.Contains(regressionHelper, "CancellationRequestToLoaderCompletion");
+        StringAssert.Contains(regressionHelper, "function Get-M14CatalogQueryContract");
+        StringAssert.Contains(regressionHelper, "$warmupIterations -ne 5");
+        StringAssert.Contains(regressionHelper, "$iterations -ne 100");
+        StringAssert.Contains(regressionHelper, "$catalogSchemaVersion -ne 5");
+        StringAssert.Contains(regressionHelper, "$warmupSampleRole -cne 'non-authoritative'");
+        StringAssert.Contains(regressionHelper, "$authoritativeSampleRole -cne 'authoritative-warm'");
+        StringAssert.Contains(regressionHelper, "$percentileEstimator -cne 'nearest-rank-ceiling'");
+        StringAssert.Contains(regressionHelper, "operationOrder = [string[]]$operationOrder");
+        StringAssert.Contains(regressionHelper, "$rawSamples.Count -ne 100");
+        StringAssert.Contains(regressionHelper, "authoritativeRawSampleCount = $rawSamples.Count");
         StringAssert.Contains(regressionHelper, "entryLimitProbe = [ordered]@{");
         StringAssert.Contains(regressionHelper, "baselineContentStable = $BaselineContentStable");
         StringAssert.Contains(regressionHelper, "physicalMachineIdentityVerified = $false");
@@ -2299,7 +2309,28 @@ public sealed class DependencyRulesTests
             "An unexpected cancellation measurement boundary must fail closed.");
         StringAssert.Contains(
             regressionSelfTest,
-            "Legacy benchmark schema v1 must fail closed.");
+            "Legacy benchmark schema v2 must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "A missing query sampling field must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "An unexpected query sampling vocabulary value must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "An unexpected authoritative query sample count must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "An unexpected query operation order must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "An unexpected query operation count must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "An unexpected query catalog schema must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "An unexpected authoritative query raw-sample count must fail closed.");
         StringAssert.Contains(regressionSelfTest, "Entry-limit workload mismatch must fail closed.");
         StringAssert.Contains(regressionSelfTest, "The regression evidence must contain exactly eight metrics.");
 
@@ -2322,10 +2353,18 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(benchmarkTest, "operatingSystemBuild");
         StringAssert.Contains(benchmarkTest, "commitSha");
         StringAssert.Contains(benchmarkTest, "schemaVersion");
-        StringAssert.Contains(benchmarkTest, "schemaVersion = 2");
+        StringAssert.Contains(benchmarkTest, "schemaVersion = 3");
         StringAssert.Contains(
             benchmarkTest,
             "measurementBoundary = \"CancellationRequestToLoaderCompletion\"");
+        StringAssert.Contains(benchmarkTest, "private const int QueryWarmupIterations = 5;");
+        StringAssert.Contains(benchmarkTest, "private const int QueryAuthoritativeIterations = 100;");
+        StringAssert.Contains(benchmarkTest, "warmupIterations = QueryWarmupIterations");
+        StringAssert.Contains(benchmarkTest, "iterations = QueryAuthoritativeIterations");
+        StringAssert.Contains(benchmarkTest, "warmupSampleRole = \"non-authoritative\"");
+        StringAssert.Contains(benchmarkTest, "authoritativeSampleRole = \"authoritative-warm\"");
+        StringAssert.Contains(benchmarkTest, "percentileEstimator = \"nearest-rank-ceiling\"");
+        StringAssert.Contains(benchmarkTest, "operationOrder = new[]");
         StringAssert.Contains(benchmarkTest, "configuration = \"Release\"");
         StringAssert.Contains(benchmarkTest, "platform = \"x64\"");
         StringAssert.Contains(benchmarkTest, "result = budgetEvaluation.AllPassed ? \"passed\" : \"failed\"");
@@ -4523,11 +4562,27 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(validator, "if (-not $syntheticJourneyAcceptanceCurrent)");
         StringAssert.Contains(
             validator,
-            "Assert-ExactInteger -Value (Get-ExactProperty $value \"schemaVersion\") -Expected 2");
+            "Assert-ExactInteger -Value (Get-ExactProperty $value \"schemaVersion\") -Expected 3");
         StringAssert.Contains(
             validator,
             "-Value (Get-ExactProperty $cancellation \"measurementBoundary\")");
         StringAssert.Contains(validator, "-Expected \"CancellationRequestToLoaderCompletion\"");
+        StringAssert.Contains(
+            validator,
+            "Assert-ExactInteger -Value (Get-ExactProperty $query50k \"warmupIterations\") -Expected 5");
+        StringAssert.Contains(
+            validator,
+            "Assert-ExactInteger -Value (Get-ExactProperty $query50k \"catalogSchemaVersion\") -Expected 5");
+        StringAssert.Contains(
+            validator,
+            "Assert-ExactInteger -Value (Get-ExactProperty $query50k \"iterations\") -Expected 100");
+        StringAssert.Contains(validator, "-Expected \"non-authoritative\"");
+        StringAssert.Contains(validator, "-Expected \"authoritative-warm\"");
+        StringAssert.Contains(validator, "-Expected \"nearest-rank-ceiling\"");
+        StringAssert.Contains(
+            validator,
+            "-Expected @(\"FirstPage\", \"CategoryPage\", \"Search\", \"ReopenFirstVisible\")");
+        StringAssert.Contains(validator, "$queryRawSamples.Count -eq 100");
         StringAssert.Contains(validator, "schemaVersion = 1");
         StringAssert.Contains(validator, "evidenceKind = \"WindowsMvpReleaseCandidateGate\"");
         StringAssert.Contains(validator, "result = \"blocked\"");

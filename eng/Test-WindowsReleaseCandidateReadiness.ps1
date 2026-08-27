@@ -1890,7 +1890,7 @@ function Test-CatalogBenchmarkInput {
     )
 
     $value = $InputRecord.Value
-    Assert-ExactInteger -Value (Get-ExactProperty $value "schemaVersion") -Expected 2
+    Assert-ExactInteger -Value (Get-ExactProperty $value "schemaVersion") -Expected 3
     Assert-CommitBinding -Value $value -PropertyName "commitSha" -CommitSha $CommitSha
     Assert-ExactString -Value (Get-ExactProperty $value "milestone") -Expected "M14"
     Assert-ExactString `
@@ -2002,7 +2002,40 @@ function Test-CatalogBenchmarkInput {
     $query50k = Get-ExactProperty $value "query50k"
     Assert-Condition ($query50k -is [pscustomobject]) "InputContractInvalid"
     Assert-ExactInteger -Value (Get-ExactProperty $query50k "recordCount") -Expected 50000
-    Assert-ExactInteger -Value (Get-ExactProperty $query50k "iterations") -Expected 20
+    Assert-ExactInteger -Value (Get-ExactProperty $query50k "catalogSchemaVersion") -Expected 5
+    Assert-ExactInteger -Value (Get-ExactProperty $query50k "warmupIterations") -Expected 5
+    Assert-ExactInteger -Value (Get-ExactProperty $query50k "iterations") -Expected 100
+    Assert-ExactString `
+        -Value (Get-ExactProperty $query50k "warmupSampleRole") `
+        -Expected "non-authoritative"
+    Assert-ExactString `
+        -Value (Get-ExactProperty $query50k "authoritativeSampleRole") `
+        -Expected "authoritative-warm"
+    Assert-ExactString `
+        -Value (Get-ExactProperty $query50k "percentileEstimator") `
+        -Expected "nearest-rank-ceiling"
+    Assert-ExactStringArray `
+        -Value (Get-ExactProperty $query50k "operationOrder") `
+        -Expected @("FirstPage", "CategoryPage", "Search", "ReopenFirstVisible")
+    $queryRawSamples = @(Get-ExactProperty $query50k "rawSamples")
+    Assert-Condition ($queryRawSamples.Count -eq 100) "InputContractInvalid"
+    for ($index = 0; $index -lt $queryRawSamples.Count; $index++) {
+        $sample = $queryRawSamples[$index]
+        Assert-Condition ($sample -is [pscustomobject]) "InputContractInvalid"
+        Assert-ExactInteger `
+            -Value (Get-ExactProperty $sample "iteration") `
+            -Expected ($index + 1)
+        foreach ($metricName in @(
+                "firstPageMilliseconds",
+                "categoryPageMilliseconds",
+                "searchMilliseconds",
+                "reopenFirstVisibleMilliseconds")) {
+            Assert-NumberRange `
+                -Value (Get-ExactProperty $sample $metricName) `
+                -Minimum ([double]::Epsilon) `
+                -Maximum ([double]::MaxValue)
+        }
+    }
     $cancellation = Get-ExactProperty $value "cancellation"
     Assert-Condition ($cancellation -is [pscustomobject]) "InputContractInvalid"
     Assert-ExactInteger -Value (Get-ExactProperty $cancellation "recordCount") -Expected 50000

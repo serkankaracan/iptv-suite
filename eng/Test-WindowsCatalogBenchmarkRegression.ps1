@@ -28,7 +28,7 @@ function New-ReferenceEvidence {
     param([double]$MetricValue = 100.0)
 
     return [pscustomobject][ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         milestone = 'M14'
         evidenceKind = 'catalog-performance-benchmark'
         configuration = 'Release'
@@ -89,8 +89,26 @@ function New-ReferenceEvidence {
         }
         query50k = [pscustomobject][ordered]@{
             recordCount = 50000
-            iterations = 20
             catalogSchemaVersion = 5
+            warmupIterations = 5
+            iterations = 100
+            warmupSampleRole = 'non-authoritative'
+            authoritativeSampleRole = 'authoritative-warm'
+            percentileEstimator = 'nearest-rank-ceiling'
+            operationOrder = @(
+                'FirstPage',
+                'CategoryPage',
+                'Search',
+                'ReopenFirstVisible')
+            rawSamples = @(1..100 | ForEach-Object {
+                    [pscustomobject][ordered]@{
+                        iteration = $_
+                        firstPageMilliseconds = 1.0
+                        categoryPageMilliseconds = 1.0
+                        searchMilliseconds = 1.0
+                        reopenFirstVisibleMilliseconds = 1.0
+                    }
+                })
         }
         cancellation = [pscustomobject][ordered]@{
             recordCount = 50000
@@ -163,9 +181,14 @@ try {
     Assert-True (-not $incompatible.binding.exactEnvironmentMatch) 'Environment mismatch must fail closed.'
 
     $workloadMismatch = New-EvidenceRecord (New-ReferenceEvidence)
-    $workloadMismatch.Evidence.query50k.catalogSchemaVersion = 6
+    $workloadMismatch.Evidence.stageScope.authoritativeTiming = 'different-warm-contract'
     $incompatible = Compare-M14CatalogRegression $baseline $workloadMismatch $true $true
     Assert-True (-not $incompatible.binding.exactWorkloadMatch) 'Query workload mismatch must fail closed.'
+
+    $wrongCatalogSchema = New-EvidenceRecord (New-ReferenceEvidence)
+    $wrongCatalogSchema.Evidence.query50k.catalogSchemaVersion = 6
+    Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $wrongCatalogSchema 'm14-reference-a' } `
+        'An unexpected query catalog schema must fail closed.'
 
     $cancellationMismatch = New-EvidenceRecord (New-ReferenceEvidence)
     $cancellationMismatch.Evidence.cancellation.expectedErrorCode = 'Unexpected'
@@ -206,9 +229,48 @@ try {
         'Ineligible baseline evidence must be rejected.'
 
     $legacySchema = New-EvidenceRecord (New-ReferenceEvidence)
-    $legacySchema.Evidence.schemaVersion = 1
+    $legacySchema.Evidence.schemaVersion = 2
     Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $legacySchema 'm14-reference-a' } `
-        'Legacy benchmark schema v1 must fail closed.'
+        'Legacy benchmark schema v2 must fail closed.'
+
+    $missingQueryField = New-EvidenceRecord (New-ReferenceEvidence)
+    $missingQueryField.Evidence.query50k.PSObject.Properties.Remove('warmupIterations')
+    Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $missingQueryField 'm14-reference-a' } `
+        'A missing query sampling field must fail closed.'
+
+    $wrongQueryVocabulary = New-EvidenceRecord (New-ReferenceEvidence)
+    $wrongQueryVocabulary.Evidence.query50k.percentileEstimator = 'linear-interpolation'
+    Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $wrongQueryVocabulary 'm14-reference-a' } `
+        'An unexpected query sampling vocabulary value must fail closed.'
+
+    $wrongQueryIterations = New-EvidenceRecord (New-ReferenceEvidence)
+    $wrongQueryIterations.Evidence.query50k.iterations = 99
+    Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $wrongQueryIterations 'm14-reference-a' } `
+        'An unexpected authoritative query sample count must fail closed.'
+
+    $wrongQueryOrder = New-EvidenceRecord (New-ReferenceEvidence)
+    $wrongQueryOrder.Evidence.query50k.operationOrder = @(
+        'CategoryPage',
+        'FirstPage',
+        'Search',
+        'ReopenFirstVisible')
+    Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $wrongQueryOrder 'm14-reference-a' } `
+        'An unexpected query operation order must fail closed.'
+
+    $wrongQueryOperationCount = New-EvidenceRecord (New-ReferenceEvidence)
+    $wrongQueryOperationCount.Evidence.query50k.operationOrder = @(
+        'FirstPage',
+        'CategoryPage',
+        'Search')
+    Assert-Throws {
+        Assert-M14CatalogBenchmarkReferenceEvidence $wrongQueryOperationCount 'm14-reference-a'
+    } 'An unexpected query operation count must fail closed.'
+
+    $wrongQuerySampleCount = New-EvidenceRecord (New-ReferenceEvidence)
+    $wrongQuerySampleCount.Evidence.query50k.rawSamples = @(
+        $wrongQuerySampleCount.Evidence.query50k.rawSamples | Select-Object -First 99)
+    Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $wrongQuerySampleCount 'm14-reference-a' } `
+        'An unexpected authoritative query raw-sample count must fail closed.'
 
     $spoofedBoolean = New-EvidenceRecord (New-ReferenceEvidence)
     $spoofedBoolean.Evidence.referenceEligible = 'false'

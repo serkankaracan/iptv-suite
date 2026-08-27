@@ -145,6 +145,70 @@ function Import-M14CatalogBenchmarkEvidence {
     }
 }
 
+function Get-M14CatalogQueryContract {
+    param([Parameter(Mandatory = $true)][object]$Evidence)
+
+    $query = Get-M14CatalogEvidenceProperty $Evidence 'query50k'
+    $recordCount = Get-M14CatalogInteger $query 'recordCount'
+    $catalogSchemaVersion = Get-M14CatalogInteger $query 'catalogSchemaVersion'
+    $warmupIterations = Get-M14CatalogInteger $query 'warmupIterations'
+    $iterations = Get-M14CatalogInteger $query 'iterations'
+    $warmupSampleRole = Get-M14CatalogString $query 'warmupSampleRole'
+    $authoritativeSampleRole = Get-M14CatalogString $query 'authoritativeSampleRole'
+    $percentileEstimator = Get-M14CatalogString $query 'percentileEstimator'
+    $expectedOperationOrder = @(
+        'FirstPage',
+        'CategoryPage',
+        'Search',
+        'ReopenFirstVisible')
+    $operationOrder = @(Get-M14CatalogEvidenceProperty $query 'operationOrder')
+    $rawSamples = @(Get-M14CatalogEvidenceProperty $query 'rawSamples')
+    if ($recordCount -ne 50000 -or
+        $catalogSchemaVersion -ne 5 -or
+        $warmupIterations -ne 5 -or
+        $iterations -ne 100 -or
+        $warmupSampleRole -cne 'non-authoritative' -or
+        $authoritativeSampleRole -cne 'authoritative-warm' -or
+        $percentileEstimator -cne 'nearest-rank-ceiling' -or
+        $operationOrder.Count -ne $expectedOperationOrder.Count -or
+        $rawSamples.Count -ne 100) {
+        throw 'M14 reference evidence query workload contract is invalid.'
+    }
+
+    for ($index = 0; $index -lt $expectedOperationOrder.Count; $index++) {
+        if ($operationOrder[$index] -isnot [string] -or
+            $operationOrder[$index] -cne $expectedOperationOrder[$index]) {
+            throw 'M14 reference evidence query operation order is invalid.'
+        }
+    }
+
+    for ($index = 0; $index -lt $rawSamples.Count; $index++) {
+        $sample = $rawSamples[$index]
+        if ((Get-M14CatalogInteger $sample 'iteration') -ne ($index + 1)) {
+            throw 'M14 reference evidence query sample sequence is invalid.'
+        }
+        foreach ($metricName in @(
+                'firstPageMilliseconds',
+                'categoryPageMilliseconds',
+                'searchMilliseconds',
+                'reopenFirstVisibleMilliseconds')) {
+            $null = Get-M14CatalogFiniteNumber $sample $metricName -Positive
+        }
+    }
+
+    return [ordered]@{
+        recordCount = $recordCount
+        catalogSchemaVersion = $catalogSchemaVersion
+        warmupIterations = $warmupIterations
+        iterations = $iterations
+        warmupSampleRole = $warmupSampleRole
+        authoritativeSampleRole = $authoritativeSampleRole
+        percentileEstimator = $percentileEstimator
+        operationOrder = [string[]]$operationOrder
+        authoritativeRawSampleCount = $rawSamples.Count
+    }
+}
+
 function Assert-M14CatalogBenchmarkReferenceEvidence {
     param(
         [Parameter(Mandatory = $true)]
@@ -158,7 +222,7 @@ function Assert-M14CatalogBenchmarkReferenceEvidence {
     }
 
     $evidence = Get-M14CatalogEvidenceProperty -Value $Record -Name 'Evidence'
-    if ((Get-M14CatalogInteger $evidence 'schemaVersion') -ne 2 -or
+    if ((Get-M14CatalogInteger $evidence 'schemaVersion') -ne 3 -or
         (Get-M14CatalogString $evidence 'milestone') -cne 'M14' -or
         (Get-M14CatalogString $evidence 'evidenceKind') -cne 'catalog-performance-benchmark' -or
         (Get-M14CatalogString $evidence 'configuration') -cne 'Release' -or
@@ -242,6 +306,7 @@ function Assert-M14CatalogBenchmarkReferenceEvidence {
         'CancellationRequestToLoaderCompletion') {
         throw 'M14 reference evidence cancellation measurement boundary is invalid.'
     }
+    $null = Get-M14CatalogQueryContract $evidence
 
     $null = Get-M14CatalogEvidenceProperty $evidence 'budgets'
     $null = Get-M14CatalogEvidenceProperty $evidence 'corpora'
@@ -293,7 +358,6 @@ function Get-M14CatalogEnvironmentContract {
 function Get-M14CatalogWorkloadContract {
     param([Parameter(Mandatory = $true)][object]$Evidence)
 
-    $query = Get-M14CatalogEvidenceProperty $Evidence 'query50k'
     $cancellation = Get-M14CatalogEvidenceProperty $Evidence 'cancellation'
     $entryLimitProbe = Get-M14CatalogEvidenceProperty $Evidence 'entryLimitProbe'
     return [ordered]@{
@@ -306,11 +370,7 @@ function Get-M14CatalogWorkloadContract {
         syntheticLicense = Get-M14CatalogEvidenceProperty $Evidence 'syntheticLicense'
         corpora = Get-M14CatalogEvidenceProperty $Evidence 'corpora'
         stageScope = Get-M14CatalogEvidenceProperty $Evidence 'stageScope'
-        query50k = [ordered]@{
-            recordCount = Get-M14CatalogInteger $query 'recordCount'
-            iterations = Get-M14CatalogInteger $query 'iterations'
-            catalogSchemaVersion = Get-M14CatalogInteger $query 'catalogSchemaVersion'
-        }
+        query50k = Get-M14CatalogQueryContract $Evidence
         cancellation = [ordered]@{
             recordCount = Get-M14CatalogInteger $cancellation 'recordCount'
             iterations = Get-M14CatalogInteger $cancellation 'iterations'

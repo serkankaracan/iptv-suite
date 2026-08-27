@@ -26,6 +26,8 @@ public sealed class M14CatalogPerformanceBenchmarkTests
     private const string BackgroundConditionVariable = "IPTVSUITE_M14_CATALOG_BACKGROUND_CONDITION";
     private const string RunnerProfileIdVariable = "IPTVSUITE_M14_CATALOG_RUNNER_PROFILE_ID";
     private const int Iterations = 20;
+    private const int QueryWarmupIterations = 5;
+    private const int QueryAuthoritativeIterations = 100;
     private const int MinimumAuthoritativeWarmIterations = 20;
     private const int ColdObservationsPerStage = 1;
     private const int PeakWorkingSetSampleLimit = 512;
@@ -159,9 +161,11 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             corpus.ExpectedOutcome == M14CatalogCorpusExpectedOutcome.EntryLimitFailClosed);
         EntryLimitProbe entryLimitProbe = await MeasureEntryLimitProbeAsync(stress);
 
-        bool authoritativeWarmSampleCountVerified = scaleResults.All(result =>
-            result.ParserSamples.Count >= MinimumAuthoritativeWarmIterations &&
-            result.CombinedSamples.Count >= MinimumAuthoritativeWarmIterations);
+        bool authoritativeWarmSampleCountVerified =
+            query.RawSamples.Count == QueryAuthoritativeIterations &&
+            scaleResults.All(result =>
+                result.ParserSamples.Count >= MinimumAuthoritativeWarmIterations &&
+                result.CombinedSamples.Count >= MinimumAuthoritativeWarmIterations);
         bool measurementIntegrityVerified = authoritativeWarmSampleCountVerified && scaleResults.All(result =>
             result.ParserColdObservation.ProcessIo.IsAvailable &&
             result.ParserSamples.All(sample => sample.ProcessIo.IsAvailable) &&
@@ -179,7 +183,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
 
         var evidence = new
         {
-            schemaVersion = 2,
+            schemaVersion = 3,
             milestone = "M14",
             evidenceKind = "catalog-performance-benchmark",
             configuration = "Release",
@@ -266,11 +270,30 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             {
                 recordCount = 50_000,
                 catalogSchemaVersion = query.CatalogSchemaVersion,
-                iterations = Iterations,
-                firstPageMilliseconds = Summary(query.RawSamples.Select(sample => sample.FirstPageMilliseconds)),
-                categoryPageMilliseconds = Summary(query.RawSamples.Select(sample => sample.CategoryPageMilliseconds)),
-                searchMilliseconds = Summary(query.RawSamples.Select(sample => sample.SearchMilliseconds)),
-                reopenFirstVisibleMilliseconds = Summary(query.RawSamples.Select(sample => sample.ReopenFirstVisibleMilliseconds)),
+                warmupIterations = QueryWarmupIterations,
+                iterations = QueryAuthoritativeIterations,
+                warmupSampleRole = "non-authoritative",
+                authoritativeSampleRole = "authoritative-warm",
+                percentileEstimator = "nearest-rank-ceiling",
+                operationOrder = new[]
+                {
+                    "FirstPage",
+                    "CategoryPage",
+                    "Search",
+                    "ReopenFirstVisible",
+                },
+                firstPageMilliseconds = Summary(
+                    query.RawSamples.Select(sample => sample.FirstPageMilliseconds),
+                    QueryAuthoritativeIterations),
+                categoryPageMilliseconds = Summary(
+                    query.RawSamples.Select(sample => sample.CategoryPageMilliseconds),
+                    QueryAuthoritativeIterations),
+                searchMilliseconds = Summary(
+                    query.RawSamples.Select(sample => sample.SearchMilliseconds),
+                    QueryAuthoritativeIterations),
+                reopenFirstVisibleMilliseconds = Summary(
+                    query.RawSamples.Select(sample => sample.ReopenFirstVisibleMilliseconds),
+                    QueryAuthoritativeIterations),
                 rawSamples = query.RawSamples,
             },
             cancellation = new
@@ -279,7 +302,9 @@ public sealed class M14CatalogPerformanceBenchmarkTests
                 iterations = Iterations,
                 expectedErrorCode = DomainErrorCode.OperationCancelled.ToString(),
                 measurementBoundary = "CancellationRequestToLoaderCompletion",
-                completionLatencyMilliseconds = Summary(cancellation.RawSamples.Select(sample => sample.DurationMilliseconds)),
+                completionLatencyMilliseconds = Summary(
+                    cancellation.RawSamples.Select(sample => sample.DurationMilliseconds),
+                    Iterations),
                 rawSamples = cancellation.RawSamples,
             },
             entryLimitProbe,
@@ -448,9 +473,18 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         Assert.IsNotEmpty(seedPage.Items);
         string searchText = seedPage.Items[^1].Name;
 
-        await RunQuerySetAsync(browser, databasePath, fixture.Source.Id, categories[0].CategoryId, searchText);
-        var samples = new List<QuerySample>(Iterations);
-        for (int iteration = 1; iteration <= Iterations; iteration++)
+        for (int iteration = 0; iteration < QueryWarmupIterations; iteration++)
+        {
+            await RunQuerySetAsync(
+                browser,
+                databasePath,
+                fixture.Source.Id,
+                categories[0].CategoryId,
+                searchText);
+        }
+
+        var samples = new List<QuerySample>(QueryAuthoritativeIterations);
+        for (int iteration = 1; iteration <= QueryAuthoritativeIterations; iteration++)
         {
             double firstPage = await MeasureDurationAsync(async () =>
             {
@@ -740,42 +774,72 @@ public sealed class M14CatalogPerformanceBenchmarkTests
                 operatingSystemCacheFlushPerformed = false,
                 rawSample = coldObservation,
             },
-            durationMilliseconds = Summary(samples.Select(sample => sample.DurationMilliseconds)),
-            allocatedBytes = Summary(samples.Select(sample => (double)sample.AllocatedBytes)),
-            processCpuMilliseconds = Summary(samples.Select(sample => sample.ProcessCpuMilliseconds)),
+            durationMilliseconds = Summary(
+                samples.Select(sample => sample.DurationMilliseconds),
+                Iterations),
+            allocatedBytes = Summary(
+                samples.Select(sample => (double)sample.AllocatedBytes),
+                Iterations),
+            processCpuMilliseconds = Summary(
+                samples.Select(sample => sample.ProcessCpuMilliseconds),
+                Iterations),
             garbageCollections = new
             {
-                generation0 = Summary(samples.Select(sample => (double)sample.GarbageCollections.Generation0)),
-                generation1 = Summary(samples.Select(sample => (double)sample.GarbageCollections.Generation1)),
-                generation2 = Summary(samples.Select(sample => (double)sample.GarbageCollections.Generation2)),
+                generation0 = Summary(
+                    samples.Select(sample => (double)sample.GarbageCollections.Generation0),
+                    Iterations),
+                generation1 = Summary(
+                    samples.Select(sample => (double)sample.GarbageCollections.Generation1),
+                    Iterations),
+                generation2 = Summary(
+                    samples.Select(sample => (double)sample.GarbageCollections.Generation2),
+                    Iterations),
             },
             workingSet = new
             {
-                beforeBytes = Summary(samples.Select(sample => (double)sample.WorkingSet.BeforeBytes)),
-                afterBytes = Summary(samples.Select(sample => (double)sample.WorkingSet.AfterBytes)),
-                deltaBytes = Summary(samples.Select(sample => (double)sample.WorkingSet.DeltaBytes)),
+                beforeBytes = Summary(
+                    samples.Select(sample => (double)sample.WorkingSet.BeforeBytes),
+                    Iterations),
+                afterBytes = Summary(
+                    samples.Select(sample => (double)sample.WorkingSet.AfterBytes),
+                    Iterations),
+                deltaBytes = Summary(
+                    samples.Select(sample => (double)sample.WorkingSet.DeltaBytes),
+                    Iterations),
             },
             processIo = new
             {
                 availableForAllSamples = samples.All(sample => sample.ProcessIo.IsAvailable),
-                readOperationCount = Summary(samples.Select(sample => (double)sample.ProcessIo.ReadOperationCount)),
-                writeOperationCount = Summary(samples.Select(sample => (double)sample.ProcessIo.WriteOperationCount)),
-                otherOperationCount = Summary(samples.Select(sample => (double)sample.ProcessIo.OtherOperationCount)),
-                readTransferBytes = Summary(samples.Select(sample => (double)sample.ProcessIo.ReadTransferBytes)),
-                writeTransferBytes = Summary(samples.Select(sample => (double)sample.ProcessIo.WriteTransferBytes)),
-                otherTransferBytes = Summary(samples.Select(sample => (double)sample.ProcessIo.OtherTransferBytes)),
+                readOperationCount = Summary(
+                    samples.Select(sample => (double)sample.ProcessIo.ReadOperationCount),
+                    Iterations),
+                writeOperationCount = Summary(
+                    samples.Select(sample => (double)sample.ProcessIo.WriteOperationCount),
+                    Iterations),
+                otherOperationCount = Summary(
+                    samples.Select(sample => (double)sample.ProcessIo.OtherOperationCount),
+                    Iterations),
+                readTransferBytes = Summary(
+                    samples.Select(sample => (double)sample.ProcessIo.ReadTransferBytes),
+                    Iterations),
+                writeTransferBytes = Summary(
+                    samples.Select(sample => (double)sample.ProcessIo.WriteTransferBytes),
+                    Iterations),
+                otherTransferBytes = Summary(
+                    samples.Select(sample => (double)sample.ProcessIo.OtherTransferBytes),
+                    Iterations),
             },
             databaseBytes = includeDatabase
-                ? Summary(samples.Select(sample => (double)sample.DatabaseBytes))
+                ? Summary(samples.Select(sample => (double)sample.DatabaseBytes), Iterations)
                 : null,
             rawSamples = samples,
         };
     }
 
-    private static MetricSummary Summary(IEnumerable<double> values)
+    private static MetricSummary Summary(IEnumerable<double> values, int expectedSampleCount)
     {
         double[] ordered = values.Order().ToArray();
-        Assert.HasCount(Iterations, ordered);
+        Assert.HasCount(expectedSampleCount, ordered);
         double mean = ordered.Average();
         double variance = ordered.Sum(value => (value - mean) * (value - mean)) / ordered.Length;
         double standardDeviation = Math.Sqrt(variance);
@@ -820,11 +884,14 @@ public sealed class M14CatalogPerformanceBenchmarkTests
     {
         ScaleBenchmark gate = scaleResults.Single(result => result.Corpus.ChannelCount == 50_000);
         double combinedImportP95 = Summary(
-            gate.CombinedSamples.Select(sample => sample.DurationMilliseconds)).Percentile95;
+            gate.CombinedSamples.Select(sample => sample.DurationMilliseconds),
+            Iterations).Percentile95;
         Assert.IsFalse(gate.PeakWorkingSet.SampleCapacityReached);
         Assert.IsLessThanOrEqualTo(
             ParserBudgetMilliseconds,
-            Summary(gate.ParserSamples.Select(sample => sample.DurationMilliseconds)).Percentile95);
+            Summary(
+                gate.ParserSamples.Select(sample => sample.DurationMilliseconds),
+                Iterations).Percentile95);
         Assert.IsLessThanOrEqualTo(
             NormalizeProtectPersistIndexBudgetMilliseconds,
             combinedImportP95);
@@ -833,25 +900,37 @@ public sealed class M14CatalogPerformanceBenchmarkTests
             combinedImportP95);
         Assert.IsLessThanOrEqualTo(
             ImportAllocationBudgetBytes,
-            Summary(gate.CombinedSamples.Select(sample => (double)sample.AllocatedBytes)).Maximum);
+            Summary(
+                gate.CombinedSamples.Select(sample => (double)sample.AllocatedBytes),
+                Iterations).Maximum);
         Assert.IsLessThanOrEqualTo(
             PeakWorkingSetBudgetBytes,
             gate.PeakWorkingSet.PeakDeltaBytes);
         Assert.IsLessThanOrEqualTo(
             CancellationBudgetMilliseconds,
-            Summary(cancellation.RawSamples.Select(sample => sample.DurationMilliseconds)).Percentile95);
+            Summary(
+                cancellation.RawSamples.Select(sample => sample.DurationMilliseconds),
+                Iterations).Percentile95);
         Assert.IsLessThanOrEqualTo(
             QueryBudgetMilliseconds,
-            Summary(query.RawSamples.Select(sample => sample.FirstPageMilliseconds)).Percentile95);
+            Summary(
+                query.RawSamples.Select(sample => sample.FirstPageMilliseconds),
+                QueryAuthoritativeIterations).Percentile95);
         Assert.IsLessThanOrEqualTo(
             QueryBudgetMilliseconds,
-            Summary(query.RawSamples.Select(sample => sample.CategoryPageMilliseconds)).Percentile95);
+            Summary(
+                query.RawSamples.Select(sample => sample.CategoryPageMilliseconds),
+                QueryAuthoritativeIterations).Percentile95);
         Assert.IsLessThanOrEqualTo(
             QueryBudgetMilliseconds,
-            Summary(query.RawSamples.Select(sample => sample.SearchMilliseconds)).Percentile95);
+            Summary(
+                query.RawSamples.Select(sample => sample.SearchMilliseconds),
+                QueryAuthoritativeIterations).Percentile95);
         Assert.IsLessThanOrEqualTo(
             ReopenBudgetMilliseconds,
-            Summary(query.RawSamples.Select(sample => sample.ReopenFirstVisibleMilliseconds)).Percentile95);
+            Summary(
+                query.RawSamples.Select(sample => sample.ReopenFirstVisibleMilliseconds),
+                QueryAuthoritativeIterations).Percentile95);
     }
 
     private static BudgetEvaluation EvaluateBudgets(
@@ -861,22 +940,30 @@ public sealed class M14CatalogPerformanceBenchmarkTests
     {
         ScaleBenchmark gate = scaleResults.Single(result => result.Corpus.ChannelCount == 50_000);
         double parserP95 = Summary(
-            gate.ParserSamples.Select(sample => sample.DurationMilliseconds)).Percentile95;
+            gate.ParserSamples.Select(sample => sample.DurationMilliseconds),
+            Iterations).Percentile95;
         double combinedImportP95 = Summary(
-            gate.CombinedSamples.Select(sample => sample.DurationMilliseconds)).Percentile95;
+            gate.CombinedSamples.Select(sample => sample.DurationMilliseconds),
+            Iterations).Percentile95;
         double normalizeProtectPersistIndexConservativeUpperBoundP95 = combinedImportP95;
         double allocationMaximum = Summary(
-            gate.CombinedSamples.Select(sample => (double)sample.AllocatedBytes)).Maximum;
+            gate.CombinedSamples.Select(sample => (double)sample.AllocatedBytes),
+            Iterations).Maximum;
         double cancellationP95 = Summary(
-            cancellation.RawSamples.Select(sample => sample.DurationMilliseconds)).Percentile95;
+            cancellation.RawSamples.Select(sample => sample.DurationMilliseconds),
+            Iterations).Percentile95;
         double firstPageP95 = Summary(
-            query.RawSamples.Select(sample => sample.FirstPageMilliseconds)).Percentile95;
+            query.RawSamples.Select(sample => sample.FirstPageMilliseconds),
+            QueryAuthoritativeIterations).Percentile95;
         double categoryPageP95 = Summary(
-            query.RawSamples.Select(sample => sample.CategoryPageMilliseconds)).Percentile95;
+            query.RawSamples.Select(sample => sample.CategoryPageMilliseconds),
+            QueryAuthoritativeIterations).Percentile95;
         double searchP95 = Summary(
-            query.RawSamples.Select(sample => sample.SearchMilliseconds)).Percentile95;
+            query.RawSamples.Select(sample => sample.SearchMilliseconds),
+            QueryAuthoritativeIterations).Percentile95;
         double reopenP95 = Summary(
-            query.RawSamples.Select(sample => sample.ReopenFirstVisibleMilliseconds)).Percentile95;
+            query.RawSamples.Select(sample => sample.ReopenFirstVisibleMilliseconds),
+            QueryAuthoritativeIterations).Percentile95;
         bool peakSamplingComplete = !gate.PeakWorkingSet.SampleCapacityReached;
         bool normalizeProtectPersistIndexPassed =
             normalizeProtectPersistIndexConservativeUpperBoundP95 <=
