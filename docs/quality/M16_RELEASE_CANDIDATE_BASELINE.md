@@ -1,6 +1,6 @@
 # M16 Windows MVP Release Candidate blocked baseline'i
 
-**Durum:** `M15 TECHNICAL CHAIN RENEWED / M16 FINAL-ARTIFACT CURRENT / JOURNEY + SECURITY-ARCHITECTURE RENEWAL REQUIRED / BLOCKED — 6 M16 blocker açık, 2026-08-27`
+**Durum:** `M15 TECHNICAL CHAIN RENEWED / M16 FINAL-ARTIFACT + JOURNEY CURRENT / SECURITY-ARCHITECTURE RENEWAL REQUIRED / BLOCKED — 5 M16 blocker açık, 2026-08-27`
 
 ## Checkpoint kararı
 
@@ -28,11 +28,11 @@ Source-controlled `eng/windows-m16-final-artifact-acceptance.json` kabul ledger'
 
 ## Bounded sentetik uçtan uca entegrasyon journey'si
 
-`HOSTED VERIFIED / HISTORICAL ACCEPTED / STALE-REOPEN, 2026-08-27`: `M16SyntheticEndToEndJourneyTests`, tamamen sentetik ve TLS certificate-pin'li loopback veriyle production onboarding, bounded transport/probe, protected-reference import, SQLite browse/search, playback coordinator control, watchdog fault/reconnect ve source deletion/tombstone zincirini tek bounded testte yürütür. Exact HTTP istek sırası, ikinci fiziksel playback session'ına control restore sırası, stop-before-reopen, retired-source non-admission, disposed lease'ler, protected-record zeroization ve ana SQLite dosyasıyla mevcut `-journal`/`-wal`/`-shm` yan yüzeylerinde raw locator yokluğu doğrulanır. Test timeout'u sabit `60 s`dir.
+`HOSTED VERIFIED / CURRENT ACCEPTED, 2026-08-27`: `M16SyntheticEndToEndJourneyTests`, tamamen sentetik ve TLS certificate-pin'li loopback veriyle production onboarding, bounded transport/probe, protected-reference import, SQLite browse/search, playback coordinator control, watchdog fault/reconnect ve source deletion/tombstone zincirini tek bounded testte yürütür. Exact HTTP istek sırası, ikinci fiziksel playback session'ına control restore sırası, stop-before-reopen, retired-source non-admission, disposed lease'ler, protected-record zeroization ve ana SQLite dosyasıyla mevcut `-journal`/`-wal`/`-shm` yan yüzeylerinde raw locator yokluğu doğrulanır. Test timeout'u sabit `60 s`dir.
 
-[Hosted run `33069492771`, attempt `1`](https://github.com/serkankaracan/iptv-suite/actions/runs/33069492771) clean `ca63f5959fd0becf59411d6aa979ee350faed90f` üzerinde exact journey sonucunu iki deterministik run'da geçti. Quality job `98507784764`, Required Windows gate `98513232942` ve workflow sonucu `success` oldu. `windows-quality-evidence` artifact `9645528070` digest'i `8da92578e4f226a37255c8d618f240db3439df1b260b18403b83addf356bf658`; `evidence/quality-summary.json` üyesi `47.236` byte ve SHA-256 `27013951798ba1b77b646d0a77ab39b1bd4c045a67cf0ecc039e0ec37db9b520`dir. Summary exact `631` test/run, `cleanRunCount=2` ve tek `AuthorizedRemotePlaylistCompletesExactSyntheticReleaseCandidateJourney|Passed` sonucu taşır.
+[Hosted run `33079150878`, attempt `1`](https://github.com/serkankaracan/iptv-suite/actions/runs/33079150878) clean `4a86016f41f88ff7fb07be238500b690aaa80b86` üzerinde exact journey sonucunu iki deterministik run'da geçti. Quality job `98541265735`, Required Windows gate `98547761765` ve workflow sonucu `success` oldu. `windows-quality-evidence` artifact `9649655323` digest'i `13c79585d872187cd10151d6d3adfbf2e93b3a5feb1f0a7fc10f9d97ba57cad5`; `evidence/quality-summary.json` üyesi `47.236` byte ve SHA-256 `d0c898665b7e75ee752fbc0c8acb40b0722c3f8f3b611e63ad9d8b022f68d11c`dir. Summary exact `631` test/run, `cleanRunCount=2` ve tek `AuthorizedRemotePlaylistCompletesExactSyntheticReleaseCandidateJourney|Passed` sonucu taşır.
 
-Bu tarihsel kabul `eng/windows-m16-synthetic-journey-acceptance.json` ledger'ında raw SHA-256 `50d867fd845e96bb4ad9207fc356bce891e36801d250e8f2d5e1f04e968a8480` ile kayıtlıdır. Exact `132` source'un producer/dependency closure SHA-256 değeri `08ef66d9ce752f91721cfcf9a3b848cfb69eb45fd454dfd674342e29a4a961ca`dır. Loopback fixture test izolasyonu bu closure'ı değiştirdiği için kayıt artık `stale-reopen`dır ve `M16SyntheticEndToEndJourneyPending` yeniden açıktır. Raw ledger/schema/artifact tutarsızlığı ise stale değil hard-invalid'dir.
+Bu current kabul `eng/windows-m16-synthetic-journey-acceptance.json` ledger'ında raw SHA-256 `ea97abb1cbfcf6ee55bc74be6bf82c52251786e627423b6cba4eb573b590ebd4` ile kayıtlıdır. Exact `132` source'un producer/dependency closure SHA-256 değeri `9ff2e682fe63d0fc2ea7761493f6c32639bfbc25a15213e9722c7c02c001fc56`dır. Ledger current kaldığı sürece yalnız `M16SyntheticEndToEndJourneyPending` kapısını kapatır; closure drift'i `stale-reopen` ile kapıyı yeniden açar. Raw ledger/schema/artifact tutarsızlığı ise stale değil hard-invalid'dir.
 
 Bu üç source-controlled acceptance ledger'ının validator tarafından okunması, kaydedilen GitHub run/job/artifact occurrence'ının veya GitHub provenance'ının bağımsız attestation'ı değildir. Validator yalnız bounded ledger byte/schema/hash bağlarını, kaydedilmiş artifact alanlarını ve current repository source closure'ını doğrular; canlı GitHub API'sine başvurmaz. Run bağlantıları ve artifact incelemesi ayrı insan/hosted kabul kaydıdır. Yeni bir producer sonucu ancak bu dış doğrulama yapılıp exact metadata source-controlled ledger'a açıkça kabul edildiğinde current teknik kapıyı kapatabilir.
 
@@ -40,9 +40,9 @@ Bu journey in-memory secret store ve deterministik playback-engine seam'i kullan
 
 ## Hosted final security/architecture kabulü
 
-`HOSTED VERIFIED / HISTORICAL ACCEPTED / STALE-REOPEN, 2026-08-27`: [Run `33072949178`, attempt `1`](https://github.com/serkankaracan/iptv-suite/actions/runs/33072949178), clean `cdcb4f64029df9b6490f5b7065f612914c9de6a9` ve exact SDK `10.0.302` ile iki deterministik full quality runında `631/631` sonucu geçti. Quality job `98519637813` (`2026-08-27T12:53:10Z`) ve Required Windows gate `98525833186` başarıyla tamamlandı. Canonical full-result set SHA-256 değeri `66dab64fa75e52da441dd863490f8d0c5c32f54c5963a12b860ff8af19663ff2`dir. Bunun içindeki exact `77` ArchitectureTests sonucu birer kez ve `Passed` olarak bulundu; ordinal canonical altküme SHA-256 değeri `9d2e961e127593313f48365a9c7f700a6bf1e745c832c8947a94c90a0c4da778`dir. Quality sentinel fail/recovery, scanner CLI contaminated/clean self-test'i ve artifact-files-only canary scan da geçti. `windows-quality-evidence` artifact `9647026031`, `14.136` byte ve SHA-256 `0562ea042c76154a3749d8c9c284d269f7b4cb951edc4da398e91b7a21f7e2e5`dır; içindeki `47.236` byte `evidence/quality-summary.json` üyesinin SHA-256 değeri `3631c20fbd7ae11fd2e4586babf1cc7c928ffe874e446920ed2a2e2eb6277549`dur.
+`HOSTED VERIFIED / STAGING ACCEPTED / STALE-REOPEN, 2026-08-27`: [Run `33079150878`, attempt `1`](https://github.com/serkankaracan/iptv-suite/actions/runs/33079150878), clean `4a86016f41f88ff7fb07be238500b690aaa80b86` ve exact SDK `10.0.302` ile iki deterministik full quality runında `631/631` sonucu geçti. Quality job `98541265735` (`2026-08-27T14:04:13Z`) ve Required Windows gate `98547761765` başarıyla tamamlandı. Canonical full-result set SHA-256 değeri `66dab64fa75e52da441dd863490f8d0c5c32f54c5963a12b860ff8af19663ff2`dir. Bunun içindeki exact `77` ArchitectureTests sonucu birer kez ve `Passed` olarak bulundu; ordinal canonical altküme SHA-256 değeri `9d2e961e127593313f48365a9c7f700a6bf1e745c832c8947a94c90a0c4da778`dir. Quality sentinel fail/recovery, scanner CLI contaminated/clean self-test'i ve artifact-files-only canary scan da geçti. `windows-quality-evidence` artifact `9649655323`, `14.135` byte ve SHA-256 `13c79585d872187cd10151d6d3adfbf2e93b3a5feb1f0a7fc10f9d97ba57cad5`dır; içindeki `47.236` byte `evidence/quality-summary.json` üyesinin SHA-256 değeri `d0c898665b7e75ee752fbc0c8acb40b0722c3f8f3b611e63ad9d8b022f68d11c`dir.
 
-Source-controlled `eng/windows-m16-security-architecture-acceptance.json` ledger'ının raw SHA-256 değeri `f8707e534c7b31a4d9d6e88cf143256d2bd549dc1475cffb9185cfdf7df8d864`dür. Exact git-tracked workflow, build/toolchain, `eng`, production, test ve testdata closure'ı tarihsel kabul anında `329` source ve LF-normalized text/raw binary toplam `7.162.233` canonical byte'tı; ordinal path sıralı binding SHA-256 değeri `580bbf89b427828db09485310f0d2284e2b4f24fda947d6e2cc9d721c78b2265`ti. Acceptance/readiness ledger ve validator döngüleri exact exclusions ile closure dışında kalır; M15 predecessor zinciri ayrıca fail-closed doğrulanır. Loopback fixture test izolasyonu bu closure'ı değiştirdiği için aggregator kaydı artık `stale-reopen` sayar ve `M16FinalSecurityArchitectureScanPending` yeniden açıktır. Missing/tamper/schema/artifact bağı hard-invalid kalır.
+Source-controlled `eng/windows-m16-security-architecture-acceptance.json` staging ledger'ının raw SHA-256 değeri `320f18a580908073b1921b21d8a72a237d71f496842963b897fb354f74d21bcf`dir. Run `#305` closure'ı `329` source / `7.162.252` canonical byte ve `c24ece0a02aab3b1beb32f2083e7787df3f7aeb7082d057b0e9cc40cb700436c` bağındaydı. Architecture contract'ındaki iki exact byte-length literalinin `7.162.252` değerine güncellenmesi byte toplamını değiştirmez fakat current source hash'ini `7e4eba95309af005981435df720f9f0b59c3cd2939d06491143de0e3f88f5fc2` yapar. Bu nedenle ledger bilinçli olarak `stale-reopen` kalır ve `M16FinalSecurityArchitectureScanPending` ancak bu final closure üzerinde temiz hosted run ile kapanabilir. Acceptance/readiness ledger ve validator döngüleri closure dışında; missing/tamper/schema/artifact bağı hard-invalid kalır.
 
 Quality artifact'ı TRX üyelerini yayımlamadığı için bu kayıt bağımsız TRX provenance attestation'ı değildir. Penetration/SAST, CVE/license/legal/privacy, Store identity/signing/WACK, fiziksel cihaz/accessibility, current final-artifact scan veya 24 saat soak kabulü üretmez.
 
@@ -54,7 +54,7 @@ Blocked baseline üretim çağrısı repository kökünden şöyledir:
 
 Sanitized sonuç `.artifacts/m16-release-candidate/rc-summary.json` altında yayımlanır.
 
-Tam RC aggregation baseline'ı gerçek current predecessor input setiyle henüz yeniden üretilmemiştir. Hosted final-artifact kaydı kendi exact commit/artifact ve closure bağında current accepted evidence'dır. Hosted run `33076296708` içindeki iki eşzamanlı ilk loopback isteğinin Windows runner scheduling/Kestrel starvation altında beş saniyelik client timeout'una ulaşması üzerine `LocalHttpFixtureServerTests` sınıfı, kendi explicit sekiz-server concurrency senaryosu korunarak assembly-level method paralelliğinden izole edilmiştir. Bu test-source drift'i önceki journey ve security/architecture closure'larını fail-closed `stale-reopen` yapar; iki kayıt temiz hosted run ile yenilenene kadar ilgili automated kapılar açık kalır. Bu kayıtlar kalan predecessor veya M16 kapılarının tamamlandığı iddiası değildir.
+Tam RC aggregation baseline'ı gerçek current predecessor input setiyle henüz yeniden üretilmemiştir. Hosted final-artifact ve journey kayıtları kendi exact commit/artifact ve closure bağlarında current accepted evidence'dır. Run `33079150878`, loopback test izolasyonunu locked quality, signed MSIX lifecycle, DPAPI ve required gate ile tamamen yeşil doğruladı. Security/architecture ledger'ı aynı run'a staging olarak bağlandı; exact byte-length contract literal güncellemesi nedeniyle tek ek hosted renewal gerekir. Bu kayıtlar kalan predecessor veya M16 kapılarının tamamlandığı iddiası değildir.
 
 ## Sabit ve bounded input seti
 
@@ -101,14 +101,13 @@ M15'in final-release CVE freshness predicate'i evaluation anında geçmezse `Cve
 
 ## M16 blocker'ları
 
-Current final-artifact ledger'ı kendi automated kapısını kapatır. Journey ve security/architecture source closure'ları test izolasyonu drift'i nedeniyle yenilenmeyi bekler; blocked baseline aşağıdaki exact altı M16 kapısını açık tutar:
+Current final-artifact ve journey ledger'ları kendi automated kapılarını kapatır; security/architecture final closure yenilenmeyi bekler. Blocked baseline aşağıdaki exact beş M16 kapısını açık tutar:
 
-1. `M16SyntheticEndToEndJourneyPending`
-2. `M16FinalSecurityArchitectureScanPending`
-3. `M16FeatureFreezeDecisionPending`
-4. `M16PhysicalDeviceAccessibilityMatrixPending`
-5. `M16ReleaseOperationsPlanPending`
-6. `M16TwentyFourHourSoakPending`
+1. `M16FinalSecurityArchitectureScanPending`
+2. `M16FeatureFreezeDecisionPending`
+3. `M16PhysicalDeviceAccessibilityMatrixPending`
+4. `M16ReleaseOperationsPlanPending`
+5. `M16TwentyFourHourSoakPending`
 
 ## Release operasyonları plan kaydı
 
