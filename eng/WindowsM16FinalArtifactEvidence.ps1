@@ -12,6 +12,8 @@ $script:m16FinalMaximumSurfaceFileCount = 25000
 $script:m16FinalMaximumSurfaceDirectoryCount = 25000
 $script:m16FinalMaximumSurfaceFileBytes = 8GB
 $script:m16FinalMaximumAggregateFileBytes = 32GB
+$script:m16FinalMaximumTemporaryArtifactDeleteAttempts = 3
+$script:m16FinalTemporaryArtifactDeleteRetryMilliseconds = 50
 $script:m16FinalUtf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
 $script:m16FinalUtf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -720,6 +722,85 @@ function New-WindowsM16FinalArtifactEvidence {
     }
 }
 
+function Test-WindowsM16FinalTransientFileDeleteFailure {
+    param(
+        [Parameter(Mandatory = $true)][System.Exception]$Exception
+    )
+
+    return $Exception.HResult -eq [Convert]::ToInt32("80070020", 16) -or
+        $Exception.HResult -eq [Convert]::ToInt32("80070021", 16)
+}
+
+function Remove-WindowsM16FinalPublicationFileOnce {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    Microsoft.PowerShell.Management\Remove-Item `
+        -LiteralPath $Path `
+        -Force `
+        -ErrorAction Stop
+}
+
+function Remove-WindowsM16FinalTemporaryArtifact {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedParent
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullParent = [System.IO.Path]::GetFullPath($ExpectedParent)
+    for ($attempt = 1;
+         $attempt -le $script:m16FinalMaximumTemporaryArtifactDeleteAttempts;
+         $attempt++) {
+        Assert-WindowsM16FinalNoAlternateDataStream `
+            -Path $fullPath `
+            -Code "OutputWriteFailed"
+        Assert-WindowsM16FinalCondition `
+            ([System.IO.Path]::GetDirectoryName($fullPath).Equals(
+                $fullParent,
+                [System.StringComparison]::OrdinalIgnoreCase)) `
+            "OutputWriteFailed"
+        if (-not (Test-Path -LiteralPath $fullPath)) {
+            return
+        }
+
+        Assert-WindowsM16FinalNoReparseDirectoryChain `
+            -Root ([System.IO.Path]::GetPathRoot($fullPath)) `
+            -DirectoryPath $fullParent `
+            -Code "OutputWriteFailed"
+        $item = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
+        Assert-WindowsM16FinalCondition `
+            (-not $item.PSIsContainer -and
+             (($item.Attributes -band
+                    [System.IO.FileAttributes]::ReparsePoint) -eq 0)) `
+            "OutputWriteFailed"
+        Assert-WindowsM16FinalNoNamedStreams `
+            -Path $fullPath `
+            -Code "OutputWriteFailed"
+
+        try {
+            Remove-WindowsM16FinalPublicationFileOnce -Path $fullPath
+        }
+        catch {
+            if (-not (Test-WindowsM16FinalTransientFileDeleteFailure `
+                        -Exception $_.Exception)) {
+                throw
+            }
+        }
+
+        if (-not (Test-Path -LiteralPath $fullPath)) {
+            return
+        }
+        if ($attempt -eq $script:m16FinalMaximumTemporaryArtifactDeleteAttempts) {
+            Fail-WindowsM16FinalArtifactEvidence -Code "OutputWriteFailed"
+        }
+
+        Start-Sleep -Milliseconds `
+            ($script:m16FinalTemporaryArtifactDeleteRetryMilliseconds * $attempt)
+    }
+}
+
 function Write-WindowsM16FinalArtifactEvidenceAtomically {
     [CmdletBinding()]
     param(
@@ -804,7 +885,9 @@ function Write-WindowsM16FinalArtifactEvidenceAtomically {
                 Assert-WindowsM16FinalNoNamedStreams `
                     -Path $destination -Code "OutputPathInvalid"
                 if ($destinationExisted) {
-                    Remove-Item -LiteralPath $backup -Force -ErrorAction Stop
+                    Remove-WindowsM16FinalTemporaryArtifact `
+                        -Path $backup `
+                        -ExpectedParent $parent
                 }
                 $committed = $true
             }
@@ -847,10 +930,9 @@ function Write-WindowsM16FinalArtifactEvidenceAtomically {
                                  (($destinationItem.Attributes -band
                                     [System.IO.FileAttributes]::ReparsePoint) -eq 0)) `
                                 "OutputRollbackFailed"
-                            Remove-Item `
-                                -LiteralPath $destination `
-                                -Force `
-                                -ErrorAction Stop
+                            Remove-WindowsM16FinalTemporaryArtifact `
+                                -Path $destination `
+                                -ExpectedParent $parent
                         }
                     }
                     catch {
@@ -865,10 +947,9 @@ function Write-WindowsM16FinalArtifactEvidenceAtomically {
                                     -ErrorAction Stop
                                 if (($failedDestination.Attributes -band
                                         [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
-                                    Remove-Item `
-                                        -LiteralPath $destination `
-                                        -Force `
-                                        -ErrorAction Stop
+                                    Remove-WindowsM16FinalTemporaryArtifact `
+                                        -Path $destination `
+                                        -ExpectedParent $parent
                                 }
                             }
                         }
@@ -881,15 +962,17 @@ function Write-WindowsM16FinalArtifactEvidenceAtomically {
             }
         }
         finally {
-            if (Test-Path -LiteralPath $temporary) {
-                Remove-Item -LiteralPath $temporary -Force -ErrorAction Stop
+            Remove-WindowsM16FinalTemporaryArtifact `
+                -Path $temporary `
+                -ExpectedParent $parent
+            if (-not $preserveBackup) {
+                Remove-WindowsM16FinalTemporaryArtifact `
+                    -Path $backup `
+                    -ExpectedParent $parent
             }
-            if ((Test-Path -LiteralPath $backup) -and -not $preserveBackup) {
-                Remove-Item -LiteralPath $backup -Force -ErrorAction Stop
-            }
-            if (Test-Path -LiteralPath $rollbackDiscard) {
-                Remove-Item -LiteralPath $rollbackDiscard -Force -ErrorAction Stop
-            }
+            Remove-WindowsM16FinalTemporaryArtifact `
+                -Path $rollbackDiscard `
+                -ExpectedParent $parent
         }
     }
     catch {

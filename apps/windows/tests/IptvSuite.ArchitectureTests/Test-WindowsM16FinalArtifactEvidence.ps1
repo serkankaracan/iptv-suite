@@ -206,6 +206,179 @@ try {
                 -Force | Where-Object { $_.Name -ne "final-evidence.json" }).Count -eq 0) `
         "atomic replacement left a temporary artifact."
 
+    $script:originalRemovePublicationFileOnce =
+        ${function:Remove-WindowsM16FinalPublicationFileOnce}
+    $script:deleteInjectionMode = ""
+    $script:deleteInvocationCount = 0
+    $deleteRetryPath = Join-Path $script:fixtureRoot "out\delete-retry.json"
+    try {
+        function Remove-WindowsM16FinalPublicationFileOnce {
+            param(
+                [Parameter(Mandatory = $true)][string]$Path
+            )
+
+            $script:deleteInvocationCount++
+            switch ($script:deleteInjectionMode) {
+                "VisibleAfterFirstDelete" {
+                    if ($script:deleteInvocationCount -eq 1) {
+                        return
+                    }
+                }
+                "SharingViolationOnce" {
+                    if ($script:deleteInvocationCount -eq 1) {
+                        throw [System.IO.IOException]::new(
+                            "synthetic lock violation",
+                            [Convert]::ToInt32("80070021", 16))
+                    }
+                }
+                "AccessDenied" {
+                    throw [System.UnauthorizedAccessException]::new(
+                        "synthetic access denied")
+                }
+                "PersistentSharingViolation" {
+                    throw [System.IO.IOException]::new(
+                        "synthetic sharing violation",
+                        [Convert]::ToInt32("80070020", 16))
+                }
+                "DeleteOnFinalSharingViolation" {
+                    if ($script:deleteInvocationCount -lt 3) {
+                        throw [System.IO.IOException]::new(
+                            "synthetic sharing violation",
+                            [Convert]::ToInt32("80070020", 16))
+                    }
+                    & $script:originalRemovePublicationFileOnce -Path $Path
+                    throw [System.IO.IOException]::new(
+                        "synthetic post-delete sharing violation",
+                        [Convert]::ToInt32("80070020", 16))
+                }
+                "NamedStreamAfterFirstDelete" {
+                    if ($script:deleteInvocationCount -eq 1) {
+                        Set-Content `
+                            -LiteralPath $Path `
+                            -Stream "m16-delete-race" `
+                            -Value "synthetic named stream" `
+                            -Encoding Ascii
+                        return
+                    }
+                }
+            }
+
+            & $script:originalRemovePublicationFileOnce -Path $Path
+        }
+
+        Write-TestText -Path $deleteRetryPath -Value "delete retry fixture"
+        $script:deleteInjectionMode = "VisibleAfterFirstDelete"
+        $script:deleteInvocationCount = 0
+        Remove-WindowsM16FinalTemporaryArtifact `
+            -Path $deleteRetryPath `
+            -ExpectedParent ([System.IO.Path]::GetDirectoryName($deleteRetryPath))
+        Assert-TestCondition `
+            ($script:deleteInvocationCount -eq 2 -and
+             -not (Test-Path -LiteralPath $deleteRetryPath)) `
+            "visible-after-delete cleanup did not converge in exactly two attempts."
+
+        Write-TestText -Path $deleteRetryPath -Value "delete retry fixture"
+        $script:deleteInjectionMode = "SharingViolationOnce"
+        $script:deleteInvocationCount = 0
+        Remove-WindowsM16FinalTemporaryArtifact `
+            -Path $deleteRetryPath `
+            -ExpectedParent ([System.IO.Path]::GetDirectoryName($deleteRetryPath))
+        Assert-TestCondition `
+            ($script:deleteInvocationCount -eq 2 -and
+             -not (Test-Path -LiteralPath $deleteRetryPath)) `
+            "sharing-violation cleanup did not converge in exactly two attempts."
+
+        Write-TestText -Path $deleteRetryPath -Value "delete retry fixture"
+        $script:deleteInjectionMode = "AccessDenied"
+        $script:deleteInvocationCount = 0
+        $deleteFailure = $null
+        try {
+            Remove-WindowsM16FinalTemporaryArtifact `
+                -Path $deleteRetryPath `
+                -ExpectedParent ([System.IO.Path]::GetDirectoryName($deleteRetryPath))
+        }
+        catch {
+            $deleteFailure = $_.Exception
+        }
+        Assert-TestCondition `
+            ($script:deleteInvocationCount -eq 1 -and
+             $deleteFailure -is [System.UnauthorizedAccessException] -and
+             (Test-Path -LiteralPath $deleteRetryPath)) `
+            "non-transient delete failure was retried or suppressed."
+        & $script:originalRemovePublicationFileOnce -Path $deleteRetryPath
+
+        Write-TestText -Path $deleteRetryPath -Value "delete retry fixture"
+        $script:deleteInjectionMode = "PersistentSharingViolation"
+        $script:deleteInvocationCount = 0
+        Assert-TestRejected `
+            -Action {
+                Remove-WindowsM16FinalTemporaryArtifact `
+                    -Path $deleteRetryPath `
+                    -ExpectedParent ([System.IO.Path]::GetDirectoryName($deleteRetryPath))
+            } `
+            -ExpectedCode "OutputWriteFailed" `
+            -CaseName "persistent sharing violation"
+        Assert-TestCondition `
+            ($script:deleteInvocationCount -eq 3 -and
+             (Test-Path -LiteralPath $deleteRetryPath)) `
+            "persistent sharing violation did not fail closed after three attempts."
+        & $script:originalRemovePublicationFileOnce -Path $deleteRetryPath
+
+        $script:deleteInjectionMode = "DeleteOnFinalSharingViolation"
+        $script:deleteInvocationCount = 0
+        Write-WindowsM16FinalArtifactEvidenceAtomically `
+            -Value $evidence `
+            -DestinationPath $script:outputPath
+        $deleteOnFinalOrphans = @(
+            Get-ChildItem `
+                -LiteralPath ([System.IO.Path]::GetDirectoryName($script:outputPath)) `
+                -Force |
+                Where-Object { $_.Name -cmatch '\.(?:tmp|bak|rollback)$' })
+        Assert-TestCondition `
+            ($script:deleteInvocationCount -eq 3 -and
+             (Test-Path -LiteralPath $script:outputPath -PathType Leaf) -and
+             $deleteOnFinalOrphans.Count -eq 0) `
+            "final-attempt backup delete did not preserve a clean committed destination."
+
+        Write-TestText -Path $deleteRetryPath -Value "delete retry fixture"
+        $script:deleteInjectionMode = "NamedStreamAfterFirstDelete"
+        $script:deleteInvocationCount = 0
+        Assert-TestRejected `
+            -Action {
+                Remove-WindowsM16FinalTemporaryArtifact `
+                    -Path $deleteRetryPath `
+                    -ExpectedParent ([System.IO.Path]::GetDirectoryName($deleteRetryPath))
+            } `
+            -ExpectedCode "OutputWriteFailed" `
+            -CaseName "named stream introduced between delete attempts"
+        Assert-TestCondition `
+            ($script:deleteInvocationCount -eq 1 -and
+             (Test-Path -LiteralPath $deleteRetryPath)) `
+            "named-stream retry preflight invoked deletion again."
+        Microsoft.PowerShell.Management\Remove-Item `
+            -LiteralPath $deleteRetryPath `
+            -Stream "m16-delete-race" `
+            -Force `
+            -ErrorAction Stop
+        & $script:originalRemovePublicationFileOnce -Path $deleteRetryPath
+    }
+    finally {
+        if (Test-Path -LiteralPath $deleteRetryPath) {
+            Microsoft.PowerShell.Management\Remove-Item `
+                -LiteralPath $deleteRetryPath `
+                -Force `
+                -ErrorAction Stop
+        }
+        ${function:Remove-WindowsM16FinalPublicationFileOnce} =
+            $script:originalRemovePublicationFileOnce
+        Remove-Variable `
+            -Name originalRemovePublicationFileOnce, `
+                deleteInjectionMode, `
+                deleteInvocationCount `
+            -Scope Script `
+            -ErrorAction SilentlyContinue
+    }
+
     $script:originalNoNamedStreamsForRollback =
         ${function:Assert-WindowsM16FinalNoNamedStreams}
     $script:forcedPostPublicationFailurePath = ""
