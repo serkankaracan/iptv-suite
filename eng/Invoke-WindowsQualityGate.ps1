@@ -21,6 +21,10 @@ $summaryPath = Join-Path $evidenceRoot "quality-summary.json"
 $selfTestScript = Join-Path $PSScriptRoot "Invoke-QualityGateSelfTest.ps1"
 # A single MSBuild node keeps the gate reliable on high-core Windows hosts and bounds process memory.
 $maximumBuildNodes = 1
+$defaultTestHangTimeout = "2m"
+# The architecture suite runs bounded PowerShell 5.1 contract matrices; hosted runners can
+# legitimately need more than two minutes for one such test while unit/integration tests cannot.
+$architectureTestHangTimeout = "5m"
 
 $testProjects = [ordered]@{
     architecture = Join-Path $repositoryRoot "apps\windows\tests\IptvSuite.ArchitectureTests\IptvSuite.ArchitectureTests.csproj"
@@ -184,6 +188,12 @@ function Invoke-TestRun {
 
     foreach ($testProject in $testProjects.GetEnumerator()) {
         $trxName = "$($testProject.Key).trx"
+        $hangTimeout = if ($testProject.Key -ceq "architecture") {
+            $architectureTestHangTimeout
+        }
+        else {
+            $defaultTestHangTimeout
+        }
         Invoke-CheckedDotNet -FailureMessage "$($testProject.Key) tests failed in run $RunNumber." -ArgumentList @(
             "test",
             $testProject.Value,
@@ -193,7 +203,7 @@ function Invoke-TestRun {
             "--logger", "trx;LogFileName=$trxName",
             "--results-directory", $runDirectory,
             "--blame-hang",
-            "--blame-hang-timeout", "2m",
+            "--blame-hang-timeout", $hangTimeout,
             "--blame-hang-dump-type", "none",
             "-maxcpucount:$maximumBuildNodes",
             "--nologo"

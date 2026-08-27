@@ -4694,6 +4694,14 @@ public sealed class DependencyRulesTests
     [TestMethod]
     public void M16WindowsReleaseCandidateContractPassesItsPowerShell51SelfTest()
     {
+        const int contractTimeoutMilliseconds = 240_000;
+        string qualityGate = File.ReadAllText(
+            Path.Combine(RepositoryRoot, "eng", "Invoke-WindowsQualityGate.ps1"));
+        StringAssert.Contains(qualityGate, "$defaultTestHangTimeout = \"2m\"");
+        StringAssert.Contains(qualityGate, "$architectureTestHangTimeout = \"5m\"");
+        StringAssert.Contains(qualityGate, "$testProject.Key -ceq \"architecture\"");
+        StringAssert.Contains(qualityGate, "\"--blame-hang-timeout\", $hangTimeout");
+
         string selfTest = Path.Combine(
             RepositoryRoot,
             "apps",
@@ -4729,7 +4737,7 @@ public sealed class DependencyRulesTests
 
         using Process contractProcess = Process.Start(startInfo)
             ?? throw new AssertFailedException("The M16 release-candidate self-test could not start.");
-        bool contractCompleted = contractProcess.WaitForExit(120_000);
+        bool contractCompleted = contractProcess.WaitForExit(contractTimeoutMilliseconds);
         if (!contractCompleted)
         {
             contractProcess.Kill(entireProcessTree: true);
