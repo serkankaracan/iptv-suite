@@ -19,7 +19,7 @@ $script:nativePackageSha256 = ("b" * 64)
 $script:m16FinalArtifactAcceptanceRelativePath =
     "eng/windows-m16-final-artifact-acceptance.json"
 $script:m16FinalArtifactAcceptanceSha256 =
-    "48c8fe9d886d2fc66991304f6a169a911c73433e2c9e5edf52c506a59e2fbac1"
+    "e02274af91c997b0f6b384b9e345335fa2c90cdcea8a6e7e70857bf82ebae6e1"
 $script:m16SyntheticJourneyAcceptanceRelativePath =
     "eng/windows-m16-synthetic-journey-acceptance.json"
 $script:m16SyntheticJourneyAcceptanceSha256 =
@@ -99,7 +99,6 @@ $script:m15Blockers = @(
     "WackPending")
 $script:m16Blockers = @(
     "M16FeatureFreezeDecisionPending",
-    "M16FinalArtifactCanaryScanPending",
     "M16PhysicalDeviceAccessibilityMatrixPending",
     "M16ReleaseOperationsPlanPending",
     "M16TwentyFourHourSoakPending")
@@ -988,6 +987,8 @@ function Read-AndAssertBlockedEvidence {
 
         [bool]$ExpectedCveFinalReleaseFreshAtEvaluation = $true,
 
+        [bool]$ExpectedFinalArtifactCurrent = $false,
+
         [bool]$ExpectedSecurityArchitectureCurrent = $true,
 
         [bool]$ExpectedSyntheticJourneyCurrent = $true
@@ -1085,41 +1086,54 @@ function Read-AndAssertBlockedEvidence {
             "closedBlocker",
             "effectiveClosedBlocker") `
         -Message "final-artifact acceptance summary schema changed."
+    $expectedFinalArtifactResult = if ($ExpectedFinalArtifactCurrent) {
+        "accepted-current"
+    }
+    else {
+        "stale-reopen"
+    }
+    $expectedFinalArtifactEffectiveBlocker = if ($ExpectedFinalArtifactCurrent) {
+        "M16FinalArtifactCanaryScanPending"
+    }
+    else {
+        "None"
+    }
     Assert-TestCondition `
-        ($finalArtifactAcceptance.result -ceq "stale-reopen" -and
+        ($finalArtifactAcceptance.result -ceq $expectedFinalArtifactResult -and
          $finalArtifactAcceptance.current -is [bool] -and
-         -not $finalArtifactAcceptance.current -and
+         $finalArtifactAcceptance.current -eq $ExpectedFinalArtifactCurrent -and
          $finalArtifactAcceptance.ledgerSha256 -ceq
             $script:m16FinalArtifactAcceptanceSha256 -and
          $finalArtifactAcceptance.decision -ceq
             "AcceptHostedM16FinalArtifactCanaryScan" -and
          $finalArtifactAcceptance.scope -ceq "M16FinalArtifactCanaryScanOnly" -and
-         $finalArtifactAcceptance.runCompletedAtUtc -ceq "2026-08-26T20:29:42Z" -and
-         $finalArtifactAcceptance.runId -eq 33009018937 -and
-         $finalArtifactAcceptance.runNumber -eq 276 -and
+         $finalArtifactAcceptance.runCompletedAtUtc -ceq "2026-08-27T04:11:43Z" -and
+         $finalArtifactAcceptance.runId -eq 33037521028 -and
+         $finalArtifactAcceptance.runNumber -eq 286 -and
          $finalArtifactAcceptance.runAttempt -eq 1 -and
          $finalArtifactAcceptance.runHeadSha -ceq
-            "da205bd194016815ab069a3513eff4500796584d" -and
-         $finalArtifactAcceptance.producerJobId -eq 98313237561 -and
-         $finalArtifactAcceptance.artifactId -eq 9622360788 -and
+            "7b6edd8a5db7ccd3835f49c43181374fefc6b5a7" -and
+         $finalArtifactAcceptance.producerJobId -eq 98405555646 -and
+         $finalArtifactAcceptance.artifactId -eq 9632983293 -and
          $finalArtifactAcceptance.artifactName -ceq
             "windows-m16-final-artifact-evidence" -and
          $finalArtifactAcceptance.artifactDigestSha256 -ceq
-            "919d6d9680ca5fe7c49cd8a62615f5c8f90e13b069b587039a7ee572abc8b7be" -and
+            "52dd5510a071a5acdd672676d496500abbf9a0138e4d50a58d5019f49730c349" -and
          $finalArtifactAcceptance.memberLength -eq 3281 -and
          $finalArtifactAcceptance.memberSha256 -ceq
-            "87132e006bc03b6f8a385a7c999755f252ea2a18282a06f2fb916c51a921500a" -and
+            "2c6513cbc75adb6eda371177f682ebd049652e049afd246cfa10e6c54829c756" -and
          $finalArtifactAcceptance.packageSha256 -ceq
-            "d758893ce36b1cb24c2f144b49da99ca56d9483ee9361b41d2fb7b083a7db68b" -and
+            "1f8897aed183dba6bbadfbef3c06df614928c5fa79e5bbd05e85ea993a631da5" -and
          $finalArtifactAcceptance.producerContractSourceCount -eq 39 -and
          $finalArtifactAcceptance.producerContractSourceSetSha256 -ceq
-            "3318bf8638903bd05f509e29d4d6281e945773d0833003e3379a266f7b9ae2bb" -and
-         $finalArtifactAcceptance.packageProducingSnapshotFileCount -eq 113 -and
+            "851bc086240e5eaa15775834364593887f9225f546e888d9ba3e4a71d11b6c57" -and
+         $finalArtifactAcceptance.packageProducingSnapshotFileCount -eq 115 -and
          $finalArtifactAcceptance.packageProducingSnapshotSha256 -ceq
-            "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493" -and
+            "5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810" -and
          $finalArtifactAcceptance.closedBlocker -ceq
             "M16FinalArtifactCanaryScanPending" -and
-         $finalArtifactAcceptance.effectiveClosedBlocker -ceq "None") `
+         $finalArtifactAcceptance.effectiveClosedBlocker -ceq
+            $expectedFinalArtifactEffectiveBlocker) `
         "final-artifact acceptance binding changed."
     $securityArchitectureAcceptance = $evidence.finalSecurityArchitectureAcceptance
     Assert-TestCondition ($securityArchitectureAcceptance -is [pscustomobject]) `
@@ -1318,6 +1332,9 @@ function Read-AndAssertBlockedEvidence {
         $expectedM15Blockers += "CveReviewPending"
     }
     $expectedM16Blockers = @($script:m16Blockers)
+    if (-not $ExpectedFinalArtifactCurrent) {
+        $expectedM16Blockers += "M16FinalArtifactCanaryScanPending"
+    }
     if (-not $ExpectedSecurityArchitectureCurrent) {
         $expectedM16Blockers += "M16FinalSecurityArchitectureScanPending"
     }
@@ -1362,6 +1379,14 @@ function Read-AndAssertBlockedEvidence {
             "M16TechnicalGateSet",
             "ReleaseCandidate") `
         -Message "the exact release-candidate gate set changed."
+    $finalArtifactGate = @($evidence.gates | Where-Object {
+            $_.code -ceq "M16FinalArtifactCanaryScan"
+        })
+    Assert-TestCondition `
+        ($finalArtifactGate.Count -eq 1 -and
+         $finalArtifactGate[0].result -ceq
+            $(if ($ExpectedFinalArtifactCurrent) { "passed" } else { "blocked" })) `
+        "the final-artifact gate did not match ledger currentness."
     $securityArchitectureGate = @($evidence.gates | Where-Object {
             $_.code -ceq "M16FinalSecurityArchitectureScan"
         })
@@ -1459,17 +1484,25 @@ try {
         "`n# self-test producer drift",
         $script:utf8NoBom)
     Commit-TestRepositoryState -Message "Drift M16 final-artifact producer source"
-    Write-ValidInputs
-    $staleFinalArtifactPath = Join-Path `
-        $script:evidenceRoot `
-        "stale-final-artifact.json"
-    Invoke-AllowedCandidate -EvidencePath $staleFinalArtifactPath
-    $staleFinalArtifactEvidence = Read-AndAssertBlockedEvidence `
-        -Path $staleFinalArtifactPath `
-        -ExpectedSecurityArchitectureCurrent $false
-    Assert-TestCondition `
-        (-not $staleFinalArtifactEvidence.finalArtifactCanaryAcceptance.current) `
-        "final-artifact source drift did not reopen its blocker."
+    $env:M16_SELF_TEST_M15_MODE = "CurrentSbom"
+    try {
+        Write-ValidInputs
+        $staleFinalArtifactPath = Join-Path `
+            $script:evidenceRoot `
+            "stale-final-artifact.json"
+        Invoke-AllowedCandidate -EvidencePath $staleFinalArtifactPath
+        $staleFinalArtifactEvidence = Read-AndAssertBlockedEvidence `
+            -Path $staleFinalArtifactPath `
+            -ExpectedSbomCurrentAtEvaluation $true `
+            -ExpectedFinalArtifactCurrent $false `
+            -ExpectedSecurityArchitectureCurrent $false
+        Assert-TestCondition `
+            (-not $staleFinalArtifactEvidence.finalArtifactCanaryAcceptance.current) `
+            "final-artifact source drift did not reopen its blocker."
+    }
+    finally {
+        Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue
+    }
     [System.IO.File]::WriteAllBytes($producerSourcePath, $producerSourceBytes)
     Commit-TestRepositoryState -Message "Restore M16 final-artifact producer source"
 
@@ -1486,17 +1519,25 @@ try {
     $binaryDriftBytes[0] = [byte]($binaryDriftBytes[0] -bxor 1)
     [System.IO.File]::WriteAllBytes($binaryProducerSourcePath, $binaryDriftBytes)
     Commit-TestRepositoryState -Message "Drift M16 final-artifact binary fixture"
-    Write-ValidInputs
-    $staleBinaryArtifactPath = Join-Path `
-        $script:evidenceRoot `
-        "stale-final-artifact-binary.json"
-    Invoke-AllowedCandidate -EvidencePath $staleBinaryArtifactPath
-    $staleBinaryArtifactEvidence = Read-AndAssertBlockedEvidence `
-        -Path $staleBinaryArtifactPath `
-        -ExpectedSecurityArchitectureCurrent $false
-    Assert-TestCondition `
-        (-not $staleBinaryArtifactEvidence.finalArtifactCanaryAcceptance.current) `
-        "final-artifact binary drift did not reopen its blocker."
+    $env:M16_SELF_TEST_M15_MODE = "CurrentSbom"
+    try {
+        Write-ValidInputs
+        $staleBinaryArtifactPath = Join-Path `
+            $script:evidenceRoot `
+            "stale-final-artifact-binary.json"
+        Invoke-AllowedCandidate -EvidencePath $staleBinaryArtifactPath
+        $staleBinaryArtifactEvidence = Read-AndAssertBlockedEvidence `
+            -Path $staleBinaryArtifactPath `
+            -ExpectedSbomCurrentAtEvaluation $true `
+            -ExpectedFinalArtifactCurrent $false `
+            -ExpectedSecurityArchitectureCurrent $false
+        Assert-TestCondition `
+            (-not $staleBinaryArtifactEvidence.finalArtifactCanaryAcceptance.current) `
+            "final-artifact binary drift did not reopen its blocker."
+    }
+    finally {
+        Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue
+    }
     [System.IO.File]::WriteAllBytes(
         $binaryProducerSourcePath,
         $binaryProducerSourceBytes)
@@ -1811,11 +1852,12 @@ try {
         $currentSbomEvidence = Read-AndAssertBlockedEvidence `
             -Path $currentSbomPath `
             -ExpectedSbomCurrentAtEvaluation $true `
-            -ExpectedCveFinalReleaseFreshAtEvaluation $true
+            -ExpectedCveFinalReleaseFreshAtEvaluation $true `
+            -ExpectedFinalArtifactCurrent $true
         Assert-TestCondition `
             ($currentSbomEvidence.m1ToM15AutomatedGateSetPassed -and
-             -not $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
-            "M15 aggregate or independent final-artifact staleness changed."
+             $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
+            "M15 aggregate or current final-artifact acceptance changed."
     }
     finally {
         Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue

@@ -1,6 +1,6 @@
 # M16 Windows MVP Release Candidate blocked baseline'i
 
-**Durum:** `M15 TECHNICAL CHAIN RENEWED / M16 HOSTED JOURNEY + SECURITY-ARCHITECTURE CURRENT / FINAL-ARTIFACT RENEWAL REQUIRED / BLOCKED — 5 M16 blocker açık, 2026-08-27`
+**Durum:** `M15 TECHNICAL CHAIN RENEWED / M16 HOSTED JOURNEY + SECURITY-ARCHITECTURE + FINAL-ARTIFACT CURRENT / BLOCKED — 4 M16 blocker açık, 2026-08-27`
 
 ## Checkpoint kararı
 
@@ -22,9 +22,9 @@ Canary locator yalnız test harness'ındaki exact `IPTVSUITE_TEST_ONLY_CANARY_V1
 
 Outer controller child bittikten sonra bounded birleşik child stdout/stderr kaydını `full-log` yüzeyi olarak tarar. Bu yüzey GitHub Actions job logunun tamamı olduğu iddiasını taşımaz. Package child başarılı tarama sonrasında yalnız exact-package staging'ini outer cleanup'a devreder. Outer controller retained `package.msix` dosyasını write/delete paylaşımına kapalı salt-okunur handle ile tutar, SHA-256'yı kendi sürecinde tarama öncesi ve sonrasında hesaplar ve exact-package inventory'sini ayrı bounded scanner çağrısıyla yeniden üretir. Child'ın strict binding kaydı ve package intermediate'ı bu outer-owned hash/inventory beklentilerine ayrı ayrı uymadan birleştirilemez; sibling kayıtların kendi aralarında tutarlı olması yeterli değildir. `WindowsM16FinalArtifactEvidence.ps1`; bu bağımsız beklentilerle package intermediate ve full-log raporunu strict UTF-8/no-BOM, duplicate-property, NTFS named-stream, reparse, boyut/schema ve same-build SHA bağlarıyla birleştirir. Exact dört yüzey sırası `owned-app-data`, `exact-package`, `support-artifact`, `full-log`dur. Raw process I/O, birleşik log, açılmış package ve iki intermediate evidence başarıda, yakalanabilen hatada ve bir sonraki koşunun doğrulanmış abandoned-run recovery'sinde exact-safe temizlenir; yalnız sanitized `.artifacts/m16-final-artifact-scan/last-success.json` yayımlanabilir.
 
-`windows-quality.yml` içindeki `run_m16_final_artifacts` yalnız manual dispatch input'udur ve `run_wack` ile aynı koşuda seçilemez. Upload allowlist'i yalnız sanitized final JSON'dur; raw yüzeyler workflow artifact'ı değildir. [Hosted run `33009018937`](https://github.com/serkankaracan/iptv-suite/actions/runs/33009018937), clean commit `da205bd194016815ab069a3513eff4500796584d` üzerinde bütün required job zincirini ve dört yüzeyli final taramayı geçti. Artifact `9622360788` digest'i `919d6d9680ca5fe7c49cd8a62615f5c8f90e13b069b587039a7ee572abc8b7be`; allowlist'teki tek `last-success.json` üyesinin SHA-256 değeri `87132e006bc03b6f8a385a7c999755f252ea2a18282a06f2fb916c51a921500a`dır. Exact `owned-app-data`, `exact-package`, `support-artifact` ve bounded `full-log` yüzeylerinin dördü de `clean`, toplam finding sayısı `0`, `SameBuildBindingPassed=true`, `RepositoryStable=true` ve `RawSurfacesUploaded=false` sonucunu verdi. Bu commit-bound kabul kendi exact source closure'ında yalnız `M16FinalArtifactCanaryScanPending` kapısını kapatmıştı; current hardening drift'i bu kapıyı yeniden açar. Ayrı `M16FinalSecurityArchitectureScanPending`, feature freeze, 24 saat soak, fiziksel matrix, Store/WACK, hukuk veya release kararı üzerinde sonuç üretmez.
+`windows-quality.yml` içindeki `run_m16_final_artifacts` yalnız manual dispatch input'udur ve `run_wack` ile aynı koşuda seçilemez. Upload allowlist'i yalnız sanitized final JSON'dur; raw yüzeyler workflow artifact'ı değildir. [Hosted run `33037521028`](https://github.com/serkankaracan/iptv-suite/actions/runs/33037521028), clean commit `7b6edd8a5db7ccd3835f49c43181374fefc6b5a7` üzerinde bütün required job zincirini ve dört yüzeyli final taramayı geçti; producer job `98405555646`, Required Windows gate `98407012109` ile başarıyla tamamlandı. Artifact `9632983293` digest'i `52dd5510a071a5acdd672676d496500abbf9a0138e4d50a58d5019f49730c349`; allowlist'teki tek `last-success.json` üyesinin SHA-256 değeri `2c6513cbc75adb6eda371177f682ebd049652e049afd246cfa10e6c54829c756`dır. Exact `owned-app-data`, `exact-package`, `support-artifact` ve bounded `full-log` yüzeylerinin dördü de `clean`, toplam finding sayısı `0`, `SameBuildBindingPassed=true`, `RepositoryStable=true` ve `RawSurfacesUploaded=false` sonucunu verdi. Aynı-run package artifact'ı `9632982815`, package/SBOM bağını exact commit ve `1f8897aed183dba6bbadfbef3c06df614928c5fa79e5bbd05e85ea993a631da5` package SHA-256 değeriyle doğrular. Bu commit-bound current kabul yalnız `M16FinalArtifactCanaryScanPending` kapısını kapatır; feature freeze, 24 saat soak, fiziksel matrix, Store/WACK, hukuk veya release kararı üzerinde sonuç üretmez.
 
-Source-controlled `eng/windows-m16-final-artifact-acceptance.json` kabul ledger'ının raw SHA-256 değeri `48c8fe9d886d2fc66991304f6a169a911c73433e2c9e5edf52c506a59e2fbac1`dir. Producer contract bağı exact `39` source'u; text girdilerini strict UTF-8/no-BOM ve LF-normalized byte'larla, binary `.ts` fixture girdisini raw byte'larla `3318bf8638903bd05f509e29d4d6281e945773d0833003e3379a266f7b9ae2bb` SHA-256 değerine bağlar. Ledger raw byte/schema/artifact tutarsızlığı hard-invalid kalır ve RC evidence üretmez. Buna karşılık intact ledger'ın current producer source veya package snapshot'ından geri kalması beklenen renewal durumudur: aggregator `result=stale-reopen`, `current=false` yayımlar ve `M16FinalArtifactCanaryScanPending` blocker'ını yeniden açarak blocked evidence üretmeye devam eder. Böylece source hardening, yeni hosted producer koşusunu deadlock etmez.
+Source-controlled `eng/windows-m16-final-artifact-acceptance.json` kabul ledger'ının raw SHA-256 değeri `e02274af91c997b0f6b384b9e345335fa2c90cdcea8a6e7e70857bf82ebae6e1`dir. Producer contract bağı exact `39` source'u; text girdilerini strict UTF-8/no-BOM ve LF-normalized byte'larla, binary `.ts` fixture girdisini raw byte'larla `851bc086240e5eaa15775834364593887f9225f546e888d9ba3e4a71d11b6c57` SHA-256 değerine bağlar. Current package-producing snapshot exact `115` dosya ve `5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810` SHA-256 bağıdır. Ledger raw byte/schema/artifact tutarsızlığı hard-invalid kalır ve RC evidence üretmez. Intact ledger current producer source veya package snapshot'ından geri kalırsa aggregator yine `result=stale-reopen`, `current=false` yayımlar ve `M16FinalArtifactCanaryScanPending` blocker'ını yeniden açarak blocked evidence üretmeye devam eder.
 
 ## Bounded sentetik uçtan uca entegrasyon journey'si
 
@@ -54,7 +54,7 @@ Blocked baseline üretim çağrısı repository kökünden şöyledir:
 
 Sanitized sonuç `.artifacts/m16-release-candidate/rc-summary.json` altında yayımlanır.
 
-Tam RC aggregation baseline'ı current predecessor input setiyle henüz yeniden üretilmemiştir. Hosted journey ve security/architecture kayıtları kendi exact commit/artifact ve closure bağlarında current accepted evidence'dır; final-artifact ledger'ı ise source drift nedeniyle historical/intact ve yenilenmesi gereken tek automated M16 kaydıdır. Bu kayıtlar kalan predecessor veya M16 kapılarının tamamlandığı iddiası değildir.
+Tam RC aggregation baseline'ı gerçek current predecessor input setiyle henüz yeniden üretilmemiştir. Hosted journey, security/architecture ve final-artifact kayıtlarının üçü de kendi exact commit/artifact ve closure bağlarında current accepted evidence'dır; self-test current-SBOM senaryosunda bu üç automated M16 kapısının birlikte kapandığını ve yalnız dört M16 blocker kaldığını doğrular. Bu kayıtlar kalan predecessor veya M16 kapılarının tamamlandığı iddiası değildir.
 
 ## Sabit ve bounded input seti
 
@@ -101,13 +101,12 @@ M15'in final-release CVE freshness predicate'i evaluation anında geçmezse `Cve
 
 ## M16 blocker'ları
 
-Current journey ve security/architecture ledger'ları kendi automated kapılarını kapatır; final-artifact ledger'ı `stale-reopen` kaldığı için blocked baseline aşağıdaki exact beş M16 kapısını açık tutar:
+Current journey, security/architecture ve final-artifact ledger'ları kendi automated kapılarını kapatır; blocked baseline aşağıdaki exact dört M16 kapısını açık tutar:
 
 1. `M16FeatureFreezeDecisionPending`
-2. `M16FinalArtifactCanaryScanPending`
-3. `M16PhysicalDeviceAccessibilityMatrixPending`
-4. `M16ReleaseOperationsPlanPending`
-5. `M16TwentyFourHourSoakPending`
+2. `M16PhysicalDeviceAccessibilityMatrixPending`
+3. `M16ReleaseOperationsPlanPending`
+4. `M16TwentyFourHourSoakPending`
 
 ## Release operasyonları plan kaydı
 
@@ -122,6 +121,6 @@ Bu local kayıt release yetkisi değildir ve schema-v1 aggregator'ın hard-coded
 - Aggregator 24 saatlik soak başlatmaz ve kısa native evidence'ı uzun soak yerine kullanmaz.
 - Physical DPI/multi-monitor/sleep/audio-device/Narrator/UIA matrisi çalıştırılmış sayılmaz.
 - Hosted ledger kabulleri yalnız bağlı oldukları exact source closure'larda kendi kapılarını kapatır; source drift'te kapı yeniden açılır. Private-flight rehearsal, production signing/WACK, Partner Center, privacy/support/listing ve hukuk kapıları kapanmaz.
-- Feature freeze, current final-artifact scan ve rollback/withdrawal/release-operations kabulü ayrıca tamamlanmalıdır.
+- Feature freeze ile rollback/withdrawal/release-operations kabulü ayrıca tamamlanmalıdır.
 
 Tam commit-bound RC aggregation evidence üretildikten sonra input digest'leri, kalan blocker sayaçları ve doğrulama sonuçları bu belgeye ayrı checkpoint olarak eklenmelidir. O zamana kadar `m16TechnicalGateSetPassed=false`, `candidateReady=false` ve durum `BLOCKED` kalır.

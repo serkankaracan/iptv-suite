@@ -26,16 +26,13 @@ $script:utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:finalArtifactAcceptanceRelativePath =
     "eng/windows-m16-final-artifact-acceptance.json"
 $script:finalArtifactAcceptanceSha256 =
-    "48c8fe9d886d2fc66991304f6a169a911c73433e2c9e5edf52c506a59e2fbac1"
+    "e02274af91c997b0f6b384b9e345335fa2c90cdcea8a6e7e70857bf82ebae6e1"
 $script:finalArtifactProducerContractSourceCount = 39
 $script:finalArtifactProducerContractSourceSetSha256 =
-    "3318bf8638903bd05f509e29d4d6281e945773d0833003e3379a266f7b9ae2bb"
+    "851bc086240e5eaa15775834364593887f9225f546e888d9ba3e4a71d11b6c57"
 $script:packageProducingSnapshotFileCount = 115
 $script:packageProducingSnapshotSha256 =
     "5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810"
-$script:historicalFinalArtifactPackageProducingSnapshotFileCount = 113
-$script:historicalFinalArtifactPackageProducingSnapshotSha256 =
-    "9a6313a187e7a34ea17163745dfcbe3d330f4acddbac2e2054d610edd4e49493"
 $script:syntheticJourneyAcceptanceRelativePath =
     "eng/windows-m16-synthetic-journey-acceptance.json"
 $script:syntheticJourneyAcceptanceSha256 =
@@ -2359,24 +2356,23 @@ function Read-M16FinalArtifactAcceptance {
         $expectedRootStrings = [ordered]@{
             decision = "AcceptHostedM16FinalArtifactCanaryScan"
             scope = "M16FinalArtifactCanaryScanOnly"
-            runCompletedAtUtc = "2026-08-26T20:29:42Z"
+            runCompletedAtUtc = "2026-08-27T04:11:43Z"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-quality.yml"
             workflowName = "Windows quality"
             runEvent = "workflow_dispatch"
             runBranch = "main"
-            runHeadSha = "da205bd194016815ab069a3513eff4500796584d"
+            runHeadSha = "7b6edd8a5db7ccd3835f49c43181374fefc6b5a7"
             runConclusion = "success"
             producerJobName = "Packaged install and launch smoke"
             producerJobConclusion = "success"
             artifactName = "windows-m16-final-artifact-evidence"
-            artifactDigestSha256 = "919d6d9680ca5fe7c49cd8a62615f5c8f90e13b069b587039a7ee572abc8b7be"
+            artifactDigestSha256 = "52dd5510a071a5acdd672676d496500abbf9a0138e4d50a58d5019f49730c349"
             memberName = "last-success.json"
-            memberSha256 = "87132e006bc03b6f8a385a7c999755f252ea2a18282a06f2fb916c51a921500a"
+            memberSha256 = "2c6513cbc75adb6eda371177f682ebd049652e049afd246cfa10e6c54829c756"
             producerContractSourceSetSha256 =
                 $script:finalArtifactProducerContractSourceSetSha256
-            packageProducingSnapshotSha256 =
-                $script:historicalFinalArtifactPackageProducingSnapshotSha256
+            packageProducingSnapshotSha256 = $script:packageProducingSnapshotSha256
             closedBlocker = "M16FinalArtifactCanaryScanPending"
         }
         foreach ($expected in $expectedRootStrings.GetEnumerator()) {
@@ -2392,17 +2388,16 @@ function Read-M16FinalArtifactAcceptance {
             schemaVersion = 1
             repositoryId = 1328998460
             workflowId = 330610209
-            runId = [long]33009018937
-            runNumber = 276
+            runId = [long]33037521028
+            runNumber = 286
             runAttempt = 1
-            producerJobId = [long]98313237561
-            artifactId = [long]9622360788
+            producerJobId = [long]98405555646
+            artifactId = [long]9632983293
             artifactSizeBytes = 1000
             memberLength = 3281
             producerContractSourceCount =
                 $script:finalArtifactProducerContractSourceCount
-            packageProducingSnapshotFileCount =
-                $script:historicalFinalArtifactPackageProducingSnapshotFileCount
+            packageProducingSnapshotFileCount = $script:packageProducingSnapshotFileCount
         }
         foreach ($expected in $expectedRootIntegers.GetEnumerator()) {
             Assert-ExactInteger `
@@ -2453,22 +2448,22 @@ function Read-M16FinalArtifactAcceptance {
                 "strictSbomValidationPassed") `
             -Code $code
         $expectedPackageStrings = [ordered]@{
-            runHeadSha = "da205bd194016815ab069a3513eff4500796584d"
+            runHeadSha = "7b6edd8a5db7ccd3835f49c43181374fefc6b5a7"
             artifactName = "windows-msix-smoke-evidence"
-            artifactDigestSha256 = "ca7447cb98c8821b7501904b9c1ef269b0365d3c82da81b0a8926f79247706fc"
+            artifactDigestSha256 = "e5058f19620e852e37f40e61aa0273500e3086435bfec5d63a6a87c27ce09aa5"
             lastSuccessMemberName = "last-success.json"
-            lastSuccessMemberSha256 = "8bf91807044c763b89107a9c197947baa4056d728cc128fd968be33b68c615aa"
-            lastSuccessCommitSha = "da205bd194016815ab069a3513eff4500796584d"
+            lastSuccessMemberSha256 = "bdd72f623691ed0ff038c78721f5dfbf8f7fd9f96acde2a1af8302377de752fd"
+            lastSuccessCommitSha = "7b6edd8a5db7ccd3835f49c43181374fefc6b5a7"
             sbomSummaryMemberName = "package-sbom-summary.json"
-            sbomSummaryMemberSha256 = "0818ec843c845974900679ecccf11167d094b9893b595cc1a34eea541186ad3f"
-            sbomSummaryCommitSha = "da205bd194016815ab069a3513eff4500796584d"
+            sbomSummaryMemberSha256 = "d82c57e6634b12529dd3ea90c577b45c0f4b1c8f72cf1e95ee0e6cfc2ba28860"
+            sbomSummaryCommitSha = "7b6edd8a5db7ccd3835f49c43181374fefc6b5a7"
             sbomMemberName = "package-sbom.spdx.json"
-            sbomMemberSha256 = "05c351c69729e51a8c928c5cb7ebbee0b71d984e43e51ec89d7698a0e7348848"
+            sbomMemberSha256 = "70b1d0323ef9399e8c45c338ce42ca50155943710d0b21e26210a60e7fb19e95"
             configuration = "Release"
             dotNetSdk = "10.0.302"
             productionInputSetSha256 = "293481fe2194c6f1fde3f667cf45872f4790e0b5955e17ac88c2d16a885b81df"
             applicationPackageFile = "IptvSuite.Windows_0.1.0.0_x64.msix"
-            applicationPackageSha256 = "d758893ce36b1cb24c2f144b49da99ca56d9483ee9361b41d2fb7b083a7db68b"
+            applicationPackageSha256 = "1f8897aed183dba6bbadfbef3c06df614928c5fa79e5bbd05e85ea993a631da5"
             runtimePackageSha256 = "a3ce5b76713133dfd3b378e81c43a89954c664fcd70fd0c070e409ed3de03ebf"
         }
         foreach ($expected in $expectedPackageStrings.GetEnumerator()) {
@@ -2478,13 +2473,13 @@ function Read-M16FinalArtifactAcceptance {
                 -Code $code
         }
         $expectedPackageIntegers = [ordered]@{
-            runId = [long]33009018937
-            artifactId = [long]9622359781
-            artifactSizeBytes = 7770
-            lastSuccessMemberLength = 18716
+            runId = [long]33037521028
+            artifactId = [long]9632982815
+            artifactSizeBytes = 7824
+            lastSuccessMemberLength = 18715
             sbomSummaryMemberLength = 1985
             sbomMemberLength = 50566
-            applicationPackageLength = 29852407
+            applicationPackageLength = 29857940
         }
         foreach ($expected in $expectedPackageIntegers.GetEnumerator()) {
             Assert-ExactInteger `
@@ -2529,13 +2524,13 @@ function Read-M16FinalArtifactAcceptance {
             milestone = "M16"
             evidenceKind = "FinalArtifactCanaryScan"
             result = "passed"
-            runToken = "c631ca74662d4dfcb96037a3951ba48f"
-            commitSha = "da205bd194016815ab069a3513eff4500796584d"
-            packageSha256 = "d758893ce36b1cb24c2f144b49da99ca56d9483ee9361b41d2fb7b083a7db68b"
-            packageSbomApplicationPackageSha256 = "d758893ce36b1cb24c2f144b49da99ca56d9483ee9361b41d2fb7b083a7db68b"
+            runToken = "02e147b98fb640878be354ee429fde1e"
+            commitSha = "7b6edd8a5db7ccd3835f49c43181374fefc6b5a7"
+            packageSha256 = "1f8897aed183dba6bbadfbef3c06df614928c5fa79e5bbd05e85ea993a631da5"
+            packageSbomApplicationPackageSha256 = "1f8897aed183dba6bbadfbef3c06df614928c5fa79e5bbd05e85ea993a631da5"
             scannerProfile = "M16ReleaseCandidate"
-            packageIntermediateSha256 = "721e4de5b3ec2086f3078b07f9e74b620d9893815def8984fa4eceb15787e609"
-            fullLogScannerReportSha256 = "2313762b66b2d27f051f27a15add5bc83750885e9dd03acc620ac5fe309c4e62"
+            packageIntermediateSha256 = "7c059f7496ae2ad22fc756625532027b44fe48ddc561170e6f3f7d2d3f8bf655"
+            fullLogScannerReportSha256 = "57b94e6c32cdf5fc0e4578877efa6c2352f736e3d349d129a8feda36f0c9cfc0"
             supportArtifactScope = "ReleaseAcceptanceOnly"
         }
         foreach ($expected in $expectedEvidenceStrings.GetEnumerator()) {
@@ -2562,7 +2557,7 @@ function Read-M16FinalArtifactAcceptance {
             -Code $code
         Assert-ExactInteger `
             -Value (Get-ExactProperty $evidence "totalFileBytes" $code) `
-            -Expected 154129442 `
+            -Expected 154147390 `
             -Code $code
         Assert-True `
             -Value (Get-ExactProperty $evidence "sameBuildBindingPassed" $code) `
@@ -2588,22 +2583,22 @@ function Read-M16FinalArtifactAcceptance {
             [pscustomobject]@{
                 SurfaceId = "owned-app-data"; FileCount = 12; DirectoryCount = 23
                 TotalFileBytes = 39096320
-                InventorySha256 = "eca7da65fa829ac57d1b675b340c782df8756ae2b977d5bb9bfe1179cf18c34f"
+                InventorySha256 = "fd9574a0769969478b7dbaa6c92776c562eb34a3239af9a3920965247def4fc5"
             },
             [pscustomobject]@{
                 SurfaceId = "exact-package"; FileCount = 72; DirectoryCount = 3
-                TotalFileBytes = 115028791
-                InventorySha256 = "18b2576569e56aac142ebef0cae0a1e875aee21db5beb0e018c570f56be689ec"
+                TotalFileBytes = 115046740
+                InventorySha256 = "1a1b956300f9526950a37b95383541a5179c5b9f7da857eac6f4f0d841f2a9bb"
             },
             [pscustomobject]@{
                 SurfaceId = "support-artifact"; FileCount = 1; DirectoryCount = 0
                 TotalFileBytes = 1139
-                InventorySha256 = "729ecc731898eb61d41063ca13a19abbcb3818dc30a6c54f25dd04781ded0297"
+                InventorySha256 = "d2731d43bd3f6948df78ff52d98c54d92f0b5c073914d3c7a79f1603e18c8720"
             },
             [pscustomobject]@{
                 SurfaceId = "full-log"; FileCount = 1; DirectoryCount = 0
-                TotalFileBytes = 3192
-                InventorySha256 = "dd4e25c91bb92f3bd129178955ef7b5e75154f01c3d44c76e22161895619c0a8"
+                TotalFileBytes = 3191
+                InventorySha256 = "8257412ee7dcc999345b5483b334c40a2a83cceb50aa33d607328a2cb860d780"
             })
         $surfaces = @(Get-ExactProperty $evidence "surfaces" $code)
         Assert-Condition ($surfaces.Count -eq $expectedSurfaces.Count) $code
