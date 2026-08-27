@@ -735,7 +735,23 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "timing.FramesLate - previousLate");
         StringAssert.Contains(packageSmoke, "failure.GetType().Name");
         StringAssert.Contains(packageSmoke, "unchecked((uint)failure.HResult)");
-        StringAssert.Contains(packageSmoke, "for ($frameInput = 0; $frameInput -lt 240; $frameInput++)");
+        StringAssert.Contains(packageSmoke, "public static bool HasMinimumExactIntervalSample(int minimumCount)");
+        StringAssert.Contains(packageSmoke, "return ExactIntervalsMilliseconds.Count >= minimumCount;");
+        StringAssert.Contains(
+            packageSmoke,
+            "The exact DWM frame interval sample is too small (intervals={0}, exactIntervals={1}, multiRefreshSegments={2}).");
+        StringAssert.Contains(packageSmoke, "$catalogDwmMinimumScrollInputCount = 240");
+        StringAssert.Contains(packageSmoke, "$catalogDwmMaximumScrollInputCount = 480");
+        StringAssert.Contains(packageSmoke, "$catalogDwmMinimumExactFrameIntervalCount = 30");
+        StringAssert.Contains(
+            packageSmoke,
+            "for ($frameInput = 0; $frameInput -lt $catalogDwmMaximumScrollInputCount; $frameInput++)");
+        StringAssert.Contains(
+            packageSmoke,
+            "($frameInput + 1) -ge $catalogDwmMinimumScrollInputCount -and");
+        StringAssert.Contains(
+            packageSmoke,
+            "[IptvSuite.PackageSmoke.DwmFrameSampler]::HasMinimumExactIntervalSample(");
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageDown()");
         StringAssert.Contains(packageSmoke, "[IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()");
         StringAssert.Contains(packageSmoke, "private static extern uint SendInput(");

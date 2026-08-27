@@ -622,6 +622,22 @@ namespace IptvSuite.PackageSmoke
             }
         }
 
+        public static bool HasMinimumExactIntervalSample(int minimumCount)
+        {
+            if (minimumCount < 1)
+            {
+                throw new ArgumentOutOfRangeException("minimumCount");
+            }
+            lock (Sync)
+            {
+                if (worker == null)
+                {
+                    throw new InvalidOperationException("The DWM frame sampler is not active.");
+                }
+                return ExactIntervalsMilliseconds.Count >= minimumCount;
+            }
+        }
+
         public static DwmFrameSampleResult Stop()
         {
             System.Threading.Thread thread;
@@ -657,11 +673,23 @@ namespace IptvSuite.PackageSmoke
                 }
                 if (IntervalsMilliseconds.Count < 30)
                 {
-                    throw new InvalidOperationException("The DWM frame interval sample is too small.");
+                    throw new InvalidOperationException(
+                        string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "The DWM frame interval sample is too small (intervals={0}, exactIntervals={1}, multiRefreshSegments={2}).",
+                            IntervalsMilliseconds.Count,
+                            ExactIntervalsMilliseconds.Count,
+                            multiRefreshSegmentCount));
                 }
                 if (ExactIntervalsMilliseconds.Count < 30)
                 {
-                    throw new InvalidOperationException("The exact DWM frame interval sample is too small.");
+                    throw new InvalidOperationException(
+                        string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "The exact DWM frame interval sample is too small (intervals={0}, exactIntervals={1}, multiRefreshSegments={2}).",
+                            IntervalsMilliseconds.Count,
+                            ExactIntervalsMilliseconds.Count,
+                            multiRefreshSegmentCount));
                 }
                 var intervals = new System.Collections.Generic.List<double>(IntervalsMilliseconds);
                 var exactIntervals =
@@ -5168,10 +5196,13 @@ try {
         throw "The packaged catalog has no realized item for the scroll probe."
     }
     Assert-FocusedAutomationElement $scrollFocusItem "CatalogChannelList" -RequestFocus
+    $catalogDwmMinimumScrollInputCount = 240
+    $catalogDwmMaximumScrollInputCount = 480
+    $catalogDwmMinimumExactFrameIntervalCount = 30
     [IptvSuite.PackageSmoke.DwmFrameSampler]::Start()
     $frameResult = $null
     try {
-        for ($frameInput = 0; $frameInput -lt 240; $frameInput++) {
+        for ($frameInput = 0; $frameInput -lt $catalogDwmMaximumScrollInputCount; $frameInput++) {
             if (($frameInput % 2) -eq 0) {
                 [IptvSuite.PackageSmoke.KeyboardInspector]::PressPageDown()
             }
@@ -5179,6 +5210,11 @@ try {
                 [IptvSuite.PackageSmoke.KeyboardInspector]::PressPageUp()
             }
             Start-Sleep -Milliseconds 16
+            if (($frameInput + 1) -ge $catalogDwmMinimumScrollInputCount -and
+                [IptvSuite.PackageSmoke.DwmFrameSampler]::HasMinimumExactIntervalSample(
+                    $catalogDwmMinimumExactFrameIntervalCount)) {
+                break
+            }
         }
     }
     finally {
