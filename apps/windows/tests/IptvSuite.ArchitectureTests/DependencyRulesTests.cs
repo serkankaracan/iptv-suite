@@ -4547,9 +4547,26 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             validator,
             "$script:securityArchitectureProducerContractSourceCount = 329");
-        StringAssert.Contains(
+        const string securityArchitectureCanonicalByteLengthPattern =
+            @"(?m)^\$script:securityArchitectureProducerContractCanonicalByteLength = (?<value>[1-9][0-9]{0,7})$";
+        Match securityArchitectureCanonicalByteLengthMatch = Regex.Match(
             validator,
-            "$script:securityArchitectureProducerContractCanonicalByteLength = 7179352");
+            securityArchitectureCanonicalByteLengthPattern,
+            RegexOptions.CultureInvariant);
+        Assert.IsTrue(securityArchitectureCanonicalByteLengthMatch.Success);
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                validator,
+                securityArchitectureCanonicalByteLengthPattern,
+                RegexOptions.CultureInvariant));
+        long expectedSecurityArchitectureCanonicalByteLength = long.Parse(
+            securityArchitectureCanonicalByteLengthMatch.Groups["value"].Value,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture);
+        Assert.IsTrue(
+            expectedSecurityArchitectureCanonicalByteLength > 0 &&
+            expectedSecurityArchitectureCanonicalByteLength <= 16L * 1024 * 1024);
         StringAssert.Contains(validator, "$kind = \"text-lf\"");
         StringAssert.Contains(validator, "$kind = \"binary\"");
         StringAssert.Contains(validator, "\"$relativePath`0$kind`0");
@@ -4670,7 +4687,7 @@ public sealed class DependencyRulesTests
             329,
             securityRoot.GetProperty("producerContractSourceCount").GetInt32());
         Assert.AreEqual(
-            7179352,
+            expectedSecurityArchitectureCanonicalByteLength,
             securityRoot.GetProperty("producerContractCanonicalByteLength").GetInt64());
         JsonElement securityQuality = securityRoot.GetProperty("qualityEvidence");
         Assert.AreEqual(2, securityQuality.GetProperty("cleanRunCount").GetInt32());

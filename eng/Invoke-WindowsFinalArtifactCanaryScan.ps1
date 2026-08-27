@@ -9,6 +9,8 @@ $script:windowsFinalMaximumLogBytes = 20MB
 $script:windowsFinalMaximumScannerOutputBytes = 128KB
 $script:windowsFinalMaximumCleanupEntries = 1024
 $script:windowsFinalMaximumCleanupBytes = 64MB
+$script:windowsFinalMaximumDirectoryDeleteAttempts = 3
+$script:windowsFinalDirectoryDeleteRetryMilliseconds = 50
 $script:windowsFinalPackageTimeoutMilliseconds = 2700000
 $script:windowsFinalScannerTimeoutMilliseconds = 600000
 $script:windowsFinalUtf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -229,6 +231,27 @@ function Remove-WindowsFinalExactFile {
     Remove-Item -LiteralPath $fullPath -Force -ErrorAction Stop
 }
 
+function Remove-WindowsFinalDirectoryTreeOnce {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    Microsoft.PowerShell.Management\Remove-Item `
+        -LiteralPath $Path `
+        -Recurse `
+        -Force `
+        -ErrorAction Stop
+}
+
+function Test-WindowsFinalDirectoryNotEmptyFailure {
+    param(
+        [Parameter(Mandatory = $true)][System.Exception]$Exception
+    )
+
+    return $Exception.HResult -eq
+        [Convert]::ToInt32("80070091", 16)
+}
+
 function Remove-WindowsFinalExactDirectory {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -241,59 +264,88 @@ function Remove-WindowsFinalExactDirectory {
     $fullPath = [System.IO.Path]::GetFullPath($Path)
     $fullExpected = [System.IO.Path]::GetFullPath($ExpectedPath)
     $fullParent = [System.IO.Path]::GetFullPath($ParentRoot)
-    Assert-WindowsFinalNoAlternateDataStream -Path $fullPath -Code "CleanupRefused"
-    Assert-WindowsFinalCondition `
-        ($fullPath.Equals($fullExpected, [System.StringComparison]::OrdinalIgnoreCase) -and
-         [System.IO.Directory]::GetParent($fullPath).FullName.Equals(
-            $fullParent,
-            [System.StringComparison]::OrdinalIgnoreCase)) `
-        "CleanupRefused"
-    if (-not (Test-Path -LiteralPath $fullPath)) {
-        return
-    }
+    for ($attempt = 1;
+         $attempt -le $script:windowsFinalMaximumDirectoryDeleteAttempts;
+         $attempt++) {
+        Assert-WindowsFinalNoAlternateDataStream `
+            -Path $fullPath `
+            -Code "CleanupRefused"
+        Assert-WindowsFinalCondition `
+            ($fullPath.Equals(
+                    $fullExpected,
+                    [System.StringComparison]::OrdinalIgnoreCase) -and
+             [System.IO.Directory]::GetParent($fullPath).FullName.Equals(
+                $fullParent,
+                [System.StringComparison]::OrdinalIgnoreCase)) `
+            "CleanupRefused"
+        if (-not (Test-Path -LiteralPath $fullPath)) {
+            return
+        }
 
-    Assert-WindowsFinalNoReparseDirectoryChain `
-        -DirectoryPath $fullParent -Code "CleanupRefused"
-    $rootItem = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
-    Assert-WindowsFinalCondition `
-        ($rootItem.PSIsContainer -and
-         (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0)) `
-        "CleanupRefused"
-    Assert-WindowsFinalNoNamedStreams `
-        -Path $fullPath `
-        -Code "CleanupRefused"
+        Assert-WindowsFinalNoReparseDirectoryChain `
+            -DirectoryPath $fullParent -Code "CleanupRefused"
+        Assert-WindowsFinalNoReparseDirectoryChain `
+            -DirectoryPath $fullPath -Code "CleanupRefused"
+        $rootItem = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
+        Assert-WindowsFinalCondition `
+            ($rootItem.PSIsContainer -and
+             (($rootItem.Attributes -band
+                    [System.IO.FileAttributes]::ReparsePoint) -eq 0)) `
+            "CleanupRefused"
+        Assert-WindowsFinalNoNamedStreams `
+            -Path $fullPath `
+            -Code "CleanupRefused"
 
-    $pending = New-Object 'System.Collections.Generic.Stack[string]'
-    $pending.Push($fullPath)
-    [long]$entryCount = 0
-    [long]$totalBytes = 0
-    while ($pending.Count -gt 0) {
-        $directory = $pending.Pop()
-        foreach ($entry in @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)) {
-            $entryCount++
-            Assert-WindowsFinalCondition `
-                ($MaximumEntries -gt 0 -and $entryCount -le $MaximumEntries) `
-                "CleanupRefused"
-            Assert-WindowsFinalNoNamedStreams `
-                -Path $entry.FullName `
-                -Code "CleanupRefused"
-            Assert-WindowsFinalCondition `
-                (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
-                "CleanupRefused"
-            if ($entry.PSIsContainer) {
-                $pending.Push($entry.FullName)
-            }
-            else {
+        $pending = New-Object 'System.Collections.Generic.Stack[string]'
+        $pending.Push($fullPath)
+        [long]$entryCount = 0
+        [long]$totalBytes = 0
+        while ($pending.Count -gt 0) {
+            $directory = $pending.Pop()
+            foreach ($entry in @(
+                    Get-ChildItem `
+                        -LiteralPath $directory `
+                        -Force `
+                        -ErrorAction Stop)) {
+                $entryCount++
                 Assert-WindowsFinalCondition `
-                    ($entry.Length -le
-                        ($MaximumBytes - $totalBytes)) `
+                    ($MaximumEntries -gt 0 -and $entryCount -le $MaximumEntries) `
                     "CleanupRefused"
-                $totalBytes += $entry.Length
+                Assert-WindowsFinalNoNamedStreams `
+                    -Path $entry.FullName `
+                    -Code "CleanupRefused"
+                Assert-WindowsFinalCondition `
+                    (($entry.Attributes -band
+                            [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
+                    "CleanupRefused"
+                if ($entry.PSIsContainer) {
+                    $pending.Push($entry.FullName)
+                }
+                else {
+                    Assert-WindowsFinalCondition `
+                        ($entry.Length -le
+                            ($MaximumBytes - $totalBytes)) `
+                        "CleanupRefused"
+                    $totalBytes += $entry.Length
+                }
             }
         }
-    }
 
-    Remove-Item -LiteralPath $fullPath -Recurse -Force -ErrorAction Stop
+        try {
+            Remove-WindowsFinalDirectoryTreeOnce -Path $fullPath
+            return
+        }
+        catch {
+            if (-not (Test-WindowsFinalDirectoryNotEmptyFailure `
+                        -Exception $_.Exception) -or
+                $attempt -eq $script:windowsFinalMaximumDirectoryDeleteAttempts) {
+                throw
+            }
+        }
+
+        Start-Sleep -Milliseconds `
+            ($script:windowsFinalDirectoryDeleteRetryMilliseconds * $attempt)
+    }
 }
 
 function Get-WindowsFinalPaths {

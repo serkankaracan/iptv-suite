@@ -194,6 +194,10 @@ Assert-Condition `
 Assert-Condition `
     ($script:windowsFinalScannerTimeoutMilliseconds -eq 600000) `
     "The scanner timeout changed."
+Assert-Condition `
+    ($script:windowsFinalMaximumDirectoryDeleteAttempts -eq 3 -and
+     $script:windowsFinalDirectoryDeleteRetryMilliseconds -eq 50) `
+    "The bounded exact-directory retry contract changed."
 
 $root = [System.IO.Path]::GetFullPath("C:\fixed\root")
 Assert-Condition `
@@ -265,6 +269,180 @@ try {
     Assert-Condition `
         (-not (Test-Path -LiteralPath $largeCleanup)) `
         "Exact cleanup rejected a target within its fixed 64 MiB bound."
+
+    $originalDirectoryTreeDelete =
+        ${function:Remove-WindowsFinalDirectoryTreeOnce}
+    $script:injectedDirectoryNotEmptyHResult =
+        [Convert]::ToInt32("80070091", 16)
+    $script:injectedDirectorySharingViolationHResult =
+        [Convert]::ToInt32("80070020", 16)
+    try {
+        $retryCleanup = [System.IO.Path]::Combine(
+            $temporaryRoot,
+            "retry-exact-cleanup")
+        [System.IO.Directory]::CreateDirectory($retryCleanup) | Out-Null
+        [System.IO.File]::WriteAllBytes(
+            [System.IO.Path]::Combine($retryCleanup, "bounded.bin"),
+            [byte[]](1, 2, 3, 4))
+        $script:injectedDirectoryDeleteAttempts = 0
+        ${function:Remove-WindowsFinalDirectoryTreeOnce} = {
+            param([Parameter(Mandatory = $true)][string]$Path)
+
+            $script:injectedDirectoryDeleteAttempts++
+            if ($script:injectedDirectoryDeleteAttempts -eq 1) {
+                throw [System.Runtime.InteropServices.Marshal]::GetExceptionForHR(
+                    $script:injectedDirectoryNotEmptyHResult)
+            }
+            & $originalDirectoryTreeDelete -Path $Path
+        }
+        Remove-WindowsFinalExactDirectory `
+            -Path $retryCleanup `
+            -ExpectedPath $retryCleanup `
+            -ParentRoot $temporaryRoot
+        Assert-Condition `
+            ($script:injectedDirectoryDeleteAttempts -eq 2 -and
+             -not (Test-Path -LiteralPath $retryCleanup)) `
+            "Exact cleanup did not recover from one directory-not-empty race."
+
+        $nonRetryCleanup = [System.IO.Path]::Combine(
+            $temporaryRoot,
+            "non-retry-exact-cleanup")
+        [System.IO.Directory]::CreateDirectory($nonRetryCleanup) | Out-Null
+        [System.IO.File]::WriteAllBytes(
+            [System.IO.Path]::Combine($nonRetryCleanup, "bounded.bin"),
+            [byte[]](1, 2, 3, 4))
+        $script:injectedDirectoryDeleteAttempts = 0
+        ${function:Remove-WindowsFinalDirectoryTreeOnce} = {
+            param([Parameter(Mandatory = $true)][string]$Path)
+
+            $script:injectedDirectoryDeleteAttempts++
+            throw [System.Runtime.InteropServices.Marshal]::GetExceptionForHR(
+                $script:injectedDirectorySharingViolationHResult)
+        }
+        $nonRetryFailure = $null
+        try {
+            Remove-WindowsFinalExactDirectory `
+                -Path $nonRetryCleanup `
+                -ExpectedPath $nonRetryCleanup `
+                -ParentRoot $temporaryRoot
+        }
+        catch {
+            $nonRetryFailure = $_
+        }
+        Assert-Condition `
+            ($null -ne $nonRetryFailure -and
+             $nonRetryFailure.Exception.HResult -eq
+                $script:injectedDirectorySharingViolationHResult -and
+             $script:injectedDirectoryDeleteAttempts -eq 1 -and
+             (Test-Path -LiteralPath $nonRetryCleanup -PathType Container)) `
+            "Exact cleanup retried a non-directory-not-empty failure."
+        ${function:Remove-WindowsFinalDirectoryTreeOnce} =
+            $originalDirectoryTreeDelete
+        Remove-WindowsFinalExactDirectory `
+            -Path $nonRetryCleanup `
+            -ExpectedPath $nonRetryCleanup `
+            -ParentRoot $temporaryRoot
+
+        $exhaustedCleanup = [System.IO.Path]::Combine(
+            $temporaryRoot,
+            "exhausted-exact-cleanup")
+        [System.IO.Directory]::CreateDirectory($exhaustedCleanup) | Out-Null
+        [System.IO.File]::WriteAllBytes(
+            [System.IO.Path]::Combine($exhaustedCleanup, "bounded.bin"),
+            [byte[]](1, 2, 3, 4))
+        $script:injectedDirectoryDeleteAttempts = 0
+        ${function:Remove-WindowsFinalDirectoryTreeOnce} = {
+            param([Parameter(Mandatory = $true)][string]$Path)
+
+            $script:injectedDirectoryDeleteAttempts++
+            throw [System.Runtime.InteropServices.Marshal]::GetExceptionForHR(
+                $script:injectedDirectoryNotEmptyHResult)
+        }
+        $exhaustedFailure = $null
+        try {
+            Remove-WindowsFinalExactDirectory `
+                -Path $exhaustedCleanup `
+                -ExpectedPath $exhaustedCleanup `
+                -ParentRoot $temporaryRoot
+        }
+        catch {
+            $exhaustedFailure = $_
+        }
+        Assert-Condition `
+            ($null -ne $exhaustedFailure -and
+             $exhaustedFailure.Exception.HResult -eq
+                $script:injectedDirectoryNotEmptyHResult -and
+             $script:injectedDirectoryDeleteAttempts -eq 3 -and
+             (Test-Path -LiteralPath $exhaustedCleanup -PathType Container)) `
+            "Exact cleanup did not enforce its directory-not-empty retry bound."
+        ${function:Remove-WindowsFinalDirectoryTreeOnce} =
+            $originalDirectoryTreeDelete
+        Remove-WindowsFinalExactDirectory `
+            -Path $exhaustedCleanup `
+            -ExpectedPath $exhaustedCleanup `
+            -ParentRoot $temporaryRoot
+
+        $tamperedCleanup = [System.IO.Path]::Combine(
+            $temporaryRoot,
+            "tampered-retry-exact-cleanup")
+        [System.IO.Directory]::CreateDirectory($tamperedCleanup) | Out-Null
+        $tamperedCleanupFile = [System.IO.Path]::Combine(
+            $tamperedCleanup,
+            "bounded.bin")
+        [System.IO.File]::WriteAllBytes(
+            $tamperedCleanupFile,
+            [byte[]](1, 2, 3, 4))
+        $script:injectedDirectoryDeleteAttempts = 0
+        ${function:Remove-WindowsFinalDirectoryTreeOnce} = {
+            param([Parameter(Mandatory = $true)][string]$Path)
+
+            $script:injectedDirectoryDeleteAttempts++
+            Set-Content `
+                -LiteralPath ([System.IO.Path]::Combine($Path, "bounded.bin")) `
+                -Stream "m16-retry-tamper" `
+                -Value "owned" `
+                -NoNewline
+            throw [System.Runtime.InteropServices.Marshal]::GetExceptionForHR(
+                $script:injectedDirectoryNotEmptyHResult)
+        }
+        Assert-StableFailure `
+            -Code "CleanupRefused" `
+            -Action {
+                Remove-WindowsFinalExactDirectory `
+                    -Path $tamperedCleanup `
+                    -ExpectedPath $tamperedCleanup `
+                    -ParentRoot $temporaryRoot
+            }
+        Assert-Condition `
+            ($script:injectedDirectoryDeleteAttempts -eq 1) `
+            "Exact cleanup did not revalidate retry-time directory state."
+        ${function:Remove-WindowsFinalDirectoryTreeOnce} =
+            $originalDirectoryTreeDelete
+        Remove-Item `
+            -LiteralPath $tamperedCleanupFile `
+            -Stream "m16-retry-tamper" `
+            -Force `
+            -ErrorAction Stop
+        Remove-WindowsFinalExactDirectory `
+            -Path $tamperedCleanup `
+            -ExpectedPath $tamperedCleanup `
+            -ParentRoot $temporaryRoot
+    }
+    finally {
+        ${function:Remove-WindowsFinalDirectoryTreeOnce} =
+            $originalDirectoryTreeDelete
+        foreach ($injectedVariableName in @(
+                "injectedDirectoryDeleteAttempts",
+                "injectedDirectoryNotEmptyHResult",
+                "injectedDirectorySharingViolationHResult")) {
+            if (Test-Path -LiteralPath "Variable:script:$injectedVariableName") {
+                Remove-Variable `
+                    -Name $injectedVariableName `
+                    -Scope Script `
+                    -ErrorAction Stop
+            }
+        }
+    }
 
     $alternateStreamFile = [System.IO.Path]::Combine(
         $temporaryRoot,
