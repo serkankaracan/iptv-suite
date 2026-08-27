@@ -27,7 +27,7 @@ $script:m16SyntheticJourneyAcceptanceSha256 =
 $script:m16SecurityArchitectureAcceptanceRelativePath =
     "eng/windows-m16-security-architecture-acceptance.json"
 $script:m16SecurityArchitectureAcceptanceSha256 =
-    "bc39d41de971a31aee69e030a17846c36f0dc39f8b21325c9b9c84af19ba4065"
+    "ec86fa5b92afbe4b3c30c4b19e07c39954358d6fb1f2948e373f2cdf66550007"
 $script:m16SyntheticJourneyProducerStaticPaths = @(
     ".github/workflows/windows-quality.yml",
     "eng/Invoke-WindowsQualityGate.ps1",
@@ -1217,22 +1217,22 @@ function Read-AndAssertBlockedEvidence {
          $securityArchitectureAcceptance.scope -ceq
             "M16FinalSecurityArchitectureScanOnly" -and
          $securityArchitectureAcceptance.runCompletedAtUtc -ceq
-            "2026-08-27T17:58:52Z" -and
-         $securityArchitectureAcceptance.runId -eq 33098975507 -and
-         $securityArchitectureAcceptance.runNumber -eq 312 -and
-         $securityArchitectureAcceptance.runAttempt -eq 1 -and
+            "2026-08-27T19:16:38Z" -and
+         $securityArchitectureAcceptance.runId -eq 33104019955 -and
+         $securityArchitectureAcceptance.runNumber -eq 313 -and
+         $securityArchitectureAcceptance.runAttempt -eq 2 -and
          $securityArchitectureAcceptance.runHeadSha -ceq
-            "28c6da84574fe96b5aad3778d776aa0c958c5df4" -and
-         $securityArchitectureAcceptance.producerJobId -eq 98611290588 -and
-         $securityArchitectureAcceptance.requiredGateJobId -eq 98618891179 -and
-         $securityArchitectureAcceptance.artifactId -eq 9658189086 -and
+            "524d148bea0ca0dc359eaefb777091eefe1efe1f" -and
+         $securityArchitectureAcceptance.producerJobId -eq 98635759984 -and
+         $securityArchitectureAcceptance.requiredGateJobId -eq 98641720078 -and
+         $securityArchitectureAcceptance.artifactId -eq 9660849258 -and
          $securityArchitectureAcceptance.artifactName -ceq
             "windows-quality-evidence" -and
          $securityArchitectureAcceptance.artifactDigestSha256 -ceq
-            "a155cfc748b56d865e84ef776b6d02ab9bfeec5c212d8f8b57db200aeec1af28" -and
+            "e2eb353682b0c88a2a03f2a82306f0afb22b6dad9b4c4141c2692ce87f6c568d" -and
          $securityArchitectureAcceptance.qualitySummaryMemberLength -eq 47236 -and
          $securityArchitectureAcceptance.qualitySummaryMemberSha256 -ceq
-            "b02a5e255c916edf8b4700cf4c3a3e6e9829f544407d33b8d8a7693c9a1b6056" -and
+            "4e1789703b7b57d65c32e546f6277eacf0b903473a3e99d33a1671d1b9789565" -and
          $securityArchitectureAcceptance.cleanRunCount -eq 2 -and
          $securityArchitectureAcceptance.testCountPerRun -eq 631 -and
          $securityArchitectureAcceptance.fullTestResultSetSha256 -ceq
@@ -1244,7 +1244,7 @@ function Read-AndAssertBlockedEvidence {
          $securityArchitectureAcceptance.producerContractCanonicalByteLength -eq
             7179352 -and
          $securityArchitectureAcceptance.producerContractSourceSetSha256 -ceq
-            "02fae4b076301657509f1d2961dd7c2bd0553f9e5b59915f94f813248e3eeb95" -and
+            "6c2fcae05643225a934734ceff680b906b813629770c32f10e045a5c294e16e1" -and
          $securityArchitectureAcceptance.closedBlocker -ceq
             "M16FinalSecurityArchitectureScanPending" -and
          $securityArchitectureAcceptance.effectiveClosedBlocker -ceq
@@ -1991,11 +1991,11 @@ try {
             -Path $currentSbomPath `
             -ExpectedSbomCurrentAtEvaluation $true `
             -ExpectedCveFinalReleaseFreshAtEvaluation $true `
-            -ExpectedFinalArtifactCurrent $true
+            -ExpectedFinalArtifactCurrent $false
         Assert-TestCondition `
             ($currentSbomEvidence.m1ToM15AutomatedGateSetPassed -and
-             $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
-            "M15 aggregate or current final-artifact acceptance changed."
+             -not $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
+            "M15 aggregate or stale final-artifact acceptance changed."
     }
     finally {
         Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue
