@@ -46,11 +46,11 @@ $script:syntheticJourneyProducerContractSourceSetSha256 =
 $script:securityArchitectureAcceptanceRelativePath =
     "eng/windows-m16-security-architecture-acceptance.json"
 $script:securityArchitectureAcceptanceSha256 =
-    "7b4accef7d7d3bc926125938db60d8f6339132288bd3049f8441036b959a418a"
+    "1867772ed424f46d57a4f0315954be14ccc1875ba149f47465f41bedfc350bdc"
 $script:securityArchitectureProducerContractSourceCount = 329
 $script:securityArchitectureProducerContractCanonicalByteLength = 7159327
 $script:securityArchitectureProducerContractSourceSetSha256 =
-    "edb68a592981e5365565dadc36e8e1bcea618cbc7b6fdaba3553ddc5c46ff78e"
+    "e3d466567b4fd4aa65b5d71bfe39295a7614c49b0190da3582d962f43ac6e3df"
 
 function Fail-TechnicalInvariant {
     param(
@@ -3080,22 +3080,22 @@ function Read-M16SecurityArchitectureAcceptance {
         $expectedRootStrings = [ordered]@{
             decision = "AcceptHostedM16FinalSecurityArchitectureScan"
             scope = "M16FinalSecurityArchitectureScanOnly"
-            runCompletedAtUtc = "2026-08-27T02:37:33Z"
+            runCompletedAtUtc = "2026-08-27T03:18:47Z"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-quality.yml"
             workflowName = "Windows quality"
             runEvent = "push"
             runBranch = "main"
-            runHeadSha = "320a7d7db8c2f5415c57d824ea6b6c9c3fdbfab9"
+            runHeadSha = "894c7717c3eb292193aceeb46d23ef9230483883"
             runConclusion = "success"
             producerJobName = "Locked build and test gate"
             producerJobConclusion = "success"
-            producerJobCompletedAtUtc = "2026-08-27T02:29:09Z"
+            producerJobCompletedAtUtc = "2026-08-27T03:10:08Z"
             requiredGateJobName = "Required Windows gate"
             requiredGateJobConclusion = "success"
             artifactName = "windows-quality-evidence"
             artifactDigestSha256 =
-                "7e1740f775ae2aaa09d7d226e106afc15e8efcc8da78a5fdaafd5530246cd072"
+                "89bfd5811cd03ca5a74df0a6fa8923d5142561b800223fb587029000a003d3b1"
             producerContractSourceSetSha256 =
                 $script:securityArchitectureProducerContractSourceSetSha256
             closedBlocker = "M16FinalSecurityArchitectureScanPending"
@@ -3117,13 +3117,13 @@ function Read-M16SecurityArchitectureAcceptance {
             schemaVersion = 1
             repositoryId = 1328998460
             workflowId = 330610209
-            runId = [long]33032754051
-            runNumber = 283
+            runId = [long]33035034462
+            runNumber = 284
             runAttempt = 1
-            producerJobId = [long]98388752346
-            requiredGateJobId = [long]98392140995
-            artifactId = [long]9631086156
-            artifactSizeBytes = 14133
+            producerJobId = [long]98395793565
+            requiredGateJobId = [long]98398634086
+            artifactId = [long]9631851803
+            artifactSizeBytes = 14134
             producerContractSourceCount =
                 $script:securityArchitectureProducerContractSourceCount
             producerContractCanonicalByteLength =
@@ -3140,7 +3140,7 @@ function Read-M16SecurityArchitectureAcceptance {
             [pscustomobject]@{
                 Name = "evidence/quality-summary.json"
                 Length = 47236
-                Sha256 = "3eb75e679cf22bf336b48f42c9e95375f8fed3dca0056bcc9669f65a69388230"
+                Sha256 = "8c760635090cee2cf4b2b69e11169c14a5a863efd7b819a6bd1a74ed5c371d55"
             },
             [pscustomobject]@{
                 Name = "fixtures/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt"
@@ -3201,7 +3201,7 @@ function Read-M16SecurityArchitectureAcceptance {
             -Code $code
         $expectedQualityStrings = [ordered]@{
             milestone = "M4-foundation"
-            commitSha = "320a7d7db8c2f5415c57d824ea6b6c9c3fdbfab9"
+            commitSha = "894c7717c3eb292193aceeb46d23ef9230483883"
             sdkVersion = "10.0.302"
             configuration = "Debug+Release"
             platform = "x64"

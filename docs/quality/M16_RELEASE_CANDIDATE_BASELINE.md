@@ -1,6 +1,6 @@
 # M16 Windows MVP Release Candidate blocked baseline'i
 
-**Durum:** `M15 TECHNICAL CHAIN RENEWED / M16 HOSTED JOURNEY CURRENT / SECURITY-ARCHITECTURE + FINAL-ARTIFACT RENEWAL REQUIRED / BLOCKED — 6 M16 blocker açık, 2026-08-27`
+**Durum:** `M15 TECHNICAL CHAIN RENEWED / M16 HOSTED JOURNEY + SECURITY-ARCHITECTURE CURRENT / FINAL-ARTIFACT RENEWAL REQUIRED / BLOCKED — 5 M16 blocker açık, 2026-08-27`
 
 ## Checkpoint kararı
 
@@ -40,9 +40,9 @@ Bu journey in-memory secret store ve deterministik playback-engine seam'i kullan
 
 ## Hosted final security/architecture kabulü
 
-`HOSTED HISTORICAL PASS / CURRENT RENEWAL REQUIRED, 2026-08-27`: [Run `33025558792`](https://github.com/serkankaracan/iptv-suite/actions/runs/33025558792), exact SDK `10.0.302` ile iki deterministik full quality runında `631/631` sonucu geçti. Canonical full-result set SHA-256 değeri `66dab64fa75e52da441dd863490f8d0c5c32f54c5963a12b860ff8af19663ff2`dir. Bunun içindeki exact `77` ArchitectureTests sonucu birer kez ve `Passed` olarak bulundu; ordinal canonical altküme SHA-256 değeri `9d2e961e127593313f48365a9c7f700a6bf1e745c832c8947a94c90a0c4da778`dir. Quality sentinel fail/recovery, scanner CLI contaminated/clean self-test'i ve artifact-files-only canary scan da geçti.
+`HOSTED VERIFIED / CURRENT ACCEPTED, 2026-08-27`: [Run `33035034462`](https://github.com/serkankaracan/iptv-suite/actions/runs/33035034462), clean `894c7717c3eb292193aceeb46d23ef9230483883` ve exact SDK `10.0.302` ile iki deterministik full quality runında `631/631` sonucu geçti. Quality job `98395793565` (`2026-08-27T03:10:08Z`) ve Required Windows gate `98398634086` başarıyla tamamlandı. Canonical full-result set SHA-256 değeri `66dab64fa75e52da441dd863490f8d0c5c32f54c5963a12b860ff8af19663ff2`dir. Bunun içindeki exact `77` ArchitectureTests sonucu birer kez ve `Passed` olarak bulundu; ordinal canonical altküme SHA-256 değeri `9d2e961e127593313f48365a9c7f700a6bf1e745c832c8947a94c90a0c4da778`dir. Quality sentinel fail/recovery, scanner CLI contaminated/clean self-test'i ve artifact-files-only canary scan da geçti. `windows-quality-evidence` artifact `9631851803`, `14.134` byte ve SHA-256 `89bfd5811cd03ca5a74df0a6fa8923d5142561b800223fb587029000a003d3b1`dır; içindeki `47.236` byte `evidence/quality-summary.json` üyesinin SHA-256 değeri `8c760635090cee2cf4b2b69e11169c14a5a863efd7b819a6bd1a74ed5c371d55`dir.
 
-Source-controlled `eng/windows-m16-security-architecture-acceptance.json` ledger'ının raw SHA-256 değeri `7c28b73f2677734d6896be1e9e27aaefa81a96f15bd3847d826e86cbab72af96`dir. Exact git-tracked workflow, build/toolchain, `eng`, production, test ve testdata closure'ı `329` source ve LF-normalized text/raw binary toplam `7.156.719` canonical byte'tır; binding SHA-256 değeri `6159ad458c302885b9f55dfa09bf0efd97ad570f150e14610e1fd4eecd3ef6ef`dir. Acceptance/readiness ledger ve validator döngüleri exact exclusions ile closure dışında kalır; M15 predecessor zinciri ayrıca fail-closed doğrulanır. Architecture contract testinin yeni ledger sözleşmesine geçirilmesi bu geniş closure'ı değiştirdiğinden ledger historical ve intact, fakat current değildir; aggregator `stale-reopen` üretir. Aynı checkpoint'i içeren yeni hosted quality artifact'ı kabul edilene kadar `M16FinalSecurityArchitectureScanPending` açık kalır. Missing/tamper/schema/artifact bağı hard-invalid'dir.
+Source-controlled `eng/windows-m16-security-architecture-acceptance.json` ledger'ının raw SHA-256 değeri `1867772ed424f46d57a4f0315954be14ccc1875ba149f47465f41bedfc350bdc`dır. Exact git-tracked workflow, build/toolchain, `eng`, production, test ve testdata closure'ı `329` source ve LF-normalized text/raw binary toplam `7.159.327` canonical byte'tır; binding SHA-256 değeri `e3d466567b4fd4aa65b5d71bfe39295a7614c49b0190da3582d962f43ac6e3df`dir. Acceptance/readiness ledger ve validator döngüleri exact exclusions ile closure dışında kalır; M15 predecessor zinciri ayrıca fail-closed doğrulanır. Run `33035034462` bu exact closure'ı hosted quality artifact'ına bağladığından aggregator security/architecture kaydını `accepted-current` sayar ve yalnız `M16FinalSecurityArchitectureScanPending` kapısını kapatır. Missing/tamper/schema/artifact bağı hard-invalid; sonraki closure drift'i yine `stale-reopen`dır.
 
 Quality artifact'ı TRX üyelerini yayımlamadığı için bu kayıt bağımsız TRX provenance attestation'ı değildir. Penetration/SAST, CVE/license/legal/privacy, Store identity/signing/WACK, fiziksel cihaz/accessibility, current final-artifact scan veya 24 saat soak kabulü üretmez.
 
@@ -54,7 +54,7 @@ Blocked baseline üretim çağrısı repository kökünden şöyledir:
 
 Sanitized sonuç `.artifacts/m16-release-candidate/rc-summary.json` altında yayımlanır.
 
-Tam RC aggregation baseline'ı current predecessor input setiyle henüz yeniden üretilmemiştir. Hosted journey kaydı kendi exact commit/artifact ve closure bağında current accepted evidence'dır; security/architecture ile final-artifact ledger'ları ise source drift nedeniyle historical/intact ve yenilenmesi gereken kayıtlardır. Bu kayıtlar kalan predecessor veya M16 kapılarının tamamlandığı iddiası değildir.
+Tam RC aggregation baseline'ı current predecessor input setiyle henüz yeniden üretilmemiştir. Hosted journey ve security/architecture kayıtları kendi exact commit/artifact ve closure bağlarında current accepted evidence'dır; final-artifact ledger'ı ise source drift nedeniyle historical/intact ve yenilenmesi gereken tek automated M16 kaydıdır. Bu kayıtlar kalan predecessor veya M16 kapılarının tamamlandığı iddiası değildir.
 
 ## Sabit ve bounded input seti
 
@@ -101,14 +101,13 @@ M15'in final-release CVE freshness predicate'i evaluation anında geçmezse `Cve
 
 ## M16 blocker'ları
 
-Current journey ledger'ı kendi automated kapısını kapatır; historical security/architecture ve final-artifact ledger'ları `stale-reopen` kaldığı için blocked baseline aşağıdaki exact altı M16 kapısını açık tutar:
+Current journey ve security/architecture ledger'ları kendi automated kapılarını kapatır; final-artifact ledger'ı `stale-reopen` kaldığı için blocked baseline aşağıdaki exact beş M16 kapısını açık tutar:
 
 1. `M16FeatureFreezeDecisionPending`
 2. `M16FinalArtifactCanaryScanPending`
-3. `M16FinalSecurityArchitectureScanPending`
-4. `M16TwentyFourHourSoakPending`
-5. `M16PhysicalDeviceAccessibilityMatrixPending`
-6. `M16ReleaseOperationsPlanPending`
+3. `M16PhysicalDeviceAccessibilityMatrixPending`
+4. `M16ReleaseOperationsPlanPending`
+5. `M16TwentyFourHourSoakPending`
 
 ## Release operasyonları plan kaydı
 
