@@ -537,7 +537,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         long requested = cancellationRequest.RequestedTimestamp;
         Assert.AreEqual(1, cancellationRequest.RequestCount);
         Assert.IsGreaterThan(0L, requested);
-        Assert.IsGreaterThanOrEqualTo(completed, requested);
+        Assert.IsGreaterThanOrEqualTo(requested, completed);
         double elapsed = measure ? Stopwatch.GetElapsedTime(requested, completed).TotalMilliseconds : 0;
         Assert.IsFalse(outcome.IsSuccess);
         Assert.AreEqual(DomainErrorCode.OperationCancelled, outcome.ErrorCode);
