@@ -413,16 +413,15 @@ function Initialize-TestRepository {
     Write-TestText `
         -Path (Join-Path $script:fixtureRoot "eng\Invoke-WindowsNativePlaybackSmoke.ps1") `
         -Value "# Synthetic controller marker used only by the bounded M16 self-test.`n"
-    Copy-TestFixtureFile -RelativePath $script:m16FinalArtifactAcceptanceRelativePath
+    $fixturePathSet = @{}
+    $fixturePathSet[$script:m16FinalArtifactAcceptanceRelativePath] = $true
     foreach ($relativePath in $script:m16ProducerContractPaths) {
-        Copy-TestFixtureFile -RelativePath $relativePath
+        $fixturePathSet[$relativePath] = $true
     }
-    Copy-TestFixtureFile `
-        -RelativePath $script:m16SyntheticJourneyAcceptanceRelativePath
-    Copy-TestFixtureFile `
-        -RelativePath $script:m16SecurityArchitectureAcceptanceRelativePath
+    $fixturePathSet[$script:m16SyntheticJourneyAcceptanceRelativePath] = $true
+    $fixturePathSet[$script:m16SecurityArchitectureAcceptanceRelativePath] = $true
     foreach ($relativePath in $script:m16SyntheticJourneyProducerStaticPaths) {
-        Copy-TestFixtureFile -RelativePath $relativePath
+        $fixturePathSet[$relativePath] = $true
     }
     foreach ($relativeRoot in $script:m16SyntheticJourneyProducerSourceRoots) {
         $sourceRoot = Join-Path $script:repositoryRoot $relativeRoot.Replace('/', '\')
@@ -431,10 +430,15 @@ function Initialize-TestRepository {
                 })) {
             $relativePath = $sourceFile.FullName.Substring(
                 $script:repositoryRoot.TrimEnd('\').Length + 1).Replace('\', '/')
-            Copy-TestFixtureFile -RelativePath $relativePath
+            $fixturePathSet[$relativePath] = $true
         }
     }
     foreach ($relativePath in @(Get-M16SecurityArchitectureProducerPaths)) {
+        $fixturePathSet[$relativePath] = $true
+    }
+    $fixturePaths = [string[]]@($fixturePathSet.Keys)
+    [System.Array]::Sort($fixturePaths, [System.StringComparer]::Ordinal)
+    foreach ($relativePath in $fixturePaths) {
         Copy-TestFixtureFile -RelativePath $relativePath
     }
 
@@ -1478,6 +1482,7 @@ try {
     $producerSourcePath = Join-Path `
         $script:fixtureRoot `
         "eng\WindowsM16FinalArtifactEvidence.ps1"
+    $producerSourceSha256 = Get-TestFileSha256 -Path $producerSourcePath
     [byte[]]$producerSourceBytes = [System.IO.File]::ReadAllBytes($producerSourcePath)
     [System.IO.File]::AppendAllText(
         $producerSourcePath,
@@ -1509,6 +1514,8 @@ try {
     $binaryProducerSourcePath = Join-Path `
         $script:fixtureRoot `
         "apps\windows\tests\fixtures\playback\tier-a\direct-h264-aac.ts"
+    $binaryProducerSourceSha256 =
+        Get-TestFileSha256 -Path $binaryProducerSourcePath
     [byte[]]$binaryProducerSourceBytes =
         [System.IO.File]::ReadAllBytes($binaryProducerSourcePath)
     [byte[]]$binaryDriftBytes = New-Object byte[] $binaryProducerSourceBytes.Length
@@ -1576,6 +1583,7 @@ try {
     $securitySourcePath = Join-Path `
         $script:fixtureRoot `
         ".github\workflows\windows-cve-review.yml"
+    $securitySourceSha256 = Get-TestFileSha256 -Path $securitySourcePath
     [byte[]]$securitySourceBytes = [System.IO.File]::ReadAllBytes($securitySourcePath)
     [System.IO.File]::AppendAllText(
         $securitySourcePath,
@@ -1629,6 +1637,7 @@ try {
     $journeySourcePath = Join-Path `
         $script:fixtureRoot `
         "apps\windows\tests\IptvSuite.IntegrationTests\M16SyntheticEndToEndJourneyTests.cs"
+    $journeySourceSha256 = Get-TestFileSha256 -Path $journeySourcePath
     [byte[]]$journeySourceBytes = [System.IO.File]::ReadAllBytes($journeySourcePath)
     [System.IO.File]::AppendAllText(
         $journeySourcePath,
@@ -1918,10 +1927,40 @@ try {
         }
     }
 
-    Write-ValidInputs
-    $finalPath = Join-Path $script:evidenceRoot "final-restored.json"
-    Invoke-AllowedCandidate -EvidencePath $finalPath
-    Read-AndAssertBlockedEvidence -Path $finalPath | Out-Null
+    $restoredFileBindings = @(
+        [ordered]@{
+            Path = $acceptancePath
+            Sha256 = $script:m16FinalArtifactAcceptanceSha256
+        },
+        [ordered]@{
+            Path = $producerSourcePath
+            Sha256 = $producerSourceSha256
+        },
+        [ordered]@{
+            Path = $binaryProducerSourcePath
+            Sha256 = $binaryProducerSourceSha256
+        },
+        [ordered]@{
+            Path = $securityAcceptancePath
+            Sha256 = $script:m16SecurityArchitectureAcceptanceSha256
+        },
+        [ordered]@{
+            Path = $securitySourcePath
+            Sha256 = $securitySourceSha256
+        },
+        [ordered]@{
+            Path = $journeyAcceptancePath
+            Sha256 = $script:m16SyntheticJourneyAcceptanceSha256
+        },
+        [ordered]@{
+            Path = $journeySourcePath
+            Sha256 = $journeySourceSha256
+        })
+    foreach ($binding in $restoredFileBindings) {
+        Assert-TestCondition `
+            ((Get-TestFileSha256 -Path $binding.Path) -ceq $binding.Sha256) `
+            "a mutated fixture file was not restored exactly."
+    }
     Assert-TestCondition `
         ([string]::IsNullOrWhiteSpace((Invoke-TestGit -Arguments @(
                     "status", "--porcelain=v1", "--untracked-files=normal")))) `
