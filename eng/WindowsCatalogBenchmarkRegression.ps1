@@ -158,7 +158,7 @@ function Assert-M14CatalogBenchmarkReferenceEvidence {
     }
 
     $evidence = Get-M14CatalogEvidenceProperty -Value $Record -Name 'Evidence'
-    if ((Get-M14CatalogInteger $evidence 'schemaVersion') -ne 1 -or
+    if ((Get-M14CatalogInteger $evidence 'schemaVersion') -ne 2 -or
         (Get-M14CatalogString $evidence 'milestone') -cne 'M14' -or
         (Get-M14CatalogString $evidence 'evidenceKind') -cne 'catalog-performance-benchmark' -or
         (Get-M14CatalogString $evidence 'configuration') -cne 'Release' -or
@@ -237,6 +237,12 @@ function Assert-M14CatalogBenchmarkReferenceEvidence {
         $null = Get-M14CatalogFiniteNumber $budgetEvaluation $metric -Positive
     }
 
+    $cancellation = Get-M14CatalogEvidenceProperty $evidence 'cancellation'
+    if ((Get-M14CatalogString $cancellation 'measurementBoundary') -cne
+        'CancellationRequestToLoaderCompletion') {
+        throw 'M14 reference evidence cancellation measurement boundary is invalid.'
+    }
+
     $null = Get-M14CatalogEvidenceProperty $evidence 'budgets'
     $null = Get-M14CatalogEvidenceProperty $evidence 'corpora'
     $null = Get-M14CatalogEvidenceProperty $evidence 'corpusManifest'
@@ -309,6 +315,7 @@ function Get-M14CatalogWorkloadContract {
             recordCount = Get-M14CatalogInteger $cancellation 'recordCount'
             iterations = Get-M14CatalogInteger $cancellation 'iterations'
             expectedErrorCode = Get-M14CatalogString $cancellation 'expectedErrorCode'
+            measurementBoundary = Get-M14CatalogString $cancellation 'measurementBoundary'
         }
         entryLimitProbe = [ordered]@{
             recordCount = Get-M14CatalogInteger $entryLimitProbe 'recordCount'

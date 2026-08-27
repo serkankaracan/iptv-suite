@@ -1890,7 +1890,7 @@ function Test-CatalogBenchmarkInput {
     )
 
     $value = $InputRecord.Value
-    Assert-ExactInteger -Value (Get-ExactProperty $value "schemaVersion") -Expected 1
+    Assert-ExactInteger -Value (Get-ExactProperty $value "schemaVersion") -Expected 2
     Assert-CommitBinding -Value $value -PropertyName "commitSha" -CommitSha $CommitSha
     Assert-ExactString -Value (Get-ExactProperty $value "milestone") -Expected "M14"
     Assert-ExactString `
@@ -2010,6 +2010,9 @@ function Test-CatalogBenchmarkInput {
     Assert-ExactString `
         -Value (Get-ExactProperty $cancellation "expectedErrorCode") `
         -Expected "OperationCancelled"
+    Assert-ExactString `
+        -Value (Get-ExactProperty $cancellation "measurementBoundary") `
+        -Expected "CancellationRequestToLoaderCompletion"
     $entryLimitProbe = Get-ExactProperty $value "entryLimitProbe"
     Assert-Condition ($entryLimitProbe -is [pscustomobject]) "InputContractInvalid"
     Assert-ExactInteger -Value (Get-ExactProperty $entryLimitProbe "recordCount") -Expected 100000

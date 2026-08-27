@@ -2276,6 +2276,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(regressionHelper, "$result -isnot [bool]");
         StringAssert.Contains(regressionHelper, "query50k = [ordered]@{");
         StringAssert.Contains(regressionHelper, "cancellation = [ordered]@{");
+        StringAssert.Contains(
+            regressionHelper,
+            "(Get-M14CatalogInteger $evidence 'schemaVersion') -ne 2");
+        StringAssert.Contains(
+            regressionHelper,
+            "measurementBoundary = Get-M14CatalogString $cancellation 'measurementBoundary'");
+        StringAssert.Contains(regressionHelper, "CancellationRequestToLoaderCompletion");
         StringAssert.Contains(regressionHelper, "entryLimitProbe = [ordered]@{");
         StringAssert.Contains(regressionHelper, "baselineContentStable = $BaselineContentStable");
         StringAssert.Contains(regressionHelper, "physicalMachineIdentityVerified = $false");
@@ -2284,6 +2291,15 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(regressionSelfTest, "A non-empty string must not spoof a Boolean evidence value.");
         StringAssert.Contains(regressionSelfTest, "Query workload mismatch must fail closed.");
         StringAssert.Contains(regressionSelfTest, "Cancellation workload mismatch must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "A missing cancellation measurement boundary must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "An unexpected cancellation measurement boundary must fail closed.");
+        StringAssert.Contains(
+            regressionSelfTest,
+            "Legacy benchmark schema v1 must fail closed.");
         StringAssert.Contains(regressionSelfTest, "Entry-limit workload mismatch must fail closed.");
         StringAssert.Contains(regressionSelfTest, "The regression evidence must contain exactly eight metrics.");
 
@@ -2306,6 +2322,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(benchmarkTest, "operatingSystemBuild");
         StringAssert.Contains(benchmarkTest, "commitSha");
         StringAssert.Contains(benchmarkTest, "schemaVersion");
+        StringAssert.Contains(benchmarkTest, "schemaVersion = 2");
+        StringAssert.Contains(
+            benchmarkTest,
+            "measurementBoundary = \"CancellationRequestToLoaderCompletion\"");
         StringAssert.Contains(benchmarkTest, "configuration = \"Release\"");
         StringAssert.Contains(benchmarkTest, "platform = \"x64\"");
         StringAssert.Contains(benchmarkTest, "result = budgetEvaluation.AllPassed ? \"passed\" : \"failed\"");
@@ -4501,6 +4521,13 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(validator, "if (-not $finalArtifactAcceptanceCurrent)");
         StringAssert.Contains(validator, "if (-not $securityArchitectureAcceptanceCurrent)");
         StringAssert.Contains(validator, "if (-not $syntheticJourneyAcceptanceCurrent)");
+        StringAssert.Contains(
+            validator,
+            "Assert-ExactInteger -Value (Get-ExactProperty $value \"schemaVersion\") -Expected 2");
+        StringAssert.Contains(
+            validator,
+            "-Value (Get-ExactProperty $cancellation \"measurementBoundary\")");
+        StringAssert.Contains(validator, "-Expected \"CancellationRequestToLoaderCompletion\"");
         StringAssert.Contains(validator, "schemaVersion = 1");
         StringAssert.Contains(validator, "evidenceKind = \"WindowsMvpReleaseCandidateGate\"");
         StringAssert.Contains(validator, "result = \"blocked\"");

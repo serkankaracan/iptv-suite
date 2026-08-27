@@ -28,7 +28,7 @@ function New-ReferenceEvidence {
     param([double]$MetricValue = 100.0)
 
     return [pscustomobject][ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         milestone = 'M14'
         evidenceKind = 'catalog-performance-benchmark'
         configuration = 'Release'
@@ -96,6 +96,7 @@ function New-ReferenceEvidence {
             recordCount = 50000
             iterations = 20
             expectedErrorCode = 'OperationCancelled'
+            measurementBoundary = 'CancellationRequestToLoaderCompletion'
         }
         entryLimitProbe = [pscustomobject][ordered]@{
             recordCount = 100000
@@ -171,6 +172,19 @@ try {
     $incompatible = Compare-M14CatalogRegression $baseline $cancellationMismatch $true $true
     Assert-True (-not $incompatible.binding.exactWorkloadMatch) 'Cancellation workload mismatch must fail closed.'
 
+    $missingCancellationBoundary = New-EvidenceRecord (New-ReferenceEvidence)
+    $missingCancellationBoundary.Evidence.cancellation.PSObject.Properties.Remove('measurementBoundary')
+    Assert-Throws {
+        Assert-M14CatalogBenchmarkReferenceEvidence $missingCancellationBoundary 'm14-reference-a'
+    } 'A missing cancellation measurement boundary must fail closed.'
+
+    $wrongCancellationBoundary = New-EvidenceRecord (New-ReferenceEvidence)
+    $wrongCancellationBoundary.Evidence.cancellation.measurementBoundary =
+        'LoaderStartToLoaderCompletion'
+    Assert-Throws {
+        Assert-M14CatalogBenchmarkReferenceEvidence $wrongCancellationBoundary 'm14-reference-a'
+    } 'An unexpected cancellation measurement boundary must fail closed.'
+
     $entryLimitMismatch = New-EvidenceRecord (New-ReferenceEvidence)
     $entryLimitMismatch.Evidence.entryLimitProbe.persistedRowsAfterFailure = 1
     $incompatible = Compare-M14CatalogRegression $baseline $entryLimitMismatch $true $true
@@ -190,6 +204,11 @@ try {
     $ineligible.Evidence.referenceEligible = $false
     Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $ineligible 'm14-reference-a' } `
         'Ineligible baseline evidence must be rejected.'
+
+    $legacySchema = New-EvidenceRecord (New-ReferenceEvidence)
+    $legacySchema.Evidence.schemaVersion = 1
+    Assert-Throws { Assert-M14CatalogBenchmarkReferenceEvidence $legacySchema 'm14-reference-a' } `
+        'Legacy benchmark schema v1 must fail closed.'
 
     $spoofedBoolean = New-EvidenceRecord (New-ReferenceEvidence)
     $spoofedBoolean.Evidence.referenceEligible = 'false'

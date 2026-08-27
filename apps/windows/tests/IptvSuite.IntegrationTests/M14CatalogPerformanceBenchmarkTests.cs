@@ -179,7 +179,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
 
         var evidence = new
         {
-            schemaVersion = 1,
+            schemaVersion = 2,
             milestone = "M14",
             evidenceKind = "catalog-performance-benchmark",
             configuration = "Release",
@@ -278,6 +278,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
                 recordCount = 50_000,
                 iterations = Iterations,
                 expectedErrorCode = DomainErrorCode.OperationCancelled.ToString(),
+                measurementBoundary = "CancellationRequestToLoaderCompletion",
                 completionLatencyMilliseconds = Summary(cancellation.RawSamples.Select(sample => sample.DurationMilliseconds)),
                 rawSamples = cancellation.RawSamples,
             },
@@ -526,13 +527,18 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m14-import-cancel");
         string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
         using var cancellation = new CancellationTokenSource();
+        var cancellationRequest = new CancellationRequestProbe(cancellation);
         await using LoaderFixture fixture = await LoaderFixture.CreateAsync(
             corpus.Path,
             databasePath,
-            cancellation);
-        long started = measure ? Stopwatch.GetTimestamp() : 0;
+            cancellationRequest);
         LoaderOutcome outcome = await InvokeLoaderAsync(fixture.Loader, fixture.Source, cancellation.Token);
-        double elapsed = measure ? Stopwatch.GetElapsedTime(started).TotalMilliseconds : 0;
+        long completed = Stopwatch.GetTimestamp();
+        long requested = cancellationRequest.RequestedTimestamp;
+        Assert.AreEqual(1, cancellationRequest.RequestCount);
+        Assert.IsGreaterThan(0L, requested);
+        Assert.IsGreaterThanOrEqualTo(completed, requested);
+        double elapsed = measure ? Stopwatch.GetElapsedTime(requested, completed).TotalMilliseconds : 0;
         Assert.IsFalse(outcome.IsSuccess);
         Assert.AreEqual(DomainErrorCode.OperationCancelled, outcome.ErrorCode);
         Assert.IsTrue(cancellation.IsCancellationRequested);
@@ -1131,7 +1137,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         internal static async Task<LoaderFixture> CreateAsync(
             string corpusPath,
             string databasePath,
-            CancellationTokenSource? cancellation = null)
+            CancellationRequestProbe? cancellation = null)
         {
             var store = new M4InMemorySecretStore();
             try
@@ -1203,7 +1209,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
 
     private sealed class FileCorpusTransport(
         string corpusPath,
-        CancellationTokenSource? cancellation) : IStreamingHttpTransport
+        CancellationRequestProbe? cancellation) : IStreamingHttpTransport
     {
         public ValueTask<HttpStreamingResult> GetStreamAsync(
             HttpTransportRequest request,
@@ -1236,7 +1242,7 @@ public sealed class M14CatalogPerformanceBenchmarkTests
 
     private sealed class CancellingReadStream(
         Stream inner,
-        CancellationTokenSource cancellation,
+        CancellationRequestProbe cancellation,
         int cancelAfterReads) : Stream
     {
         private int _readCount;
@@ -1286,8 +1292,29 @@ public sealed class M14CatalogPerformanceBenchmarkTests
         {
             if (Interlocked.Increment(ref _readCount) == cancelAfterReads)
             {
-                cancellation.Cancel();
+                cancellation.Request();
             }
+        }
+    }
+
+    private sealed class CancellationRequestProbe(CancellationTokenSource cancellation)
+    {
+        private long _requestedTimestamp = -1;
+        private int _requestCount;
+
+        internal long RequestedTimestamp => Volatile.Read(ref _requestedTimestamp);
+        internal int RequestCount => Volatile.Read(ref _requestCount);
+
+        internal void Request()
+        {
+            long requested = Stopwatch.GetTimestamp();
+            if (Interlocked.CompareExchange(ref _requestedTimestamp, requested, -1) != -1 ||
+                Interlocked.Increment(ref _requestCount) != 1)
+            {
+                throw new InvalidOperationException("Cancellation must be requested exactly once.");
+            }
+
+            cancellation.Cancel();
         }
     }
 

@@ -800,7 +800,7 @@ function Write-ValidInputs {
         -Value $native
 
     $benchmark = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         commitSha = $script:originalCommit
         milestone = "M14"
         evidenceKind = "catalog-performance-benchmark"
@@ -864,6 +864,7 @@ function Write-ValidInputs {
             recordCount = 50000
             iterations = 20
             expectedErrorCode = "OperationCancelled"
+            measurementBoundary = "CancellationRequestToLoaderCompletion"
         }
         entryLimitProbe = [ordered]@{
             recordCount = 100000
@@ -993,9 +994,9 @@ function Read-AndAssertBlockedEvidence {
 
         [bool]$ExpectedFinalArtifactCurrent = $false,
 
-        [bool]$ExpectedSecurityArchitectureCurrent = $true,
+        [bool]$ExpectedSecurityArchitectureCurrent = $false,
 
-        [bool]$ExpectedSyntheticJourneyCurrent = $true
+        [bool]$ExpectedSyntheticJourneyCurrent = $false
     )
 
     Assert-TestCondition (Test-Path -LiteralPath $Path -PathType Leaf) `
@@ -1797,9 +1798,45 @@ try {
     Write-ValidInputs
     $benchmarkPath = Join-Path $script:inputRoot "catalog-benchmark-summary.json"
     $benchmark = Read-TestJson -Path $benchmarkPath
-    $benchmark.budgetEvaluation.allPassed = $false
+    $benchmark.schemaVersion = 1
     Write-TestJson -Path $benchmarkPath -Value $benchmark
     $regressionPath = Join-Path $script:inputRoot "catalog-regression-summary.json"
+    $regression = Read-TestJson -Path $regressionPath
+    $regression.candidate.sha256 = Get-TestFileSha256 -Path $benchmarkPath
+    $regression.candidate.byteLength = (Get-Item -LiteralPath $benchmarkPath).Length
+    Write-TestJson -Path $regressionPath -Value $regression
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.budgetEvaluation.allPassed = $false
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    $regression = Read-TestJson -Path $regressionPath
+    $regression.candidate.sha256 = Get-TestFileSha256 -Path $benchmarkPath
+    $regression.candidate.byteLength = (Get-Item -LiteralPath $benchmarkPath).Length
+    Write-TestJson -Path $regressionPath -Value $regression
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.cancellation.PSObject.Properties.Remove("measurementBoundary")
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
+    $regression = Read-TestJson -Path $regressionPath
+    $regression.candidate.sha256 = Get-TestFileSha256 -Path $benchmarkPath
+    $regression.candidate.byteLength = (Get-Item -LiteralPath $benchmarkPath).Length
+    Write-TestJson -Path $regressionPath -Value $regression
+    Assert-CandidateFailure `
+        -ExpectedMessage "M16TechnicalInvariant:InputContractInvalid" `
+        -AllowBlockedCandidate
+
+    Write-ValidInputs
+    $benchmark = Read-TestJson -Path $benchmarkPath
+    $benchmark.cancellation.measurementBoundary = "LoaderStartToLoaderCompletion"
+    Write-TestJson -Path $benchmarkPath -Value $benchmark
     $regression = Read-TestJson -Path $regressionPath
     $regression.candidate.sha256 = Get-TestFileSha256 -Path $benchmarkPath
     $regression.candidate.byteLength = (Get-Item -LiteralPath $benchmarkPath).Length
