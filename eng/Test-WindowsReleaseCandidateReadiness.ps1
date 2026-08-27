@@ -152,13 +152,19 @@ function Assert-NoReparseDirectoryChain {
     foreach ($part in @($relative.Split(
                 @('\', '/'),
                 [System.StringSplitOptions]::RemoveEmptyEntries))) {
-        $current = Join-Path $current $part
-        if (Test-Path -LiteralPath $current) {
-            $item = Get-Item -LiteralPath $current -Force
-            Assert-Condition $item.PSIsContainer $Code
+        $current = [System.IO.Path]::Combine($current, $part)
+        $directory = [System.IO.DirectoryInfo]::new($current)
+        $directory.Refresh()
+        if ($directory.Exists) {
             Assert-Condition `
-                (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
+                (($directory.Attributes -band [System.IO.FileAttributes]::Directory) -ne 0) `
                 $Code
+            Assert-Condition `
+                (($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
+                $Code
+        }
+        else {
+            Assert-Condition (-not [System.IO.File]::Exists($current)) $Code
         }
     }
 }
@@ -202,9 +208,12 @@ function Read-RegularFileBytes {
             -Root $Root `
             -DirectoryPath ([System.IO.Path]::GetDirectoryName($fullPath)) `
             -Code $Code
-        Assert-Condition (Test-Path -LiteralPath $fullPath -PathType Leaf) $Code
-        $item = Get-Item -LiteralPath $fullPath -Force
-        Assert-Condition (-not $item.PSIsContainer) $Code
+        $item = [System.IO.FileInfo]::new($fullPath)
+        $item.Refresh()
+        Assert-Condition $item.Exists $Code
+        Assert-Condition `
+            (($item.Attributes -band [System.IO.FileAttributes]::Directory) -eq 0) `
+            $Code
         Assert-Condition `
             (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
             $Code
@@ -2295,8 +2304,6 @@ function Read-M16FinalArtifactAcceptance {
 
     $code = "FinalArtifactAcceptanceInvalid"
     try {
-        $contractBinding = Get-FinalArtifactProducerContractBinding -Root $Root
-
         $ledgerPath = Join-Path `
             $Root `
             ($script:finalArtifactAcceptanceRelativePath.Replace('/', '\'))
@@ -2687,6 +2694,7 @@ function Read-M16FinalArtifactAcceptance {
                 -Code $code
         }
 
+        $contractBinding = Get-FinalArtifactProducerContractBinding -Root $Root
         return [pscustomobject]@{
             Record = $record
             Acceptance = $acceptance
@@ -2720,8 +2728,6 @@ function Read-M16SyntheticJourneyAcceptance {
 
     $code = "SyntheticJourneyAcceptanceInvalid"
     try {
-        $contractBinding = Get-SyntheticJourneyProducerContractBinding -Root $Root
-
         $ledgerPath = Join-Path `
             $Root `
             ($script:syntheticJourneyAcceptanceRelativePath.Replace('/', '\'))
@@ -2991,6 +2997,7 @@ function Read-M16SyntheticJourneyAcceptance {
                 -Code $code
         }
 
+        $contractBinding = Get-SyntheticJourneyProducerContractBinding -Root $Root
         return [pscustomobject]@{
             Record = $record
             Acceptance = $acceptance
@@ -3018,7 +3025,6 @@ function Read-M16SecurityArchitectureAcceptance {
 
     $code = "SecurityArchitectureAcceptanceInvalid"
     try {
-        $contractBinding = Get-SecurityArchitectureProducerContractBinding -Root $Root
         $ledgerPath = Join-Path `
             $Root `
             ($script:securityArchitectureAcceptanceRelativePath.Replace('/', '\'))
@@ -3305,6 +3311,7 @@ function Read-M16SecurityArchitectureAcceptance {
                 -Code $code
         }
 
+        $contractBinding = Get-SecurityArchitectureProducerContractBinding -Root $Root
         return [pscustomobject]@{
             Record = $record
             Acceptance = $acceptance

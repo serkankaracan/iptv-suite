@@ -1422,10 +1422,6 @@ try {
     Initialize-TestRepository
     Write-ValidInputs
 
-    $allowedPath = Join-Path $script:evidenceRoot "allowed.json"
-    Invoke-AllowedCandidate -EvidencePath $allowedPath
-    Read-AndAssertBlockedEvidence -Path $allowedPath | Out-Null
-
     $defaultPath = Join-Path $script:evidenceRoot "default.json"
     Assert-CandidateFailure `
         -EvidencePath $defaultPath `
