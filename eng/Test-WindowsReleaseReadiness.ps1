@@ -26,7 +26,7 @@ $script:packageSbomAcceptanceSha256 = "84e5977428543ab52c80408bcb34fff72f5034acc
 $script:packageVulnerabilityAcceptanceRelativePath =
     "eng/windows-package-vulnerability-acceptance.json"
 $script:packageVulnerabilityAcceptanceSha256 =
-    "f15bc8fefc49938fc66e67a8d51e28ed4b9f40dffdd1c7411e47e81be8e80707"
+    "fbd0929b7ea4a8254352da0abe2ded7b1f9a7a0665a42ad64ce47c6b415900ee"
 $script:packageVulnerabilityContractSourceCount = 16
 $script:packageVulnerabilityContractSourceSetSha256 =
     "2183ea7fd3ddcd48f98966f1475276da49dfe8157b1f430f78a7ac7dc6e5787b"
@@ -1708,27 +1708,27 @@ function Read-PackageVulnerabilityAcceptance {
         $expectedStrings = [ordered]@{
             decision = "AcceptTechnicalKnownVulnerabilityReview"
             scope = "ProductionWindowsLeafKnownVulnerabilityReviewOnly"
-            runCompletedAtUtc = "2026-08-26T23:02:56Z"
-            freshThroughUtc = "2026-09-02T23:02:56Z"
+            runCompletedAtUtc = "2026-08-27T05:41:19Z"
+            freshThroughUtc = "2026-09-03T05:41:19Z"
             freshnessPolicy = "RunCompletionPlus7Days"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-cve-review.yml"
             workflowName = "Windows known-vulnerability producer"
-            runEvent = "workflow_dispatch"
+            runEvent = "push"
             runBranch = "main"
-            runHeadSha = "f8780657636266350778480c30c080ad64aa8dcd"
+            runHeadSha = "44506bfe50047ca8930417454488d2cafde7bbf3"
             runConclusion = "success"
             jobName = "Known-vulnerability producer gate"
             jobConclusion = "success"
             artifactName = "windows-cve-review-evidence"
-            artifactDigestSha256 = "96e6e34b96e2a6daf7e214f6e24e2278a55a5db4f6083db50258da55e5910175"
+            artifactDigestSha256 = "07ec9d4a93dc4ea53328ee5e1390bcb1c42b9763e86b4116ca2aec7bacd18cc1"
             lastSuccessMemberName = "last-success.json"
-            lastSuccessMemberSha256 = "836b738af446cf4e7dc10ce81d5fbb01cb5645681074ba469bc14d0cc45a9b7c"
+            lastSuccessMemberSha256 = "9c8f1b0c44a6233fd3806632eaa6d7c4552b3d78b4b126bf9e06bd0d023c8203"
             packageSbomAcceptanceSha256 = $script:packageSbomAcceptanceSha256
-            observedAtUtc = "2026-08-26T23:02:43.5370755Z"
+            observedAtUtc = "2026-08-27T05:41:06.1909319Z"
             producerResult = "passed"
             producerScope = "ProductionWindowsLeafKnownVulnerabilityProducer"
-            producerRepositoryCommitSha = "f8780657636266350778480c30c080ad64aa8dcd"
+            producerRepositoryCommitSha = "44506bfe50047ca8930417454488d2cafde7bbf3"
             dotNetSdk = "10.0.302"
             projectPath = "apps/windows/src/IptvSuite.Windows/IptvSuite.Windows.csproj"
             targetFramework = "net10.0-windows10.0.26100.0"
@@ -1756,7 +1756,7 @@ function Read-PackageVulnerabilityAcceptance {
             maximumAgeDays = $script:packageVulnerabilityMaximumAgeDays
             repositoryId = 1328998460
             workflowId = 342499403
-            runNumber = 49
+            runNumber = 59
             runAttempt = 1
             artifactSizeBytes = 1122
             lastSuccessMemberLength = 2403
@@ -1789,9 +1789,9 @@ function Read-PackageVulnerabilityAcceptance {
         }
 
         $expectedInt64 = [ordered]@{
-            runId = [long]33021741188
-            jobId = [long]98353520241
-            artifactId = [long]9626815227
+            runId = [long]33043196165
+            jobId = [long]98421205106
+            artifactId = [long]9634659536
         }
         foreach ($expected in $expectedInt64.GetEnumerator()) {
             Assert-Condition `
