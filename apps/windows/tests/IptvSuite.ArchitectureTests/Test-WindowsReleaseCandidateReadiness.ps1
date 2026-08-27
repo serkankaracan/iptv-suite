@@ -27,7 +27,7 @@ $script:m16SyntheticJourneyAcceptanceSha256 =
 $script:m16SecurityArchitectureAcceptanceRelativePath =
     "eng/windows-m16-security-architecture-acceptance.json"
 $script:m16SecurityArchitectureAcceptanceSha256 =
-    "87e6dbc14c674e07a7c244a0414c6ad347fe63db5ea54fdf018fdf5a612fa5ef"
+    "f8707e534c7b31a4d9d6e88cf143256d2bd549dc1475cffb9185cfdf7df8d864"
 $script:m16SyntheticJourneyProducerStaticPaths = @(
     ".github/workflows/windows-quality.yml",
     "eng/Invoke-WindowsQualityGate.ps1",
@@ -993,7 +993,7 @@ function Read-AndAssertBlockedEvidence {
 
         [bool]$ExpectedFinalArtifactCurrent = $false,
 
-        [bool]$ExpectedSecurityArchitectureCurrent = $false,
+        [bool]$ExpectedSecurityArchitectureCurrent = $true,
 
         [bool]$ExpectedSyntheticJourneyCurrent = $true
     )
@@ -1197,22 +1197,22 @@ function Read-AndAssertBlockedEvidence {
          $securityArchitectureAcceptance.scope -ceq
             "M16FinalSecurityArchitectureScanOnly" -and
          $securityArchitectureAcceptance.runCompletedAtUtc -ceq
-            "2026-08-27T12:16:34Z" -and
-         $securityArchitectureAcceptance.runId -eq 33069492771 -and
-         $securityArchitectureAcceptance.runNumber -eq 302 -and
+            "2026-08-27T13:01:49Z" -and
+         $securityArchitectureAcceptance.runId -eq 33072949178 -and
+         $securityArchitectureAcceptance.runNumber -eq 303 -and
          $securityArchitectureAcceptance.runAttempt -eq 1 -and
          $securityArchitectureAcceptance.runHeadSha -ceq
-            "ca63f5959fd0becf59411d6aa979ee350faed90f" -and
-         $securityArchitectureAcceptance.producerJobId -eq 98507784764 -and
-         $securityArchitectureAcceptance.requiredGateJobId -eq 98513232942 -and
-         $securityArchitectureAcceptance.artifactId -eq 9645528070 -and
+            "cdcb4f64029df9b6490f5b7065f612914c9de6a9" -and
+         $securityArchitectureAcceptance.producerJobId -eq 98519637813 -and
+         $securityArchitectureAcceptance.requiredGateJobId -eq 98525833186 -and
+         $securityArchitectureAcceptance.artifactId -eq 9647026031 -and
          $securityArchitectureAcceptance.artifactName -ceq
             "windows-quality-evidence" -and
          $securityArchitectureAcceptance.artifactDigestSha256 -ceq
-            "8da92578e4f226a37255c8d618f240db3439df1b260b18403b83addf356bf658" -and
+            "0562ea042c76154a3749d8c9c284d269f7b4cb951edc4da398e91b7a21f7e2e5" -and
          $securityArchitectureAcceptance.qualitySummaryMemberLength -eq 47236 -and
          $securityArchitectureAcceptance.qualitySummaryMemberSha256 -ceq
-            "27013951798ba1b77b646d0a77ab39b1bd4c045a67cf0ecc039e0ec37db9b520" -and
+            "3631c20fbd7ae11fd2e4586babf1cc7c928ffe874e446920ed2a2e2eb6277549" -and
          $securityArchitectureAcceptance.cleanRunCount -eq 2 -and
          $securityArchitectureAcceptance.testCountPerRun -eq 631 -and
          $securityArchitectureAcceptance.fullTestResultSetSha256 -ceq
@@ -1224,7 +1224,7 @@ function Read-AndAssertBlockedEvidence {
          $securityArchitectureAcceptance.producerContractCanonicalByteLength -eq
             7162233 -and
          $securityArchitectureAcceptance.producerContractSourceSetSha256 -ceq
-            "ed77c3f055f4d8119913a8d44664b0d3ac35e2e86df8a85aae2c724375823e92" -and
+            "580bbf89b427828db09485310f0d2284e2b4f24fda947d6e2cc9d721c78b2265" -and
          $securityArchitectureAcceptance.closedBlocker -ceq
             "M16FinalSecurityArchitectureScanPending" -and
          $securityArchitectureAcceptance.effectiveClosedBlocker -ceq
