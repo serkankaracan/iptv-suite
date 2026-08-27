@@ -36,18 +36,18 @@ $script:packageProducingSnapshotSha256 =
 $script:syntheticJourneyAcceptanceRelativePath =
     "eng/windows-m16-synthetic-journey-acceptance.json"
 $script:syntheticJourneyAcceptanceSha256 =
-    "f42e151054c86b2d6c86f4473f27dbd69c898695c783c7f89321846bd75da660"
+    "50d867fd845e96bb4ad9207fc356bce891e36801d250e8f2d5e1f04e968a8480"
 $script:syntheticJourneyProducerContractSourceCount = 132
 $script:syntheticJourneyProducerContractSourceSetSha256 =
-    "461f6dc9f8681783fca461ed4840fa176827c0038037ff73d14e2f32ba7b4375"
+    "08ef66d9ce752f91721cfcf9a3b848cfb69eb45fd454dfd674342e29a4a961ca"
 $script:securityArchitectureAcceptanceRelativePath =
     "eng/windows-m16-security-architecture-acceptance.json"
 $script:securityArchitectureAcceptanceSha256 =
-    "30dffdd22498e11d5168e64e94670a24727e09bc85371dc1fdd1b7b840cbf87e"
+    "87e6dbc14c674e07a7c244a0414c6ad347fe63db5ea54fdf018fdf5a612fa5ef"
 $script:securityArchitectureProducerContractSourceCount = 329
-$script:securityArchitectureProducerContractCanonicalByteLength = 7162210
+$script:securityArchitectureProducerContractCanonicalByteLength = 7162233
 $script:securityArchitectureProducerContractSourceSetSha256 =
-    "e5f4857bb8c33f9d9d37e0c1948db0b9acaf3a0e0a94cc2755ec12dbb855af5b"
+    "ed77c3f055f4d8119913a8d44664b0d3ac35e2e86df8a85aae2c724375823e92"
 
 function Fail-TechnicalInvariant {
     param(
@@ -2777,22 +2777,22 @@ function Read-M16SyntheticJourneyAcceptance {
         $expectedRootStrings = [ordered]@{
             decision = "AcceptHostedM16SyntheticEndToEndJourney"
             scope = "M16SyntheticEndToEndJourneyOnly"
-            runCompletedAtUtc = "2026-08-27T08:38:47Z"
+            runCompletedAtUtc = "2026-08-27T12:16:34Z"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-quality.yml"
             workflowName = "Windows quality"
             runEvent = "push"
             runBranch = "main"
-            runHeadSha = "67a9f6110787d098ca93bd06e15aa43b214ad0a5"
+            runHeadSha = "ca63f5959fd0becf59411d6aa979ee350faed90f"
             runConclusion = "success"
             producerJobName = "Locked build and test gate"
             producerJobConclusion = "success"
-            producerJobCompletedAtUtc = "2026-08-27T08:30:23Z"
+            producerJobCompletedAtUtc = "2026-08-27T12:08:01Z"
             requiredGateJobName = "Required Windows gate"
             requiredGateJobConclusion = "success"
             artifactName = "windows-quality-evidence"
             artifactDigestSha256 =
-                "ab945d6b7fbacd272ff4f615c90e966cd2ef692375a89b352e2f584191fa884a"
+                "8da92578e4f226a37255c8d618f240db3439df1b260b18403b83addf356bf658"
             producerContractSourceSetSha256 =
                 $script:syntheticJourneyProducerContractSourceSetSha256
             closedBlocker = "M16SyntheticEndToEndJourneyPending"
@@ -2814,13 +2814,13 @@ function Read-M16SyntheticJourneyAcceptance {
             schemaVersion = 1
             repositoryId = 1328998460
             workflowId = 330610209
-            runId = [long]33053496234
-            runNumber = 295
+            runId = [long]33069492771
+            runNumber = 302
             runAttempt = 1
-            producerJobId = [long]98454455402
-            requiredGateJobId = [long]98459265767
-            artifactId = [long]9638918347
-            artifactSizeBytes = 14133
+            producerJobId = [long]98507784764
+            requiredGateJobId = [long]98513232942
+            artifactId = [long]9645528070
+            artifactSizeBytes = 14131
             producerContractSourceCount =
                 $script:syntheticJourneyProducerContractSourceCount
         }
@@ -2835,7 +2835,7 @@ function Read-M16SyntheticJourneyAcceptance {
             [pscustomobject]@{
                 Name = "evidence/quality-summary.json"
                 Length = 47236
-                Sha256 = "d0465f40327a2a99857c89330016c03b536b1677b3c5de9c45f48a1bb4f8625c"
+                Sha256 = "27013951798ba1b77b646d0a77ab39b1bd4c045a67cf0ecc039e0ec37db9b520"
             },
             [pscustomobject]@{
                 Name = "fixtures/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt"
@@ -2893,7 +2893,7 @@ function Read-M16SyntheticJourneyAcceptance {
             -Code $code
         $expectedQualityStrings = [ordered]@{
             milestone = "M4-foundation"
-            commitSha = "67a9f6110787d098ca93bd06e15aa43b214ad0a5"
+            commitSha = "ca63f5959fd0becf59411d6aa979ee350faed90f"
             sdkVersion = "10.0.302"
             configuration = "Debug+Release"
             platform = "x64"
@@ -3075,22 +3075,22 @@ function Read-M16SecurityArchitectureAcceptance {
         $expectedRootStrings = [ordered]@{
             decision = "AcceptHostedM16FinalSecurityArchitectureScan"
             scope = "M16FinalSecurityArchitectureScanOnly"
-            runCompletedAtUtc = "2026-08-27T10:52:34Z"
+            runCompletedAtUtc = "2026-08-27T12:16:34Z"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-quality.yml"
             workflowName = "Windows quality"
             runEvent = "push"
             runBranch = "main"
-            runHeadSha = "bbe4aff445d1e9d0910ba4f553056d9efb6005b5"
+            runHeadSha = "ca63f5959fd0becf59411d6aa979ee350faed90f"
             runConclusion = "success"
             producerJobName = "Locked build and test gate"
             producerJobConclusion = "success"
-            producerJobCompletedAtUtc = "2026-08-27T10:43:21Z"
+            producerJobCompletedAtUtc = "2026-08-27T12:08:01Z"
             requiredGateJobName = "Required Windows gate"
             requiredGateJobConclusion = "success"
             artifactName = "windows-quality-evidence"
             artifactDigestSha256 =
-                "08b88e8b66aab726bf57385d54fc6e1f04f497a12e6fbabaccff60d2a2986a15"
+                "8da92578e4f226a37255c8d618f240db3439df1b260b18403b83addf356bf658"
             producerContractSourceSetSha256 =
                 $script:securityArchitectureProducerContractSourceSetSha256
             closedBlocker = "M16FinalSecurityArchitectureScanPending"
@@ -3112,13 +3112,13 @@ function Read-M16SecurityArchitectureAcceptance {
             schemaVersion = 1
             repositoryId = 1328998460
             workflowId = 330610209
-            runId = [long]33063296038
-            runNumber = 300
+            runId = [long]33069492771
+            runNumber = 302
             runAttempt = 1
-            producerJobId = [long]98487141524
-            requiredGateJobId = [long]98492459254
-            artifactId = [long]9643023629
-            artifactSizeBytes = 14133
+            producerJobId = [long]98507784764
+            requiredGateJobId = [long]98513232942
+            artifactId = [long]9645528070
+            artifactSizeBytes = 14131
             producerContractSourceCount =
                 $script:securityArchitectureProducerContractSourceCount
             producerContractCanonicalByteLength =
@@ -3135,7 +3135,7 @@ function Read-M16SecurityArchitectureAcceptance {
             [pscustomobject]@{
                 Name = "evidence/quality-summary.json"
                 Length = 47236
-                Sha256 = "c768619dcd27766dabb8ffea32784c83b845e233e52f32622b27d6653bb811ba"
+                Sha256 = "27013951798ba1b77b646d0a77ab39b1bd4c045a67cf0ecc039e0ec37db9b520"
             },
             [pscustomobject]@{
                 Name = "fixtures/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt"
@@ -3196,7 +3196,7 @@ function Read-M16SecurityArchitectureAcceptance {
             -Code $code
         $expectedQualityStrings = [ordered]@{
             milestone = "M4-foundation"
-            commitSha = "bbe4aff445d1e9d0910ba4f553056d9efb6005b5"
+            commitSha = "ca63f5959fd0becf59411d6aa979ee350faed90f"
             sdkVersion = "10.0.302"
             configuration = "Debug+Release"
             platform = "x64"

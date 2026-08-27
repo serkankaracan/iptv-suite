@@ -23,11 +23,11 @@ $script:m16FinalArtifactAcceptanceSha256 =
 $script:m16SyntheticJourneyAcceptanceRelativePath =
     "eng/windows-m16-synthetic-journey-acceptance.json"
 $script:m16SyntheticJourneyAcceptanceSha256 =
-    "f42e151054c86b2d6c86f4473f27dbd69c898695c783c7f89321846bd75da660"
+    "50d867fd845e96bb4ad9207fc356bce891e36801d250e8f2d5e1f04e968a8480"
 $script:m16SecurityArchitectureAcceptanceRelativePath =
     "eng/windows-m16-security-architecture-acceptance.json"
 $script:m16SecurityArchitectureAcceptanceSha256 =
-    "30dffdd22498e11d5168e64e94670a24727e09bc85371dc1fdd1b7b840cbf87e"
+    "87e6dbc14c674e07a7c244a0414c6ad347fe63db5ea54fdf018fdf5a612fa5ef"
 $script:m16SyntheticJourneyProducerStaticPaths = @(
     ".github/workflows/windows-quality.yml",
     "eng/Invoke-WindowsQualityGate.ps1",
@@ -995,7 +995,7 @@ function Read-AndAssertBlockedEvidence {
 
         [bool]$ExpectedSecurityArchitectureCurrent = $false,
 
-        [bool]$ExpectedSyntheticJourneyCurrent = $false
+        [bool]$ExpectedSyntheticJourneyCurrent = $true
     )
 
     Assert-TestCondition (Test-Path -LiteralPath $Path -PathType Leaf) `
@@ -1197,22 +1197,22 @@ function Read-AndAssertBlockedEvidence {
          $securityArchitectureAcceptance.scope -ceq
             "M16FinalSecurityArchitectureScanOnly" -and
          $securityArchitectureAcceptance.runCompletedAtUtc -ceq
-            "2026-08-27T10:52:34Z" -and
-         $securityArchitectureAcceptance.runId -eq 33063296038 -and
-         $securityArchitectureAcceptance.runNumber -eq 300 -and
+            "2026-08-27T12:16:34Z" -and
+         $securityArchitectureAcceptance.runId -eq 33069492771 -and
+         $securityArchitectureAcceptance.runNumber -eq 302 -and
          $securityArchitectureAcceptance.runAttempt -eq 1 -and
          $securityArchitectureAcceptance.runHeadSha -ceq
-            "bbe4aff445d1e9d0910ba4f553056d9efb6005b5" -and
-         $securityArchitectureAcceptance.producerJobId -eq 98487141524 -and
-         $securityArchitectureAcceptance.requiredGateJobId -eq 98492459254 -and
-         $securityArchitectureAcceptance.artifactId -eq 9643023629 -and
+            "ca63f5959fd0becf59411d6aa979ee350faed90f" -and
+         $securityArchitectureAcceptance.producerJobId -eq 98507784764 -and
+         $securityArchitectureAcceptance.requiredGateJobId -eq 98513232942 -and
+         $securityArchitectureAcceptance.artifactId -eq 9645528070 -and
          $securityArchitectureAcceptance.artifactName -ceq
             "windows-quality-evidence" -and
          $securityArchitectureAcceptance.artifactDigestSha256 -ceq
-            "08b88e8b66aab726bf57385d54fc6e1f04f497a12e6fbabaccff60d2a2986a15" -and
+            "8da92578e4f226a37255c8d618f240db3439df1b260b18403b83addf356bf658" -and
          $securityArchitectureAcceptance.qualitySummaryMemberLength -eq 47236 -and
          $securityArchitectureAcceptance.qualitySummaryMemberSha256 -ceq
-            "c768619dcd27766dabb8ffea32784c83b845e233e52f32622b27d6653bb811ba" -and
+            "27013951798ba1b77b646d0a77ab39b1bd4c045a67cf0ecc039e0ec37db9b520" -and
          $securityArchitectureAcceptance.cleanRunCount -eq 2 -and
          $securityArchitectureAcceptance.testCountPerRun -eq 631 -and
          $securityArchitectureAcceptance.fullTestResultSetSha256 -ceq
@@ -1222,9 +1222,9 @@ function Read-AndAssertBlockedEvidence {
             "9d2e961e127593313f48365a9c7f700a6bf1e745c832c8947a94c90a0c4da778" -and
          $securityArchitectureAcceptance.producerContractSourceCount -eq 329 -and
          $securityArchitectureAcceptance.producerContractCanonicalByteLength -eq
-            7162210 -and
+            7162233 -and
          $securityArchitectureAcceptance.producerContractSourceSetSha256 -ceq
-            "e5f4857bb8c33f9d9d37e0c1948db0b9acaf3a0e0a94cc2755ec12dbb855af5b" -and
+            "ed77c3f055f4d8119913a8d44664b0d3ac35e2e86df8a85aae2c724375823e92" -and
          $securityArchitectureAcceptance.closedBlocker -ceq
             "M16FinalSecurityArchitectureScanPending" -and
          $securityArchitectureAcceptance.effectiveClosedBlocker -ceq
@@ -1285,29 +1285,29 @@ function Read-AndAssertBlockedEvidence {
          $syntheticJourneyAcceptance.scope -ceq
             "M16SyntheticEndToEndJourneyOnly" -and
          $syntheticJourneyAcceptance.runCompletedAtUtc -ceq
-            "2026-08-27T08:38:47Z" -and
-         $syntheticJourneyAcceptance.runId -eq 33053496234 -and
-         $syntheticJourneyAcceptance.runNumber -eq 295 -and
+            "2026-08-27T12:16:34Z" -and
+         $syntheticJourneyAcceptance.runId -eq 33069492771 -and
+         $syntheticJourneyAcceptance.runNumber -eq 302 -and
          $syntheticJourneyAcceptance.runAttempt -eq 1 -and
          $syntheticJourneyAcceptance.runHeadSha -ceq
-            "67a9f6110787d098ca93bd06e15aa43b214ad0a5" -and
-         $syntheticJourneyAcceptance.producerJobId -eq 98454455402 -and
-         $syntheticJourneyAcceptance.requiredGateJobId -eq 98459265767 -and
-         $syntheticJourneyAcceptance.artifactId -eq 9638918347 -and
+            "ca63f5959fd0becf59411d6aa979ee350faed90f" -and
+         $syntheticJourneyAcceptance.producerJobId -eq 98507784764 -and
+         $syntheticJourneyAcceptance.requiredGateJobId -eq 98513232942 -and
+         $syntheticJourneyAcceptance.artifactId -eq 9645528070 -and
          $syntheticJourneyAcceptance.artifactName -ceq
             "windows-quality-evidence" -and
          $syntheticJourneyAcceptance.artifactDigestSha256 -ceq
-            "ab945d6b7fbacd272ff4f615c90e966cd2ef692375a89b352e2f584191fa884a" -and
+            "8da92578e4f226a37255c8d618f240db3439df1b260b18403b83addf356bf658" -and
          $syntheticJourneyAcceptance.qualitySummaryMemberLength -eq 47236 -and
          $syntheticJourneyAcceptance.qualitySummaryMemberSha256 -ceq
-            "d0465f40327a2a99857c89330016c03b536b1677b3c5de9c45f48a1bb4f8625c" -and
+            "27013951798ba1b77b646d0a77ab39b1bd4c045a67cf0ecc039e0ec37db9b520" -and
          $syntheticJourneyAcceptance.cleanRunCount -eq 2 -and
          $syntheticJourneyAcceptance.testCountPerRun -eq 631 -and
          $syntheticJourneyAcceptance.journeyTestResult -ceq
             "AuthorizedRemotePlaylistCompletesExactSyntheticReleaseCandidateJourney|Passed" -and
          $syntheticJourneyAcceptance.producerContractSourceCount -eq 132 -and
          $syntheticJourneyAcceptance.producerContractSourceSetSha256 -ceq
-            "461f6dc9f8681783fca461ed4840fa176827c0038037ff73d14e2f32ba7b4375" -and
+            "08ef66d9ce752f91721cfcf9a3b848cfb69eb45fd454dfd674342e29a4a961ca" -and
          $syntheticJourneyAcceptance.closedBlocker -ceq
             "M16SyntheticEndToEndJourneyPending" -and
          $syntheticJourneyAcceptance.effectiveClosedBlocker -ceq

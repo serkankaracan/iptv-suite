@@ -4490,7 +4490,7 @@ public sealed class DependencyRulesTests
             "$script:securityArchitectureProducerContractSourceCount = 329");
         StringAssert.Contains(
             validator,
-            "$script:securityArchitectureProducerContractCanonicalByteLength = 7162210");
+            "$script:securityArchitectureProducerContractCanonicalByteLength = 7162233");
         StringAssert.Contains(validator, "$kind = \"text-lf\"");
         StringAssert.Contains(validator, "$kind = \"binary\"");
         StringAssert.Contains(validator, "\"$relativePath`0$kind`0");
@@ -4588,7 +4588,7 @@ public sealed class DependencyRulesTests
             329,
             securityRoot.GetProperty("producerContractSourceCount").GetInt32());
         Assert.AreEqual(
-            7162210,
+            7162233,
             securityRoot.GetProperty("producerContractCanonicalByteLength").GetInt64());
         JsonElement securityQuality = securityRoot.GetProperty("qualityEvidence");
         Assert.AreEqual(2, securityQuality.GetProperty("cleanRunCount").GetInt32());
