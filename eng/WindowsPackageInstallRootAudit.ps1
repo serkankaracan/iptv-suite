@@ -246,6 +246,7 @@ namespace IptvSuite.PackageInstallRootAudit
     internal sealed class SerialSynchronizer : ISynchronizeInvoke, IDisposable
     {
         private const int MaximumPendingInvocations = 4096;
+        private const int WorkerDrainTimeoutMilliseconds = 10000;
         private readonly object gate = new object();
         private readonly BlockingCollection<SerialInvocation> queue =
             new BlockingCollection<SerialInvocation>(MaximumPendingInvocations);
@@ -343,7 +344,7 @@ namespace IptvSuite.PackageInstallRootAudit
                     queue.CompleteAdding();
                 }
             }
-            if (!worker.Join(2000))
+            if (!worker.Join(WorkerDrainTimeoutMilliseconds))
             {
                 throw new InvalidOperationException("WatcherBarrierTimeout");
             }
