@@ -208,6 +208,7 @@ public sealed class SqliteCatalogDatabaseTests
     [DataRow(2)]
     [DataRow(3)]
     [Timeout(30_000)]
+    [DoNotParallelize]
     public async Task LegacyPendingSourceIsBackfilledIntoExactPhaseZeroJournal(int legacyVersion)
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m12-sqlite-deletion-backfill");
@@ -255,6 +256,7 @@ public sealed class SqliteCatalogDatabaseTests
 
     [TestMethod]
     [Timeout(30_000)]
+    [DoNotParallelize]
     public async Task MigrationFailureRollsBackSchemaAndVersionAtomically()
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m8-sqlite-migration-rollback");
