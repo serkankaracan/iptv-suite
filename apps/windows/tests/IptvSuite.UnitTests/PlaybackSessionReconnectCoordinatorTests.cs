@@ -107,8 +107,18 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         engine.EmitFailure(logical.SessionId, DomainErrorCode.StreamInterrupted);
         await WaitForWaitingAttemptAsync(coordinator, attemptNumber: 1);
         await AdvanceAsync(time, TimeSpan.FromSeconds(1));
-        await WaitUntilAsync(() => engine.OpenCount == 2);
-        PlaybackSessionId physical = engine.OpenSessions.ToArray()[^1];
+        PlaybackSessionId physical = await WaitForReconnectBufferingPhysicalAsync(
+            engine,
+            logical.SessionId);
+        var recovered = new TaskCompletionSource<PlaybackSessionSnapshot>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.StateChanged += (_, args) =>
+        {
+            if (args.Snapshot.State == PlaybackState.Playing)
+            {
+                recovered.TrySetResult(args.Snapshot);
+            }
+        };
 
         Assert.AreEqual(PlaybackState.Buffering, engine.Current.State);
         Assert.AreEqual(PlaybackState.Reconnecting, coordinator.Current.State);
@@ -120,8 +130,10 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         Assert.AreEqual(PlaybackState.Reconnecting, coordinator.Current.State);
 
         engine.EmitState(physical, PlaybackState.Playing);
-        await WaitUntilAsync(() => coordinator.Current.State == PlaybackState.Playing);
+        PlaybackSessionSnapshot recoveredSnapshot = await recovered.Task
+            .WaitAsync(TimeSpan.FromSeconds(2));
 
+        Assert.AreEqual(PlaybackState.Playing, recoveredSnapshot.State);
         Assert.AreEqual(logical.SessionId, coordinator.Current.SessionId);
         Assert.AreEqual(2, engine.OpenCount);
         Assert.AreEqual(1, engine.StopCount);
@@ -141,8 +153,9 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         engine.EmitFailure(logical.SessionId, DomainErrorCode.StreamInterrupted);
         await WaitForWaitingAttemptAsync(coordinator, attemptNumber: 1);
         await AdvanceAsync(time, TimeSpan.FromSeconds(1));
-        await WaitUntilAsync(() => engine.OpenCount == 2);
-        PlaybackSessionId physical = engine.OpenSessions.ToArray()[^1];
+        PlaybackSessionId physical = await WaitForReconnectBufferingPhysicalAsync(
+            engine,
+            logical.SessionId);
 
         PlaybackEngineOperationResult stopped = await coordinator.StopAsync()
             .AsTask()
@@ -170,8 +183,9 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
         engine.EmitFailure(logical.SessionId, DomainErrorCode.StreamInterrupted);
         await WaitForWaitingAttemptAsync(coordinator, attemptNumber: 1);
         await AdvanceAsync(time, TimeSpan.FromSeconds(1));
-        await WaitUntilAsync(() => engine.OpenCount == 2);
-        PlaybackSessionId physical = engine.OpenSessions.ToArray()[^1];
+        PlaybackSessionId physical = await WaitForReconnectBufferingPhysicalAsync(
+            engine,
+            logical.SessionId);
 
         await AdvanceAsync(time, TimeSpan.FromSeconds(29));
         await WaitUntilAsync(() => coordinator.Current is
@@ -1281,6 +1295,25 @@ public sealed class PlaybackSessionReconnectCoordinatorTests
                 Reconnect.Phase: PlaybackReconnectPhase.Waiting,
                 Reconnect.AttemptNumber: var attempt,
             } && attempt == attemptNumber);
+
+    private static async Task<PlaybackSessionId> WaitForReconnectBufferingPhysicalAsync(
+        ReconnectPlaybackEngine engine,
+        PlaybackSessionId logicalSessionId)
+    {
+        await WaitUntilAsync(() =>
+        {
+            PlaybackEngineSnapshot current = engine.Current;
+            return engine.OpenSessions.Count == 2 &&
+                current.State == PlaybackState.Buffering &&
+                current.SessionId != logicalSessionId;
+        });
+
+        PlaybackSessionId physicalSessionId = engine.Current.SessionId;
+        PlaybackSessionId[] openSessions = engine.OpenSessions.ToArray();
+        Assert.AreEqual(2, openSessions.Length);
+        Assert.AreEqual(physicalSessionId, openSessions[^1]);
+        return physicalSessionId;
+    }
 
     private static async Task AdvanceAsync(FakeTimeProvider time, TimeSpan duration)
     {
