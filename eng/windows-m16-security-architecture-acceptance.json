@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "decision": "AcceptHostedM16SyntheticEndToEndJourney",
-  "scope": "M16SyntheticEndToEndJourneyOnly",
+  "decision": "AcceptHostedM16FinalSecurityArchitectureScan",
+  "scope": "M16FinalSecurityArchitectureScanOnly",
   "runCompletedAtUtc": "2026-08-27T00:26:33Z",
   "repository": "serkankaracan/iptv-suite",
   "repositoryId": 1328998460,
@@ -52,8 +52,11 @@
     "platform": "x64",
     "cleanRunCount": 2,
     "testCountPerRun": 631,
-    "journeyTestResult": "AuthorizedRemotePlaylistCompletesExactSyntheticReleaseCandidateJourney|Passed",
-    "journeyTestResultOccurrenceCount": 1,
+    "fullTestResultSetSha256": "66dab64fa75e52da441dd863490f8d0c5c32f54c5963a12b860ff8af19663ff2",
+    "architectureTestCount": 77,
+    "architectureTestResultSetSha256": "9d2e961e127593313f48365a9c7f700a6bf1e745c832c8947a94c90a0c4da778",
+    "architectureTestResultsPresentExactlyOnce": true,
+    "architectureTestResultsAllPassed": true,
     "qualityGateSentinel": "armed-failed-and-disarmed-passed",
     "scannerCliSelfTest": "contaminated-exit-2-and-clean-exit-0",
     "artifactCanaryScan": "artifact-files-only-passed",
@@ -67,24 +70,26 @@
       "manifestSha256": "b1f1513e786f3176c7275af927c4c93c847d0476858fe56701d2054128818438"
     }
   },
-  "producerContractSourceCount": 132,
-  "producerContractSourceSetSha256": "3f05c6675a838479fb69ec8fefd0c453a04725c25bcee676a8c97952786eb93f",
-  "closedBlocker": "M16SyntheticEndToEndJourneyPending",
+  "producerContractSourceCount": 329,
+  "producerContractCanonicalByteLength": 7156719,
+  "producerContractSourceSetSha256": "6159ad458c302885b9f55dfa09bf0efd97ad570f150e14610e1fd4eecd3ef6ef",
+  "closedBlocker": "M16FinalSecurityArchitectureScanPending",
   "remainingM16Blockers": [
     "M16FeatureFreezeDecisionPending",
     "M16FinalArtifactCanaryScanPending",
-    "M16FinalSecurityArchitectureScanPending",
     "M16PhysicalDeviceAccessibilityMatrixPending",
     "M16ReleaseOperationsPlanPending",
+    "M16SyntheticEndToEndJourneyPending",
     "M16TwentyFourHourSoakPending"
   ],
   "nonClaims": {
     "candidateReady": false,
-    "realDpapiBoundaryProven": false,
-    "nativeDecoderProven": false,
-    "winUiOrPackagedJourneyProven": false,
-    "twentyFourHourSoakComplete": false,
+    "independentTrxArtifactProvenance": false,
+    "penetrationOrSastComplete": false,
+    "cveLicenseLegalPrivacyApproved": false,
+    "storeIdentitySigningWackApproved": false,
     "physicalDeviceAccessibilityMatrixComplete": false,
-    "storeWackLegalOrSigningApproved": false
+    "finalArtifactCanaryScanCurrent": false,
+    "twentyFourHourSoakComplete": false
   }
 }

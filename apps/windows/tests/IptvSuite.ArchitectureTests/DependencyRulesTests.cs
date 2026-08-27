@@ -4433,6 +4433,10 @@ public sealed class DependencyRulesTests
             RepositoryRoot,
             "eng",
             "windows-m16-synthetic-journey-acceptance.json");
+        string securityArchitectureAcceptancePath = Path.Combine(
+            RepositoryRoot,
+            "eng",
+            "windows-m16-security-architecture-acceptance.json");
         Assert.IsTrue(File.Exists(validatorPath), "The M16 release-candidate validator is missing.");
         Assert.IsTrue(File.Exists(baselinePath), "The M16 release-candidate baseline is missing.");
         Assert.IsTrue(
@@ -4441,6 +4445,9 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             File.Exists(syntheticJourneyAcceptancePath),
             "The M16 synthetic-journey acceptance ledger is missing.");
+        Assert.IsTrue(
+            File.Exists(securityArchitectureAcceptancePath),
+            "The M16 security-architecture acceptance ledger is missing.");
 
         string validator = File.ReadAllText(validatorPath).Replace("\r\n", "\n", StringComparison.Ordinal);
         StringAssert.Contains(validator, "[switch]$AllowBlockedCandidate");
@@ -4458,14 +4465,25 @@ public sealed class DependencyRulesTests
             "$script:syntheticJourneyAcceptanceSha256 =");
         StringAssert.Contains(
             validator,
-            "$script:syntheticJourneyProducerContractSourceCount = 130");
+            "$script:syntheticJourneyProducerContractSourceCount = 132");
+        StringAssert.Contains(
+            validator,
+            "$script:securityArchitectureAcceptanceSha256 =");
+        StringAssert.Contains(
+            validator,
+            "$script:securityArchitectureProducerContractSourceCount = 329");
+        StringAssert.Contains(
+            validator,
+            "$script:securityArchitectureProducerContractCanonicalByteLength = 7156719");
         StringAssert.Contains(validator, "$kind = \"text-lf\"");
         StringAssert.Contains(validator, "$kind = \"binary\"");
         StringAssert.Contains(validator, "\"$relativePath`0$kind`0");
         StringAssert.Contains(validator, "finalArtifactCanaryAcceptance = [ordered]@{");
+        StringAssert.Contains(validator, "finalSecurityArchitectureAcceptance = [ordered]@{");
         StringAssert.Contains(validator, "syntheticEndToEndJourneyAcceptance = [ordered]@{");
         StringAssert.Contains(validator, "\"stale-reopen\"");
         StringAssert.Contains(validator, "if (-not $finalArtifactAcceptanceCurrent)");
+        StringAssert.Contains(validator, "if (-not $securityArchitectureAcceptanceCurrent)");
         StringAssert.Contains(validator, "if (-not $syntheticJourneyAcceptanceCurrent)");
         StringAssert.Contains(validator, "schemaVersion = 1");
         StringAssert.Contains(validator, "evidenceKind = \"WindowsMvpReleaseCandidateGate\"");
@@ -4525,7 +4543,7 @@ public sealed class DependencyRulesTests
             "M16SyntheticEndToEndJourneyPending",
             journeyRoot.GetProperty("closedBlocker").GetString());
         Assert.AreEqual(
-            130,
+            132,
             journeyRoot.GetProperty("producerContractSourceCount").GetInt32());
         Assert.AreEqual(
             2,
@@ -4538,10 +4556,41 @@ public sealed class DependencyRulesTests
             .EnumerateArray()
             .Select(value => value.GetString()!)
             .ToArray();
-        Assert.AreEqual(5, journeyRemainingBlockers.Length);
+        Assert.AreEqual(6, journeyRemainingBlockers.Length);
         CollectionAssert.DoesNotContain(
             journeyRemainingBlockers,
             "M16SyntheticEndToEndJourneyPending");
+
+        using JsonDocument securityAcceptance = JsonDocument.Parse(
+            File.ReadAllText(securityArchitectureAcceptancePath));
+        JsonElement securityRoot = securityAcceptance.RootElement;
+        Assert.AreEqual(1, securityRoot.GetProperty("schemaVersion").GetInt32());
+        Assert.AreEqual(
+            "M16FinalSecurityArchitectureScanPending",
+            securityRoot.GetProperty("closedBlocker").GetString());
+        Assert.AreEqual(
+            329,
+            securityRoot.GetProperty("producerContractSourceCount").GetInt32());
+        Assert.AreEqual(
+            7156719,
+            securityRoot.GetProperty("producerContractCanonicalByteLength").GetInt64());
+        JsonElement securityQuality = securityRoot.GetProperty("qualityEvidence");
+        Assert.AreEqual(2, securityQuality.GetProperty("cleanRunCount").GetInt32());
+        Assert.AreEqual(631, securityQuality.GetProperty("testCountPerRun").GetInt32());
+        Assert.AreEqual(77, securityQuality.GetProperty("architectureTestCount").GetInt32());
+        Assert.IsTrue(
+            securityQuality.GetProperty("architectureTestResultsPresentExactlyOnce").GetBoolean());
+        Assert.IsTrue(
+            securityQuality.GetProperty("architectureTestResultsAllPassed").GetBoolean());
+        string[] securityRemainingBlockers = securityRoot
+            .GetProperty("remainingM16Blockers")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        Assert.AreEqual(6, securityRemainingBlockers.Length);
+        CollectionAssert.DoesNotContain(
+            securityRemainingBlockers,
+            "M16FinalSecurityArchitectureScanPending");
     }
 
     [TestMethod]

@@ -39,10 +39,18 @@ $script:historicalFinalArtifactPackageProducingSnapshotSha256 =
 $script:syntheticJourneyAcceptanceRelativePath =
     "eng/windows-m16-synthetic-journey-acceptance.json"
 $script:syntheticJourneyAcceptanceSha256 =
-    "d9089be0cdfd3e50b7f7bbd1b284af8be3a53a4ac90781255f60bacc1192c7c9"
-$script:syntheticJourneyProducerContractSourceCount = 130
+    "cb2384a6a8e1a618889307e52f0e0ea0d46b397e942218f717e8e69c76794278"
+$script:syntheticJourneyProducerContractSourceCount = 132
 $script:syntheticJourneyProducerContractSourceSetSha256 =
-    "4fd8c9e261a01d019b3b7f7aebf633fee6106e1bd8566b3fdbd13119bb25035f"
+    "3f05c6675a838479fb69ec8fefd0c453a04725c25bcee676a8c97952786eb93f"
+$script:securityArchitectureAcceptanceRelativePath =
+    "eng/windows-m16-security-architecture-acceptance.json"
+$script:securityArchitectureAcceptanceSha256 =
+    "7c28b73f2677734d6896be1e9e27aaefa81a96f15bd3847d826e86cbab72af96"
+$script:securityArchitectureProducerContractSourceCount = 329
+$script:securityArchitectureProducerContractCanonicalByteLength = 7156719
+$script:securityArchitectureProducerContractSourceSetSha256 =
+    "6159ad458c302885b9f55dfa09bf0efd97ad570f150e14610e1fd4eecd3ef6ef"
 
 function Fail-TechnicalInvariant {
     param(
@@ -580,6 +588,176 @@ function Get-SyntheticJourneyProducerContractBinding {
         ([string[]]$records.ToArray() -join "`n"))
     return [pscustomobject]@{
         SourceCount = [int]$records.Count
+        SourceSetSha256 = Get-LowerSha256Bytes -Bytes $bindingBytes
+    }
+}
+
+function Get-SecurityArchitectureProducerContractBinding {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $code = "SecurityArchitectureAcceptanceInvalid"
+    $excludedPaths = [string[]]@(
+        "eng/Test-WindowsReleaseCandidateReadiness.ps1",
+        "apps/windows/tests/IptvSuite.ArchitectureTests/Test-WindowsReleaseCandidateReadiness.ps1",
+        "eng/Test-WindowsReleaseReadiness.ps1",
+        "apps/windows/tests/IptvSuite.ArchitectureTests/Test-WindowsReleaseReadiness.ps1",
+        "eng/windows-package-sbom-acceptance.json",
+        "eng/windows-package-vulnerability-acceptance.json",
+        "eng/windows-m16-final-artifact-acceptance.json",
+        "eng/windows-m16-synthetic-journey-acceptance.json",
+        "eng/windows-m16-security-architecture-acceptance.json")
+    $staticPaths = [string[]]@(
+        ".config/dotnet-tools.json",
+        "global.json",
+        "NuGet.config",
+        "Directory.Build.props",
+        "Directory.Packages.props",
+        "Directory.Solution.props",
+        "apps/windows/IptvSuite.Windows.sln")
+    $binaryExtensions = [string[]]@(".ico", ".png", ".ts", ".sln")
+    $textExtensions = [string[]]@(
+        ".appxmanifest",
+        ".config",
+        ".cs",
+        ".csproj",
+        ".json",
+        ".m3u8",
+        ".manifest",
+        ".md",
+        ".props",
+        ".ps1",
+        ".resw",
+        ".txt",
+        ".xaml",
+        ".yml")
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = "git"
+    $startInfo.Arguments = "ls-files -z --"
+    $startInfo.WorkingDirectory = $Root
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.CreateNoWindow = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    $gitOutput = New-Object System.IO.MemoryStream
+    try {
+        Assert-Condition $process.Start() $code
+        $buffer = New-Object byte[] 8192
+        while (($read = $process.StandardOutput.BaseStream.Read(
+                    $buffer,
+                    0,
+                    $buffer.Length)) -gt 0) {
+            Assert-Condition (($gitOutput.Length + $read) -le 1MB) $code
+            $gitOutput.Write($buffer, 0, $read)
+        }
+        $process.WaitForExit()
+        Assert-Condition ($process.ExitCode -eq 0) $code
+        [byte[]]$trackedBytes = $gitOutput.ToArray()
+    }
+    finally {
+        $gitOutput.Dispose()
+        $process.Dispose()
+    }
+
+    Assert-Condition ($trackedBytes.Length -gt 0) $code
+    try {
+        $trackedText = $script:utf8Strict.GetString($trackedBytes)
+    }
+    catch {
+        Fail-TechnicalInvariant -Code $code
+    }
+    Assert-Condition ($trackedText[$trackedText.Length - 1] -eq [char]0) $code
+    $trackedEntries = @($trackedText.Split([char]0))
+    Assert-Condition ($trackedEntries[$trackedEntries.Count - 1] -ceq "") $code
+
+    $allTrackedPaths = [System.Collections.Generic.List[string]]::new()
+    $trackedPathSet = New-Object 'System.Collections.Generic.HashSet[string]' `
+        ([System.StringComparer]::Ordinal)
+    for ($index = 0; $index -lt ($trackedEntries.Count - 1); $index++) {
+        $trackedPath = [string]$trackedEntries[$index]
+        Assert-Condition `
+            (-not [string]::IsNullOrWhiteSpace($trackedPath) -and
+             $trackedPath.Length -le $script:maximumStringLength -and
+             $trackedPath -cmatch '\A[A-Za-z0-9._/-]+\z' -and
+             -not [System.IO.Path]::IsPathRooted($trackedPath) -and
+             $trackedPath -notmatch '(?:^|/)\.\.(?:/|$)' -and
+             $trackedPath.IndexOf('\') -lt 0 -and
+             $trackedPathSet.Add($trackedPath)) `
+            $code
+        $allTrackedPaths.Add($trackedPath)
+    }
+    Assert-Condition ($allTrackedPaths.Count -le $script:maximumArrayLength) $code
+
+    $relativePaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($relativePath in [string[]]$allTrackedPaths.ToArray()) {
+        $included =
+            $relativePath -cmatch '\A\.github/workflows/[^/]+\.yml\z' -or
+            $relativePath -cmatch '\Aeng/[^/]+\z' -or
+            $relativePath -cmatch '\Aapps/windows/(?:src|tests|testdata)/' -or
+            $staticPaths -ccontains $relativePath
+        if (-not $included -or $excludedPaths -ccontains $relativePath) {
+            continue
+        }
+
+        $extension = [System.IO.Path]::GetExtension($relativePath).ToLowerInvariant()
+        Assert-Condition `
+            ($binaryExtensions -ccontains $extension -or
+             $textExtensions -ccontains $extension) `
+            $code
+        $relativePaths.Add($relativePath)
+    }
+
+    $sortedPaths = [string[]]$relativePaths.ToArray()
+    [System.Array]::Sort($sortedPaths, [System.StringComparer]::Ordinal)
+    $records = [System.Collections.Generic.List[string]]::new()
+    [long]$aggregateBytes = 0
+    foreach ($relativePath in $sortedPaths) {
+        [byte[]]$sourceBytes = Read-RegularFileBytes `
+            -Path (Join-Path $Root $relativePath) `
+            -MaximumBytes $script:maximumProducerContractSourceBytes `
+            -Root $Root `
+            -Code $code
+        $extension = [System.IO.Path]::GetExtension($relativePath).ToLowerInvariant()
+        if ($binaryExtensions -ccontains $extension) {
+            [byte[]]$canonicalBytes = $sourceBytes
+            $kind = "binary"
+        }
+        else {
+            Assert-Condition `
+                (-not ($sourceBytes.Length -ge 3 -and
+                       $sourceBytes[0] -eq 0xef -and
+                       $sourceBytes[1] -eq 0xbb -and
+                       $sourceBytes[2] -eq 0xbf)) `
+                $code
+            try {
+                $sourceText = $script:utf8Strict.GetString($sourceBytes)
+            }
+            catch {
+                Fail-TechnicalInvariant -Code $code
+            }
+            $normalizedText =
+                $sourceText.Replace("`r`n", "`n").Replace("`r", "`n")
+            [byte[]]$canonicalBytes = $script:utf8NoBom.GetBytes($normalizedText)
+            $kind = "text-lf"
+        }
+
+        Assert-Condition ($canonicalBytes.Length -gt 0) $code
+        $aggregateBytes += $canonicalBytes.Length
+        Assert-Condition ($aggregateBytes -le 16MB) $code
+        $records.Add(
+            "$relativePath`0$kind`0$($canonicalBytes.Length)`0" +
+            (Get-LowerSha256Bytes -Bytes $canonicalBytes))
+    }
+
+    [byte[]]$bindingBytes = $script:utf8NoBom.GetBytes(
+        ([string[]]$records.ToArray() -join "`n"))
+    return [pscustomobject]@{
+        SourceCount = [int]$records.Count
+        CanonicalByteLength = [long]$aggregateBytes
         SourceSetSha256 = Get-LowerSha256Bytes -Bytes $bindingBytes
     }
 }
@@ -2598,22 +2776,22 @@ function Read-M16SyntheticJourneyAcceptance {
         $expectedRootStrings = [ordered]@{
             decision = "AcceptHostedM16SyntheticEndToEndJourney"
             scope = "M16SyntheticEndToEndJourneyOnly"
-            runCompletedAtUtc = "2026-08-26T20:29:42Z"
+            runCompletedAtUtc = "2026-08-27T00:26:33Z"
             repository = "serkankaracan/iptv-suite"
             workflowPath = ".github/workflows/windows-quality.yml"
             workflowName = "Windows quality"
-            runEvent = "workflow_dispatch"
+            runEvent = "push"
             runBranch = "main"
-            runHeadSha = "da205bd194016815ab069a3513eff4500796584d"
+            runHeadSha = "502fc2240b3e04218c5976ebaacbe3eb0467247e"
             runConclusion = "success"
             producerJobName = "Locked build and test gate"
             producerJobConclusion = "success"
-            producerJobCompletedAtUtc = "2026-08-26T20:20:46Z"
+            producerJobCompletedAtUtc = "2026-08-27T00:17:48Z"
             requiredGateJobName = "Required Windows gate"
             requiredGateJobConclusion = "success"
             artifactName = "windows-quality-evidence"
             artifactDigestSha256 =
-                "04e823517cb745691b8b744670c858906b218c9f3030e47e3a4ba7540e44c1d4"
+                "87bc48d940d9359aa07d6c451f893459aa75013d331db633b498fd9355ed5c79"
             producerContractSourceSetSha256 =
                 $script:syntheticJourneyProducerContractSourceSetSha256
             closedBlocker = "M16SyntheticEndToEndJourneyPending"
@@ -2635,13 +2813,13 @@ function Read-M16SyntheticJourneyAcceptance {
             schemaVersion = 1
             repositoryId = 1328998460
             workflowId = 330610209
-            runId = [long]33009018937
-            runNumber = 276
+            runId = [long]33025558792
+            runNumber = 281
             runAttempt = 1
-            producerJobId = [long]98310223088
-            requiredGateJobId = [long]98315789718
-            artifactId = [long]9622072031
-            artifactSizeBytes = 13783
+            producerJobId = [long]98365914452
+            requiredGateJobId = [long]98370087400
+            artifactId = [long]9628529235
+            artifactSizeBytes = 14132
             producerContractSourceCount =
                 $script:syntheticJourneyProducerContractSourceCount
         }
@@ -2655,8 +2833,8 @@ function Read-M16SyntheticJourneyAcceptance {
         $expectedMembers = @(
             [pscustomobject]@{
                 Name = "evidence/quality-summary.json"
-                Length = 45966
-                Sha256 = "f3894bfb82f5ea811cf56c525c27c6dce6525e61f5404975aed4ab6142c3bf1c"
+                Length = 47236
+                Sha256 = "ca8fb5dfd1a3f622ddf7f7cf800d9ff23bab95341357f5038fc50318a6d7981e"
             },
             [pscustomobject]@{
                 Name = "fixtures/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt"
@@ -2714,7 +2892,7 @@ function Read-M16SyntheticJourneyAcceptance {
             -Code $code
         $expectedQualityStrings = [ordered]@{
             milestone = "M4-foundation"
-            commitSha = "da205bd194016815ab069a3513eff4500796584d"
+            commitSha = "502fc2240b3e04218c5976ebaacbe3eb0467247e"
             sdkVersion = "10.0.302"
             configuration = "Debug+Release"
             platform = "x64"
@@ -2733,7 +2911,7 @@ function Read-M16SyntheticJourneyAcceptance {
         foreach ($expected in ([ordered]@{
                     schemaVersion = 1
                     cleanRunCount = 2
-                    testCountPerRun = 614
+                    testCountPerRun = 631
                     journeyTestResultOccurrenceCount = 1
                 }).GetEnumerator()) {
             Assert-ExactInteger `
@@ -2788,6 +2966,7 @@ function Read-M16SyntheticJourneyAcceptance {
             -Value (Get-ExactProperty $acceptance "remainingM16Blockers" $code) `
             -Expected @(
                 "M16FeatureFreezeDecisionPending",
+                "M16FinalArtifactCanaryScanPending",
                 "M16FinalSecurityArchitectureScanPending",
                 "M16PhysicalDeviceAccessibilityMatrixPending",
                 "M16ReleaseOperationsPlanPending",
@@ -2819,6 +2998,322 @@ function Read-M16SyntheticJourneyAcceptance {
             IsCurrent =
                 $contractBinding.SourceCount -eq
                     $acceptance.producerContractSourceCount -and
+                $contractBinding.SourceSetSha256 -ceq
+                    $acceptance.producerContractSourceSetSha256
+        }
+    }
+    catch {
+        if ($_.Exception.Message -ceq "M16TechnicalInvariant:$code") {
+            throw $_.Exception.Message
+        }
+        Fail-TechnicalInvariant -Code $code
+    }
+}
+
+function Read-M16SecurityArchitectureAcceptance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $code = "SecurityArchitectureAcceptanceInvalid"
+    try {
+        $contractBinding = Get-SecurityArchitectureProducerContractBinding -Root $Root
+        $ledgerPath = Join-Path `
+            $Root `
+            ($script:securityArchitectureAcceptanceRelativePath.Replace('/', '\'))
+        $record = Read-StrictJsonRecord `
+            -Path $ledgerPath `
+            -Root $Root `
+            -Name "windows-m16-security-architecture-acceptance.json" `
+            -MaximumBytes $script:maximumFinalArtifactAcceptanceBytes
+        Assert-Condition `
+            ($record.Sha256 -ceq $script:securityArchitectureAcceptanceSha256) `
+            $code
+        $acceptance = $record.Value
+        Assert-ExactPropertyNames `
+            -Value $acceptance `
+            -Expected @(
+                "schemaVersion",
+                "decision",
+                "scope",
+                "runCompletedAtUtc",
+                "repository",
+                "repositoryId",
+                "workflowPath",
+                "workflowName",
+                "workflowId",
+                "runId",
+                "runNumber",
+                "runAttempt",
+                "runEvent",
+                "runBranch",
+                "runHeadSha",
+                "runConclusion",
+                "producerJobId",
+                "producerJobName",
+                "producerJobConclusion",
+                "producerJobCompletedAtUtc",
+                "requiredGateJobId",
+                "requiredGateJobName",
+                "requiredGateJobConclusion",
+                "artifactId",
+                "artifactName",
+                "artifactSizeBytes",
+                "artifactDigestSha256",
+                "artifactMembers",
+                "qualityEvidence",
+                "producerContractSourceCount",
+                "producerContractCanonicalByteLength",
+                "producerContractSourceSetSha256",
+                "closedBlocker",
+                "remainingM16Blockers",
+                "nonClaims") `
+            -Code $code
+
+        $expectedRootStrings = [ordered]@{
+            decision = "AcceptHostedM16FinalSecurityArchitectureScan"
+            scope = "M16FinalSecurityArchitectureScanOnly"
+            runCompletedAtUtc = "2026-08-27T00:26:33Z"
+            repository = "serkankaracan/iptv-suite"
+            workflowPath = ".github/workflows/windows-quality.yml"
+            workflowName = "Windows quality"
+            runEvent = "push"
+            runBranch = "main"
+            runHeadSha = "502fc2240b3e04218c5976ebaacbe3eb0467247e"
+            runConclusion = "success"
+            producerJobName = "Locked build and test gate"
+            producerJobConclusion = "success"
+            producerJobCompletedAtUtc = "2026-08-27T00:17:48Z"
+            requiredGateJobName = "Required Windows gate"
+            requiredGateJobConclusion = "success"
+            artifactName = "windows-quality-evidence"
+            artifactDigestSha256 =
+                "87bc48d940d9359aa07d6c451f893459aa75013d331db633b498fd9355ed5c79"
+            producerContractSourceSetSha256 =
+                $script:securityArchitectureProducerContractSourceSetSha256
+            closedBlocker = "M16FinalSecurityArchitectureScanPending"
+        }
+        foreach ($expected in $expectedRootStrings.GetEnumerator()) {
+            Assert-ExactString `
+                -Value (Get-ExactProperty $acceptance $expected.Key $code) `
+                -Expected ([string]$expected.Value) `
+                -Code $code
+        }
+        Assert-UtcTimestamp `
+            -Value (Get-ExactProperty $acceptance "runCompletedAtUtc" $code) `
+            -Code $code
+        Assert-UtcTimestamp `
+            -Value (Get-ExactProperty $acceptance "producerJobCompletedAtUtc" $code) `
+            -Code $code
+
+        $expectedRootIntegers = [ordered]@{
+            schemaVersion = 1
+            repositoryId = 1328998460
+            workflowId = 330610209
+            runId = [long]33025558792
+            runNumber = 281
+            runAttempt = 1
+            producerJobId = [long]98365914452
+            requiredGateJobId = [long]98370087400
+            artifactId = [long]9628529235
+            artifactSizeBytes = 14132
+            producerContractSourceCount =
+                $script:securityArchitectureProducerContractSourceCount
+            producerContractCanonicalByteLength =
+                $script:securityArchitectureProducerContractCanonicalByteLength
+        }
+        foreach ($expected in $expectedRootIntegers.GetEnumerator()) {
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $acceptance $expected.Key $code) `
+                -Expected ([long]$expected.Value) `
+                -Code $code
+        }
+
+        $expectedMembers = @(
+            [pscustomobject]@{
+                Name = "evidence/quality-summary.json"
+                Length = 47236
+                Sha256 = "ca8fb5dfd1a3f622ddf7f7cf800d9ff23bab95341357f5038fc50318a6d7981e"
+            },
+            [pscustomobject]@{
+                Name = "fixtures/LICENSES/LicenseRef-IPTVSuite-Synthetic-Test-Only.txt"
+                Length = 531
+                Sha256 = "0ee38448ce47fb7c98e56984a84819138e0f7eec085b03d75607d3f5f1d0dba3"
+            },
+            [pscustomobject]@{
+                Name = "fixtures/run-1/fixture-manifest.json"
+                Length = 927
+                Sha256 = "b1f1513e786f3176c7275af927c4c93c847d0476858fe56701d2054128818438"
+            })
+        $members = @(Get-ExactProperty $acceptance "artifactMembers" $code)
+        Assert-Condition ($members.Count -eq $expectedMembers.Count) $code
+        for ($index = 0; $index -lt $expectedMembers.Count; $index++) {
+            $member = $members[$index]
+            $expectedMember = $expectedMembers[$index]
+            Assert-Condition ($member -is [pscustomobject]) $code
+            Assert-ExactPropertyNames `
+                -Value $member `
+                -Expected @("name", "length", "sha256") `
+                -Code $code
+            Assert-ExactString `
+                -Value (Get-ExactProperty $member "name" $code) `
+                -Expected $expectedMember.Name `
+                -Code $code
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $member "length" $code) `
+                -Expected $expectedMember.Length `
+                -Code $code
+            Assert-ExactString `
+                -Value (Get-ExactProperty $member "sha256" $code) `
+                -Expected $expectedMember.Sha256 `
+                -Code $code
+        }
+
+        $quality = Get-ExactProperty $acceptance "qualityEvidence" $code
+        Assert-Condition ($quality -is [pscustomobject]) $code
+        Assert-ExactPropertyNames `
+            -Value $quality `
+            -Expected @(
+                "schemaVersion",
+                "milestone",
+                "commitSha",
+                "sdkVersion",
+                "configuration",
+                "platform",
+                "cleanRunCount",
+                "testCountPerRun",
+                "fullTestResultSetSha256",
+                "architectureTestCount",
+                "architectureTestResultSetSha256",
+                "architectureTestResultsPresentExactlyOnce",
+                "architectureTestResultsAllPassed",
+                "qualityGateSentinel",
+                "scannerCliSelfTest",
+                "artifactCanaryScan",
+                "fixture") `
+            -Code $code
+        $expectedQualityStrings = [ordered]@{
+            milestone = "M4-foundation"
+            commitSha = "502fc2240b3e04218c5976ebaacbe3eb0467247e"
+            sdkVersion = "10.0.302"
+            configuration = "Debug+Release"
+            platform = "x64"
+            fullTestResultSetSha256 =
+                "66dab64fa75e52da441dd863490f8d0c5c32f54c5963a12b860ff8af19663ff2"
+            architectureTestResultSetSha256 =
+                "9d2e961e127593313f48365a9c7f700a6bf1e745c832c8947a94c90a0c4da778"
+            qualityGateSentinel = "armed-failed-and-disarmed-passed"
+            scannerCliSelfTest = "contaminated-exit-2-and-clean-exit-0"
+            artifactCanaryScan = "artifact-files-only-passed"
+        }
+        foreach ($expected in $expectedQualityStrings.GetEnumerator()) {
+            Assert-ExactString `
+                -Value (Get-ExactProperty $quality $expected.Key $code) `
+                -Expected ([string]$expected.Value) `
+                -Code $code
+        }
+        foreach ($expected in ([ordered]@{
+                    schemaVersion = 1
+                    cleanRunCount = 2
+                    testCountPerRun = 631
+                    architectureTestCount = 77
+                }).GetEnumerator()) {
+            Assert-ExactInteger `
+                -Value (Get-ExactProperty $quality $expected.Key $code) `
+                -Expected ([long]$expected.Value) `
+                -Code $code
+        }
+        Assert-True `
+            -Value (Get-ExactProperty `
+                $quality `
+                "architectureTestResultsPresentExactlyOnce" `
+                $code) `
+            -Code $code
+        Assert-True `
+            -Value (Get-ExactProperty `
+                $quality `
+                "architectureTestResultsAllPassed" `
+                $code) `
+            -Code $code
+        Assert-Condition ($quality.commitSha -ceq $acceptance.runHeadSha) $code
+
+        $fixture = Get-ExactProperty $quality "fixture" $code
+        Assert-Condition ($fixture -is [pscustomobject]) $code
+        Assert-ExactPropertyNames `
+            -Value $fixture `
+            -Expected @(
+                "generatorName",
+                "generatorVersion",
+                "algorithmVersion",
+                "seed",
+                "provenance",
+                "recordsSha256",
+                "manifestSha256") `
+            -Code $code
+        foreach ($expected in ([ordered]@{
+                    generatorName = "IptvSuite.Testing.SyntheticFixtureGenerator"
+                    generatorVersion = "1.0.0"
+                    provenance = "synthetic"
+                    recordsSha256 =
+                        "1da91c57da1f704076600aab29cdd938851d75f765679ac2b79dc9cb9e908020"
+                    manifestSha256 =
+                        "b1f1513e786f3176c7275af927c4c93c847d0476858fe56701d2054128818438"
+                }).GetEnumerator()) {
+            Assert-ExactString `
+                -Value (Get-ExactProperty $fixture $expected.Key $code) `
+                -Expected ([string]$expected.Value) `
+                -Code $code
+        }
+        Assert-ExactInteger `
+            -Value (Get-ExactProperty $fixture "algorithmVersion" $code) `
+            -Expected 1 `
+            -Code $code
+        Assert-ExactInteger `
+            -Value (Get-ExactProperty $fixture "seed" $code) `
+            -Expected 20260809 `
+            -Code $code
+        Assert-Condition ($fixture.manifestSha256 -ceq $members[2].sha256) $code
+
+        Assert-ExactStringArray `
+            -Value (Get-ExactProperty $acceptance "remainingM16Blockers" $code) `
+            -Expected @(
+                "M16FeatureFreezeDecisionPending",
+                "M16FinalArtifactCanaryScanPending",
+                "M16PhysicalDeviceAccessibilityMatrixPending",
+                "M16ReleaseOperationsPlanPending",
+                "M16SyntheticEndToEndJourneyPending",
+                "M16TwentyFourHourSoakPending") `
+            -Code $code
+        $nonClaims = Get-ExactProperty $acceptance "nonClaims" $code
+        Assert-Condition ($nonClaims -is [pscustomobject]) $code
+        Assert-ExactPropertyNames `
+            -Value $nonClaims `
+            -Expected @(
+                "candidateReady",
+                "independentTrxArtifactProvenance",
+                "penetrationOrSastComplete",
+                "cveLicenseLegalPrivacyApproved",
+                "storeIdentitySigningWackApproved",
+                "physicalDeviceAccessibilityMatrixComplete",
+                "finalArtifactCanaryScanCurrent",
+                "twentyFourHourSoakComplete") `
+            -Code $code
+        foreach ($propertyName in @($nonClaims.PSObject.Properties.Name)) {
+            Assert-False `
+                -Value (Get-ExactProperty $nonClaims $propertyName $code) `
+                -Code $code
+        }
+
+        return [pscustomobject]@{
+            Record = $record
+            Acceptance = $acceptance
+            ContractBinding = $contractBinding
+            IsCurrent =
+                $contractBinding.SourceCount -eq
+                    $acceptance.producerContractSourceCount -and
+                $contractBinding.CanonicalByteLength -eq
+                    $acceptance.producerContractCanonicalByteLength -and
                 $contractBinding.SourceSetSha256 -ceq
                     $acceptance.producerContractSourceSetSha256
         }
@@ -3088,10 +3583,17 @@ try {
         -Root $resolvedRepositoryRoot
     $syntheticJourneyAcceptance =
         $syntheticJourneyAcceptanceValidation.Acceptance
+    $script:technicalStage = "SecurityArchitectureAcceptance"
+    $securityArchitectureAcceptanceValidation =
+        Read-M16SecurityArchitectureAcceptance -Root $resolvedRepositoryRoot
+    $securityArchitectureAcceptance =
+        $securityArchitectureAcceptanceValidation.Acceptance
     $finalArtifactAcceptanceCurrent =
         [bool]$finalArtifactAcceptanceValidation.IsCurrent
     $syntheticJourneyAcceptanceCurrent =
         [bool]$syntheticJourneyAcceptanceValidation.IsCurrent
+    $securityArchitectureAcceptanceCurrent =
+        [bool]$securityArchitectureAcceptanceValidation.IsCurrent
 
     $script:technicalStage = "InputStability"
     foreach ($key in @($inputRecords.Keys)) {
@@ -3111,7 +3613,6 @@ try {
     $script:technicalStage = "EvidenceComposition"
     $m16BlockerDefinitions = @(
         [ordered]@{ code = "M16FeatureFreezeDecisionPending"; category = "Governance"; origin = "M16"; closureMode = "RecordedDecisionRequired" },
-        [ordered]@{ code = "M16FinalSecurityArchitectureScanPending"; category = "Security"; origin = "M16"; closureMode = "AutomatedEvidenceRequired" },
         [ordered]@{ code = "M16TwentyFourHourSoakPending"; category = "Reliability"; origin = "M16"; closureMode = "OperatorEvidenceRequired" },
         [ordered]@{ code = "M16PhysicalDeviceAccessibilityMatrixPending"; category = "Accessibility"; origin = "M16"; closureMode = "OperatorEvidenceRequired" },
         [ordered]@{ code = "M16ReleaseOperationsPlanPending"; category = "Operations"; origin = "M16"; closureMode = "RecordedDecisionRequired" }
@@ -3119,6 +3620,14 @@ try {
     if (-not $finalArtifactAcceptanceCurrent) {
         $m16BlockerDefinitions += [ordered]@{
             code = "M16FinalArtifactCanaryScanPending"
+            category = "Security"
+            origin = "M16"
+            closureMode = "AutomatedEvidenceRequired"
+        }
+    }
+    if (-not $securityArchitectureAcceptanceCurrent) {
+        $m16BlockerDefinitions += [ordered]@{
+            code = "M16FinalSecurityArchitectureScanPending"
             category = "Security"
             origin = "M16"
             closureMode = "AutomatedEvidenceRequired"
@@ -3231,6 +3740,56 @@ try {
                 "None"
             }
         }
+        finalSecurityArchitectureAcceptance = [ordered]@{
+            result = if ($securityArchitectureAcceptanceCurrent) {
+                "accepted-current"
+            }
+            else {
+                "stale-reopen"
+            }
+            current = $securityArchitectureAcceptanceCurrent
+            ledgerSha256 = $securityArchitectureAcceptanceValidation.Record.Sha256
+            decision = $securityArchitectureAcceptance.decision
+            scope = $securityArchitectureAcceptance.scope
+            runCompletedAtUtc = $securityArchitectureAcceptance.runCompletedAtUtc
+            runId = $securityArchitectureAcceptance.runId
+            runNumber = $securityArchitectureAcceptance.runNumber
+            runAttempt = $securityArchitectureAcceptance.runAttempt
+            runHeadSha = $securityArchitectureAcceptance.runHeadSha
+            producerJobId = $securityArchitectureAcceptance.producerJobId
+            requiredGateJobId = $securityArchitectureAcceptance.requiredGateJobId
+            artifactId = $securityArchitectureAcceptance.artifactId
+            artifactName = $securityArchitectureAcceptance.artifactName
+            artifactDigestSha256 =
+                $securityArchitectureAcceptance.artifactDigestSha256
+            qualitySummaryMemberLength =
+                $securityArchitectureAcceptance.artifactMembers[0].length
+            qualitySummaryMemberSha256 =
+                $securityArchitectureAcceptance.artifactMembers[0].sha256
+            cleanRunCount =
+                $securityArchitectureAcceptance.qualityEvidence.cleanRunCount
+            testCountPerRun =
+                $securityArchitectureAcceptance.qualityEvidence.testCountPerRun
+            fullTestResultSetSha256 =
+                $securityArchitectureAcceptance.qualityEvidence.fullTestResultSetSha256
+            architectureTestCount =
+                $securityArchitectureAcceptance.qualityEvidence.architectureTestCount
+            architectureTestResultSetSha256 =
+                $securityArchitectureAcceptance.qualityEvidence.architectureTestResultSetSha256
+            producerContractSourceCount =
+                $securityArchitectureAcceptance.producerContractSourceCount
+            producerContractCanonicalByteLength =
+                $securityArchitectureAcceptance.producerContractCanonicalByteLength
+            producerContractSourceSetSha256 =
+                $securityArchitectureAcceptance.producerContractSourceSetSha256
+            closedBlocker = $securityArchitectureAcceptance.closedBlocker
+            effectiveClosedBlocker = if ($securityArchitectureAcceptanceCurrent) {
+                $securityArchitectureAcceptance.closedBlocker
+            }
+            else {
+                "None"
+            }
+        }
         syntheticEndToEndJourneyAcceptance = [ordered]@{
             result = if ($syntheticJourneyAcceptanceCurrent) {
                 "accepted-current"
@@ -3288,6 +3847,16 @@ try {
             [ordered]@{
                 code = "M16FinalArtifactCanaryScan"
                 result = if ($finalArtifactAcceptanceCurrent) {
+                    "passed"
+                }
+                else {
+                    "blocked"
+                }
+                evidenceCount = 1
+            },
+            [ordered]@{
+                code = "M16FinalSecurityArchitectureScan"
+                result = if ($securityArchitectureAcceptanceCurrent) {
                     "passed"
                 }
                 else {
@@ -3369,8 +3938,22 @@ try {
          $stableSyntheticJourneyAcceptance.Record.Sha256 -ceq
             $syntheticJourneyAcceptanceValidation.Record.Sha256 -and
          $stableSyntheticJourneyAcceptance.ContractBinding.SourceSetSha256 -ceq
-            $syntheticJourneyAcceptanceValidation.ContractBinding.SourceSetSha256) `
+             $syntheticJourneyAcceptanceValidation.ContractBinding.SourceSetSha256) `
         "SyntheticJourneyAcceptanceInvalid"
+    $stableSecurityArchitectureAcceptance =
+        Read-M16SecurityArchitectureAcceptance -Root $resolvedRepositoryRoot
+    Assert-Condition `
+        ($stableSecurityArchitectureAcceptance.Record.ByteLength -eq
+            $securityArchitectureAcceptanceValidation.Record.ByteLength -and
+         $stableSecurityArchitectureAcceptance.Record.Sha256 -ceq
+            $securityArchitectureAcceptanceValidation.Record.Sha256 -and
+         $stableSecurityArchitectureAcceptance.ContractBinding.SourceCount -eq
+            $securityArchitectureAcceptanceValidation.ContractBinding.SourceCount -and
+         $stableSecurityArchitectureAcceptance.ContractBinding.CanonicalByteLength -eq
+            $securityArchitectureAcceptanceValidation.ContractBinding.CanonicalByteLength -and
+         $stableSecurityArchitectureAcceptance.ContractBinding.SourceSetSha256 -ceq
+            $securityArchitectureAcceptanceValidation.ContractBinding.SourceSetSha256) `
+        "SecurityArchitectureAcceptanceInvalid"
     $prePublicationCommit = Get-CleanRepositoryCommit -Root $resolvedRepositoryRoot
     Assert-Condition ($prePublicationCommit -ceq $repositoryCommit) "RepositoryChanged"
 
