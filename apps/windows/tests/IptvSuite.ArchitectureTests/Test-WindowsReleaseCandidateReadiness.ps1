@@ -19,7 +19,7 @@ $script:nativePackageSha256 = ("b" * 64)
 $script:m16FinalArtifactAcceptanceRelativePath =
     "eng/windows-m16-final-artifact-acceptance.json"
 $script:m16FinalArtifactAcceptanceSha256 =
-    "89f87e92514cda2cbfc8d41f34a6d074d69871a6808086fb15876e0d0d95c05f"
+    "327a09c059111e62682d247c06f07249ede8c4d1cc319f2b7b85efff48ca6364"
 $script:m16SyntheticJourneyAcceptanceRelativePath =
     "eng/windows-m16-synthetic-journey-acceptance.json"
 $script:m16SyntheticJourneyAcceptanceSha256 =
@@ -27,7 +27,7 @@ $script:m16SyntheticJourneyAcceptanceSha256 =
 $script:m16SecurityArchitectureAcceptanceRelativePath =
     "eng/windows-m16-security-architecture-acceptance.json"
 $script:m16SecurityArchitectureAcceptanceSha256 =
-    "fca033be76fb252ed2a4f3ac9dbf36dbcf0240b1f4eeb1dfd06210d79b7ca152"
+    "1c8cb5fb9fa579d4c91cdbc1427044dc2de563f25cf30d449210e8f703652d22"
 $script:m16SyntheticJourneyProducerStaticPaths = @(
     ".github/workflows/windows-quality.yml",
     "eng/Invoke-WindowsQualityGate.ps1",
@@ -302,7 +302,7 @@ if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') {
     throw "M15TechnicalInvariant:RepositoryBindingInvalid"
 }
 $sbomCurrentAtEvaluation =
-    $env:M16_SELF_TEST_M15_MODE -ceq "CurrentSbom"
+    $env:M16_SELF_TEST_M15_MODE -cne "StaleSbom"
 $cveFinalReleaseFreshAtEvaluation =
     $env:M16_SELF_TEST_M15_MODE -cne "ExpiredCve"
 $blockers = @(
@@ -1007,13 +1007,13 @@ function Read-AndAssertBlockedEvidence {
         [Parameter(Mandatory = $true)]
         [string]$Path,
 
-        [bool]$ExpectedSbomCurrentAtEvaluation = $false,
+        [bool]$ExpectedSbomCurrentAtEvaluation = $true,
 
         [bool]$ExpectedCveFinalReleaseFreshAtEvaluation = $true,
 
-        [bool]$ExpectedFinalArtifactCurrent = $false,
+        [bool]$ExpectedFinalArtifactCurrent = $true,
 
-        [bool]$ExpectedSecurityArchitectureCurrent = $false,
+        [bool]$ExpectedSecurityArchitectureCurrent = $true,
 
         [bool]$ExpectedSyntheticJourneyCurrent = $true
     )
@@ -1131,26 +1131,26 @@ function Read-AndAssertBlockedEvidence {
          $finalArtifactAcceptance.decision -ceq
             "AcceptHostedM16FinalArtifactCanaryScan" -and
          $finalArtifactAcceptance.scope -ceq "M16FinalArtifactCanaryScanOnly" -and
-         $finalArtifactAcceptance.runCompletedAtUtc -ceq "2026-08-28T00:11:59Z" -and
-         $finalArtifactAcceptance.runId -eq 33127559624 -and
-         $finalArtifactAcceptance.runNumber -eq 321 -and
+         $finalArtifactAcceptance.runCompletedAtUtc -ceq "2026-08-28T06:00:37Z" -and
+         $finalArtifactAcceptance.runId -eq 33145434224 -and
+         $finalArtifactAcceptance.runNumber -eq 327 -and
          $finalArtifactAcceptance.runAttempt -eq 1 -and
          $finalArtifactAcceptance.runHeadSha -ceq
-            "1e42603173e69e536027a0a094338da533faa97d" -and
-         $finalArtifactAcceptance.producerJobId -eq 98712013301 -and
-         $finalArtifactAcceptance.artifactId -eq 9669457755 -and
+            "c5db51438b3fd9247c92fa2946b13ad09147f9cc" -and
+         $finalArtifactAcceptance.producerJobId -eq 98767157714 -and
+         $finalArtifactAcceptance.artifactId -eq 9675962291 -and
          $finalArtifactAcceptance.artifactName -ceq
             "windows-m16-final-artifact-evidence" -and
          $finalArtifactAcceptance.artifactDigestSha256 -ceq
-            "bbc03adaaafc2d790e2c5f5c559c18c012c3f5f0f4aa0aa5b4f2c42a506289a6" -and
+            "f7b3c777ba1941642e173be82490ee6478d470e9ab189f8b44c3ca7e459451fb" -and
          $finalArtifactAcceptance.memberLength -eq 3281 -and
          $finalArtifactAcceptance.memberSha256 -ceq
-            "8e7654776bf532e76e555056159079d5e40506fdf2c03a916d59e7f09976d91b" -and
+            "383a69a75eb9f02547dc8c0aa0a382e05cbc626138ac11be2b2e70f8389b0107" -and
          $finalArtifactAcceptance.packageSha256 -ceq
-            "3e31ee5b010a07f8912ba5c4bd1cf094d20d182f85301abbd1414cc5b8326a2b" -and
+            "a809f0d41c188824634d9af4c75bde15f3a378190845ed93a58e7b49aff17e97" -and
          $finalArtifactAcceptance.producerContractSourceCount -eq 39 -and
          $finalArtifactAcceptance.producerContractSourceSetSha256 -ceq
-            "f033e9721efd06184d5bc21c4fd215902b3c1e98fa3d5279cbd644e0d171f6bc" -and
+            "697856156c64898518dd30cd3013671939206d4f59bb15414973fbd01be2f63e" -and
          $finalArtifactAcceptance.packageProducingSnapshotFileCount -eq 115 -and
          $finalArtifactAcceptance.packageProducingSnapshotSha256 -ceq
             "5568fb8fc87f614392762501cb2a4b3be1a13487bb8cfab037ccaec579756810" -and
@@ -1217,34 +1217,34 @@ function Read-AndAssertBlockedEvidence {
          $securityArchitectureAcceptance.scope -ceq
             "M16FinalSecurityArchitectureScanOnly" -and
          $securityArchitectureAcceptance.runCompletedAtUtc -ceq
-            "2026-08-28T00:11:59Z" -and
-         $securityArchitectureAcceptance.runId -eq 33127559624 -and
-         $securityArchitectureAcceptance.runNumber -eq 321 -and
+            "2026-08-28T06:00:37Z" -and
+         $securityArchitectureAcceptance.runId -eq 33145434224 -and
+         $securityArchitectureAcceptance.runNumber -eq 327 -and
          $securityArchitectureAcceptance.runAttempt -eq 1 -and
          $securityArchitectureAcceptance.runHeadSha -ceq
-            "1e42603173e69e536027a0a094338da533faa97d" -and
-         $securityArchitectureAcceptance.producerJobId -eq 98709207462 -and
-         $securityArchitectureAcceptance.requiredGateJobId -eq 98713628778 -and
-         $securityArchitectureAcceptance.artifactId -eq 9669277637 -and
+            "c5db51438b3fd9247c92fa2946b13ad09147f9cc" -and
+         $securityArchitectureAcceptance.producerJobId -eq 98765280906 -and
+         $securityArchitectureAcceptance.requiredGateJobId -eq 98768606459 -and
+         $securityArchitectureAcceptance.artifactId -eq 9675779615 -and
          $securityArchitectureAcceptance.artifactName -ceq
             "windows-quality-evidence" -and
          $securityArchitectureAcceptance.artifactDigestSha256 -ceq
-            "bea5dd2a0c87e70bfa26065b66b7fba9c7ffc2acb8193bad22d2e5d5fecfdd86" -and
-         $securityArchitectureAcceptance.qualitySummaryMemberLength -eq 47236 -and
+            "75f74ef497cff27fbbd725be81a61104e0bd16e59370fb6520f379a94002a772" -and
+         $securityArchitectureAcceptance.qualitySummaryMemberLength -eq 47549 -and
          $securityArchitectureAcceptance.qualitySummaryMemberSha256 -ceq
-            "9d865417ff927ef8ddf532fcd9706f657d0200cb6251e3f21b7ba06c08b4528e" -and
+            "1ca66e4a9ff89e8be3fc9b95adfdff9f9d3d0a9ad0b11f4e8683d927122df2f7" -and
          $securityArchitectureAcceptance.cleanRunCount -eq 2 -and
-         $securityArchitectureAcceptance.testCountPerRun -eq 631 -and
+         $securityArchitectureAcceptance.testCountPerRun -eq 634 -and
          $securityArchitectureAcceptance.fullTestResultSetSha256 -ceq
-            "66dab64fa75e52da441dd863490f8d0c5c32f54c5963a12b860ff8af19663ff2" -and
-         $securityArchitectureAcceptance.architectureTestCount -eq 77 -and
+            "a94e0c17dfa7ab56b098a760101c4b2afe10bc2b0b2aa542d0b790da049c23b4" -and
+         $securityArchitectureAcceptance.architectureTestCount -eq 80 -and
          $securityArchitectureAcceptance.architectureTestResultSetSha256 -ceq
-            "9d2e961e127593313f48365a9c7f700a6bf1e745c832c8947a94c90a0c4da778" -and
-         $securityArchitectureAcceptance.producerContractSourceCount -eq 329 -and
+            "8bf658b6c8e724bf1af1f0c48f67b9a6c6b65587e137aba6ebcfbc4e07f27bfb" -and
+         $securityArchitectureAcceptance.producerContractSourceCount -eq 330 -and
          $securityArchitectureAcceptance.producerContractCanonicalByteLength -eq
-            7204158 -and
+            7208153 -and
          $securityArchitectureAcceptance.producerContractSourceSetSha256 -ceq
-            "7ee590883be2198547a336611370a629c5f20a7f16a5cdd6e3b9294fb626c031" -and
+            "c9ebdfcd3d0544c8e4209ba4d6cf3c9f1dbfe2919162ee603e17cc13a0d6ec1d" -and
          $securityArchitectureAcceptance.closedBlocker -ceq
             "M16FinalSecurityArchitectureScanPending" -and
          $securityArchitectureAcceptance.effectiveClosedBlocker -ceq
@@ -1971,7 +1971,7 @@ try {
         Invoke-AllowedCandidate -EvidencePath $expiredCvePath
         $expiredCveEvidence = Read-AndAssertBlockedEvidence `
             -Path $expiredCvePath `
-            -ExpectedSbomCurrentAtEvaluation $false `
+            -ExpectedSbomCurrentAtEvaluation $true `
             -ExpectedCveFinalReleaseFreshAtEvaluation $false
         Assert-TestCondition `
             (@($expiredCveEvidence.blockers | ForEach-Object { [string]$_.code }) `
@@ -1990,11 +1990,14 @@ try {
         $currentSbomEvidence = Read-AndAssertBlockedEvidence `
             -Path $currentSbomPath `
             -ExpectedSbomCurrentAtEvaluation $true `
-            -ExpectedCveFinalReleaseFreshAtEvaluation $true
+            -ExpectedCveFinalReleaseFreshAtEvaluation $true `
+            -ExpectedFinalArtifactCurrent $true `
+            -ExpectedSecurityArchitectureCurrent $true
         Assert-TestCondition `
             ($currentSbomEvidence.m1ToM15AutomatedGateSetPassed -and
-             -not $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
-            "M15 aggregate or stale final-artifact acceptance changed."
+             $currentSbomEvidence.finalArtifactCanaryAcceptance.current -and
+             $currentSbomEvidence.finalSecurityArchitectureAcceptance.current) `
+            "M15 aggregate or current M16 acceptances changed."
     }
     finally {
         Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue
