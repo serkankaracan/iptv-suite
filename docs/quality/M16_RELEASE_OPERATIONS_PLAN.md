@@ -16,7 +16,7 @@ Her karar tek bir immutable candidate packet'ına bağlanır. Packet aşağıdak
 |---|---|---|
 | Source/build | Clean commit SHA, exact SDK/configuration ve build sonucu | M16 final clean-commit bağı bekleniyor |
 | Package | Exact package version, identity, architecture, byte length ve SHA-256 | Production identity/signing bekleniyor |
-| Predecessor evidence | M15 ve M16 sanitized summary boyut/hash'leri | M16 final aggregation bekleniyor |
+| Predecessor evidence | M15 ve M16 sanitized summary boyut/hash'leri | `26fedef...` blocked aggregate kaydedildi; final release packet bekleniyor |
 | Supply chain | Package-bound SBOM digest'i, exact dependency graph ve fresh CVE review | Final candidate için yeniden doğrulama gerekir |
 | Quality/reliability | Full gate, journey, canary/security scan, fiziksel matrix ve 24 saat soak sonucu | Açık M16 kapıları var |
 | Release metni | Support matrix, known issues ve release notes'un exact revision/hash'i | Final candidate'a göre üretilecek |

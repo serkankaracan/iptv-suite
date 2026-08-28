@@ -54,7 +54,24 @@ Blocked baseline üretim çağrısı repository kökünden şöyledir:
 
 Sanitized sonuç `.artifacts/m16-release-candidate/rc-summary.json` altında yayımlanır.
 
-Tam RC aggregation baseline'ı gerçek current predecessor input setiyle henüz yeniden üretilmemiştir. Hosted final-artifact, journey ve security/architecture kayıtlarının üçü de kendi exact commit/artifact ve source closure bağlarında current accepted evidence'dır. Run `#327` (`33145434224`), final-artifact için exact `39`-source closure'ı ve security/architecture için exact `330`-source closure'ı locked quality, signed MSIX lifecycle, DPAPI ve required gate ile tamamen yeşil doğruladı. Synthetic journey ise ayrı run `#321` (`33127559624`) ve exact `132`-source closure'ında current kalır. Bu kayıtlar kalan predecessor veya dört M16 kapısının tamamlandığı iddiası değildir.
+## Exact commit-bound aggregation checkpoint'i
+
+`LOCAL VERIFIED — BLOCKED, 2026-08-28`: Gerçek predecessor input seti clean `26fedef6544d542bf77723c4ee2062488aff64a8` üzerinde `2026-08-28T10:06:48.6993606Z` zamanında birleştirildi. `18.513` byte sanitized `rc-summary.json` dosyasının SHA-256 değeri `b6af0fdd3000ae6087ed66ba548b988891ead15d41bb7395167617133d4ab90b`, exact release-package bağı `8051dfab808db2b8da3e556cc38d05a83bf764ad124e239df50ae9c98241efee`dir. Sonuç `aggregationIntegrityPassed=true` ve `m1ToM15AutomatedGateSetPassed=true`; schema-v1 sözleşmesi gereği `m16TechnicalGateSetPassed=false`, `candidateReady=false` ve `result=blocked` kaldı. Final-artifact, security/architecture ve synthetic-journey kabullerinin üçü de `accepted-current` doğrulandı.
+
+Exact sekiz input bağı şöyledir:
+
+| Input | Byte | SHA-256 |
+|---|---:|---|
+| `quality-summary.json` | `47.549` | `33980829ced75868987a2211eae4742169ed757622836807485529f7e9a3a61d` |
+| `package-smoke-success.json` | `18.708` | `5919b1805f7568b84fe3508510ac4cd858e27bc48cc13e14351254b7a965a526` |
+| `package-lifecycle-success.json` | `2.480` | `78dfa90b86b7a49f50b3fbd56c9a12e25bbd020386fbcc7b4847d8d36dc84481` |
+| `dpapi-user-boundary-success.json` | `1.763` | `dc0b03ad25c32cc327249fda655c85323885bd5eceab5ded75993fcac6db872b` |
+| `native-tier-a-success.json` | `3.960` | `fe6e436ea3b61ac662dd55276484103084b3d06ba8ba0d84f0f69766e1e9e033` |
+| `catalog-benchmark-summary.json` | `295.025` | `7840fecbdf54df28ffd96becae7b961f39ac66e336e7627180fe4b6aed6c452f` |
+| `catalog-regression-summary.json` | `5.327` | `52f2e1d8f049ca305a25e8ea055e7d8469e9b377007892379de43518ffb782ec` |
+| `m15-readiness.json` | `32.333` | `9259f33ee0682d9b8228496b9383ff57aadf7fe72beb5a73464d440cf58f45c0` |
+
+Kalan `16` blocker'ın `12` tanesi M15 dış kanıtı, `4` tanesi M16 kapısıdır; M16 dağılımı iki recorded-decision ve iki operator-evidence kapısıdır. Bu belgeyi kaydeden sonraki docs-only commit, exact input commit'ini geriye dönük değiştirmez: checkpoint yalnız immutable `26fedef...` adayı için geçerlidir ve successor `HEAD` için current aggregate iddiası değildir. Hosted run `#327` (`33145434224`) ile run `#321` (`33127559624`) kendi accepted source closure'larında current kalır.
 
 ## Sabit ve bounded input seti
 
@@ -76,7 +93,7 @@ Inputlar strict UTF-8/schema, duplicate-property, bounded boyut/yapı, containme
 ## Gate alanlarının anlamı
 
 - `aggregationIntegrityPassed=true`, inputların beklenen schema, provenance, commit/package ve bounded publication sözleşmesini geçtiğini gösterir; ürün veya Store acceptance sonucu değildir.
-- Son historical RC evidence'ındaki `m1ToM15AutomatedGateSetPassed=false`, o evaluation anındaki stale SBOM predecessor sonucunu kaydeder. Current source-controlled M15 zinciri clean `f6e8fdbb56644bff62ab261cb4725d1088e5124a` üzerindeki hosted SBOM run `#15` (`33143245610`) ve onun exact ledger hash'ine zincirlenen farklı clean `1c7ae00298414fb7707ad6097e151fc39aa38c03` üzerindeki CVE run `#88` (`33143833495`) ile `technicalBaselinePassed=true` durumuna yenilenmiştir. CVE final-release freshness sınırı `2026-08-29T05:09:29Z`, yedi günlük teknik freshness sınırı `2026-09-04T05:09:29Z`dir; aggregation alanı ancak current RC input seti yeniden üretildiğinde değişebilir.
+- Exact `26fedef...` checkpoint'inde `m1ToM15AutomatedGateSetPassed=true`; bu sonuç clean `f6e8fdbb56644bff62ab261cb4725d1088e5124a` üzerindeki hosted SBOM run `#15` (`33143245610`) ve onun exact ledger hash'ine zincirlenen clean `1c7ae00298414fb7707ad6097e151fc39aa38c03` üzerindeki CVE run `#88` (`33143833495`) ile yenilenen M15 teknik zincirini doğrular. CVE final-release freshness sınırı `2026-08-29T05:09:29Z`, yedi günlük teknik freshness sınırı `2026-09-04T05:09:29Z`dir; yeni candidate commit için aggregation yeniden üretilmelidir.
 - `m16TechnicalGateSetPassed=false`, M16'nın kendi hard gate setinin tamamlanmadığını açıkça kaydeder.
 - `candidateReady=false`, schema v1'in değişmez ve fail-closed sonucudur.
 
@@ -123,4 +140,4 @@ Bu local kayıt release yetkisi değildir ve schema-v1 aggregator'ın hard-coded
 - Hosted ledger kabulleri yalnız bağlı oldukları exact source closure'larda kendi kapılarını kapatır; source drift'te kapı yeniden açılır. Private-flight rehearsal, production signing/WACK, Partner Center, privacy/support/listing ve hukuk kapıları kapanmaz.
 - Feature freeze ile rollback/withdrawal/release-operations kabulü ayrıca tamamlanmalıdır.
 
-Tam commit-bound RC aggregation evidence üretildikten sonra input digest'leri, kalan blocker sayaçları ve doğrulama sonuçları bu belgeye ayrı checkpoint olarak eklenmelidir. O zamana kadar `m16TechnicalGateSetPassed=false`, `candidateReady=false` ve durum `BLOCKED` kalır.
+Exact `26fedef...` commit-bound RC aggregation checkpoint'i yukarıda kaydedilmiştir. Integrity ve M1–M15 otomatik gate seti geçse de `16` açık blocker nedeniyle `m16TechnicalGateSetPassed=false`, `candidateReady=false` ve durum `BLOCKED` kalır. Yeni candidate commit, yeni dış kanıt veya kayıtlı karar bu tarihsel checkpoint'i sessizce güncellemez; ilgili input seti ve aggregate yeniden üretilmelidir.
