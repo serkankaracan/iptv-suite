@@ -599,15 +599,15 @@ function Read-AndAssertEvidence {
         -Message "the package vulnerability acceptance evidence schema changed."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.ledgerSha256 -ceq
-            "ee7e95df83dadaaa4d6e352e4807c819b26c9be23db53dc3b36f11d84a771e1c" -and
+            "290f1e57eecd8c9b30093644af87fdd83d4fe338b0151691b9de62ef8310e126" -and
          $packageVulnerabilityAcceptance.decision -ceq
             "AcceptTechnicalKnownVulnerabilityReview" -and
          $packageVulnerabilityAcceptance.scope -ceq
             "ProductionWindowsLeafKnownVulnerabilityReviewOnly" -and
          $packageVulnerabilityAcceptance.runCompletedAtUtc -ceq
-            "2026-08-27T09:14:09Z" -and
+            "2026-08-28T05:09:29Z" -and
          $packageVulnerabilityAcceptance.freshThroughUtc -ceq
-            "2026-09-03T09:14:09Z" -and
+            "2026-09-04T05:09:29Z" -and
          $packageVulnerabilityAcceptance.freshnessPolicy -ceq
             "RunCompletionPlus7Days" -and
          $packageVulnerabilityAcceptance.maximumAgeDays -eq 7 -and
@@ -639,30 +639,30 @@ function Read-AndAssertEvidence {
          $packageVulnerabilityAcceptance.workflowName -ceq
             "Windows known-vulnerability producer" -and
          $packageVulnerabilityAcceptance.workflowId -eq 342499403 -and
-         $packageVulnerabilityAcceptance.runId -eq 33057496306 -and
-         $packageVulnerabilityAcceptance.runNumber -eq 65 -and
+         $packageVulnerabilityAcceptance.runId -eq 33143833495 -and
+         $packageVulnerabilityAcceptance.runNumber -eq 88 -and
          $packageVulnerabilityAcceptance.runAttempt -eq 1 -and
          $packageVulnerabilityAcceptance.runHeadSha -ceq
-            "1ce6c80b97c886a7a40a676359e8d22a3fc22a6d" -and
+            "1c7ae00298414fb7707ad6097e151fc39aa38c03" -and
          $packageVulnerabilityAcceptance.runConclusion -ceq "success" -and
-         $packageVulnerabilityAcceptance.jobId -eq 98467829624 -and
+         $packageVulnerabilityAcceptance.jobId -eq 98760427129 -and
          $packageVulnerabilityAcceptance.jobName -ceq
             "Known-vulnerability producer gate" -and
          $packageVulnerabilityAcceptance.jobConclusion -ceq "success" -and
-         $packageVulnerabilityAcceptance.artifactId -eq 9640281201 -and
+         $packageVulnerabilityAcceptance.artifactId -eq 9675011337 -and
          $packageVulnerabilityAcceptance.artifactName -ceq
             "windows-cve-review-evidence" -and
          $packageVulnerabilityAcceptance.artifactDigestSha256 -ceq
-            "bad809a71dfbb3c05655795bc3c05b251c3dfe53c5b67c1f1309bed36fdc2c3a" -and
+            "1b1954bce5c7c80dcdc895e57e4359df6acdedf0de2534470ca175131c2e9792" -and
          $packageVulnerabilityAcceptance.lastSuccessMemberLength -eq 2403 -and
          $packageVulnerabilityAcceptance.lastSuccessMemberSha256 -ceq
-            "cb179100198f497630207fefe250454fea9a1fcd4042a55c2bcbe726f06de8e9" -and
+            "625d3fe47e1d23c79e349c1c653e2362f70d3cbea1864636555e06b26fd8d4f3" -and
          $packageVulnerabilityAcceptance.packageSbomAcceptanceSha256 -ceq
-            "a9f6212ba99c09068825da6f6bbf05fa65c58a410f7f1fa21d00b8ca1daf6e1b" -and
+            "a1a6fbb24e2ece1884995264eb375982242f4b86d5bd743b7ee572b93fc50f8d" -and
          $packageVulnerabilityAcceptance.observedAtUtc -ceq
-            "2026-08-27T09:13:54.9049828Z" -and
+            "2026-08-28T05:09:13.0584345Z" -and
          $packageVulnerabilityAcceptance.producerRepositoryCommitSha -ceq
-            "1ce6c80b97c886a7a40a676359e8d22a3fc22a6d") `
+            "1c7ae00298414fb7707ad6097e151fc39aa38c03") `
         "the hosted package vulnerability workflow or artifact evidence changed."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.restoreProjectCount -eq 4 -and
@@ -1068,13 +1068,13 @@ try {
         "the package vulnerability evaluation clock contract changed."
     $staleValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 9, 3, 9, 14, 10, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 9, 4, 5, 9, 30, [TimeSpan]::Zero)')
     Assert-TestCondition ($staleValidatorText -cne $validatorText) `
         "the deterministic stale validator mutation was not applied."
 
     $finalReleaseBoundaryValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 28, 9, 14, 9, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 29, 5, 9, 29, [TimeSpan]::Zero)')
     Assert-TestCondition `
         ($finalReleaseBoundaryValidatorText -cne $validatorText) `
         "the exact final-release freshness boundary mutation was not applied."
@@ -1114,7 +1114,7 @@ try {
 
     $finalReleaseExpiredValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 28, 9, 14, 10, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 29, 5, 9, 30, [TimeSpan]::Zero)')
     Assert-TestCondition `
         ($finalReleaseExpiredValidatorText -cne $validatorText) `
         "the final-release freshness plus-one-second mutation was not applied."
@@ -1274,7 +1274,7 @@ try {
     $tamperedVulnerabilityAcceptanceSha256 = Get-TestFileSha256 `
         -Path $vulnerabilityAcceptancePath
     $semanticValidatorText = $validatorText.Replace(
-        "ee7e95df83dadaaa4d6e352e4807c819b26c9be23db53dc3b36f11d84a771e1c",
+        "290f1e57eecd8c9b30093644af87fdd83d4fe338b0151691b9de62ef8310e126",
         $tamperedVulnerabilityAcceptanceSha256)
     Assert-TestCondition ($semanticValidatorText -cne $validatorText) `
         "package vulnerability semantic validator mutation was not applied."

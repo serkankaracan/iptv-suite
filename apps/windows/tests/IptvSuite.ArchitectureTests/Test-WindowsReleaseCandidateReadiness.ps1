@@ -193,7 +193,7 @@ function Get-M16SecurityArchitectureProducerPaths {
             $excludedPaths -cnotcontains $_
         })
     [System.Array]::Sort($paths, [System.StringComparer]::Ordinal)
-    Assert-TestCondition ($paths.Count -eq 329) `
+    Assert-TestCondition ($paths.Count -eq 330) `
         "security-architecture fixture inventory count changed."
     return $paths
 }
