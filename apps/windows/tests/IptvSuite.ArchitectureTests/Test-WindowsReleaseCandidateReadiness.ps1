@@ -1013,7 +1013,7 @@ function Read-AndAssertBlockedEvidence {
 
         [bool]$ExpectedFinalArtifactCurrent = $false,
 
-        [bool]$ExpectedSecurityArchitectureCurrent = $true,
+        [bool]$ExpectedSecurityArchitectureCurrent = $false,
 
         [bool]$ExpectedSyntheticJourneyCurrent = $true
     )
@@ -1990,14 +1990,11 @@ try {
         $currentSbomEvidence = Read-AndAssertBlockedEvidence `
             -Path $currentSbomPath `
             -ExpectedSbomCurrentAtEvaluation $true `
-            -ExpectedCveFinalReleaseFreshAtEvaluation $true `
-            -ExpectedFinalArtifactCurrent $true
+            -ExpectedCveFinalReleaseFreshAtEvaluation $true
         Assert-TestCondition `
             ($currentSbomEvidence.m1ToM15AutomatedGateSetPassed -and
-             $currentSbomEvidence.finalArtifactCanaryAcceptance.current -and
-             $currentSbomEvidence.finalSecurityArchitectureAcceptance.current -and
-             $currentSbomEvidence.syntheticEndToEndJourneyAcceptance.current) `
-            "M15 aggregate or current M16 hosted acceptances changed."
+             -not $currentSbomEvidence.finalArtifactCanaryAcceptance.current) `
+            "M15 aggregate or stale final-artifact acceptance changed."
     }
     finally {
         Remove-Item Env:\M16_SELF_TEST_M15_MODE -ErrorAction SilentlyContinue

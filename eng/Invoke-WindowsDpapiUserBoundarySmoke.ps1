@@ -1445,7 +1445,11 @@ function Write-JsonAtomically {
     Assert-RegularDirectory -Path $directory
     $temporaryPath = Join-Path $directory ("staging-" + [Guid]::NewGuid().ToString("N") + ".json")
     try {
-        $Value | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+        $json = $Value | ConvertTo-Json -Depth 4
+        [System.IO.File]::WriteAllText(
+            $temporaryPath,
+            $json + [Environment]::NewLine,
+            [System.Text.UTF8Encoding]::new($false, $true))
         Assert-RegularFile -Path $temporaryPath
         Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -Force -ErrorAction Stop
     }

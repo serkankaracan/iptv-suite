@@ -1007,7 +1007,11 @@ function Write-JsonAtomically {
     }
 
     try {
-        $Value | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+        $json = $Value | ConvertTo-Json -Depth 5
+        [System.IO.File]::WriteAllText(
+            $temporaryPath,
+            $json + [Environment]::NewLine,
+            [System.Text.UTF8Encoding]::new($false, $true))
         Assert-RegularFile -Path $temporaryPath
         [System.IO.File]::Move($temporaryPath, $resolvedDestination)
     }
