@@ -44,6 +44,12 @@ Baseline ve candidate aynı commit, schema, workload, budget contract ve declare
 
 İki kayıt aynı committe olduğu için bu sonuç same-profile repeatability ve regression-gate wiring kanıtıdır; cross-commit hızlanma iddiası değildir.
 
+## Supplemental ölçüm-sözleşmesi hardening'i
+
+`32fd7f803dfa6b16de8635372b3ce80197d0595c` checkpoint'i, historical M14 completion sonucunu veya bütçeleri değiştirmeden iki ölçüm kusurunu kapattı: cancellation zamanlayıcısı eskiden cancellation isteğinden önceki loader hazırlığını da kapsıyordu; ayrıca 20 örnekli ucuz query p95'i tekil scheduler tail'lerine aşırı duyarlıydı. Evidence schema v3 cancellation'ı exact `CancellationRequestToLoaderCompletion` sınırına bağlar. Parser, import ve cancellation `20` authoritative warm sample'da kalır; query matrisi exact `5` non-authoritative full-query warm-up sonrasında `100` `authoritative-warm` sample toplar. Query sırası `FirstPage → CategoryPage → Search → ReopenFirstVisible`, estimator `nearest-rank-ceiling` ve mutlak/`≤ +%10` regression eşikleri değişmemiştir.
+
+Önceden ilan edilen ve yeniden seçilmeyen tek binding schema-v3 baseline/candidate çifti `8/8 PASS` verdi. Seçilmiş p95 baseline/candidate değerleri parser `69,9869 / 71,1438 ms`, combined import `1.462,5378 / 1.468,4712 ms`, cancellation `0,7250 / 0,5526 ms`, search `27,1650 / 26,9656 ms` ve reopen `10,3267 / 10,1470 ms` idi; en yüksek artış parser'da `%1,653` kaldı. Baseline SHA-256 `15d54f1a34c5403b772292e2ead26a6086cff03604dce3cddfc80430d51a24e3`, candidate SHA-256 `1e694e408b7adc3cd4b9e399830ebd99fe9398b2a70896da3db4488173ecb6b1`dir. Bu supplemental kayıt yeni bir ürün-performansı iddiası değil, mevcut M14 kabulünün ölçüm sınırı ve repeatability hardening kanıtıdır.
+
 ## Signed package UI ve working-set kabulü
 
 [GitHub Actions run #217 (`32858287103`)](https://github.com/serkankaracan/iptv-suite/actions/runs/32858287103) final committe başarıyla tamamlandı:

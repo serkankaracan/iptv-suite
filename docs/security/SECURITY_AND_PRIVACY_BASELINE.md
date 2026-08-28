@@ -4,7 +4,7 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M3 validation/redaction contract'ı ve M4 CurrentUser protected-storage foundation `COMPLETED`; M8 transactional layout ve M15 production package lifecycle acceptance pending
+**Durum:** M3 validation/redaction contract'ı, M4 CurrentUser protected-storage foundation ve M8 transactional layout/process-crash recovery `COMPLETED`; M15 production package lifecycle acceptance pending
 
 **Kapsam:** Windows MVP; platformlar aynı ilkeleri kendi güvenli API'leriyle uygular
 
