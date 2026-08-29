@@ -46,7 +46,7 @@ Exact yanıt: `M17-01 PASS`
 
 1. Home kartlarından ve sol navigation'dan sırasıyla `Live TV`, `Movies`, `Series` ve `Sources` hedeflerine git; her seferinde doğru başlığı gör.
 2. Aynı geçişleri klavye ile Tab/Enter kullanarak tekrarla; odak kaybolmamalı veya görünmeyen bir kontrole takılmamalıdır.
-3. Playlist/account editor'ın yalnız ayrı `Sources` sayfasında, `Add source` veya `Replace URL or credentials` seçiminden sonra açıldığını doğrula. Home, Live TV, Movies ve Series yüzeylerinde inline/overlay source formu görünmemelidir.
+3. Playlist/account editor'ın yalnız ayrı `Sources` sayfasında, `Add source` veya `Replace or convert` seçiminden sonra açıldığını doğrula. Home, Live TV, Movies ve Series yüzeylerinde inline/overlay source formu görünmemelidir.
 4. Editor'ı `Cancel` ile kapat ve Source listesine dön.
 
 Exact yanıt: `M17-02 PASS`
@@ -56,7 +56,7 @@ Exact yanıt: `M17-02 PASS`
 1. `Sources > Add source` ile `SYNTH-CRUD` kaynağını ekle. `Validate and save` sonrası işlem boyunca spinner'ın görünür, edit kontrollerinin yeniden submit'e kapalı ve tamamlanma durumunun anlaşılır olduğunu doğrula.
 2. Kaynağı `SYNTH-CRUD-RENAMED` olarak yeniden adlandır; URL/username/password değerlerinin ayrıntı panelinde tekrar gösterilmediğini doğrula.
 3. `Refresh` uygula; source hazır kalmalı ve fixture değişmediyse count'lar aynı kalmalıdır.
-4. `Replace URL or credentials` ile fixture controller'ın bilerek hata veren sentetik alternatifini dene. Hata sonrası eski source listede ve oynatılabilir kalmalı; yarım/yinelenmiş source görünmemelidir.
+4. `Replace or convert` ile fixture controller'ın bilerek hata veren sentetik alternatifini dene. Hata sonrası eski source listede ve oynatılabilir kalmalı; yarım/yinelenmiş source görünmemelidir.
 5. Replace'i geçerli sentetik alternatifle yeniden yap. Authorization kutusunun yeniden işaretlenmesi gerektiğini, işlemin başarılı olduğunu ve listede tek etkin replacement kaldığını doğrula.
 6. Disposable replacement'ı `Delete` ile sil ve onayla. Source listesi ve Home count'ları `SYNTH-CRUD` eklenmeden önceki baseline'a dönmelidir.
 
@@ -70,6 +70,16 @@ Exact yanıt: `M17-03 PASS`
 4. Home'a dön ve aggregate sayıların M17-01 ile aynı olduğunu doğrula.
 
 Exact yanıt: `M17-04 PASS`
+
+### M17-05 — Remote M3U'dan typed Xtream kataloğuna dönüşüm
+
+1. Yalnız sentetik fixture'ın yetkili `get.php` bootstrap varyantını önce `M3U URL` olarak ekle; kaynak sayımlarının yalnız Live TV altında olduğunu doğrula. Kategori veya ad üzerinden Movie/Series tahmini bekleme.
+2. `Sources` içinde aynı kaynağı seçip `Replace or convert > Xtream API > Use an existing Xtream get.php M3U URL` akışını aç. Tam URL'yi yalnız editöre yapıştır; not, sohbet, ekran görüntüsü veya log'a kopyalama.
+3. HTTP kullanılıyorsa fresh Xtream MITM onayını ve authorization kutusunu yeniden işaretle; `Validate and save` tamamlanırken spinner görünür olmalıdır.
+4. Source listesinde tek kayıt ve aynı source kimliği kaldığını; sayımların fixture manifestindeki typed `Live / Movie / Series` değerleriyle eşleştiğini doğrula.
+5. Live TV'de yalnız Live kayıtlarını, Movies'de Movie kayıtlarını ve Series'de Series kayıtlarını doğrula. Dönüşüm başarısız olursa önceki M3U snapshot'ı kullanılabilir kalmalı ve yarım ikinci source oluşmamalıdır.
+
+Exact yanıt: `M17-05 PASS`
 
 ## M18-manuel-kabul
 
@@ -160,6 +170,7 @@ M17-01 PASS
 M17-02 PASS
 M17-03 PASS
 M17-04 PASS
+M17-05 PASS
 M18-01 PASS
 M18-02 PASS
 M18-03 PASS

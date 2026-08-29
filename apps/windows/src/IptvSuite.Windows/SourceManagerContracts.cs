@@ -17,17 +17,30 @@ internal sealed class XtreamSourceInput(
     string serverLocator,
     string username,
     string password,
-    bool allowInsecureHttp)
+    bool allowInsecureHttp,
+    bool usesM3uBootstrap)
 {
+    private string _serverLocator = serverLocator;
+    private string _username = username;
+    private string _password = password;
+
     [DebuggerBrowsable(DebuggerBrowsableState.Never)]
     internal string DisplayName { get; } = displayName;
     [DebuggerBrowsable(DebuggerBrowsableState.Never)]
-    internal string ServerLocator { get; } = serverLocator;
+    internal string ServerLocator => _serverLocator;
     [DebuggerBrowsable(DebuggerBrowsableState.Never)]
-    internal string Username { get; } = username;
+    internal string Username => _username;
     [DebuggerBrowsable(DebuggerBrowsableState.Never)]
-    internal string Password { get; } = password;
+    internal string Password => _password;
     internal bool AllowInsecureHttp { get; } = allowInsecureHttp;
+    internal bool UsesM3uBootstrap { get; } = usesM3uBootstrap;
+
+    internal void ClearSensitiveFields()
+    {
+        _serverLocator = string.Empty;
+        _username = string.Empty;
+        _password = string.Empty;
+    }
 
     public override string ToString() => "[XTREAM-SOURCE-INPUT]";
 }

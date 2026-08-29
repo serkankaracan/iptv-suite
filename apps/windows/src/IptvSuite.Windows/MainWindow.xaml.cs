@@ -230,19 +230,45 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         XtreamSourceInput input,
         CancellationToken cancellationToken)
     {
-        DomainResult<XtreamSourceOnboardingResult> result = input.AllowInsecureHttp
-            ? await _catalogServices.XtreamOnboarding.AddAllowingInsecureHttpAsync(
-                input.DisplayName,
-                input.ServerLocator,
-                input.Username,
-                input.Password,
-                cancellationToken)
-            : await _catalogServices.XtreamOnboarding.AddAsync(
-                input.DisplayName,
-                input.ServerLocator,
-                input.Username,
-                input.Password,
-                cancellationToken);
+        DomainResult<XtreamSourceOnboardingResult> result;
+        try
+        {
+            if (input.UsesM3uBootstrap)
+            {
+                ValueTask<DomainResult<XtreamSourceOnboardingResult>> pending =
+                    input.AllowInsecureHttp
+                    ? _catalogServices.XtreamOnboarding.AddFromM3uUrlAllowingInsecureHttpAsync(
+                        input.DisplayName,
+                        input.ServerLocator,
+                        cancellationToken)
+                    : _catalogServices.XtreamOnboarding.AddFromM3uUrlAsync(
+                        input.DisplayName,
+                        input.ServerLocator,
+                        cancellationToken);
+                input.ClearSensitiveFields();
+                result = await pending;
+            }
+            else
+            {
+                result = input.AllowInsecureHttp
+                    ? await _catalogServices.XtreamOnboarding.AddAllowingInsecureHttpAsync(
+                        input.DisplayName,
+                        input.ServerLocator,
+                        input.Username,
+                        input.Password,
+                        cancellationToken)
+                    : await _catalogServices.XtreamOnboarding.AddAsync(
+                        input.DisplayName,
+                        input.ServerLocator,
+                        input.Username,
+                        input.Password,
+                        cancellationToken);
+            }
+        }
+        finally
+        {
+            input.ClearSensitiveFields();
+        }
         if (!result.IsSuccess)
         {
             return SourceManagerOperationResult.Failure(
@@ -398,21 +424,41 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
                         return DomainResult.Failure<bool>(current.Error!);
                     }
 
-                    replacement = input.AllowInsecureHttp
-                        ? await _catalogServices.XtreamOnboarding.ReplaceAllowingInsecureHttpAsync(
-                            current.Value!,
-                            input.DisplayName,
-                            input.ServerLocator,
-                            input.Username,
-                            input.Password,
-                            token)
-                        : await _catalogServices.XtreamOnboarding.ReplaceAsync(
-                            current.Value!,
-                            input.DisplayName,
-                            input.ServerLocator,
-                            input.Username,
-                            input.Password,
-                            token);
+                    if (input.UsesM3uBootstrap)
+                    {
+                        ValueTask<DomainResult<XtreamSourceOnboardingResult>> pending =
+                            input.AllowInsecureHttp
+                            ? _catalogServices.XtreamOnboarding.ReplaceFromM3uUrlAllowingInsecureHttpAsync(
+                                    current.Value!,
+                                    input.DisplayName,
+                                    input.ServerLocator,
+                                    token)
+                            : _catalogServices.XtreamOnboarding.ReplaceFromM3uUrlAsync(
+                                current.Value!,
+                                input.DisplayName,
+                                input.ServerLocator,
+                                token);
+                        input.ClearSensitiveFields();
+                        replacement = await pending;
+                    }
+                    else
+                    {
+                        replacement = input.AllowInsecureHttp
+                            ? await _catalogServices.XtreamOnboarding.ReplaceAllowingInsecureHttpAsync(
+                                current.Value!,
+                                input.DisplayName,
+                                input.ServerLocator,
+                                input.Username,
+                                input.Password,
+                                token)
+                            : await _catalogServices.XtreamOnboarding.ReplaceAsync(
+                                current.Value!,
+                                input.DisplayName,
+                                input.ServerLocator,
+                                input.Username,
+                                input.Password,
+                                token);
+                    }
                     return replacement.IsSuccess
                         ? DomainResult.Success(true)
                         : DomainResult.Failure<bool>(replacement.Error!);
@@ -421,6 +467,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
         finally
         {
+            input.ClearSensitiveFields();
             await TryRefreshCatalogAfterSourceMutationAsync();
         }
 

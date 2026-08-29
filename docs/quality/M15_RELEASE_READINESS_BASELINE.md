@@ -1,6 +1,6 @@
 # M15 MSIX ve Store release-readiness teknik baseline'i
 
-**Durum:** `HOSTED SBOM/CVE RENEWED — technicalBaselinePassed=true; releaseReady=false; 12 external blocker açık, 2026-08-28`
+**Durum:** `HISTORICAL HOSTED SBOM/CVE RENEWED; ADR-008/ADR-009 successor closure OPEN; releaseReady=false, 2026-08-29`
 
 ## Checkpoint kararı
 
@@ -162,7 +162,7 @@ Aşağıdaki 13 kod, asset byte değişiminden önceki son hosted-kabul schema-v
 12. `SupportUrlPending`
 13. `WackPending`
 
-## Güncel schema-v7 exact açık blocker seti
+## Son accepted schema-v7 tarihsel açık blocker seti
 
 Aşağıdaki 12 kod, final-release CVE freshness geçerliyken current evidence'ta açıktır ve ordinal sıralıdır:
 
@@ -178,6 +178,41 @@ Aşağıdaki 12 kod, final-release CVE freshness geçerliyken current evidence't
 10. `StoreListingPending`
 11. `SupportUrlPending`
 12. `WackPending`
+
+## ADR-008/ADR-009 sonrası successor SBOM/CVE kapanışı — OPEN
+
+M17–M19 production kaynakları ile package-smoke sözleşmesi, yukarıdaki run `#15`
+SBOM kabulünün exact source/package closure'ını değiştirmiştir. Ledger'ın byte'ları ve
+tarihsel hosted provenance'i geçerli kalır; fakat yeni aday için `currentAtEvaluation=false`,
+`technicalBaselinePassed=false` ve `SbomPending` beklenen fail-closed sonuçtur. Bu durum
+ledger tahrifi değildir: doğrulayıcı, raw ledger hash/schema/pin uyuşmazlığını hâlâ
+`PackageSbomAcceptanceInvalid` ile hard-fail eder; source, production-input veya package
+snapshot drift'ini ise açık stale blocker olarak raporlar. İki geçişli snapshot, contract
+source ve repository-stability kontrolleri yayım öncesinde değişimi reddetmeye devam eder.
+
+Successor teknik closure sırası şöyledir:
+
+1. M17–M19 düzeltmeleri tamamlanır; aday clean commit olarak `main` dalına push edilir.
+2. Exact aday SHA üzerinde `Windows package SBOM producer` workflow'u elle tetiklenir.
+3. Başarılı run/job kimliği ile `windows-msix-smoke-evidence` artifact digest'i ve üç exact
+   üyenin (`last-success.json`, `package-sbom-summary.json`, `package-sbom.spdx.json`)
+   byte length/SHA-256 değerleri indirilmiş artifact üzerinden doğrulanır.
+4. Yalnız bu doğrulanmış hosted metadata/evidence ile
+   `eng/windows-package-sbom-acceptance.json`, validator pin'leri, offline self-test pin'leri
+   ve bu checkpoint kaydı birlikte yenilenir; eski run numarası yeni kaynak için tekrar
+   kullanılamaz.
+5. SBOM acceptance commit'i push edildikten sonra `Windows known-vulnerability producer`
+   exact yeni SBOM-ledger hash'i üzerinde yeniden çalıştırılır. Başarılı artifact
+   doğrulanarak CVE acceptance ledger/validator pin'leri yenilenir. Final-release için
+   24 saatlik freshness sınırı ayrıca geçmelidir.
+6. Windows PowerShell 5.1 adversarial self-test, Release x64 build ve architecture suite
+   yeniden çalıştırılır. Bu teknik zincir geçse bile aşağıdaki Store, signing, hukuk ve
+   operator blocker'ları ayrıca kapanmadan M15 `COMPLETED` olmaz.
+
+Yerelde elevated development package smoke ve offline SBOM self-test yapılabilir; bunlar
+hosted Actions run/job/artifact provenance'i üretmediği için successor ledger'ı tek başına
+kapatamaz. Signing private key/parolası veya gerçekte üretilmemiş Actions metadata'sı source'a
+yazılamaz.
 
 ## Non-claims ve sonraki kabul sınırı
 

@@ -1,6 +1,8 @@
 # M16 Windows MVP Release Candidate blocked baseline'i
 
-**Durum:** `M15 TECHNICAL CHAIN RENEWED / M16 AUTOMATED ACCEPTANCE LEDGERS CURRENT / BLOCKED — 4 M16 blocker açık, 2026-08-28`
+**Durum:** `HISTORICAL CHECKPOINT ONLY / SUCCESSOR ACCEPTANCE STALE-REOPEN / BLOCKED, 2026-08-29`
+
+**Successor sınırı:** Aşağıdaki 2026-08-28 `current` kayıtları yalnız kaydedildikleri exact commit, package ve source closure'ları için tarihsel kanıttır. ADR-008/ADR-009 ile M17–M19 production değişikliklerinden sonra final-artifact producer contract'ı, package-producing snapshot, security/architecture closure'ı ve synthetic-journey closure'ı değişmiştir. Local architecture self-test'i bu farkı fail-closed biçimde `stale-reopen` olarak doğrular; eski ledger metadata'sını veya hash'lerini yeni kanıt gibi güncellemez. Successor candidate için package/SBOM/CVE zinciri ile M16 quality, dört yüzeyli final-artifact ve journey hosted kanıtları aynı clean commit'e yeniden bağlanıp dışarıdan doğrulanmadan hiçbir lane `current`, M15/M16 ise `completed` sayılamaz.
 
 ## Checkpoint kararı
 

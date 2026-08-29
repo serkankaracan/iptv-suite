@@ -127,12 +127,11 @@ public sealed partial class SourceManagerPage : Page, IDisposable
         }
 
         _replacementSource = source;
-        ShowEditor("Replace URL or credentials", source.Name);
+        ShowEditor("Replace or convert source", source.Name);
         bool xtream = source.Kind == SourceKind.XtreamCompatible;
         XtreamRadioButton.IsChecked = xtream;
         RemotePlaylistRadioButton.IsChecked = !xtream;
-        RemotePlaylistRadioButton.IsEnabled = false;
-        XtreamRadioButton.IsEnabled = false;
+        RemotePlaylistRadioButton.IsEnabled = !xtream;
     }
 
     private void ShowEditor(string title, string? sourceName)
@@ -168,6 +167,15 @@ public sealed partial class SourceManagerPage : Page, IDisposable
         }
 
         bool xtream = XtreamRadioButton.IsChecked == true;
+        if (xtream)
+        {
+            RemotePlaylistLocatorTextBox.Text = string.Empty;
+        }
+        else
+        {
+            ClearXtreamEditorFields();
+        }
+
         RemotePlaylistFields.Visibility = xtream ? Visibility.Collapsed : Visibility.Visible;
         XtreamFields.Visibility = xtream ? Visibility.Visible : Visibility.Collapsed;
         SourceAuthorizationCheckBox.IsChecked = false;
@@ -176,6 +184,38 @@ public sealed partial class SourceManagerPage : Page, IDisposable
         SourceAuthorizationText.Text = xtream
             ? "I am authorized to access this Xtream-compatible account. If it resolves to a private or local endpoint, I trust only the exact server and port I entered. HTTP requires the separate Xtream MITM consent above."
             : "I am authorized to access this Remote M3U playlist. If it resolves to a private or local endpoint, I trust only the exact server and port I entered. HTTP requires the separate M3U MITM consent above.";
+        UpdateHttpConsentVisibility();
+    }
+
+    private void XtreamM3uBootstrapCheckBox_Changed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (XtreamStructuredFields is null || XtreamM3uBootstrapFields is null)
+        {
+            return;
+        }
+
+        bool useBootstrap = XtreamM3uBootstrapCheckBox.IsChecked == true;
+        if (useBootstrap)
+        {
+            XtreamServerTextBox.Text = string.Empty;
+            XtreamUsernameTextBox.Text = string.Empty;
+            XtreamPasswordBox.Password = string.Empty;
+        }
+        else
+        {
+            XtreamM3uBootstrapUrlPasswordBox.Password = string.Empty;
+        }
+
+        XtreamStructuredFields.Visibility = useBootstrap
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        XtreamM3uBootstrapFields.Visibility = useBootstrap
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        SourceAuthorizationCheckBox.IsChecked = false;
+        XtreamHttpConsentCheckBox.IsChecked = false;
         UpdateHttpConsentVisibility();
     }
 
@@ -193,6 +233,20 @@ public sealed partial class SourceManagerPage : Page, IDisposable
         }
         else if (ReferenceEquals(sender, XtreamServerTextBox) &&
                  XtreamHttpConsentCheckBox is not null)
+        {
+            XtreamHttpConsentCheckBox.IsChecked = false;
+        }
+        UpdateHttpConsentVisibility();
+    }
+
+    private void XtreamM3uBootstrapUrl_Changed(object sender, RoutedEventArgs e)
+    {
+        if (SourceAuthorizationCheckBox is not null)
+        {
+            SourceAuthorizationCheckBox.IsChecked = false;
+        }
+
+        if (XtreamHttpConsentCheckBox is not null)
         {
             XtreamHttpConsentCheckBox.IsChecked = false;
         }
@@ -226,7 +280,7 @@ public sealed partial class SourceManagerPage : Page, IDisposable
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         XtreamHttpConsentCheckBox.Visibility =
-            XtreamRadioButton.IsChecked == true && IsHttp(XtreamServerTextBox.Text)
+            XtreamRadioButton.IsChecked == true && IsHttp(CurrentXtreamLocator())
                 ? Visibility.Visible
                 : Visibility.Collapsed;
     }
@@ -239,9 +293,11 @@ public sealed partial class SourceManagerPage : Page, IDisposable
         }
 
         bool xtreamSelected = XtreamRadioButton.IsChecked == true;
+        bool xtreamM3uBootstrap =
+            xtreamSelected && XtreamM3uBootstrapCheckBox.IsChecked == true;
         bool usesHttp = IsHttp(
             xtreamSelected
-                ? XtreamServerTextBox.Text
+                ? CurrentXtreamLocator()
                 : RemotePlaylistLocatorTextBox.Text);
         bool hasKindSpecificHttpConsent = !usesHttp ||
             (xtreamSelected
@@ -270,13 +326,20 @@ public sealed partial class SourceManagerPage : Page, IDisposable
                 string password = XtreamPasswordBox.Password;
                 var input = new XtreamSourceInput(
                     displayName,
-                    XtreamServerTextBox.Text,
-                    XtreamUsernameTextBox.Text,
-                    password,
-                    usesHttp && XtreamHttpConsentCheckBox.IsChecked == true);
-                result = replacement is null
-                    ? await _operations.AddXtreamAsync(input, _lifetime.Token)
-                    : await _operations.ReplaceXtreamAsync(replacement.SourceId, input, _lifetime.Token);
+                    CurrentXtreamLocator(),
+                    xtreamM3uBootstrap ? string.Empty : XtreamUsernameTextBox.Text,
+                    xtreamM3uBootstrap ? string.Empty : password,
+                    usesHttp && XtreamHttpConsentCheckBox.IsChecked == true,
+                    xtreamM3uBootstrap);
+                ValueTask<SourceManagerOperationResult> pending = replacement is null
+                    ? _operations.AddXtreamAsync(input, _lifetime.Token)
+                    : _operations.ReplaceXtreamAsync(replacement.SourceId, input, _lifetime.Token);
+                if (xtreamM3uBootstrap)
+                {
+                    XtreamM3uBootstrapUrlPasswordBox.Password = string.Empty;
+                }
+
+                result = await pending;
             }
             else
             {
@@ -483,18 +546,30 @@ public sealed partial class SourceManagerPage : Page, IDisposable
     private void ClearSensitiveEditorFields()
     {
         RemotePlaylistLocatorTextBox.Text = string.Empty;
+        ClearXtreamEditorFields();
+        RemotePlaylistHttpConsentCheckBox.IsChecked = false;
+        RemotePlaylistHttpConsentCheckBox.Visibility = Visibility.Collapsed;
+    }
+
+    private void ClearXtreamEditorFields()
+    {
         XtreamServerTextBox.Text = string.Empty;
         XtreamUsernameTextBox.Text = string.Empty;
         XtreamPasswordBox.Password = string.Empty;
-        RemotePlaylistHttpConsentCheckBox.IsChecked = false;
+        XtreamM3uBootstrapUrlPasswordBox.Password = string.Empty;
+        XtreamM3uBootstrapCheckBox.IsChecked = false;
         XtreamHttpConsentCheckBox.IsChecked = false;
-        RemotePlaylistHttpConsentCheckBox.Visibility = Visibility.Collapsed;
         XtreamHttpConsentCheckBox.Visibility = Visibility.Collapsed;
     }
 
     private static bool IsHttp(string? locator) =>
         Uri.TryCreate(locator, UriKind.Absolute, out Uri? uri) &&
         string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
+
+    private string CurrentXtreamLocator() =>
+        XtreamM3uBootstrapCheckBox.IsChecked == true
+            ? XtreamM3uBootstrapUrlPasswordBox.Password
+            : XtreamServerTextBox.Text;
 
     private static bool IsRecoverable(Exception exception) =>
         exception is not OutOfMemoryException and

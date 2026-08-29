@@ -1550,12 +1550,12 @@ function Read-PackageSbomAcceptance {
         Assert-Condition `
             ($contractSourcePaths.Count -eq $script:packageSbomContractSourceCount) `
             "PackageSbomAcceptanceInvalid"
-        Assert-Condition `
-            ((Get-CanonicalTextSourceSetSha256 `
-                -Root $Root `
-                -RelativePaths $contractSourcePaths) -ceq
-                $script:packageSbomContractSourceSetSha256) `
-            "PackageSbomAcceptanceInvalid"
+        $currentContractSourceSetSha256 = Get-CanonicalTextSourceSetSha256 `
+            -Root $Root `
+            -RelativePaths $contractSourcePaths
+        $contractSourceSetCurrent =
+            $currentContractSourceSetSha256 -ceq
+                $script:packageSbomContractSourceSetSha256
         $currentProductionInputSetSha256 = Get-CanonicalTextSourceSetSha256 `
             -Root $Root `
             -RelativePaths $productionInputPaths
@@ -1565,8 +1565,10 @@ function Read-PackageSbomAcceptance {
         return [pscustomobject]@{
             Acceptance = $acceptance
             PackageProducingSnapshot = $packageProducingSnapshot
+            CurrentContractSourceSetSha256 = $currentContractSourceSetSha256
             CurrentProductionInputSetSha256 = $currentProductionInputSetSha256
-            IsCurrent = [bool]($packageProducingSnapshotCurrent -and
+            IsCurrent = [bool]($contractSourceSetCurrent -and
+                $packageProducingSnapshotCurrent -and
                 $productionInputSetCurrent)
             LedgerSha256 = Get-LowerSha256ForBytes -Bytes $ledgerBytes
         }
@@ -3281,6 +3283,8 @@ try {
              $validatedPackageProducingSnapshot.Sha256 -and
          $publicationPackageSbomAcceptanceValidation.LedgerSha256 -ceq
              $packageSbomAcceptanceValidation.LedgerSha256 -and
+         $publicationPackageSbomAcceptanceValidation.CurrentContractSourceSetSha256 -ceq
+             $packageSbomAcceptanceValidation.CurrentContractSourceSetSha256 -and
          $publicationPackageSbomAcceptanceValidation.CurrentProductionInputSetSha256 -ceq
              $packageSbomAcceptanceValidation.CurrentProductionInputSetSha256 -and
          $publicationPackageSbomAcceptanceValidation.IsCurrent -eq

@@ -802,11 +802,15 @@ Assert-TestCondition `
     ($validatorText.Contains(
         '$packageProducingSnapshot = Get-PackageProducingSnapshot -Root $Root') -and
      $validatorText.Contains(
+        '$contractSourceSetCurrent =') -and
+     $validatorText.Contains(
          '$publicationPackageSbomAcceptanceValidation = Read-PackageSbomAcceptance') -and
      $validatorText.Contains(
         '$publicationPackageProducingSnapshot.CanonicalBytes -eq') -and
      $validatorText.Contains(
         '$validatedPackageProducingSnapshot.CanonicalBytes') -and
+     $validatorText.Contains(
+        '$publicationPackageSbomAcceptanceValidation.CurrentContractSourceSetSha256 -ceq') -and
      $validatorText.Contains(
         '[System.IO.Directory]::EnumerateFileSystemEntries(')) `
     "the bounded two-pass package-producing snapshot contract changed."
@@ -852,7 +856,8 @@ try {
     Invoke-AllowedAudit -Root $script:repositoryRoot -EvidencePath $actualEvidencePath
     Read-AndAssertEvidence `
         -EvidencePath $actualEvidencePath `
-        -ForbiddenRoot $script:repositoryRoot | Out-Null
+        -ForbiddenRoot $script:repositoryRoot `
+        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
 
     Assert-AuditFailure `
         -Root $script:repositoryRoot `
@@ -865,7 +870,8 @@ try {
     Invoke-AllowedAudit -Root $script:fixtureRoot -EvidencePath $fixtureEvidencePath
     Read-AndAssertEvidence `
         -EvidencePath $fixtureEvidencePath `
-        -ForbiddenRoot $script:fixtureRoot | Out-Null
+        -ForbiddenRoot $script:fixtureRoot `
+        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
 
     $assetProvenanceRelativePath =
         "eng\windows-production-asset-provenance.json"
@@ -1094,16 +1100,17 @@ try {
         $finalReleaseBoundaryEvidence = Read-AndAssertEvidence `
             -EvidencePath $finalReleaseBoundaryEvidencePath `
             -ForbiddenRoot $script:fixtureRoot `
-            -ExpectedFinalReleaseFreshAtEvaluation $true
+            -ExpectedFinalReleaseFreshAtEvaluation $true `
+            -ExpectedSbomCurrentAtEvaluation $false
         Assert-TestCondition `
             ($finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
                 "CveReviewPending" -and
-             @($finalReleaseBoundaryEvidence.blockers).Count -eq 12 -and
+             @($finalReleaseBoundaryEvidence.blockers).Count -eq 13 -and
              @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "CveReviewPending" -and
-             @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "SbomPending") `
-            "the exact 24-hour final-release boundary did not remain accepted."
+             @($finalReleaseBoundaryEvidence.blockers) -ccontains "SbomPending") `
+            "the exact 24-hour final-release boundary did not preserve the stale SBOM blocker."
     }
     finally {
         Remove-Item `
@@ -1134,15 +1141,16 @@ try {
         $finalReleaseExpiredEvidence = Read-AndAssertEvidence `
             -EvidencePath $finalReleaseExpiredEvidencePath `
             -ForbiddenRoot $script:fixtureRoot `
-            -ExpectedFinalReleaseFreshAtEvaluation $false
+            -ExpectedFinalReleaseFreshAtEvaluation $false `
+            -ExpectedSbomCurrentAtEvaluation $false
         Assert-TestCondition `
             ($finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              -not $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
                 "None" -and
-             @($finalReleaseExpiredEvidence.blockers).Count -eq 13 -and
+             @($finalReleaseExpiredEvidence.blockers).Count -eq 14 -and
              @($finalReleaseExpiredEvidence.blockers) -ccontains "CveReviewPending" -and
-             @($finalReleaseExpiredEvidence.blockers) -cnotcontains "SbomPending") `
+             @($finalReleaseExpiredEvidence.blockers) -ccontains "SbomPending") `
             "the final-release blocker did not reopen at 24 hours plus one second."
     }
     finally {
@@ -1163,15 +1171,16 @@ try {
         $staleEvidence = Read-AndAssertEvidence `
             -EvidencePath $staleEvidencePath `
             -ForbiddenRoot $script:fixtureRoot `
-            -ExpectedFinalReleaseFreshAtEvaluation $false
+            -ExpectedFinalReleaseFreshAtEvaluation $false `
+            -ExpectedSbomCurrentAtEvaluation $false
         Assert-TestCondition `
             (-not $staleEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              -not $staleEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $staleEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq "None" -and
-             @($staleEvidence.blockers).Count -eq 13 -and
+             @($staleEvidence.blockers).Count -eq 14 -and
              @($staleEvidence.blockers) -ccontains "CveReviewPending" -and
-             @($staleEvidence.blockers) -cnotcontains "SbomPending") `
-            "stale package vulnerability acceptance did not reopen only its blocker."
+             @($staleEvidence.blockers) -ccontains "SbomPending") `
+            "stale package vulnerability acceptance did not preserve both technical blockers."
     }
     finally {
         Remove-Item -LiteralPath $staleValidatorPath -Force -ErrorAction SilentlyContinue
@@ -1223,11 +1232,16 @@ try {
     Write-TestText `
         -Path $contractSourcePath `
         -Value ($contractSourceText + "`n# package SBOM acceptance mutation")
-    Assert-AuditFailure `
+    $changedContractSourceEvidencePath = Join-Path `
+        $fixtureEvidenceRoot `
+        "changed-sbom-source-scope.json"
+    Invoke-AllowedAudit `
         -Root $script:fixtureRoot `
-        -EvidencePath (Join-Path $fixtureEvidenceRoot "tampered-sbom-source-scope.json") `
-        -ExpectedMessage "M15TechnicalInvariant:PackageSbomAcceptanceInvalid" `
-        -AllowBlockedInventory
+        -EvidencePath $changedContractSourceEvidencePath
+    Read-AndAssertEvidence `
+        -EvidencePath $changedContractSourceEvidencePath `
+        -ForbiddenRoot $script:fixtureRoot `
+        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
     Copy-TestFile -RelativePath $contractSourceRelativePath
 
     $vulnerabilityAcceptanceRelativePath =
@@ -1763,7 +1777,8 @@ try {
     Invoke-AllowedAudit -Root $script:fixtureRoot -EvidencePath $restoredEvidencePath
     Read-AndAssertEvidence `
         -EvidencePath $restoredEvidencePath `
-        -ForbiddenRoot $script:fixtureRoot | Out-Null
+        -ForbiddenRoot $script:fixtureRoot `
+        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
 
     Write-Output "M15 Windows release-readiness self-test passed."
 }

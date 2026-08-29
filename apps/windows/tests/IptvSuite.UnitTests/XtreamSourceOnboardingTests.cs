@@ -1,6 +1,8 @@
 using IptvSuite.Application;
 using IptvSuite.Domain;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace IptvSuite.UnitTests;
 
@@ -148,12 +150,135 @@ public sealed class XtreamSourceOnboardingTests
         Assert.AreEqual(store.Reference, store.DeletedReference);
     }
 
+    [TestMethod]
+    public async Task ExplicitM3uBootstrapUsesXtreamApiSourceAndProtectsExtractedCredentials()
+    {
+        var store = new OnboardingSecretStore
+        {
+            ExpectedServerLocator = "https://fixture.invalid",
+            ExpectedUsername = "synthetic+user",
+            ExpectedPassword = "synthetic password",
+        };
+        var importer = new OnboardingImporter(XtreamCatalogImportResult.Committed(
+            new ContentCatalogCounts(7, 5, 3, 0)));
+        var service = new XtreamSourceOnboardingService(
+            store,
+            importer,
+            new FixedTimeProvider(FixedInstant));
+
+        DomainResult<XtreamSourceOnboardingResult> result =
+            await service.AddFromM3uUrlAsync(
+                "Synthetic bootstrap source",
+                "https://fixture.invalid/get.php?username=synthetic%2Buser&password=synthetic%20password&type=m3u_plus&output=ts");
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(new ContentCatalogCounts(7, 5, 3, 0), result.Value!.Counts);
+        Assert.IsNotNull(importer.Source);
+        Assert.AreEqual(SourceKind.XtreamCompatible, importer.Source.Kind);
+        Assert.AreEqual("https", importer.Source.SafeEndpoint.Scheme);
+        Assert.AreEqual("fixture.invalid", importer.Source.SafeEndpoint.Host);
+        Assert.IsTrue(store.CredentialPayloadMatched);
+    }
+
+    [TestMethod]
+    public async Task ExplicitM3uBootstrapRejectsAmbiguousCredentialsBeforeProtectionOrImport()
+    {
+        var store = new OnboardingSecretStore();
+        var importer = new OnboardingImporter(XtreamCatalogImportResult.Committed(
+            new ContentCatalogCounts(1, 1, 1, 0)));
+        var service = new XtreamSourceOnboardingService(
+            store,
+            importer,
+            new FixedTimeProvider(FixedInstant));
+
+        DomainResult<XtreamSourceOnboardingResult> result =
+            await service.AddFromM3uUrlAsync(
+                "Synthetic bootstrap source",
+                "https://fixture.invalid/get.php?username=first&username=second&password=synthetic");
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.EndpointMalformed, result.Error!.Code);
+        Assert.AreEqual(0, store.CreateCount);
+        Assert.IsNull(importer.Source);
+    }
+
+    [TestMethod]
+    [DataRow("https://fixture.invalid/path/get.php?username=user&password=password")]
+    [DataRow("https://user:password@fixture.invalid/get.php?username=user&password=password")]
+    [DataRow("https://fixture.invalid/get.php?username=user&password=password#fragment")]
+    [DataRow("https://fixture.invalid/get.php?username=user%ZZ&password=password")]
+    [DataRow("https://fixture.invalid/GET.PHP?username=user&password=password")]
+    [DataRow("https://fixture.invalid/a/../get.php?username=user&password=password")]
+    [DataRow("https://fixture.invalid/get.php??username=user&password=password")]
+    public async Task ExplicitM3uBootstrapRejectsNonExactOrMalformedLocator(string locator)
+    {
+        var store = new OnboardingSecretStore();
+        var importer = new OnboardingImporter(XtreamCatalogImportResult.Committed(
+            new ContentCatalogCounts(1, 1, 1, 0)));
+        var service = new XtreamSourceOnboardingService(
+            store,
+            importer,
+            new FixedTimeProvider(FixedInstant));
+
+        DomainResult<XtreamSourceOnboardingResult> result =
+            await service.AddFromM3uUrlAsync("Synthetic bootstrap source", locator);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(0, store.CreateCount);
+        Assert.IsNull(importer.Source);
+    }
+
+    [TestMethod]
+    public async Task RemotePlaylistCanConvertToXtreamUnderTheSameSourceIdentity()
+    {
+        ContentSource existing = CreateExistingRemoteSource();
+        var store = new OnboardingSecretStore();
+        var importer = new OnboardingImporter(XtreamCatalogImportResult.Committed(
+            new ContentCatalogCounts(4, 2, 1, 0)));
+        var service = new XtreamSourceOnboardingService(
+            store,
+            importer,
+            new FixedTimeProvider(FixedInstant));
+
+        DomainResult<XtreamSourceOnboardingResult> result =
+            await service.ReplaceFromM3uUrlAsync(
+                existing,
+                "Converted source",
+                "https://fixture.invalid/get.php?username=synthetic-user&password=synthetic-password&type=m3u_plus");
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(existing.Id, result.Value!.SourceId);
+        Assert.AreEqual(existing.Id, importer.Source!.Id);
+        Assert.AreEqual(SourceKind.XtreamCompatible, importer.Source.Kind);
+        Assert.AreEqual(1, store.DeleteCount);
+        Assert.AreEqual(existing.Id, store.DeletedSourceId);
+        Assert.AreEqual(
+            ((RemotePlaylistSourceConfiguration)existing.Configuration).LocatorReference,
+            store.DeletedLocatorReference);
+    }
+
     private static ContentSource CreateExistingSource()
     {
         ValidatedSourceDraft draft = SourceDraftTestFixtures.CreateXtreamDraft(
             SourceId.Generate(),
             "Existing source",
             "https://existing.fixture.invalid/provider");
+        DomainResult<ContentSource> source = ContentSource.Create(
+            draft,
+            ContentSourceStatus.Testing,
+            FixedInstant,
+            FixedInstant);
+        return source.IsSuccess
+            ? source.Value!
+            : throw new InvalidOperationException("The synthetic source is invalid.");
+    }
+
+    private static ContentSource CreateExistingRemoteSource()
+    {
+        ValidatedSourceDraft draft = SourceDraftTestFixtures.CreateRemoteDraft(
+            SourceId.Generate(),
+            "Existing Remote M3U source",
+            "https://existing.fixture.invalid/catalog.m3u");
         DomainResult<ContentSource> source = ContentSource.Create(
             draft,
             ContentSourceStatus.Testing,
@@ -199,6 +324,16 @@ public sealed class XtreamSourceOnboardingTests
 
         internal SourceId CreatedSourceId { get; private set; }
 
+        internal int CreateCount { get; private set; }
+
+        internal string? ExpectedServerLocator { get; init; }
+
+        internal string? ExpectedUsername { get; init; }
+
+        internal string? ExpectedPassword { get; init; }
+
+        internal bool CredentialPayloadMatched { get; private set; }
+
         internal ProtectedRecordOwner CreatedOwner { get; private set; }
 
         internal int DeleteCount { get; private set; }
@@ -208,6 +343,8 @@ public sealed class XtreamSourceOnboardingTests
         internal ProtectedRecordOwner DeletedOwner { get; private set; }
 
         internal SecretReference? DeletedReference { get; private set; }
+
+        internal ProtectedLocatorReference? DeletedLocatorReference { get; private set; }
 
         internal SecretStoreOperationResult DeleteResult { get; init; } =
             SecretStoreOperationResult.Succeeded();
@@ -219,8 +356,27 @@ public sealed class XtreamSourceOnboardingTests
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            CreateCount++;
             CreatedSourceId = sourceId;
             CreatedOwner = owner;
+            if (ExpectedServerLocator is not null &&
+                ExpectedUsername is not null &&
+                ExpectedPassword is not null)
+            {
+                byte[] expectedSuffix = Encoding.UTF8.GetBytes(
+                    ExpectedServerLocator + ExpectedUsername + ExpectedPassword);
+                try
+                {
+                    CredentialPayloadMatched =
+                        value.Length >= expectedSuffix.Length &&
+                        value.Span[^expectedSuffix.Length..].SequenceEqual(expectedSuffix);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(expectedSuffix);
+                }
+            }
+
             return ValueTask.FromResult(SecretReferenceCreationResult.Succeeded(Reference));
         }
 
@@ -278,7 +434,16 @@ public sealed class XtreamSourceOnboardingTests
             ProtectedValuePurpose purpose,
             ProtectedRecordOwner owner,
             ProtectedLocatorReference reference,
-            CancellationToken cancellationToken = default) => throw Unused();
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert.AreEqual(ProtectedValuePurpose.RemotePlaylistLocator, purpose);
+            DeleteCount++;
+            DeletedSourceId = sourceId;
+            DeletedOwner = owner;
+            DeletedLocatorReference = reference;
+            return ValueTask.FromResult(DeleteResult);
+        }
     }
 
     private static InvalidOperationException Unused() =>

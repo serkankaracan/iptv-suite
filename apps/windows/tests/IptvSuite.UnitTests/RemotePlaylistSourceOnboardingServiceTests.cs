@@ -379,6 +379,34 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
     }
 
     [TestMethod]
+    public async Task XtreamSourceCannotBeConvertedToRemotePlaylistByTheAsymmetricSink()
+    {
+        ValidatedSourceDraft draft = SourceDraftTestFixtures.CreateXtreamDraft(
+            SourceId.Generate(),
+            "Existing Xtream source",
+            "https://existing.fixture.invalid");
+        DomainResult<ContentSource> source = ContentSource.Create(
+            draft,
+            ContentSourceStatus.Testing,
+            FixedInstant,
+            FixedInstant);
+        Assert.IsTrue(source.IsSuccess);
+        var store = new OnboardingSecretStore();
+        var importer = new OnboardingImporter(
+            RemotePlaylistCatalogImportResult.Committed(1, 0));
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
+
+        DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.ReplaceAsync(
+            source.Value!,
+            "Rejected conversion",
+            "https://replacement.fixture.invalid/list.m3u");
+
+        SecurityTestAssertions.IsFailure(result, DomainErrorCode.DomainInvariantViolation);
+        Assert.AreEqual(0, store.CreateLocatorCount);
+        Assert.AreEqual(0, importer.CallCount);
+    }
+
+    [TestMethod]
     public async Task CancelledNotCommittedImportDeletesTheStagedLocator()
     {
         var store = new OnboardingSecretStore();

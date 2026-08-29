@@ -365,7 +365,7 @@ public sealed class SqliteCatalogSnapshotWriterTests
 
     [TestMethod]
     [Timeout(30_000)]
-    public async Task SameSourceReplacementCommitsConfigurationAndSnapshotAtomicallyAndJournalsCleanup()
+    public async Task RemoteM3uToXtreamReplacementKeepsSourceIdentityAndJournalsOldConfigurationAtomically()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -396,6 +396,10 @@ public sealed class SqliteCatalogSnapshotWriterTests
                     unchanged,
                     "SELECT configuration_id FROM sources WHERE source_id = $source;",
                     ("$source", Id(initialSource.Id.Value))));
+            Assert.AreEqual((long)SourceKind.RemotePlaylist, await ScalarInt64Async(
+                unchanged,
+                "SELECT source_kind FROM sources WHERE source_id = $source;",
+                ("$source", Id(initialSource.Id.Value))));
             Assert.AreEqual(
                 Id(initial.Snapshot.Id.Value),
                 await ScalarStringAsync(
@@ -418,6 +422,10 @@ public sealed class SqliteCatalogSnapshotWriterTests
                     committed,
                     "SELECT configuration_id FROM sources WHERE source_id = $source;",
                     ("$source", Id(initialSource.Id.Value))));
+            Assert.AreEqual((long)SourceKind.XtreamCompatible, await ScalarInt64Async(
+                committed,
+                "SELECT source_kind FROM sources WHERE source_id = $source;",
+                ("$source", Id(initialSource.Id.Value))));
             Assert.AreEqual(
                 Id(replacement.Snapshot.Id.Value),
                 await ScalarStringAsync(
@@ -429,10 +437,14 @@ public sealed class SqliteCatalogSnapshotWriterTests
                 """
                 SELECT count(*)
                 FROM source_configuration_retirements
-                WHERE source_id = $source AND configuration_id = $configuration;
+                WHERE source_id = $source
+                  AND configuration_id = $configuration
+                  AND source_kind = $kind
+                  AND configuration_reference LIKE 'locator-ref-v1:%';
                 """,
                 ("$source", Id(initialSource.Id.Value)),
-                ("$configuration", Id(initialSource.Configuration.ConfigurationId.Value))));
+                ("$configuration", Id(initialSource.Configuration.ConfigurationId.Value)),
+                ("$kind", (int)SourceKind.RemotePlaylist)));
         }
 
         var reconciler = new SqliteSourceConfigurationRetirementReconciler(
@@ -777,10 +789,12 @@ public sealed class SqliteCatalogSnapshotWriterTests
         SourceId sourceId)
     {
         DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(store)
-            .ProtectRemotePlaylistAsync(
+            .ProtectXtreamAsync(
                 sourceId,
                 "Replacement catalog",
-                "https://replacement.invalid/catalog/list.m3u");
+                "https://replacement.invalid",
+                "synthetic-user",
+                "synthetic-password");
         Assert.IsTrue(draft.IsSuccess);
         DateTimeOffset now = new(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DomainResult<ContentSource> source = ContentSource.Create(

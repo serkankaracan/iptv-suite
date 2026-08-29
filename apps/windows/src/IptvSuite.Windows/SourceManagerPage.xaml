@@ -61,7 +61,7 @@
                                     Click="RefreshSourceButton_Click" Content="Refresh" />
                             <Button x:Name="ReplaceSourceButton"
                                     AutomationProperties.AutomationId="SourceManagerReplaceButton"
-                                    Click="ReplaceSourceButton_Click" Content="Replace URL or credentials" />
+                                    Click="ReplaceSourceButton_Click" Content="Replace or convert" />
                             <Button x:Name="DeleteSourceButton"
                                     AutomationProperties.AutomationId="SourceManagerDeleteButton"
                                     AutomationProperties.Name="Delete authorized source"
@@ -85,6 +85,7 @@
                                          AutomationProperties.AutomationId="SourceManagerXtreamKindRadioButton"
                                          Checked="SourceKind_Changed" Content="Xtream API" />
                         </StackPanel>
+                        <TextBlock Text="Remote M3U has no authoritative content-type contract and is imported as Live TV. Choose Xtream API, including the explicit get.php bootstrap below, to load provider-typed Live, Movies and Series catalogs." TextWrapping="Wrap" />
 
                         <StackPanel x:Name="RemotePlaylistFields" Spacing="8">
                             <TextBox x:Name="RemotePlaylistLocatorTextBox" MaxLength="4096" IsSpellCheckEnabled="False"
@@ -102,19 +103,35 @@
                         </StackPanel>
 
                         <StackPanel x:Name="XtreamFields" Spacing="8" Visibility="Collapsed">
-                            <TextBox x:Name="XtreamServerTextBox" MaxLength="4096" IsSpellCheckEnabled="False"
-                                     AutomationProperties.AutomationId="SourceManagerXtreamServerTextBox"
-                                     AutomationProperties.Name="Xtream server URL"
-                                     Header="HTTP or HTTPS server URL" PlaceholderText="https://server.example"
-                                     TextChanged="SourceEndpointTextBox_TextChanged" />
-                            <TextBox x:Name="XtreamUsernameTextBox" MaxLength="256" IsSpellCheckEnabled="False"
-                                     AutomationProperties.AutomationId="SourceManagerXtreamUsernameTextBox"
-                                     AutomationProperties.Name="Xtream username" Header="Username"
-                                     TextChanged="XtreamCredentials_Changed" />
-                            <PasswordBox x:Name="XtreamPasswordBox" MaxLength="1024"
-                                         AutomationProperties.AutomationId="SourceManagerXtreamPasswordBox"
-                                         AutomationProperties.Name="Xtream password" Header="Password"
-                                         PasswordChanged="XtreamCredentials_Changed" />
+                            <CheckBox x:Name="XtreamM3uBootstrapCheckBox"
+                                      AutomationProperties.AutomationId="SourceManagerXtreamM3uBootstrapCheckBox"
+                                      AutomationProperties.Name="Use an authorized Xtream get.php M3U URL"
+                                      Checked="XtreamM3uBootstrapCheckBox_Changed"
+                                      Unchecked="XtreamM3uBootstrapCheckBox_Changed"
+                                      Content="Use an existing Xtream get.php M3U URL" />
+                            <StackPanel x:Name="XtreamStructuredFields" Spacing="8">
+                                <TextBox x:Name="XtreamServerTextBox" MaxLength="4096" IsSpellCheckEnabled="False"
+                                         AutomationProperties.AutomationId="SourceManagerXtreamServerTextBox"
+                                         AutomationProperties.Name="Xtream server URL"
+                                         Header="HTTP or HTTPS server URL" PlaceholderText="https://server.example"
+                                         TextChanged="SourceEndpointTextBox_TextChanged" />
+                                <TextBox x:Name="XtreamUsernameTextBox" MaxLength="256" IsSpellCheckEnabled="False"
+                                         AutomationProperties.AutomationId="SourceManagerXtreamUsernameTextBox"
+                                         AutomationProperties.Name="Xtream username" Header="Username"
+                                         TextChanged="XtreamCredentials_Changed" />
+                                <PasswordBox x:Name="XtreamPasswordBox" MaxLength="1024"
+                                             AutomationProperties.AutomationId="SourceManagerXtreamPasswordBox"
+                                             AutomationProperties.Name="Xtream password" Header="Password"
+                                             PasswordChanged="XtreamCredentials_Changed" />
+                            </StackPanel>
+                            <StackPanel x:Name="XtreamM3uBootstrapFields" Spacing="4" Visibility="Collapsed">
+                                <PasswordBox x:Name="XtreamM3uBootstrapUrlPasswordBox" MaxLength="4096"
+                                         AutomationProperties.AutomationId="SourceManagerXtreamM3uBootstrapUrlPasswordBox"
+                                         AutomationProperties.Name="Authorized Xtream get.php M3U URL"
+                                         Header="Authorized get.php M3U URL" PlaceholderText="https://server.example/get.php?..."
+                                         PasswordChanged="XtreamM3uBootstrapUrl_Changed" />
+                                <TextBlock Text="The masked URL is used only to extract the server and credentials locally, then cleared as import starts. Content types come from explicit Xtream Live, VOD and Series API operations; names, categories and stream paths are not guessed." TextWrapping="Wrap" />
+                            </StackPanel>
                             <CheckBox x:Name="XtreamHttpConsentCheckBox"
                                       Visibility="Collapsed"
                                       AutomationProperties.AutomationId="SourceManagerXtreamHttpConsentCheckBox"
