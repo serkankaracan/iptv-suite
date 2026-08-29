@@ -621,7 +621,7 @@ public sealed partial class MainPage : Page, IDisposable
         }
     }
 
-    private async Task RestoreCatalogAfterUncommittedDeletionFailureAsync()
+    internal async Task RestoreCatalogAfterUncommittedDeletionFailureAsync()
     {
         try
         {

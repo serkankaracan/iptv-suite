@@ -493,14 +493,41 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         CancellationToken cancellationToken)
     {
         SourceDeletionResult result;
+        bool deletionInvoked = false;
         try
         {
             await PrepareSourceMutationAsync(sourceId, "Deleting the selected source.");
+            deletionInvoked = true;
             result = await DeleteSourceAsync(sourceId, cancellationToken);
+
+            if (!result.IsSuccess)
+            {
+                if (result.FailureStage == SourceDeletionFailureStage.MarkPending)
+                {
+                    await _mainPage.RestoreCatalogAfterUncommittedDeletionFailureAsync();
+                }
+                else
+                {
+                    _mainPage.ReportPendingSourceCleanup();
+                }
+            }
+            else
+            {
+                await TryRefreshCatalogAfterSourceMutationAsync();
+            }
         }
-        finally
+        catch
         {
-            await TryRefreshCatalogAfterSourceMutationAsync();
+            if (deletionInvoked)
+            {
+                _mainPage.ReportPendingSourceCleanup();
+            }
+            else
+            {
+                await _mainPage.RestoreCatalogAfterUncommittedDeletionFailureAsync();
+            }
+
+            throw;
         }
 
         if (!result.IsSuccess)

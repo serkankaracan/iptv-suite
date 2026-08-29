@@ -6231,7 +6231,7 @@ public sealed class DependencyRulesTests
             "The UI deletion handler must not bypass the coordinator or expose sensitive storage detail.");
 
         int restoreStart = page.IndexOf(
-            "private async Task RestoreCatalogAfterUncommittedDeletionFailureAsync()",
+            "internal async Task RestoreCatalogAfterUncommittedDeletionFailureAsync()",
             StringComparison.Ordinal);
         int unavailableStart = page.IndexOf(
             "private void ReportCatalogUnavailable()",
@@ -9157,6 +9157,23 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             window,
             "_catalogServices.Onboarding.AddAllowingInsecureHttpAsync(");
+        string managerDeletion = ExtractRequiredBlock(
+            window,
+            "private async ValueTask<SourceManagerOperationResult> DeleteSourceFromManagerAsync(",
+            "private async ValueTask PrepareSourceMutationAsync(");
+        StringAssert.Contains(managerDeletion, "bool deletionInvoked = false;");
+        StringAssert.Contains(managerDeletion, "deletionInvoked = true;");
+        StringAssert.Contains(
+            managerDeletion,
+            "result.FailureStage == SourceDeletionFailureStage.MarkPending");
+        StringAssert.Contains(
+            managerDeletion,
+            "await _mainPage.RestoreCatalogAfterUncommittedDeletionFailureAsync();");
+        StringAssert.Contains(managerDeletion, "_mainPage.ReportPendingSourceCleanup();");
+        StringAssert.Contains(managerDeletion, "await TryRefreshCatalogAfterSourceMutationAsync();");
+        Assert.IsFalse(
+            managerDeletion.Contains("finally", StringComparison.Ordinal),
+            "Source Manager deletion must not reopen catalog admission unconditionally.");
         Assert.IsFalse(
             window.Contains("ConfigureSourceOnboarding", StringComparison.Ordinal),
             "M17 Source Manager must be the only source-onboarding presentation route.");
