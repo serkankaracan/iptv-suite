@@ -6,7 +6,7 @@
 
 **Ad durumu:** “IPTV Suite” yalnızca doğrulanmamış iç codename'dir.
 
-**Milestone bağı:** M17–M19. Bu belge M1–M16'nın tarihsel durumunu değiştirmez; ADR-008 sonrasındaki M15/M16 successor ledger'ları yeni hosted kabul üretilene kadar stale kalır.
+**Milestone bağı:** M17–M19. Bu belge M1–M16'nın tarihsel durumunu değiştirmez; ADR-008/ADR-009 sonrasındaki M15 teknik zinciri ve üç M16 automated acceptance ledger'ı 2026-08-29 successor hosted kanıtıyla yenilenmiştir, ancak M15/M16 completion veya post-MVP feature acceptance sonucu üretmez.
 
 ## Karar özeti
 

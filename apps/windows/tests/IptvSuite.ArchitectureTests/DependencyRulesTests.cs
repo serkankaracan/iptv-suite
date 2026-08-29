@@ -4681,7 +4681,7 @@ public sealed class DependencyRulesTests
             "$script:syntheticJourneyAcceptanceSha256 =");
         StringAssert.Contains(
             validator,
-            "$script:syntheticJourneyProducerContractSourceCount = 132");
+            "$script:syntheticJourneyProducerContractSourceCount = 148");
         StringAssert.Contains(
             validator,
             "$script:securityArchitectureAcceptanceSha256 =");
@@ -4801,7 +4801,7 @@ public sealed class DependencyRulesTests
             .EnumerateArray()
             .Select(value => value.GetString()!)
             .ToArray();
-        Assert.AreEqual(6, remainingM16Blockers.Length);
+        Assert.AreEqual(4, remainingM16Blockers.Length);
         CollectionAssert.DoesNotContain(
             remainingM16Blockers,
             "M16FinalArtifactCanaryScanPending");
@@ -4814,7 +4814,7 @@ public sealed class DependencyRulesTests
             "M16SyntheticEndToEndJourneyPending",
             journeyRoot.GetProperty("closedBlocker").GetString());
         Assert.AreEqual(
-            132,
+            148,
             journeyRoot.GetProperty("producerContractSourceCount").GetInt32());
         Assert.AreEqual(
             2,
@@ -4827,7 +4827,7 @@ public sealed class DependencyRulesTests
             .EnumerateArray()
             .Select(value => value.GetString()!)
             .ToArray();
-        Assert.AreEqual(6, journeyRemainingBlockers.Length);
+        Assert.AreEqual(4, journeyRemainingBlockers.Length);
         CollectionAssert.DoesNotContain(
             journeyRemainingBlockers,
             "M16SyntheticEndToEndJourneyPending");
@@ -4860,7 +4860,7 @@ public sealed class DependencyRulesTests
             .EnumerateArray()
             .Select(value => value.GetString()!)
             .ToArray();
-        Assert.AreEqual(6, securityRemainingBlockers.Length);
+        Assert.AreEqual(4, securityRemainingBlockers.Length);
         CollectionAssert.DoesNotContain(
             securityRemainingBlockers,
             "M16FinalSecurityArchitectureScanPending");

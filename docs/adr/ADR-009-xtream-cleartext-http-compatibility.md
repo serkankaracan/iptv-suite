@@ -95,7 +95,7 @@ Consent metni en az şunları açıklar:
 - HTTP image'ların reddi bazı provider kataloglarında poster/logo eksikliği yaratabilir; güvenlik sınırı sessizce gevşetilmez.
 - Same-origin initial playback sınırı bazı cross-origin CDN kullanan provider'larla uyumsuz olabilir. Bu uyumsuzluk credential'ı başka HTTP origin'e göndermek için gerekçe değildir.
 - Proprietary adapter değişkenliği M17–M19 sentetik contract corpus'u ve capability sonucu gerektirir; “Xtream supported” global sözü verilmez.
-- Bu production-source genişlemesi M15 package/SBOM/CVE ve M16 successor acceptance closure'larını yeniden stale bırakır. Önceki hosted kayıtlar yalnız exact eski source closure'larında tarihsel kanıttır.
+- Bu production-source genişlemesi karar anında M15 package/SBOM/CVE ve M16 successor acceptance closure'larını yeniden stale bırakmıştır. Zincirler 2026-08-29 successor hosted kanıtıyla exact yeni closure'lara yeniden bağlanmıştır; sonraki source/package drift'i ilgili kapıyı yine fail-closed `stale-reopen` yapar. Önceki hosted kayıtlar yalnız exact eski source closure'larında tarihsel kanıttır.
 
 ## Risks
 
