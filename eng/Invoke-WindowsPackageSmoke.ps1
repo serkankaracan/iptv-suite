@@ -2633,7 +2633,7 @@ function Get-RequiredAutomationElement {
     if ($null -eq $element -or
         $element.Current.ControlType -ne $ControlType -or
         $element.Current.Name -ne $AccessibleName) {
-        throw "The packaged catalog UI Automation contract is invalid."
+        throw "The packaged UI Automation contract is invalid for '$AutomationId'."
     }
 
     return $element
@@ -3619,7 +3619,7 @@ function Wait-PackagedPlaybackStoppedWithinBudget {
         Assert-PackagedProcessAlive -Process $Process
         if ($StatusElement.Current.Name -ceq "Playback stopped." -and
             $ChannelElement.Current.Name -ceq "No channel selected." -and
-            $StopButtonElement.Current.Name -ceq "Stop channel" -and
+            $StopButtonElement.Current.Name -ceq "Stop content" -and
             -not $StopButtonElement.Current.IsEnabled) {
             $Timer.Stop()
             if ($Timer.Elapsed.TotalMilliseconds -gt $BudgetMilliseconds) {
@@ -5967,17 +5967,17 @@ try {
         $playbackAutomationRoot `
         "PlaybackPlayButton" `
         ([System.Windows.Automation.ControlType]::Button) `
-        "Play channel"
+        "Play content"
     $pauseButtonElement = Get-RequiredAutomationElement `
         $playbackAutomationRoot `
         "PlaybackPauseButton" `
         ([System.Windows.Automation.ControlType]::Button) `
-        "Pause channel"
+        "Pause content"
     $stopButtonElement = Get-RequiredAutomationElement `
         $playbackAutomationRoot `
         "PlaybackStopButton" `
         ([System.Windows.Automation.ControlType]::Button) `
-        "Stop channel"
+        "Stop content"
     $volumeDownButtonElement = Get-RequiredAutomationElement `
         $playbackAutomationRoot `
         "PlaybackVolumeDownButton" `

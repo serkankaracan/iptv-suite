@@ -7713,6 +7713,25 @@ public sealed class DependencyRulesTests
             StringAssert.Contains(page, contract);
         }
 
+        string[] playbackCommandNames =
+        [
+            "Play content",
+            "Pause content",
+            "Stop content",
+        ];
+        foreach (string commandName in playbackCommandNames)
+        {
+            StringAssert.Contains(page, $"AutomationProperties.Name=\"{commandName}\"");
+            StringAssert.Contains(packageSmoke, $"\"{commandName}\"");
+        }
+
+        Assert.IsFalse(packageSmoke.Contains("\"Play channel\"", StringComparison.Ordinal));
+        Assert.IsFalse(packageSmoke.Contains("\"Pause channel\"", StringComparison.Ordinal));
+        Assert.IsFalse(packageSmoke.Contains("\"Stop channel\"", StringComparison.Ordinal));
+        StringAssert.Contains(
+            packageSmoke,
+            "The packaged UI Automation contract is invalid for '$AutomationId'.");
+
         StringAssert.Contains(codeBehind, "private const int VolumeStep = 5;");
         StringAssert.Contains(codeBehind, "PlaybackSessionSnapshot session = playback.Current;");
         StringAssert.Contains(codeBehind, "session.SessionId,");
