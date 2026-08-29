@@ -164,6 +164,130 @@ public sealed class SqlitePlaybackSourceResolverTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task ExplicitMovieAndEpisodeTargetsBuildDistinctOnDemandRoutes()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("post-mvp-vod-resolver");
+        using var store = new TrackingSecretStore();
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(databasePath);
+        ContentSource source = await CreateXtreamSourceAsync(
+            store,
+            "vod",
+            "https://fixtures.invalid/provider",
+            "synthetic user",
+            "p/ass");
+        ResolverBatch batch = await CreateBatchAsync(
+            locator: null,
+            suffix: "vod",
+            existingSource: source,
+            providerItem: true);
+        await ActivateAsync(databasePath, batch.Batch);
+        CategoryId movieCategoryId = CategoryId.Generate();
+        CategoryId seriesCategoryId = CategoryId.Generate();
+        Movie movie = Movie.Create(
+            MovieId.Generate(),
+            batch.SnapshotId,
+            movieCategoryId,
+            ProviderItemKey.Create("movie/item").Value,
+            "Movie",
+            "mp4",
+            false).Value!;
+        Series series = Series.Create(
+            SeriesId.Generate(),
+            batch.SnapshotId,
+            seriesCategoryId,
+            ProviderItemKey.Create("series-item").Value,
+            "Series",
+            false).Value!;
+        Season season = Season.Create(
+            SeasonId.Generate(), batch.SnapshotId, series.Id, 1, "Season 1").Value!;
+        Episode episode = Episode.Create(
+            EpisodeId.Generate(),
+            batch.SnapshotId,
+            season.Id,
+            ProviderItemKey.Create("episode/item").Value,
+            1,
+            "Episode 1",
+            "mkv",
+            TimeSpan.FromMinutes(42)).Value!;
+        var content = new SqliteContentCatalog(databasePath);
+        await content.ReplaceActiveSnapshotContentAsync(new ContentCatalogMutation(
+            source.Id,
+            batch.SnapshotId,
+            [
+                ChannelCategory.Create(
+                    movieCategoryId, batch.SnapshotId, "xtream:movie:test", "Movies", 1, false).Value!,
+                ChannelCategory.Create(
+                    seriesCategoryId, batch.SnapshotId, "xtream:series:test", "Series", 2, false).Value!,
+            ],
+            [movie],
+            [series],
+            [season],
+            [episode]));
+
+        ResolvedSource resolvedMovie = await ResolveAsync(
+            databasePath,
+            PlaybackSelection.ForTarget(source.Id, PlaybackTarget.Movie(movie.Id)),
+            store);
+        ResolvedSource resolvedEpisode = await ResolveAsync(
+            databasePath,
+            PlaybackSelection.ForTarget(source.Id, PlaybackTarget.Episode(episode.Id)),
+            store);
+
+        Assert.AreEqual("None", resolvedMovie.Failure);
+        Assert.AreEqual("None", resolvedEpisode.Failure);
+        using (SecretLease movieLease = resolvedMovie.Lease!)
+        {
+            Assert.AreEqual(
+                "https://fixtures.invalid/provider/movie/synthetic%20user/p%2Fass/movie%2Fitem.mp4",
+                Encoding.UTF8.GetString(movieLease.Value.Span));
+        }
+        using (SecretLease episodeLease = resolvedEpisode.Lease!)
+        {
+            Assert.AreEqual(
+                "https://fixtures.invalid/provider/series/synthetic%20user/p%2Fass/episode%2Fitem.mkv",
+                Encoding.UTF8.GetString(episodeLease.Value.Span));
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task ExplicitHttpXtreamGrantBuildsOnlySameOriginPlaybackRoute()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("post-mvp-http-xtream-resolver");
+        using var store = new TrackingSecretStore();
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(databasePath);
+        ContentSource source = await CreateXtreamSourceAsync(
+            store,
+            "http",
+            "http://127.0.0.1:18080/get.php?discarded=synthetic",
+            "synthetic-user",
+            "synthetic-password",
+            allowInsecureHttp: true);
+        ResolverBatch batch = await CreateBatchAsync(
+            locator: null,
+            suffix: "http",
+            existingSource: source,
+            providerItem: true,
+            containerHint: ChannelContainerHint.MpegTs,
+            providerItemValue: "stream-7");
+        await ActivateAsync(databasePath, batch.Batch);
+
+        ResolvedSource resolved = await ResolveAsync(
+            databasePath,
+            new PlaybackSelection(source.Id, batch.ChannelId),
+            store);
+
+        Assert.AreEqual("None", resolved.Failure);
+        using SecretLease lease = resolved.Lease!;
+        Assert.AreEqual(
+            "http://127.0.0.1:18080/live/synthetic-user/synthetic-password/stream-7.ts",
+            Encoding.UTF8.GetString(lease.Value.Span));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task WrongAndRetiredBindingsAreUnavailable()
     {
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m11-playback-binding");
@@ -642,8 +766,15 @@ public sealed class SqlitePlaybackSourceResolverTests
             throwOnError: true)!;
         object batch = Activator.CreateInstance(
             batchType,
-            [source, snapshot.Value!, new[] { category.Value! }, new[] { channel.Value! }, locators])!;
-        return new(batch, source, channelId);
+            [
+                source,
+                snapshot.Value!,
+                new[] { category.Value! },
+                new[] { channel.Value! },
+                locators,
+                null,
+            ])!;
+        return new(batch, source, snapshotId, channelId);
     }
 
     private static async Task<ContentSource> CreateSourceAsync(
@@ -678,10 +809,18 @@ public sealed class SqlitePlaybackSourceResolverTests
         string suffix,
         string locator,
         string username,
-        string password)
+        string password,
+        bool allowInsecureHttp = false)
     {
-        DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(store)
-            .ProtectXtreamAsync(
+        var protection = new SourceDraftProtectionService(store);
+        DomainResult<ValidatedSourceDraft> draft = allowInsecureHttp
+            ? await protection.ProtectXtreamAllowingInsecureHttpAsync(
+                SourceId.Generate(),
+                $"Synthetic {suffix}",
+                locator,
+                username,
+                password)
+            : await protection.ProtectXtreamAsync(
                 SourceId.Generate(),
                 $"Synthetic {suffix}",
                 locator,
@@ -799,6 +938,7 @@ public sealed class SqlitePlaybackSourceResolverTests
     private sealed record ResolverBatch(
         object Batch,
         ContentSource Source,
+        SnapshotId SnapshotId,
         ChannelId ChannelId);
 
     private sealed record ResolvedSource(

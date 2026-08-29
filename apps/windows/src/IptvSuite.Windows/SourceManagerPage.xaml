@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="IptvSuite.Windows.SourceManagerPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Padding="32" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="4">
+                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Sources" />
+                <TextBlock Text="Manage playlists and accounts you are authorized to access." TextWrapping="Wrap" />
+            </StackPanel>
+            <Button x:Name="AddSourceButton" Grid.Column="1"
+                    AutomationProperties.AutomationId="SourceManagerAddButton"
+                    AutomationProperties.Name="Add authorized source"
+                    Click="AddSourceButton_Click" Content="Add source" />
+        </Grid>
+
+        <Grid Grid.Row="1" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="3*" />
+            </Grid.ColumnDefinitions>
+
+            <ListView x:Name="SourceList"
+                      AutomationProperties.AutomationId="SourceManagerList"
+                      AutomationProperties.Name="Playlist sources"
+                      DisplayMemberPath="Name"
+                      SelectionChanged="SourceList_SelectionChanged" />
+
+            <Grid Grid.Column="1">
+                <StackPanel x:Name="EmptySelectionPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                    <FontIcon HorizontalAlignment="Center" FontSize="42" Glyph="&#xE838;" />
+                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Select or add a source" />
+                </StackPanel>
+
+                <ScrollViewer x:Name="SourceDetailsPanel" Visibility="Collapsed">
+                    <StackPanel Spacing="12">
+                        <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Source details" />
+                        <TextBlock x:Name="SourceKindText" />
+                        <TextBlock x:Name="SourceCountsText" TextWrapping="Wrap" />
+                        <TextBox x:Name="RenameSourceTextBox" MaxLength="100"
+                                 AutomationProperties.AutomationId="SourceManagerRenameTextBox"
+                                 AutomationProperties.Name="Source name" Header="Source name" />
+                        <TextBlock x:Name="SourceTransportWarningText" TextWrapping="Wrap" Visibility="Collapsed" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="RenameSourceButton"
+                                    AutomationProperties.AutomationId="SourceManagerRenameButton"
+                                    Click="RenameSourceButton_Click" Content="Rename" />
+                            <Button x:Name="RefreshSourceButton"
+                                    AutomationProperties.AutomationId="SourceManagerRefreshButton"
+                                    Click="RefreshSourceButton_Click" Content="Refresh" />
+                            <Button x:Name="ReplaceSourceButton"
+                                    AutomationProperties.AutomationId="SourceManagerReplaceButton"
+                                    Click="ReplaceSourceButton_Click" Content="Replace URL or credentials" />
+                            <Button x:Name="DeleteSourceButton"
+                                    AutomationProperties.AutomationId="SourceManagerDeleteButton"
+                                    AutomationProperties.Name="Delete authorized source"
+                                    Click="DeleteSourceButton_Click" Content="Delete" />
+                        </StackPanel>
+                        <TextBlock Text="For security, saved URLs, usernames and passwords are never displayed. Replacing a configuration requires entering the new values." TextWrapping="Wrap" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="SourceEditorPanel" Visibility="Collapsed">
+                    <StackPanel Spacing="12">
+                        <TextBlock x:Name="SourceEditorTitle" Style="{StaticResource SubtitleTextBlockStyle}" Text="Add an authorized source" />
+                        <TextBox x:Name="SourceNameTextBox" MaxLength="100"
+                                 AutomationProperties.AutomationId="SourceManagerNameTextBox"
+                                 AutomationProperties.Name="Source name" Header="Source name" PlaceholderText="My authorized source" />
+                        <StackPanel Orientation="Horizontal" Spacing="16">
+                            <RadioButton x:Name="RemotePlaylistRadioButton" GroupName="SourceKind" IsChecked="True"
+                                         AutomationProperties.AutomationId="SourceManagerM3uKindRadioButton"
+                                         Checked="SourceKind_Changed" Content="M3U URL" />
+                            <RadioButton x:Name="XtreamRadioButton" GroupName="SourceKind"
+                                         AutomationProperties.AutomationId="SourceManagerXtreamKindRadioButton"
+                                         Checked="SourceKind_Changed" Content="Xtream API" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="RemotePlaylistFields" Spacing="8">
+                            <TextBox x:Name="RemotePlaylistLocatorTextBox" MaxLength="4096" IsSpellCheckEnabled="False"
+                                     AutomationProperties.AutomationId="SourceManagerM3uUrlTextBox"
+                                     AutomationProperties.Name="HTTP or HTTPS playlist URL"
+                                     Header="HTTP or HTTPS playlist URL" PlaceholderText="https:// or http://"
+                                     TextChanged="SourceEndpointTextBox_TextChanged" />
+                            <CheckBox x:Name="RemotePlaylistHttpConsentCheckBox"
+                                      Visibility="Collapsed"
+                                      AutomationProperties.AutomationId="SourceManagerM3uHttpConsentCheckBox"
+                                      AutomationProperties.Name="Accept Remote M3U cleartext HTTP risk">
+                                <TextBlock MaxWidth="760" TextWrapping="Wrap"
+                                           Text="For this new Remote M3U configuration, I accept that the full playlist URL (including query credentials or tokens) and media traffic use cleartext HTTP and may be observed or modified in transit (MITM)." />
+                            </CheckBox>
+                        </StackPanel>
+
+                        <StackPanel x:Name="XtreamFields" Spacing="8" Visibility="Collapsed">
+                            <TextBox x:Name="XtreamServerTextBox" MaxLength="4096" IsSpellCheckEnabled="False"
+                                     AutomationProperties.AutomationId="SourceManagerXtreamServerTextBox"
+                                     AutomationProperties.Name="Xtream server URL"
+                                     Header="HTTP or HTTPS server URL" PlaceholderText="https://server.example"
+                                     TextChanged="SourceEndpointTextBox_TextChanged" />
+                            <TextBox x:Name="XtreamUsernameTextBox" MaxLength="256" IsSpellCheckEnabled="False"
+                                     AutomationProperties.AutomationId="SourceManagerXtreamUsernameTextBox"
+                                     AutomationProperties.Name="Xtream username" Header="Username"
+                                     TextChanged="XtreamCredentials_Changed" />
+                            <PasswordBox x:Name="XtreamPasswordBox" MaxLength="1024"
+                                         AutomationProperties.AutomationId="SourceManagerXtreamPasswordBox"
+                                         AutomationProperties.Name="Xtream password" Header="Password"
+                                         PasswordChanged="XtreamCredentials_Changed" />
+                            <CheckBox x:Name="XtreamHttpConsentCheckBox"
+                                      Visibility="Collapsed"
+                                      AutomationProperties.AutomationId="SourceManagerXtreamHttpConsentCheckBox"
+                                      AutomationProperties.Name="Accept Xtream cleartext HTTP risk">
+                                <TextBlock MaxWidth="760" TextWrapping="Wrap"
+                                           Text="For this new Xtream-compatible configuration, I accept that the server requests, username, password and media traffic use cleartext HTTP and may be observed or modified in transit (MITM)." />
+                            </CheckBox>
+                        </StackPanel>
+
+                        <CheckBox x:Name="SourceAuthorizationCheckBox"
+                                  AutomationProperties.AutomationId="SourceManagerAuthorizationCheckBox"
+                                  AutomationProperties.Name="Confirm authorization for the selected source kind">
+                            <TextBlock x:Name="SourceAuthorizationText" MaxWidth="760" TextWrapping="Wrap"
+                                       Text="I am authorized to access this Remote M3U playlist. If it resolves to a private or local endpoint, I trust only the exact server and port I entered. HTTP requires the separate M3U MITM consent above." />
+                        </CheckBox>
+                        <TextBlock Text="HTTPS is recommended. Certificate validation is never disabled." TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="SaveSourceButton"
+                                    AutomationProperties.AutomationId="SourceManagerSaveButton"
+                                    Click="SaveSourceButton_Click" Content="Validate and save" />
+                            <Button x:Name="CancelEditorButton"
+                                    AutomationProperties.AutomationId="SourceManagerCancelButton"
+                                    Click="CancelEditorButton_Click" Content="Cancel" />
+                            <ProgressRing x:Name="SourceOperationProgressRing" Width="20" Height="20"
+                                          AutomationProperties.Name="Authorized source operation in progress"
+                                          IsActive="False" Visibility="Collapsed" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <Grid Grid.Row="2" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="SourceStatusText" AutomationProperties.AutomationId="SourceManagerStatusText"
+                       AutomationProperties.LiveSetting="Polite" TextWrapping="Wrap" />
+            <ProgressRing x:Name="SourceListProgressRing" Grid.Column="1" Width="20" Height="20"
+                          AutomationProperties.Name="Source list operation in progress"
+                          IsActive="False" Visibility="Collapsed" />
+        </Grid>
+    </Grid>
+</Page>

@@ -100,6 +100,12 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
             JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id
             WHERE s.source_id = $source
               AND s.status = $ready
+              AND EXISTS (
+                  SELECT 1
+                  FROM channels AS channel
+                  WHERE channel.snapshot_id = c.snapshot_id
+                    AND channel.category_id = c.category_id
+              )
             ORDER BY c.sort_order, c.display_name COLLATE NOCASE, c.category_id
             LIMIT $limit;
             """;

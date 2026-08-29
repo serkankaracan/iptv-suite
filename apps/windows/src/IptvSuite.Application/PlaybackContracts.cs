@@ -27,29 +27,116 @@ public readonly record struct PlaybackSessionId
     public override string ToString() => Value.ToString(CultureInfo.InvariantCulture);
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<PlaybackTargetKind>))]
+public enum PlaybackTargetKind
+{
+    Live,
+    Movie,
+    Episode,
+}
+
+public sealed record PlaybackTarget
+{
+    private PlaybackTarget(
+        PlaybackTargetKind kind,
+        ChannelId? channelId,
+        MovieId? movieId,
+        EpisodeId? episodeId)
+    {
+        Kind = kind;
+        ChannelId = channelId;
+        MovieId = movieId;
+        EpisodeId = episodeId;
+    }
+
+    public PlaybackTargetKind Kind { get; }
+
+    public ChannelId? ChannelId { get; }
+
+    public MovieId? MovieId { get; }
+
+    public EpisodeId? EpisodeId { get; }
+
+    public static PlaybackTarget Live(ChannelId channelId)
+    {
+        if (channelId.IsEmpty)
+        {
+            throw new ArgumentException("A live channel identifier is required.", nameof(channelId));
+        }
+
+        return new PlaybackTarget(
+            PlaybackTargetKind.Live,
+            channelId,
+            movieId: null,
+            episodeId: null);
+    }
+
+    public static PlaybackTarget Movie(MovieId movieId)
+    {
+        if (movieId.IsEmpty)
+        {
+            throw new ArgumentException("A movie identifier is required.", nameof(movieId));
+        }
+
+        return new PlaybackTarget(
+            PlaybackTargetKind.Movie,
+            channelId: null,
+            movieId,
+            episodeId: null);
+    }
+
+    public static PlaybackTarget Episode(EpisodeId episodeId)
+    {
+        if (episodeId.IsEmpty)
+        {
+            throw new ArgumentException("An episode identifier is required.", nameof(episodeId));
+        }
+
+        return new PlaybackTarget(
+            PlaybackTargetKind.Episode,
+            channelId: null,
+            movieId: null,
+            episodeId);
+    }
+
+    public override string ToString() => $"[PLAYBACK-TARGET:{Kind}]";
+}
+
 public sealed record PlaybackSelection
 {
     public PlaybackSelection(SourceId sourceId, ChannelId channelId)
+        : this(sourceId, PlaybackTarget.Live(channelId))
+    {
+    }
+
+    private PlaybackSelection(SourceId sourceId, PlaybackTarget target)
     {
         if (sourceId.IsEmpty)
         {
             throw new ArgumentException("A playback source identifier is required.", nameof(sourceId));
         }
 
-        if (channelId.IsEmpty)
-        {
-            throw new ArgumentException("A playback channel identifier is required.", nameof(channelId));
-        }
-
         SourceId = sourceId;
-        ChannelId = channelId;
+        Target = target ?? throw new ArgumentNullException(nameof(target));
     }
+
+    public static PlaybackSelection ForTarget(SourceId sourceId, PlaybackTarget target) =>
+        new(sourceId, target);
 
     public SourceId SourceId { get; }
 
-    public ChannelId ChannelId { get; }
+    public PlaybackTarget Target { get; }
 
-    public override string ToString() => $"[PLAYBACK-SELECTION:{SourceId}:{ChannelId}]";
+    public ChannelId ChannelId => Target.ChannelId.GetValueOrDefault();
+
+    public override string ToString() => $"[PLAYBACK-SELECTION:{SourceId}:{Target.Kind}]";
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PlaybackContentIntent>))]
+public enum PlaybackContentIntent
+{
+    Live,
+    OnDemand,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<PlaybackState>))]
@@ -60,6 +147,7 @@ public enum PlaybackState
     Buffering,
     Playing,
     Paused,
+    Completed,
     Reconnecting,
     Stopping,
     Failed,
@@ -225,6 +313,128 @@ public interface IPlaybackEngine : IAsyncDisposable
         CancellationToken cancellationToken = default);
 }
 
+public sealed record PlaybackTimelineSnapshot
+{
+    private PlaybackTimelineSnapshot(
+        PlaybackSessionId sessionId,
+        TimeSpan position,
+        TimeSpan duration,
+        bool canSeek)
+    {
+        SessionId = sessionId;
+        Position = position;
+        Duration = duration;
+        CanSeek = canSeek;
+    }
+
+    public PlaybackSessionId SessionId { get; }
+
+    public TimeSpan Position { get; }
+
+    public TimeSpan Duration { get; }
+
+    public bool CanSeek { get; }
+
+    public static PlaybackTimelineSnapshot Unavailable() =>
+        new(default, TimeSpan.Zero, TimeSpan.Zero, canSeek: false);
+
+    public static PlaybackTimelineSnapshot Unavailable(PlaybackSessionId sessionId)
+    {
+        if (sessionId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "An active playback session identifier is required.",
+                nameof(sessionId));
+        }
+
+        return new PlaybackTimelineSnapshot(
+            sessionId,
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            canSeek: false);
+    }
+
+    public static PlaybackTimelineSnapshot Create(
+        PlaybackSessionId sessionId,
+        TimeSpan position,
+        TimeSpan duration,
+        bool canSeek)
+    {
+        if (sessionId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "An active playback session identifier is required.",
+                nameof(sessionId));
+        }
+
+        if (position < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(position),
+                "A playback position cannot be negative.");
+        }
+
+        if (duration < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(duration),
+                "A playback duration cannot be negative.");
+        }
+
+        if (position > duration)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(position),
+                "A playback position cannot exceed its duration.");
+        }
+
+        if (canSeek && duration == TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                "A seekable timeline requires a positive duration.",
+                nameof(canSeek));
+        }
+
+        return new PlaybackTimelineSnapshot(sessionId, position, duration, canSeek);
+    }
+
+    public override string ToString() => SessionId.IsEmpty
+        ? "[PLAYBACK-TIMELINE:UNAVAILABLE]"
+        : CanSeek
+            ? $"[PLAYBACK-TIMELINE:{SessionId}:SEEKABLE]"
+            : $"[PLAYBACK-TIMELINE:{SessionId}:READ-ONLY]";
+}
+
+public sealed class PlaybackTimelineChangedEventArgs : EventArgs
+{
+    public PlaybackTimelineChangedEventArgs(PlaybackTimelineSnapshot snapshot)
+    {
+        Snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
+    }
+
+    public PlaybackTimelineSnapshot Snapshot { get; }
+
+    public override string ToString() => Snapshot.ToString();
+}
+
+public interface IPlaybackTimelineEngine
+{
+    event EventHandler<PlaybackTimelineChangedEventArgs>? TimelineChanged;
+
+    PlaybackTimelineSnapshot CurrentTimeline { get; }
+
+    ValueTask<PlaybackEngineOperationResult> OpenAsync(
+        PlaybackSessionId sessionId,
+        PlaybackSelection selection,
+        PlaybackContentIntent contentIntent,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<PlaybackEngineOperationResult> SeekAsync(
+        PlaybackSessionId sessionId,
+        TimeSpan position,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record PlaybackSessionSnapshot
 {
     private PlaybackSessionSnapshot(
@@ -234,10 +444,41 @@ public sealed record PlaybackSessionSnapshot
         PlaybackState state,
         DomainError? error,
         PlaybackReconnectSnapshot? reconnect)
+        : this(
+            sessionId,
+            sourceId,
+            channelId.HasValue ? PlaybackTarget.Live(channelId.Value) : null,
+            channelId.HasValue ? PlaybackContentIntent.Live : null,
+            state,
+            error,
+            reconnect)
+    {
+    }
+
+    private PlaybackSessionSnapshot(
+        PlaybackSessionId sessionId,
+        SourceId? sourceId,
+        PlaybackTarget? target,
+        PlaybackContentIntent? contentIntent,
+        PlaybackState state,
+        DomainError? error,
+        PlaybackReconnectSnapshot? reconnect)
     {
         if (!Enum.IsDefined(state))
         {
             throw new ArgumentOutOfRangeException(nameof(state));
+        }
+
+        if (contentIntent.HasValue && !Enum.IsDefined(contentIntent.Value))
+        {
+            throw new ArgumentOutOfRangeException(nameof(contentIntent));
+        }
+
+        if (sourceId.HasValue != (target is not null) ||
+            sourceId.HasValue != contentIntent.HasValue)
+        {
+            throw new ArgumentException(
+                "Playback content intent is required exactly when a selection is active.");
         }
 
         bool reconnecting = state == PlaybackState.Reconnecting;
@@ -254,7 +495,8 @@ public sealed record PlaybackSessionSnapshot
 
         SessionId = sessionId;
         SourceId = sourceId;
-        ChannelId = channelId;
+        Target = target;
+        ContentIntent = contentIntent;
         State = state;
         Error = error;
         Reconnect = reconnect;
@@ -264,7 +506,15 @@ public sealed record PlaybackSessionSnapshot
 
     public SourceId? SourceId { get; }
 
-    public ChannelId? ChannelId { get; }
+    public PlaybackTarget? Target { get; }
+
+    public ChannelId? ChannelId => Target?.ChannelId;
+
+    public MovieId? MovieId => Target?.MovieId;
+
+    public EpisodeId? EpisodeId => Target?.EpisodeId;
+
+    public PlaybackContentIntent? ContentIntent { get; }
 
     public PlaybackState State { get; }
 
@@ -273,12 +523,13 @@ public sealed record PlaybackSessionSnapshot
     public PlaybackReconnectSnapshot? Reconnect { get; }
 
     internal static PlaybackSessionSnapshot Closed() =>
-        new(default, null, null, PlaybackState.Closed, null, reconnect: null);
+        new(default, null, null, null, PlaybackState.Closed, null, reconnect: null);
 
     internal static PlaybackSessionSnapshot Active(
         PlaybackSessionId sessionId,
         PlaybackSelection selection,
-        PlaybackState state)
+        PlaybackState state,
+        PlaybackContentIntent contentIntent = PlaybackContentIntent.Live)
     {
         if (sessionId.IsEmpty)
         {
@@ -288,6 +539,10 @@ public sealed record PlaybackSessionSnapshot
         }
 
         ArgumentNullException.ThrowIfNull(selection);
+        if (!Enum.IsDefined(contentIntent))
+        {
+            throw new ArgumentOutOfRangeException(nameof(contentIntent));
+        }
         if (state is PlaybackState.Closed or PlaybackState.Reconnecting or PlaybackState.Failed ||
             !Enum.IsDefined(state))
         {
@@ -297,7 +552,8 @@ public sealed record PlaybackSessionSnapshot
         return new PlaybackSessionSnapshot(
             sessionId,
             selection.SourceId,
-            selection.ChannelId,
+            selection.Target,
+            contentIntent,
             state,
             error: null,
             reconnect: null);
@@ -330,7 +586,8 @@ public sealed record PlaybackSessionSnapshot
         return new PlaybackSessionSnapshot(
             sessionId,
             selection.SourceId,
-            selection.ChannelId,
+            selection.Target,
+            PlaybackContentIntent.Live,
             PlaybackState.Reconnecting,
             error: null,
             reconnect);
@@ -339,7 +596,8 @@ public sealed record PlaybackSessionSnapshot
     internal static PlaybackSessionSnapshot Failed(
         PlaybackSessionId sessionId,
         PlaybackSelection selection,
-        DomainError error)
+        DomainError error,
+        PlaybackContentIntent contentIntent = PlaybackContentIntent.Live)
     {
         if (sessionId.IsEmpty)
         {
@@ -350,10 +608,15 @@ public sealed record PlaybackSessionSnapshot
 
         ArgumentNullException.ThrowIfNull(selection);
         ArgumentNullException.ThrowIfNull(error);
+        if (!Enum.IsDefined(contentIntent))
+        {
+            throw new ArgumentOutOfRangeException(nameof(contentIntent));
+        }
         return new PlaybackSessionSnapshot(
             sessionId,
             selection.SourceId,
-            selection.ChannelId,
+            selection.Target,
+            contentIntent,
             PlaybackState.Failed,
             error,
             reconnect: null);

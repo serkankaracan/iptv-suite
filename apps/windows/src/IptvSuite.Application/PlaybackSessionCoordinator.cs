@@ -5,6 +5,7 @@ namespace IptvSuite.Application;
 public sealed class PlaybackSessionCoordinator : IAsyncDisposable
 {
     private readonly IPlaybackEngine _engine;
+    private readonly IPlaybackTimelineEngine? _timelineEngine;
     private readonly PlaybackReconnectPolicy? _reconnectPolicy;
     private readonly PlaybackReconnectOrchestrator? _reconnectOrchestrator;
     private readonly SemaphoreSlim _engineGate = new(1, 1);
@@ -24,6 +25,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         isMuted: false,
         PlaybackAspectMode.Fit);
     private PlaybackTrackSnapshot? _currentTracks;
+    private PlaybackTimelineSnapshot _currentTimeline = PlaybackTimelineSnapshot.Unavailable();
+    private PlaybackContentIntent _currentContentIntent = PlaybackContentIntent.Live;
     private ReconnectContext? _reconnectContext;
     private Task? _disposeTask;
     private long _generation;
@@ -35,7 +38,12 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
     public PlaybackSessionCoordinator(IPlaybackEngine engine)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        _timelineEngine = engine as IPlaybackTimelineEngine;
         _engine.StateChanged += OnEngineStateChanged;
+        if (_timelineEngine is not null)
+        {
+            _timelineEngine.TimelineChanged += OnEngineTimelineChanged;
+        }
     }
 
     public PlaybackSessionCoordinator(
@@ -49,6 +57,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(jitterSource);
         _engine = engine;
+        _timelineEngine = engine as IPlaybackTimelineEngine;
         _reconnectPolicy = reconnectPolicy;
         _reconnectOrchestrator = new PlaybackReconnectOrchestrator(
             reconnectPolicy,
@@ -56,10 +65,16 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             jitterSource,
             ExecuteReconnectAttemptAsync);
         _engine.StateChanged += OnEngineStateChanged;
+        if (_timelineEngine is not null)
+        {
+            _timelineEngine.TimelineChanged += OnEngineTimelineChanged;
+        }
         _reconnectOrchestrator.SnapshotChanged += OnReconnectSnapshotChanged;
     }
 
     public event EventHandler<PlaybackSessionStateChangedEventArgs>? StateChanged;
+
+    public event EventHandler<PlaybackTimelineChangedEventArgs>? TimelineChanged;
 
     public PlaybackSessionSnapshot Current
     {
@@ -94,6 +109,17 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
     }
 
+    public PlaybackTimelineSnapshot CurrentTimeline
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _currentTimeline;
+            }
+        }
+    }
+
     public bool CanRetryReconnect
     {
         get
@@ -106,17 +132,83 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
     }
 
-    public async ValueTask<PlaybackSessionSnapshot?> StartAsync(
+    public ValueTask<PlaybackSessionSnapshot?> StartAsync(
         SourceId sourceId,
         ChannelId channelId,
+        CancellationToken cancellationToken = default) =>
+        StartAsync(
+            sourceId,
+            PlaybackTarget.Live(channelId),
+            PlaybackContentIntent.Live,
+            cancellationToken);
+
+    public ValueTask<PlaybackSessionSnapshot?> StartAsync(
+        SourceId sourceId,
+        ChannelId channelId,
+        PlaybackContentIntent contentIntent,
+        CancellationToken cancellationToken = default) =>
+        StartAsync(
+            sourceId,
+            PlaybackTarget.Live(channelId),
+            contentIntent,
+            cancellationToken);
+
+    public ValueTask<PlaybackSessionSnapshot?> StartAsync(
+        SourceId sourceId,
+        MovieId movieId,
+        CancellationToken cancellationToken = default) =>
+        StartAsync(
+            sourceId,
+            PlaybackTarget.Movie(movieId),
+            PlaybackContentIntent.OnDemand,
+            cancellationToken);
+
+    public ValueTask<PlaybackSessionSnapshot?> StartAsync(
+        SourceId sourceId,
+        EpisodeId episodeId,
+        CancellationToken cancellationToken = default) =>
+        StartAsync(
+            sourceId,
+            PlaybackTarget.Episode(episodeId),
+            PlaybackContentIntent.OnDemand,
+            cancellationToken);
+
+    public async ValueTask<PlaybackSessionSnapshot?> StartAsync(
+        SourceId sourceId,
+        PlaybackTarget target,
+        PlaybackContentIntent contentIntent,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(target);
+        if (!Enum.IsDefined(contentIntent))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(contentIntent),
+                contentIntent,
+                "Unknown playback content intent.");
+        }
+
+        bool targetMatchesIntent = contentIntent switch
+        {
+            PlaybackContentIntent.Live => target.Kind == PlaybackTargetKind.Live,
+            PlaybackContentIntent.OnDemand => target.Kind is
+                PlaybackTargetKind.Movie or PlaybackTargetKind.Episode,
+            _ => false,
+        };
+        if (!targetMatchesIntent)
+        {
+            throw new ArgumentException(
+                "The playback target does not match its content intent.",
+                nameof(target));
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
-        var selection = new PlaybackSelection(sourceId, channelId);
+        PlaybackSelection selection = PlaybackSelection.ForTarget(sourceId, target);
         var lifetime = new SessionLifetime();
         SessionOperationCancellation request = lifetime.CreateOperation(cancellationToken);
         SessionLifetime? previousLifetime;
         PlaybackSessionSnapshot opening;
+        PlaybackTimelineSnapshot openingTimeline;
         PlaybackControlSnapshot desiredControls;
         PlaybackSessionId sessionId;
         long generation;
@@ -140,10 +232,12 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 previousLifetime = _currentLifetime;
                 _currentLifetime = lifetime;
                 _currentSelection = selection;
+                _currentContentIntent = contentIntent;
                 opening = PlaybackSessionSnapshot.Active(
                     sessionId,
                     selection,
-                    PlaybackState.Opening);
+                    PlaybackState.Opening,
+                    contentIntent);
                 _current = opening;
                 _currentControls = PlaybackControlSnapshot.Active(
                     sessionId,
@@ -152,6 +246,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     _aspectMode);
                 desiredControls = _currentControls;
                 _currentTracks = null;
+                _currentTimeline = PlaybackTimelineSnapshot.Unavailable(sessionId);
+                openingTimeline = _currentTimeline;
             }
         }
         catch
@@ -164,6 +260,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         CancelReconnectSafely(reconnectToCancel);
         previousLifetime?.Retire();
         RaiseStateChanged(opening);
+        RaiseTimelineChanged(openingTimeline);
 
         try
         {
@@ -207,7 +304,11 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     _engineSource = sourceId;
                 }
                 PlaybackEngineOperationResult opened = await InvokeEngineOperationAsync(
-                    token => _engine.OpenAsync(sessionId, selection, token),
+                    token => OpenEngineSessionAsync(
+                        sessionId,
+                        selection,
+                        contentIntent,
+                        token),
                     DomainErrorCode.PlaybackStartFailed,
                     request.Token).ConfigureAwait(false);
                 request.Token.ThrowIfCancellationRequested();
@@ -408,6 +509,49 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             cancellationToken);
     }
 
+    public async ValueTask<PlaybackEngineOperationResult> SeekAsync(
+        PlaybackSessionId sessionId,
+        TimeSpan position,
+        CancellationToken cancellationToken = default)
+    {
+        if (position < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(position),
+                "A playback position cannot be negative.");
+        }
+
+        PlaybackTimelineSnapshot? changed = null;
+        PlaybackEngineOperationResult result = await ExecuteCurrentControlCommandAsync(
+            sessionId,
+            (physicalSession, token) => _timelineEngine is null
+                ? ValueTask.FromResult(PlaybackEngineOperationResult.Failed(
+                    DomainErrorCode.PlaybackControlFailed))
+                : _timelineEngine.SeekAsync(physicalSession, position, token),
+            () =>
+            {
+                changed = PlaybackTimelineSnapshot.Create(
+                    sessionId,
+                    position,
+                    _currentTimeline.Duration,
+                    canSeek: true);
+                _currentTimeline = changed;
+            },
+            () => _timelineEngine is not null &&
+                _currentContentIntent == PlaybackContentIntent.OnDemand &&
+                _currentTimeline.SessionId == sessionId &&
+                _currentTimeline.CanSeek &&
+                position <= _currentTimeline.Duration,
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.IsSuccess && changed is not null)
+        {
+            RaiseTimelineChanged(changed);
+        }
+
+        return result;
+    }
+
     public ValueTask<PlaybackEngineOperationResult> StopAsync(
         CancellationToken cancellationToken = default)
     {
@@ -526,6 +670,47 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
     }
 
+    internal ValueTask<PlaybackEngineOperationResult> DrainSourceRetirementAsync(
+        SourceId sourceId)
+    {
+        if (sourceId.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A playback source identifier is required.",
+                nameof(sourceId));
+        }
+
+        PlaybackSessionId sessionId = default;
+        bool releaseCurrent;
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (!_sourceRetirements.ContainsKey(sourceId))
+            {
+                return ValueTask.FromResult(PlaybackEngineOperationResult.Failed(
+                    DomainErrorCode.DomainInvariantViolation));
+            }
+
+            releaseCurrent = _currentSelection?.SourceId == sourceId &&
+                _current.State is (
+                    PlaybackState.Opening or
+                    PlaybackState.Buffering or
+                    PlaybackState.Playing or
+                    PlaybackState.Paused or
+                    PlaybackState.Completed or
+                    PlaybackState.Reconnecting or
+                    PlaybackState.Stopping or
+                    PlaybackState.Failed);
+            if (releaseCurrent)
+            {
+                sessionId = _current.SessionId;
+            }
+        }
+
+        return new ValueTask<PlaybackEngineOperationResult>(
+            ReleaseRetiredSourceAsync(sourceId, releaseCurrent, sessionId));
+    }
+
     /// <summary>
     /// Atomically retires a source from playback admission and drains its exact current or
     /// in-flight physical session.
@@ -559,6 +744,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     PlaybackState.Buffering or
                     PlaybackState.Playing or
                     PlaybackState.Paused or
+                    PlaybackState.Completed or
                     PlaybackState.Reconnecting or
                     PlaybackState.Stopping or
                     PlaybackState.Failed);
@@ -619,8 +805,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                    PlaybackState.Stopping or PlaybackState.Failed ||
+            if (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Reconnecting or PlaybackState.Stopping or PlaybackState.Failed ||
                 _currentLifetime is null)
             {
                 return PlaybackEngineOperationResult.Failed(
@@ -657,8 +843,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     ? _current.Error
                     : null;
                 invalidBeforeDispatch = terminalBeforeDispatch is null &&
-                    (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                        PlaybackState.Stopping ||
+                    (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                        PlaybackState.Reconnecting or PlaybackState.Stopping ||
                         _currentLifetime is null);
             }
 
@@ -705,8 +891,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     ? _current.Error
                     : null;
                 invalidAfterDispatch = terminalAfterDispatch is null &&
-                    (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                        PlaybackState.Stopping ||
+                    (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                        PlaybackState.Reconnecting or PlaybackState.Stopping ||
                         _currentLifetime is null);
             }
 
@@ -779,8 +965,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 return PlaybackEngineOperationResult.Failed(DomainErrorCode.OperationCancelled);
             }
 
-            if (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                    PlaybackState.Stopping or PlaybackState.Failed ||
+            if (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Reconnecting or PlaybackState.Stopping or PlaybackState.Failed ||
                 _currentLifetime is null ||
                 canExecute is not null && !canExecute())
             {
@@ -812,8 +998,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     ? _current.Error
                     : null;
                 invalidBeforeDispatch = terminalBeforeDispatch is null &&
-                    (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                        PlaybackState.Stopping ||
+                    (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                        PlaybackState.Reconnecting or PlaybackState.Stopping ||
                         _currentLifetime is null ||
                         canExecute is not null && !canExecute());
                 physicalSession = _engineSession;
@@ -862,8 +1048,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     ? _current.Error
                     : null;
                 invalidAfterDispatch = terminalError is null &&
-                    (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                        PlaybackState.Stopping ||
+                    (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                        PlaybackState.Reconnecting or PlaybackState.Stopping ||
                         _currentLifetime is null);
                 exactBindingAfterDispatch = _engineSession == physicalSession &&
                     _engineLogicalSession == expectedSession;
@@ -936,8 +1122,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 return DomainResult.Failure<PlaybackTrackSnapshot>(DomainErrorCode.OperationCancelled);
             }
 
-            if (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                    PlaybackState.Stopping or PlaybackState.Failed ||
+            if (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Reconnecting or PlaybackState.Stopping or PlaybackState.Failed ||
                 _currentLifetime is null)
             {
                 return DomainResult.Failure<PlaybackTrackSnapshot>(DomainErrorCode.DomainInvariantViolation);
@@ -969,8 +1155,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     ? _current.Error
                     : null;
                 invalidBeforeDispatch = terminalBeforeDispatch is null &&
-                    (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                        PlaybackState.Stopping ||
+                    (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                        PlaybackState.Reconnecting or PlaybackState.Stopping ||
                         _currentLifetime is null);
                 physicalSession = _engineSession;
                 exactBindingBeforeDispatch = !physicalSession.IsEmpty &&
@@ -1021,8 +1207,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                     ? _current.Error
                     : null;
                 invalidAfterDispatch = terminalError is null &&
-                    (_current.State is PlaybackState.Closed or PlaybackState.Reconnecting or
-                        PlaybackState.Stopping ||
+                    (_current.State is PlaybackState.Closed or PlaybackState.Completed or
+                        PlaybackState.Reconnecting or PlaybackState.Stopping ||
                         _currentLifetime is null);
                 exactBindingAfterDispatch = _engineSession == physicalSession &&
                     _engineLogicalSession == expectedSession;
@@ -1130,6 +1316,27 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             cancellationToken);
     }
 
+    private ValueTask<PlaybackEngineOperationResult> OpenEngineSessionAsync(
+        PlaybackSessionId sessionId,
+        PlaybackSelection selection,
+        PlaybackContentIntent contentIntent,
+        CancellationToken cancellationToken)
+    {
+        if (_timelineEngine is not null)
+        {
+            return _timelineEngine.OpenAsync(
+                sessionId,
+                selection,
+                contentIntent,
+                cancellationToken);
+        }
+
+        return contentIntent == PlaybackContentIntent.Live
+            ? _engine.OpenAsync(sessionId, selection, cancellationToken)
+            : ValueTask.FromResult(PlaybackEngineOperationResult.Failed(
+                DomainErrorCode.PlaybackSourceUnsupported));
+    }
+
     private PlaybackEngineOperationResult CheckControlRestoreProgress(
         long generation,
         PlaybackSessionId sessionId,
@@ -1184,7 +1391,8 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             stopping = PlaybackSessionSnapshot.Active(
                 sessionId,
                 _currentSelection,
-                PlaybackState.Stopping);
+                PlaybackState.Stopping,
+                _currentContentIntent);
             _current = stopping;
             if (_currentLifetime is not null)
             {
@@ -1219,6 +1427,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         }
 
         PlaybackSessionSnapshot? completed = null;
+        PlaybackTimelineSnapshot? timelineChanged = null;
         lock (_sync)
         {
             if (!_disposed &&
@@ -1229,18 +1438,24 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 {
                     _current = PlaybackSessionSnapshot.Closed();
                     _currentSelection = null;
+                    _currentContentIntent = PlaybackContentIntent.Live;
                     _currentControls = PlaybackControlSnapshot.Idle(
                         _volume,
                         _isMuted,
                         _aspectMode);
                     _currentTracks = null;
+                    _currentTimeline = PlaybackTimelineSnapshot.Unavailable();
+                    timelineChanged = _currentTimeline;
                 }
                 else
                 {
                     _current = PlaybackSessionSnapshot.Failed(
                         sessionId,
                         _currentSelection!,
-                        result.Error!);
+                        result.Error!,
+                        _currentContentIntent);
+                    _currentTimeline = PlaybackTimelineSnapshot.Unavailable(sessionId);
+                    timelineChanged = _currentTimeline;
                 }
 
                 completed = _current;
@@ -1250,6 +1465,11 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         if (completed is not null)
         {
             RaiseStateChanged(completed);
+        }
+
+        if (timelineChanged is not null)
+        {
+            RaiseTimelineChanged(timelineChanged);
         }
 
         return result;
@@ -1277,6 +1497,10 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             await _engineGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             gateEntered = true;
             _engine.StateChanged -= OnEngineStateChanged;
+            if (_timelineEngine is not null)
+            {
+                _timelineEngine.TimelineChanged -= OnEngineTimelineChanged;
+            }
             if (!_engineSession.IsEmpty)
             {
                 await StopEngineSessionUnderGateAsync(_engineSession).ConfigureAwait(false);
@@ -1289,12 +1513,14 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
                 _engineLogicalSession = default;
                 _engineSource = default;
                 _currentSelection = null;
+                _currentContentIntent = PlaybackContentIntent.Live;
                 _current = PlaybackSessionSnapshot.Closed();
                 _currentControls = PlaybackControlSnapshot.Idle(
                     _volume,
                     _isMuted,
                     _aspectMode);
                 _currentTracks = null;
+                _currentTimeline = PlaybackTimelineSnapshot.Unavailable();
             }
 
             if (cleanupFailed)
@@ -1897,6 +2123,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(eventArgs);
         PlaybackEngineSnapshot engineSnapshot = eventArgs.Snapshot;
         PlaybackSessionSnapshot? changed = null;
+        PlaybackTimelineSnapshot? timelineChanged = null;
         ReconnectContext? reconnectToBegin = null;
         DomainError? reconnectFailure = null;
 
@@ -1947,6 +2174,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             }
 
             if (engineSnapshot.State == PlaybackState.Failed &&
+                _currentContentIntent == PlaybackContentIntent.Live &&
                 _currentLifetime is not null &&
                 _current.State is (
                     PlaybackState.Opening or
@@ -1970,26 +2198,34 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             {
                 _current = PlaybackSessionSnapshot.Closed();
                 _currentSelection = null;
+                _currentContentIntent = PlaybackContentIntent.Live;
                 _currentControls = PlaybackControlSnapshot.Idle(
                     _volume,
                     _isMuted,
                     _aspectMode);
                 _currentTracks = null;
+                _currentTimeline = PlaybackTimelineSnapshot.Unavailable();
+                timelineChanged = _currentTimeline;
             }
             else if (engineSnapshot.State == PlaybackState.Failed)
             {
                 _current = PlaybackSessionSnapshot.Failed(
                     _current.SessionId,
                     _currentSelection,
-                    engineSnapshot.Error!);
+                    engineSnapshot.Error!,
+                    _currentContentIntent);
                 _currentTracks = null;
+                _currentTimeline = PlaybackTimelineSnapshot.Unavailable(
+                    _current.SessionId);
+                timelineChanged = _currentTimeline;
             }
             else
             {
                 _current = PlaybackSessionSnapshot.Active(
                     _current.SessionId,
                     _currentSelection,
-                    engineSnapshot.State);
+                    engineSnapshot.State,
+                    _currentContentIntent);
             }
 
             changed = _current;
@@ -2003,6 +2239,45 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         {
             RaiseStateChanged(changed);
         }
+
+        if (timelineChanged is not null)
+        {
+            RaiseTimelineChanged(timelineChanged);
+        }
+    }
+
+    private void OnEngineTimelineChanged(
+        object? sender,
+        PlaybackTimelineChangedEventArgs eventArgs)
+    {
+        ArgumentNullException.ThrowIfNull(eventArgs);
+        PlaybackTimelineSnapshot engineTimeline = eventArgs.Snapshot;
+        PlaybackTimelineSnapshot? changed = null;
+        lock (_sync)
+        {
+            if (_disposed ||
+                _currentSelection is null ||
+                _current.State is PlaybackState.Closed or PlaybackState.Stopping or
+                    PlaybackState.Failed ||
+                _currentContentIntent != PlaybackContentIntent.OnDemand ||
+                _engineSession.IsEmpty ||
+                engineTimeline.SessionId != _engineSession ||
+                _engineLogicalSession != _current.SessionId)
+            {
+                return;
+            }
+
+            changed = engineTimeline.SessionId == _current.SessionId
+                ? engineTimeline
+                : PlaybackTimelineSnapshot.Create(
+                    _current.SessionId,
+                    engineTimeline.Position,
+                    engineTimeline.Duration,
+                    engineTimeline.CanSeek);
+            _currentTimeline = changed;
+        }
+
+        RaiseTimelineChanged(changed);
     }
 
     private void BeginReconnect(ReconnectContext context, DomainError failure)
@@ -2254,19 +2529,31 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         DomainError error)
     {
         PlaybackSessionSnapshot? failed = null;
+        PlaybackTimelineSnapshot? timelineChanged = null;
         lock (_sync)
         {
             if (!_disposed && generation == _generation && _current.SessionId == sessionId)
             {
-                failed = PlaybackSessionSnapshot.Failed(sessionId, selection, error);
+                failed = PlaybackSessionSnapshot.Failed(
+                    sessionId,
+                    selection,
+                    error,
+                    _currentContentIntent);
                 _current = failed;
                 _currentTracks = null;
+                _currentTimeline = PlaybackTimelineSnapshot.Unavailable(sessionId);
+                timelineChanged = _currentTimeline;
             }
         }
 
         if (failed is not null)
         {
             RaiseStateChanged(failed);
+        }
+
+        if (timelineChanged is not null)
+        {
+            RaiseTimelineChanged(timelineChanged);
         }
 
         return failed;
@@ -2419,6 +2706,7 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
         if (next == PlaybackState.Failed)
         {
             return current is not PlaybackState.Closed and
+                not PlaybackState.Completed and
                 not PlaybackState.Reconnecting and
                 not PlaybackState.Stopping and
                 not PlaybackState.Failed;
@@ -2426,10 +2714,10 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
 
         return current switch
         {
-            PlaybackState.Opening => next is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused,
-            PlaybackState.Buffering => next is PlaybackState.Playing or PlaybackState.Paused,
-            PlaybackState.Playing => next is PlaybackState.Buffering or PlaybackState.Paused,
-            PlaybackState.Paused => next is PlaybackState.Buffering or PlaybackState.Playing,
+            PlaybackState.Opening => next is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused or PlaybackState.Completed,
+            PlaybackState.Buffering => next is PlaybackState.Playing or PlaybackState.Paused or PlaybackState.Completed,
+            PlaybackState.Playing => next is PlaybackState.Buffering or PlaybackState.Paused or PlaybackState.Completed,
+            PlaybackState.Paused => next is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Completed,
             PlaybackState.Stopping => next == PlaybackState.Closed,
             _ => false,
         };
@@ -2468,6 +2756,40 @@ public sealed class PlaybackSessionCoordinator : IAsyncDisposable
             catch (Exception)
             {
                 // Observer failures cannot mutate or stop playback lifecycle coordination.
+            }
+        }
+    }
+
+    private void RaiseTimelineChanged(PlaybackTimelineSnapshot snapshot)
+    {
+        EventHandler<PlaybackTimelineChangedEventArgs>[] handlers;
+        lock (_sync)
+        {
+            if (_disposed || !ReferenceEquals(_currentTimeline, snapshot))
+            {
+                return;
+            }
+
+            handlers = TimelineChanged?.GetInvocationList()
+                .Cast<EventHandler<PlaybackTimelineChangedEventArgs>>()
+                .ToArray() ?? [];
+        }
+
+        if (handlers.Length == 0)
+        {
+            return;
+        }
+
+        var eventArgs = new PlaybackTimelineChangedEventArgs(snapshot);
+        foreach (EventHandler<PlaybackTimelineChangedEventArgs> handler in handlers)
+        {
+            try
+            {
+                handler(this, eventArgs);
+            }
+            catch (Exception)
+            {
+                // Observer failures cannot mutate playback ownership.
             }
         }
     }

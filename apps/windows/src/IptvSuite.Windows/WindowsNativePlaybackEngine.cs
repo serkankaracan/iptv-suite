@@ -11,7 +11,7 @@ using Windows.Media.Playback;
 
 namespace IptvSuite.Windows;
 
-internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
+internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine, IPlaybackTimelineEngine
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly object _sync = new();
@@ -27,6 +27,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         PlaybackVolume.FromPercent(100),
         isMuted: false,
         PlaybackAspectMode.Fit);
+    private PlaybackTimelineSnapshot _timeline = PlaybackTimelineSnapshot.Unavailable();
     private SessionContext? _active;
     private Task? _disposeTask;
     private long _generation;
@@ -62,6 +63,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
 
     public event EventHandler<PlaybackEngineStateChangedEventArgs>? StateChanged;
 
+    public event EventHandler<PlaybackTimelineChangedEventArgs>? TimelineChanged;
+
     public PlaybackEngineSnapshot Current
     {
         get
@@ -84,12 +87,40 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         }
     }
 
+    public PlaybackTimelineSnapshot CurrentTimeline
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _timeline;
+            }
+        }
+    }
+
+    public ValueTask<PlaybackEngineOperationResult> OpenAsync(
+        PlaybackSessionId sessionId,
+        PlaybackSelection selection,
+        CancellationToken cancellationToken = default) =>
+        OpenAsync(
+            sessionId,
+            selection,
+            PlaybackContentIntent.Live,
+            cancellationToken);
+
     public async ValueTask<PlaybackEngineOperationResult> OpenAsync(
         PlaybackSessionId sessionId,
         PlaybackSelection selection,
+        PlaybackContentIntent contentIntent,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(selection);
+        if (!Enum.IsDefined(contentIntent))
+        {
+            return PlaybackEngineOperationResult.Failed(
+                DomainErrorCode.PlaybackStartFailed);
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         if (sessionId.IsEmpty || IsDisposeStarted())
         {
@@ -140,7 +171,10 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             try
             {
                 return await RunOnDispatcherAsync(
-                    () => OpenOnUiThread(sessionId, lease.Value.Span),
+                    () => OpenOnUiThread(
+                        sessionId,
+                        lease.Value.Span,
+                        contentIntent),
                     operationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -274,6 +308,24 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             cancellationToken);
     }
 
+    public ValueTask<PlaybackEngineOperationResult> SeekAsync(
+        PlaybackSessionId sessionId,
+        TimeSpan position,
+        CancellationToken cancellationToken = default)
+    {
+        if (position < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(position),
+                "A playback position cannot be negative.");
+        }
+
+        return ExecuteControlOnUiThreadAsync(
+            sessionId,
+            () => SeekOnUiThread(sessionId, position),
+            cancellationToken);
+    }
+
     public ValueTask<DomainResult<PlaybackTrackSnapshot>> GetTracksAsync(
         PlaybackSessionId sessionId,
         CancellationToken cancellationToken = default)
@@ -282,7 +334,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         lock (_sync)
         {
             if (_disposeStarted || _active?.SessionId != sessionId ||
-                _current.State is PlaybackState.Closed or PlaybackState.Failed)
+                _current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Failed)
             {
                 return ValueTask.FromResult(
                     DomainResult.Failure<PlaybackTrackSnapshot>(
@@ -337,7 +390,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
 
     private PlaybackEngineOperationResult OpenOnUiThread(
         PlaybackSessionId sessionId,
-        ReadOnlySpan<byte> locatorBytes)
+        ReadOnlySpan<byte> locatorBytes,
+        PlaybackContentIntent contentIntent)
     {
         if (IsDisposeStarted())
         {
@@ -354,7 +408,11 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             if (!_disposeStarted && _active is null)
             {
                 long generation = checked(++_generation);
-                context = new SessionContext(sessionId, generation, source);
+                context = new SessionContext(
+                    sessionId,
+                    generation,
+                    source,
+                    contentIntent);
                 _active = context;
                 _current = buffering;
                 _controls = PlaybackControlSnapshot.Active(
@@ -362,6 +420,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                     PlaybackVolume.FromPercent(100),
                     isMuted: false,
                     PlaybackAspectMode.Fit);
+                _timeline = PlaybackTimelineSnapshot.Unavailable(sessionId);
             }
         }
 
@@ -378,6 +437,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         {
             AttachSessionHandlers(context);
             _mediaPlayer.AutoPlay = false;
+            _mediaPlayer.RealTimePlayback = contentIntent == PlaybackContentIntent.Live;
             _mediaPlayer.Volume = 1d;
             _mediaPlayer.IsMuted = false;
             _surface.Stretch = Stretch.Uniform;
@@ -390,7 +450,30 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         }
 
         RaiseIfCurrent(buffering);
+        NotifyTimelineChanged(_timeline);
         return PlaybackEngineOperationResult.Succeeded();
+    }
+
+    private void SeekOnUiThread(PlaybackSessionId sessionId, TimeSpan position)
+    {
+        SessionContext context;
+        lock (_sync)
+        {
+            context = _active ??
+                throw new InvalidOperationException("An active playback session is required.");
+            if (context.Retired ||
+                context.SessionId != sessionId ||
+                context.ContentIntent != PlaybackContentIntent.OnDemand ||
+                _timeline.SessionId != sessionId ||
+                !_timeline.CanSeek ||
+                position > _timeline.Duration)
+            {
+                throw new InvalidOperationException("The playback timeline is not seekable.");
+            }
+        }
+
+        _mediaPlayer.PlaybackSession.Position = position;
+        PublishTimeline(context);
     }
 
     private PlaybackEngineOperationResult StopOnUiThread(PlaybackSessionId sessionId)
@@ -413,6 +496,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                     _controls.Volume,
                     _controls.IsMuted,
                     _controls.AspectMode);
+                _timeline = PlaybackTimelineSnapshot.Unavailable();
                 return PlaybackEngineOperationResult.Succeeded();
             }
         }
@@ -587,12 +671,19 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             context,
             NativeCallback.PlaybackStateChanged,
             source: null);
+        context.TimelineChangedHandler = (_, _) => PostNativeCallback(
+            context,
+            NativeCallback.TimelineChanged,
+            source: null);
         context.Source.OpenOperationCompleted += context.SourceOpenHandler;
         _mediaPlayer.MediaOpened += context.MediaOpenedHandler;
         _mediaPlayer.MediaFailed += context.MediaFailedHandler;
         _mediaPlayer.MediaEnded += context.MediaEndedHandler;
         _mediaPlayer.PlaybackSession.PlaybackStateChanged +=
             context.PlaybackStateChangedHandler;
+        _mediaPlayer.PlaybackSession.PositionChanged += context.TimelineChangedHandler;
+        _mediaPlayer.PlaybackSession.NaturalDurationChanged += context.TimelineChangedHandler;
+        _mediaPlayer.PlaybackSession.SeekCompleted += context.TimelineChangedHandler;
     }
 
     private bool DetachSessionHandlers(SessionContext context)
@@ -664,6 +755,23 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             }
         }
 
+        if (context.TimelineChangedHandler is not null)
+        {
+            try
+            {
+                _mediaPlayer.PlaybackSession.PositionChanged -=
+                    context.TimelineChangedHandler;
+                _mediaPlayer.PlaybackSession.NaturalDurationChanged -=
+                    context.TimelineChangedHandler;
+                _mediaPlayer.PlaybackSession.SeekCompleted -= context.TimelineChangedHandler;
+                context.TimelineChangedHandler = null;
+            }
+            catch (Exception exception) when (IsRecoverable(exception))
+            {
+                succeeded = false;
+            }
+        }
+
         return succeeded;
     }
 
@@ -692,6 +800,30 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
             return;
         }
 
+        if (callback == NativeCallback.MediaEnded &&
+            context.ContentIntent == PlaybackContentIntent.OnDemand)
+        {
+            PublishTimeline(context, completed: true);
+            PlaybackEngineSnapshot? completed = SetOnDemandCompleted(context);
+            try
+            {
+                ReleaseContextOnUiThread(context, preserveTerminalState: true);
+            }
+            catch (Exception exception) when (IsRecoverable(exception))
+            {
+                // Final disposal retries exact teardown.
+            }
+            finally
+            {
+                if (completed is not null)
+                {
+                    NotifyStateChanged(completed);
+                }
+            }
+
+            return;
+        }
+
         if (callback is NativeCallback.SourceFailed or
             NativeCallback.MediaFailed or NativeCallback.MediaEnded)
         {
@@ -715,6 +847,12 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                 }
             }
 
+            return;
+        }
+
+        if (callback == NativeCallback.TimelineChanged)
+        {
+            PublishTimeline(context);
             return;
         }
 
@@ -759,7 +897,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                 _active.Generation != _generation ||
                 _active.SessionId != eventArgs.SessionId ||
                 _current.SessionId != eventArgs.SessionId ||
-                _current.State is PlaybackState.Closed or PlaybackState.Failed)
+                _current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Failed)
             {
                 return;
             }
@@ -930,6 +1069,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                             _controls.Volume,
                             _controls.IsMuted,
                             _controls.AspectMode);
+                        _timeline = PlaybackTimelineSnapshot.Unavailable();
                     }
                 }
             }
@@ -952,7 +1092,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         lock (_sync)
         {
             if (!ReferenceEquals(_active, context) || context.Retired ||
-                _current.State is PlaybackState.Closed or PlaybackState.Failed)
+                _current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Failed)
             {
                 return;
             }
@@ -974,6 +1115,93 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         NotifyStateChanged(changed);
     }
 
+    private void PublishTimeline(SessionContext context, bool completed = false)
+    {
+        PlaybackTimelineSnapshot timeline;
+        try
+        {
+            timeline = ReadTimelineOnUiThread(context, completed);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            if (!ReferenceEquals(_active, context) ||
+                context.Retired ||
+                context.Generation != _generation ||
+                context.SessionId != _current.SessionId ||
+                _current.State is PlaybackState.Closed or PlaybackState.Failed ||
+                _timeline == timeline)
+            {
+                return;
+            }
+
+            _timeline = timeline;
+        }
+
+        NotifyTimelineChanged(timeline);
+    }
+
+    private PlaybackTimelineSnapshot ReadTimelineOnUiThread(
+        SessionContext context,
+        bool completed)
+    {
+        if (context.ContentIntent == PlaybackContentIntent.Live)
+        {
+            return PlaybackTimelineSnapshot.Unavailable(context.SessionId);
+        }
+
+        TimeSpan duration = _mediaPlayer.PlaybackSession.NaturalDuration;
+        if (duration <= TimeSpan.Zero)
+        {
+            return PlaybackTimelineSnapshot.Unavailable(context.SessionId);
+        }
+
+        TimeSpan position = completed
+            ? duration
+            : _mediaPlayer.PlaybackSession.Position;
+        position = position < TimeSpan.Zero
+            ? TimeSpan.Zero
+            : position > duration
+                ? duration
+                : position;
+        bool canSeek = _mediaPlayer.PlaybackSession.CanSeek;
+        return PlaybackTimelineSnapshot.Create(
+            context.SessionId,
+            position,
+            duration,
+            canSeek);
+    }
+
+    private PlaybackEngineSnapshot? SetOnDemandCompleted(SessionContext context)
+    {
+        PlaybackEngineSnapshot? completed = null;
+        lock (_sync)
+        {
+            if (_disposeStarted ||
+                !ReferenceEquals(_active, context) ||
+                context.Retired ||
+                context.ContentIntent != PlaybackContentIntent.OnDemand ||
+                context.Generation != _generation ||
+                context.SessionId != _current.SessionId ||
+                _current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Failed)
+            {
+                return null;
+            }
+
+            completed = PlaybackEngineSnapshot.Active(
+                context.SessionId,
+                PlaybackState.Completed);
+            _current = completed;
+        }
+
+        return completed;
+    }
+
     private PlaybackEngineSnapshot? SetNativeFailure(
         SessionContext context,
         NativeCallback callback,
@@ -987,7 +1215,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                 context.Retired ||
                 context.Generation != _generation ||
                 context.SessionId != _current.SessionId ||
-                _current.State is PlaybackState.Closed or PlaybackState.Failed)
+                _current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Failed)
             {
                 return null;
             }
@@ -1043,7 +1272,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                 context.Retired ||
                 context.Generation != _generation ||
                 context.SessionId != _current.SessionId ||
-                _current.State is PlaybackState.Closed or PlaybackState.Failed)
+                _current.State is PlaybackState.Closed or PlaybackState.Completed or
+                    PlaybackState.Failed)
             {
                 return null;
             }
@@ -1094,6 +1324,29 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         }
     }
 
+    private void NotifyTimelineChanged(PlaybackTimelineSnapshot snapshot)
+    {
+        EventHandler<PlaybackTimelineChangedEventArgs>? handlers = TimelineChanged;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        var eventArgs = new PlaybackTimelineChangedEventArgs(snapshot);
+        foreach (EventHandler<PlaybackTimelineChangedEventArgs> handler in
+            handlers.GetInvocationList().Cast<EventHandler<PlaybackTimelineChangedEventArgs>>())
+        {
+            try
+            {
+                handler(this, eventArgs);
+            }
+            catch (Exception exception) when (IsRecoverable(exception))
+            {
+                // Observer failures cannot interrupt native resource ownership.
+            }
+        }
+    }
+
     private void UpdateControls(
         PlaybackSessionId sessionId,
         PlaybackVolume? volume = null,
@@ -1116,7 +1369,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         {
             return !_disposeStarted && _active?.SessionId == sessionId &&
                 !_active.Retired &&
-                _current.State is not PlaybackState.Closed and not PlaybackState.Failed;
+                _current.State is not PlaybackState.Closed and
+                    not PlaybackState.Completed and not PlaybackState.Failed;
         }
     }
 
@@ -1272,6 +1526,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
                 _controls.Volume,
                 _controls.IsMuted,
                 _controls.AspectMode);
+            _timeline = PlaybackTimelineSnapshot.Unavailable();
         }
 
         _faultWatchdog.Expired -= FaultWatchdog_Expired;
@@ -1329,10 +1584,10 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
 
         return current switch
         {
-            PlaybackState.Opening => next is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused,
-            PlaybackState.Buffering => next is PlaybackState.Playing or PlaybackState.Paused,
-            PlaybackState.Playing => next is PlaybackState.Buffering or PlaybackState.Paused,
-            PlaybackState.Paused => next is PlaybackState.Buffering or PlaybackState.Playing,
+            PlaybackState.Opening => next is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Paused or PlaybackState.Completed,
+            PlaybackState.Buffering => next is PlaybackState.Playing or PlaybackState.Paused or PlaybackState.Completed,
+            PlaybackState.Playing => next is PlaybackState.Buffering or PlaybackState.Paused or PlaybackState.Completed,
+            PlaybackState.Paused => next is PlaybackState.Buffering or PlaybackState.Playing or PlaybackState.Completed,
             _ => false,
         };
     }
@@ -1357,6 +1612,7 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         MediaFailed,
         MediaEnded,
         PlaybackStateChanged,
+        TimelineChanged,
     }
 
     private enum PlaybackIntent
@@ -1368,11 +1624,13 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
     private sealed class SessionContext(
         PlaybackSessionId sessionId,
         long generation,
-        MediaSource source)
+        MediaSource source,
+        PlaybackContentIntent contentIntent)
     {
         internal PlaybackSessionId SessionId { get; } = sessionId;
         internal long Generation { get; } = generation;
         internal MediaSource Source { get; } = source;
+        internal PlaybackContentIntent ContentIntent { get; } = contentIntent;
         internal TypedEventHandler<MediaSource, MediaSourceOpenOperationCompletedEventArgs>?
             SourceOpenHandler { get; set; }
         internal TypedEventHandler<MediaPlayer, object>? MediaOpenedHandler { get; set; }
@@ -1381,6 +1639,8 @@ internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine
         internal TypedEventHandler<MediaPlayer, object>? MediaEndedHandler { get; set; }
         internal TypedEventHandler<MediaPlaybackSession, object>?
             PlaybackStateChangedHandler { get; set; }
+        internal TypedEventHandler<MediaPlaybackSession, object>?
+            TimelineChangedHandler { get; set; }
         internal PlaybackIntent Intent { get; set; } = PlaybackIntent.Play;
         internal bool HasReachedPlayableState { get; set; }
         internal bool Retired { get; set; }

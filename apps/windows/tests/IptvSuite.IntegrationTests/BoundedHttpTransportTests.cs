@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Security.Authentication;
 using System.Text;
 using IptvSuite.Application;
@@ -14,6 +15,7 @@ namespace IptvSuite.IntegrationTests;
 [TestClass]
 public sealed class BoundedHttpTransportTests
 {
+    private const int XtreamCatalogResponseBytes = 64 * 1024 * 1024;
     private static readonly string[] SingleAuthorization = ["Bearer synthetic-boundary-marker"];
     private static readonly string[] RedirectedAuthorization =
         ["Bearer synthetic-boundary-marker", "Bearer synthetic-boundary-marker"];
@@ -120,6 +122,100 @@ public sealed class BoundedHttpTransportTests
 
         Assert.IsTrue(result.IsSuccess);
         result.Response!.Dispose();
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task XtreamSpecificBudgetAcceptsLoopbackBodyPastGeneralCapAndRejectsDeclaredOverflow()
+    {
+        byte[] pastGeneralCap = new byte[HttpTransportLimits.MaximumAllowedResponseBytes + 1];
+        pastGeneralCap[0] = (byte)'[';
+        pastGeneralCap[^1] = (byte)']';
+        Dictionary<string, FixtureHttpResponse> routes = new(StringComparer.Ordinal)
+        {
+            ["/xtream-list"] = new FixtureHttpResponse(
+                200,
+                "application/json",
+                pastGeneralCap),
+            ["/xtream-over-limit"] = new FixtureHttpResponse(
+                200,
+                "application/json",
+                "[]"u8.ToArray(),
+                DeclaredContentLength: (long)XtreamCatalogResponseBytes + 1),
+        };
+        await using LocalHttpFixtureServer server = await LocalHttpFixtureServer.StartAsync(routes);
+        using var transport = new BoundedHttpTransport();
+        string acceptedLocator = new Uri(server.BaseAddress, "xtream-list").AbsoluteUri;
+        string oversizedLocator = new Uri(server.BaseAddress, "xtream-over-limit").AbsoluteUri;
+        using HttpTransportRequest acceptedRequest = CreateXtreamSourceRequest(
+            acceptedLocator,
+            XtreamCatalogResponseBytes);
+        using HttpTransportRequest oversizedRequest = CreateXtreamSourceRequest(
+            oversizedLocator,
+            XtreamCatalogResponseBytes);
+
+        HttpTransportResult accepted = await transport.GetAsync(acceptedRequest);
+        HttpTransportResult oversized = await transport.GetAsync(oversizedRequest);
+
+        Assert.IsTrue(accepted.IsSuccess);
+        using (HttpResponseLease response = accepted.Response!)
+        {
+            Assert.AreEqual(pastGeneralCap.Length, response.Content.Length);
+        }
+
+        Assert.AreEqual(HttpTransportFailure.ResponseTooLarge, oversized.Failure);
+        Assert.AreEqual(HttpTransportRetryability.Never, oversized.Retryability);
+        string[] expectedRequestPaths = ["/xtream-list", "/xtream-over-limit"];
+        CollectionAssert.AreEqual(
+            expectedRequestPaths,
+            server.Requests.Select(request => request.Path).ToArray());
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => CreateRequest(
+            "https://example.test/general-remains-bounded",
+            HttpTransportLimits.MaximumAllowedResponseBytes + 1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => CreateXtreamSourceRequest(
+            "https://example.test/xtream-over-ceiling",
+            XtreamCatalogResponseBytes + 1));
+    }
+
+    [TestMethod]
+    public async Task XtreamHttpsRequestRejectsSameOriginRedirectWithoutSecondRequest()
+    {
+        using StubHandler handler = new((_, _) =>
+        {
+            HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+            redirect.Headers.Location = new Uri("https://example.test/final");
+            return Task.FromResult(redirect);
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateXtreamSourceRequest(
+            "https://example.test/start",
+            32);
+
+        HttpTransportResult result = await transport.GetAsync(request);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(HttpTransportFailure.RedirectRejected, result.Failure);
+        Assert.AreEqual(HttpTransportRetryability.Never, result.Retryability);
+        Assert.AreEqual((int)HttpStatusCode.Redirect, result.StatusCode);
+        Assert.HasCount(1, handler.RequestUris);
+    }
+
+    [TestMethod]
+    public void DisposingXtreamRequestReleasesCredentialBearingUriReference()
+    {
+        HttpTransportRequest request = CreateXtreamSourceRequest(
+            "https://example.test/player_api.php?username=synthetic&password=synthetic-secret",
+            32);
+        FieldInfo requestUriField = typeof(HttpTransportRequest).GetField(
+            "_requestUri",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The bounded request URI field is unavailable.");
+
+        Assert.IsNotNull(requestUriField.GetValue(request));
+
+        request.Dispose();
+
+        Assert.IsNull(requestUriField.GetValue(request));
     }
 
     [TestMethod]
@@ -917,6 +1013,34 @@ public sealed class BoundedHttpTransportTests
         return (HttpTransportRequest)factory.Invoke(
             null,
             [new Uri(locator), prepared.Value!.SafeEndpoint])!;
+    }
+
+    private static HttpTransportRequest CreateXtreamSourceRequest(
+        string locator,
+        int maximumBytes)
+    {
+        DomainResult<PreparedXtreamSourceDraft> prepared =
+            SourceConfigurationValidator.PrepareXtreamAllowingInsecureHttp(
+                "Synthetic",
+                locator,
+                "synthetic-user",
+                "synthetic-password");
+        Assert.IsTrue(prepared.IsSuccess);
+        MethodInfo factory = typeof(HttpTransportRequest).GetMethod(
+            "CreateForExplicitXtreamSourceOrigin",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The explicit Xtream request factory is unavailable.");
+        try
+        {
+            return (HttpTransportRequest)factory.Invoke(
+                null,
+                [new Uri(locator), prepared.Value!.SafeEndpoint, maximumBytes, true])!;
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
+        }
     }
 
     private static TimeSpan? ReadRequestTimeoutOverride(HttpTransportRequest request)

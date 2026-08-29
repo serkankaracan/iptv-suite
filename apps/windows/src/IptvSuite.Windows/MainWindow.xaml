@@ -20,6 +20,37 @@
             </TitleBar.IconSource>
         </TitleBar>
 
-        <Frame x:Name="RootFrame" Grid.Row="1" />
+        <NavigationView x:Name="AppNavigation" Grid.Row="1"
+                        AutomationProperties.AutomationId="AppNavigation"
+                        IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="False"
+                        PaneDisplayMode="LeftCompact"
+                        SelectionChanged="AppNavigation_SelectionChanged">
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Name="HomeNavigationItem" Content="Home" Tag="Home"
+                                    AutomationProperties.AutomationId="AppNavigationHomeItem">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Home" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="LiveTvNavigationItem" Content="Live TV" Tag="LiveTv"
+                                    AutomationProperties.AutomationId="AppNavigationLiveTvItem">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Video" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="MoviesNavigationItem" Content="Movies" Tag="Movies"
+                                    AutomationProperties.AutomationId="AppNavigationMoviesItem">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Pictures" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="SeriesNavigationItem" Content="Series" Tag="Series"
+                                    AutomationProperties.AutomationId="AppNavigationSeriesItem">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Library" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem x:Name="SourcesNavigationItem" Content="Sources" Tag="Sources"
+                                    AutomationProperties.AutomationId="AppNavigationSourcesItem">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Manage" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.FooterMenuItems>
+            <ContentControl x:Name="PageHost" />
+        </NavigationView>
     </Grid>
 </Window>

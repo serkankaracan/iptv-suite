@@ -15,7 +15,32 @@ public static class SourceConfigurationValidator
         string? displayName,
         string? locator,
         string? username,
-        string? password)
+        string? password) =>
+        PrepareXtreamCore(
+            displayName,
+            locator,
+            username,
+            password,
+            allowInsecureHttp: false);
+
+    public static DomainResult<PreparedXtreamSourceDraft> PrepareXtreamAllowingInsecureHttp(
+        string? displayName,
+        string? locator,
+        string? username,
+        string? password) =>
+        PrepareXtreamCore(
+            displayName,
+            locator,
+            username,
+            password,
+            allowInsecureHttp: true);
+
+    private static DomainResult<PreparedXtreamSourceDraft> PrepareXtreamCore(
+        string? displayName,
+        string? locator,
+        string? username,
+        string? password,
+        bool allowInsecureHttp)
     {
         DomainResult<string> normalizedName = ValidateDisplayName(displayName);
         if (!normalizedName.IsSuccess)
@@ -23,7 +48,10 @@ public static class SourceConfigurationValidator
             return DomainResult.Failure<PreparedXtreamSourceDraft>(normalizedName.Error!);
         }
 
-        DomainResult<SafeEndpoint> endpoint = ValidateHttpsLocator(locator, rejectUserInfo: true);
+        DomainResult<SafeEndpoint> endpoint = ValidateWebLocator(
+            locator,
+            rejectUserInfo: true,
+            allowInsecureHttp);
         if (!endpoint.IsSuccess)
         {
             return DomainResult.Failure<PreparedXtreamSourceDraft>(endpoint.Error!);
@@ -36,7 +64,13 @@ public static class SourceConfigurationValidator
         }
 
         return DomainResult.Success(
-            new PreparedXtreamSourceDraft(normalizedName.Value!, endpoint.Value!));
+            new PreparedXtreamSourceDraft(
+                normalizedName.Value!,
+                endpoint.Value!,
+                allowsInsecureTransport: string.Equals(
+                    endpoint.Value!.Scheme,
+                    Uri.UriSchemeHttp,
+                    StringComparison.Ordinal)));
     }
 
     public static DomainResult<PreparedRemotePlaylistSourceDraft> PrepareRemotePlaylist(
@@ -106,7 +140,8 @@ public static class SourceConfigurationValidator
         var configuration = new XtreamSourceConfiguration(
             configurationId,
             prepared.SafeEndpoint,
-            credentialsReference);
+            credentialsReference,
+            prepared.AllowsInsecureTransport);
         return new ValidatedSourceDraft(sourceId, prepared.NormalizedDisplayName, configuration);
     }
 

@@ -86,3 +86,71 @@ public readonly record struct ChannelId
 
     public override string ToString() => Value.ToString("D", CultureInfo.InvariantCulture);
 }
+
+public readonly record struct MovieId
+{
+    private MovieId(Guid value) => Value = value;
+
+    public Guid Value { get; }
+
+    public bool IsEmpty => Value == Guid.Empty;
+
+    public static DomainResult<MovieId> Create(Guid value) => value == Guid.Empty
+        ? DomainResult.Failure<MovieId>(DomainErrorCode.DomainInvariantViolation)
+        : DomainResult.Success(new MovieId(value));
+
+    public static MovieId Generate() => new(Guid.NewGuid());
+
+    public override string ToString() => Value.ToString("D", CultureInfo.InvariantCulture);
+}
+
+public readonly record struct SeriesId
+{
+    private SeriesId(Guid value) => Value = value;
+
+    public Guid Value { get; }
+
+    public bool IsEmpty => Value == Guid.Empty;
+
+    public static DomainResult<SeriesId> Create(Guid value) => value == Guid.Empty
+        ? DomainResult.Failure<SeriesId>(DomainErrorCode.DomainInvariantViolation)
+        : DomainResult.Success(new SeriesId(value));
+
+    public static SeriesId Generate() => new(Guid.NewGuid());
+
+    public override string ToString() => Value.ToString("D", CultureInfo.InvariantCulture);
+}
+
+public readonly record struct SeasonId
+{
+    private SeasonId(Guid value) => Value = value;
+
+    public Guid Value { get; }
+
+    public bool IsEmpty => Value == Guid.Empty;
+
+    public static DomainResult<SeasonId> Create(Guid value) => value == Guid.Empty
+        ? DomainResult.Failure<SeasonId>(DomainErrorCode.DomainInvariantViolation)
+        : DomainResult.Success(new SeasonId(value));
+
+    public static SeasonId Generate() => new(Guid.NewGuid());
+
+    public override string ToString() => Value.ToString("D", CultureInfo.InvariantCulture);
+}
+
+public readonly record struct EpisodeId
+{
+    private EpisodeId(Guid value) => Value = value;
+
+    public Guid Value { get; }
+
+    public bool IsEmpty => Value == Guid.Empty;
+
+    public static DomainResult<EpisodeId> Create(Guid value) => value == Guid.Empty
+        ? DomainResult.Failure<EpisodeId>(DomainErrorCode.DomainInvariantViolation)
+        : DomainResult.Success(new EpisodeId(value));
+
+    public static EpisodeId Generate() => new(Guid.NewGuid());
+
+    public override string ToString() => Value.ToString("D", CultureInfo.InvariantCulture);
+}

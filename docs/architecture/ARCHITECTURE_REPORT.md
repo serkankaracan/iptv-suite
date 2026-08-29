@@ -12,6 +12,8 @@ M8 `COMPLETED` kaydı, aşağıdaki tarihsel M4/M7 paragraflarında geçen “M8
 
 **ADR-008 successor notu — `POLICY ACCEPTED / HOSTED ACCEPTANCE STALE, 2026-08-29`:** Açık UI onaylı Remote M3U HTTP locator query/token taşıyabilir; user-info taşıyamaz. Initial HTTP channel yalnız HTTP source'un exact `SafeEndpoint` origin'inde, HTTPS channel ise URI/scheme validation ile kabul edilir. Xtream HTTP, HTTP logo, HTTP request'te `Authorization`/`Cookie`/`Referer`, cross-origin HTTP playlist redirect ve HTTPS→HTTP downgrade reddedilir; HTTP→HTTPS upgrade yeniden doğrulanabilir. Açık-onaylı HTTP catalog ilk 50.000 geçerli entry'yi provider sırasıyla commit eder, bounded tail'i doğrulayıp atlar ve UI'da truncation uyarısı verir; HTTPS/direct 50.001 fail-closed kalır. At-rest protection transit HTTP'yi güvenli yapmaz. Native player HLS/media alt-kaynak ve redirect origin/address enforcement'ı `UNVERIFIED`, yüksek residual ve release blocker'dır. M3/M5/M7 completion kayıtları tarihsel kalır; production-source değişikliği önceki M15/M16 hosted closure'larını successor aday için stale bırakır ve yeni hosted `VERIFIED` iddiası oluşturmaz. Store/hukuk sonucu `UNVERIFIED`dır [ADR-008](../adr/ADR-008-remote-m3u-cleartext-http-compatibility.md).
 
+**Post-MVP successor notu — `SCOPE ACCEPTED / IMPLEMENTATION AND ACCEPTANCE PENDING, 2026-08-29`:** Home hub + ayrı Source Manager + authoritative content counts M17, Movie/VOD seek M18, Series/Season/Episode M19 olarak onaylanmıştır. ADR-009, M1–M16 Xtream HTTPS-only tarihsel sınırını M17'den itibaren yalnız ayrı exact source/configuration consent'iyle HTTP Xtream'e genişletir; Remote M3U consent'i devredilemez. Xtream endpoint/action/DTO/path davranışı `UNVERIFIED / proprietary compatibility family`; cleartext credential/API/playback ile native subresource/redirect yüzeyi release blocker'dır. Bu karar M15/M16'yı kapatmaz ve stale successor ledger'larını yenilemez. [Post-MVP brief](../product/POST_MVP_CONTENT_EXPERIENCE_BRIEF.md), [ADR-009](../adr/ADR-009-xtream-cleartext-http-compatibility.md).
+
 **Ürün adı:** “IPTV Suite” yalnız doğrulanmamış iç codename'dir.
 
 ## Yönetici özeti
@@ -65,6 +67,8 @@ Provider, playlist, logo ve stream tamamen güvenilmeyen dış girdidir. “Kull
 7. Source deletion ile credential, locator, snapshot ve cache temizliği.
 
 VOD, Series, EPG/XMLTV, local-file import, recording, download, cloud backend, analytics, reklam ve DRM işi M16 sonrasıdır.
+
+2026-08-29 post-MVP kararı bu listeden yalnız Home/Source Manager/content counts (M17), Movie/VOD seek (M18) ve Series/Season/Episode (M19) kapsamını açar. EPG/XMLTV, catch-up/timeshift, recording, download, history ve diğer maddeler ayrı karar olmadan kapsam dışı kalır.
 
 ### A.3 Medya terimleri
 
@@ -270,20 +274,22 @@ M4'ün ilk gerçek Application orchestration'ı `SourceDraftProtectionService`'t
 
 - Uzun ömürlü/typed `HttpClient`; DNS yenileme için bounded `PooledConnectionLifetime`.
 - `ResponseHeadersRead`, connect/request timeout, cancellation, decompression ve byte/line/item budget.
-- Genel HTTP/Xtream response tavanı `4 MiB` ve varsayılan request süresi 15 saniyedir. Remote M3U streaming yolu, scheme'den bağımsız olarak büyük bounded kataloglar için ayrı `128 MiB` decompressed-response ve iki dakikalık total request bütçesi kullanır; bu genişleme başka transport factory'sine yayılmaz.
+- Genel HTTP response tavanı `4 MiB`dir. M17 Xtream account/category/top-level-list/selected-series-info tavanları `64 KiB / 1 MiB / 64 MiB / 16 MiB`, varsayılan request süresi 15 saniyedir. Remote M3U streaming yolu ayrı `128 MiB` decompressed-response ve iki dakikalık total request bütçesi kullanır; üç factory bütçesi birbirine yayılmaz.
 - Redirect manuel, sınırlı ve loop-safe; credential/header/cookie cross-origin forward edilmez.
 - Cookies default kapalı; ancak contract corpus ihtiyacı kanıtlarsa source-scoped isolated container.
 - Retry yalnız idempotent/safe GET ve transient DNS/connect/408/429/seçilmiş 5xx için, jitter ve total-time budget ile.
 - Auth rejection, validation, TLS ve parse hatası otomatik retry edilmez.
 - Sertifika doğrulaması veya hostname check kapatılamaz; HTTPS→HTTP downgrade reddedilir.
-- HTTPS varsayılandır. ADR-008 yalnız açık UI onaylı `RemotePlaylist` locator/query için HTTP exception açar; Xtream HTTP ve general-purpose fallback yoktur.
+- HTTPS varsayılandır. ADR-008 açık UI onaylı `RemotePlaylist` locator/query için; M17 ADR-009 ise bundan ayrı exact source/configuration consent'iyle Xtream-compatible account için HTTP exception açar. Consent türleri devredilemez; general-purpose fallback yoktur.
 - HTTP request'e Authorization/Cookie/Referer eklenmez. Same-origin HTTP redirect ve revalidated HTTP→HTTPS upgrade mümkün; cross-origin HTTP redirect reddedilir.
 - Remote M3U onboarding, HTTP/HTTPS ayrımı olmadan preliminary full-body probe yapmaz. Local validation — HTTP için ayrıca açık onay — sonrasında locator'ı owner-bound protected store'da stage eder ve tek bounded streaming import isteği kullanır. Açık `NotCommitted` sonuç exact kaydı siler; indeterminate commit recovery için kaydı korur.
 - Persisted HTTP source UI'da kalıcı insecure warning taşır. Protected-at-rest locator cleartext request/playlist/channel trafiğine transit confidentiality veya integrity kazandırmaz.
 
 ### E.4 Provider ve parser
 
-`XtreamCompatibleSourceAdapter` ve `RemoteM3uSourceAdapter`, provider payload'ını domain'e çeviren gerçek variability sınırlarıdır. Xtream bir standart kabul edilmez; string/number boolean, missing category, duplicate ID, endpoint ve response varyasyonları contract fixture'larıyla izlenir. MVP yalnız Live TV çağrılarını kullanır.
+`XtreamCompatibleSourceAdapter` ve `RemoteM3uSourceAdapter`, provider payload'ını domain'e çeviren gerçek variability sınırlarıdır. Xtream bir standart kabul edilmez; string/number boolean, missing category, duplicate ID, endpoint ve response varyasyonları contract fixture'larıyla izlenir. M1–M16 yalnız Live TV çağrılarını kullanır. M17 content-kind/count foundation'ı, M18 Movie ve M19 Series/Season/Episode operations'ını versioned sentetik profile göre açar; endpoint/action/DTO/playback path'i `UNVERIFIED / proprietary` kalır.
+
+Content kind isim/category/URL path/extension heuristic'inden türetilmez. Remote M3U güvenilir type metadata vermiyorsa Live-only kalır. HTTP Xtream yalnız ADR-009 exact configuration consent'iyle, exact-origin API/initial playback policy'si ve kalıcı warning ile çalışır; automatic redirect, HTTP image, cross-origin HTTP locator ve Authorization/Cookie/Referer fallback'i reddedilir. M17 sentetik contract'ı account/category/top-level-list/selected-series-info için `64 KiB / 1 MiB / 64 MiB / 16 MiB` hard cap uygular; JSON depth/string/array/item ve decompressed bytes unbounded olamaz.
 
 ADR-008 successor'ında HTTP source'taki relative veya absolute initial HTTP channel locator yalnız source'un exact scheme + IDNA host + effective port origin'iyle aynıysa kabul edilir. HTTPS channel initial URI/scheme validation ile kabul edilir; HTTPS-source→HTTP, cross-origin initial HTTP, user-info ve HTTP logo fail-closed reddedilir. Kabul edilen initial locator native player'a verilir. Bu sınır malicious intermediary'nin cleartext playlist/channel byte'larını değiştirmesini engellemez ve native HLS/media alt-kaynak veya player-internal redirect zincirinde uygulama same-origin/`EndpointAddressPolicy` enforcement'ı iddia etmez.
 
@@ -394,6 +400,41 @@ Bir local/hosted komut tanımının varlığı başarılı run kanıtı değildi
 
 Tarihsel M2 hosted artifact'ı `ProtectedStoreDirectoryInitialized` alanını taşımaz; alan run `31735655363` packaged artifact'ında doğrulanmıştır.
 
+### E.8 Post-MVP navigation, source management ve VOD timeline
+
+M17–M19 mevcut modular-monolith katmanlarını korur; ikinci bir product runtime veya generic “media repository” eklemez.
+
+```text
+Shell
+  -> HomePage
+       -> LiveTvPage
+       -> MoviesPage
+       -> SeriesPage -> SeriesDetailPage
+       -> SourceManagerPage -> SourceEditorPage/Window
+
+Source Manager
+  -> Application source lifecycle coordinator
+       -> protected configuration staging
+       -> bounded provider validation/sync
+       -> same-SQLite old-or-new activation
+       -> cleanup/reconciliation
+
+Movie/Episode selection
+  -> typed source/configuration/item binding
+  -> short-lived playback locator lease
+  -> existing playback coordinator
+  -> capability-gated VodPlaybackTimeline
+```
+
+- `HomePage` yalnız navigation ve source-scoped/all-source authoritative counts taşır. `Total = LiveChannel + Movie + Series`; Season/Episode double-count edilmez.
+- `SourceManagerPage` ayrı route'tur. Source formu Home/Live/Movies/Series/player üzerine inline veya overlay yerleştirilmez. Aynı shell window kullanılabilir; navigation page ve focus scope ayrıdır.
+- Rename metadata-only'dir. Endpoint/credential replace fresh configuration owner altında stage→validate/sync→atomic swap yapar; failure eski active configuration/snapshot'ı korur. Delete durable admission/drain + idempotent secret/content/user-state/cache reconciliation ister.
+- Movie ve Episode sonlu VOD session kind'larıdır. Series doğrudan oynatılmaz; Season grouping'dir. Raw provider locator hiçbir view-model/domain/persistence result'ına girmez.
+- Seek UI yalnız typed Movie/Episode session'ında current `sessionId/generation`, `CanSeek`, positive finite `NaturalDuration` ve varsa seekable ranges ile etkinleşir. Slider başlangıç `00:00`, current position ve total/end gösterir; scrub sırasında background update thumb'ı override etmez, `SeekCompleted` stale context'te düşer [S139][S140][S141].
+- Live TV'de timeshift/catch-up yokken native duration/range seek'i açmaz. Unknown/unseekable VOD fake duration/başarı göstermez.
+- Fullscreen overlay timeline ve kontrolleri aynı inactivity state machine'iyle gizler; pointer/keyboard/touch hareketi geri getirir. Accessibility name/value ve keyboard slider semantics packaged acceptance'ın parçasıdır.
+- HTTP Xtream consent'i Remote M3U'dan ayrı policy type/resource/persistence bağı kullanır. At-rest protection transit güvenlik iddiası değildir; native player subresource/redirect yüzeyi release blocker'dır.
+
 ## F. Repository stratejisi
 
 **Accepted:** Başlangıçta platform sınırları belirgin monorepo. Phase 0'da bu path'ler scaffold edilmez:
@@ -419,8 +460,8 @@ Multirepo tetikleri: bağımsız ekip/release, vendor erişim izolasyonu, compli
 
 - Credentials ve full locators secret; raw URL loglanmaz.
 - Platform-protected at-rest storage, least privilege, deletion/reconciliation.
-- TLS validation kapatılamaz ve HTTPS varsayılandır. Tek credential-bearing cleartext istisna ADR-008 kapsamındaki açık-onaylı Remote M3U locator/query zinciridir; transit disclosure/tamper residual risk'i açıkça gösterilir.
-- HTTP logo, Xtream HTTP, HTTP Authorization/Cookie/Referer, cross-origin HTTP redirect ve HTTPS→HTTP downgrade yoktur.
+- TLS validation kapatılamaz ve HTTPS varsayılandır. Credential-bearing cleartext istisnalar ADR-008 Remote M3U ile M17 ADR-009 Xtream exact source configuration'ıdır; consent türleri ayrıdır ve transit disclosure/tamper residual risk'i açıkça gösterilir.
+- HTTP logo/image, HTTP Authorization/Cookie/Referer fallback'i, cross-origin HTTP locator/redirect ve HTTPS→HTTP downgrade yoktur. Xtream HTTP yalnız ADR-009 exact-origin policy'siyle açılır; general fallback değildir.
 - Playlist/logo/provider response hostile input olarak bounded parse/decode edilir.
 - Native player ve image codec/parser dependency'leri attack surface'tir; SBOM/CVE/update SLA gerekir.
 - Source delete; secret, protected locator, snapshot, favorites policy ve image cache'i kapsar.
@@ -480,6 +521,8 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 | O12 | Assumption | Test verisi sentetik, third-party içeriksiz ve credentials sahtedir; public redistribution lisansı ayrıca doğrulanır. | Fixture provenance/license manifest; paylaşım öncesi legal review | Quality/Legal |
 | O13 | VERIFIED / CLOSED, 2026-08-09 | M2 scaffold'u exact-SDK iki-run quality gate ve hosted packaged-smoke'u deterministik geçiyor mu? | Local sıfır exit code + minimal summary ve ephemeral TRX set karşılaştırması; hosted run `31327398270` üç green job + iki doğrulanmış sanitized artifact; exact sentinel/scanner fail-recovery | Quality / M2 |
 | O14 | ACCEPTED ENGINEERING / RELEASE UNVERIFIED, 2026-08-28 | HTTPS sunmayan yetkili Remote M3U source için query/token taşıyabilen cleartext HTTP exception kabul edilebilir mi? | [ADR-008](../adr/ADR-008-remote-m3u-cleartext-http-compatibility.md), explicit consent/persistent warning, initial exact-origin test matrisi; native subresource/redirect enforcement high residual release blocker, Store/privacy/legal ve successor hosted acceptance açık | Product/Security / M16 |
+| O15 | ACCEPTED PRODUCT/ENGINEERING / RELEASE UNVERIFIED, 2026-08-29 | HTTP Xtream username/password/API/playback için Remote M3U'dan ayrı cleartext exception kabul edilebilir mi? | [ADR-009](../adr/ADR-009-xtream-cleartext-http-compatibility.md), exact source/configuration/origin consent, persistent warning, no redirect/image/cross-origin/header fallback; native subresource/redirect, provider, Store/privacy/legal ve successor hosted kabul açık | Product/Security / M17–M19 |
+| O16 | UNVERIFIED | Windows native player, representative finite Movie/Episode corpus'unda duration/seekable range/`SeekCompleted` contract'ını cihaz ve provider tuple'larında güvenilir karşılıyor mu? | M18/M19 sentetik finite/unseekable/unknown/sparse-range matrix + signed package + physical-device acceptance; API yüzeyi [S139][S140][S141] | Playback/UI / M18–M19 |
 
 ## İlişkili kararlar
 
@@ -491,4 +534,6 @@ Backend/analytics olmasa da credential ve izleme/katalog metadata'sı için priv
 - [ADR-006 — Samsung TV strategy](../adr/ADR-006-samsung-tv-platform-strategy.md)
 - [ADR-007 — Windows-native Tier A playback fallback](../adr/ADR-007-windows-native-tier-a-playback-fallback.md)
 - [ADR-008 — Remote M3U cleartext HTTP compatibility](../adr/ADR-008-remote-m3u-cleartext-http-compatibility.md)
+- [ADR-009 — Xtream cleartext HTTP compatibility](../adr/ADR-009-xtream-cleartext-http-compatibility.md)
+- [Post-MVP Content Experience Product Brief](../product/POST_MVP_CONTENT_EXPERIENCE_BRIEF.md)
 - [Araştırma kaynakları](../research/SOURCES.md)

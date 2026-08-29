@@ -108,13 +108,117 @@ public sealed class XtreamProviderJsonParserTests
     }
 
     [TestMethod]
-    public void MalformedNonArrayAndOversizedDocumentsFailWithStableTypedError()
+    public void VodAndSeriesDocumentsProduceDistinctTypedItemsWithoutDirectSourceRetention()
+    {
+        DomainResult<XtreamProviderPage<XtreamMovieInput>> movies =
+            XtreamProviderJsonParser.ParseMovies(Utf8("""
+                [{
+                  "stream_id": "movie-7",
+                  "name": " Synthetic Movie ",
+                  "category_id": "20",
+                  "container_extension": "mp4",
+                  "is_adult": 0,
+                  "direct_source": "https://must-not-be-retained.invalid/private"
+                }]
+                """));
+        DomainResult<XtreamProviderPage<XtreamSeriesInput>> series =
+            XtreamProviderJsonParser.ParseSeries(Utf8("""
+                [{
+                  "series_id": 9,
+                  "name": " Synthetic Series ",
+                  "category_id": 30,
+                  "is_adult": "1",
+                  "cover": "https://must-not-be-retained.invalid/private"
+                }]
+                """));
+
+        Assert.IsTrue(movies.IsSuccess);
+        Assert.IsTrue(series.IsSuccess);
+        Assert.AreEqual("movie-7", movies.Value!.Items.Single().ProviderPlaybackKey.Value);
+        Assert.AreEqual("Synthetic Movie", movies.Value.Items.Single().Name);
+        Assert.AreEqual("mp4", movies.Value.Items.Single().ContainerExtension);
+        Assert.AreEqual("9", series.Value!.Items.Single().ProviderKey.Value);
+        Assert.AreEqual("Synthetic Series", series.Value.Items.Single().Name);
+        Assert.AreEqual(true, series.Value.Items.Single().IsAdultHint);
+        Assert.AreEqual("[XTREAM-MOVIE-INPUT]", movies.Value.Items.Single().ToString());
+        Assert.AreEqual("[XTREAM-SERIES-INPUT]", series.Value.Items.Single().ToString());
+    }
+
+    [TestMethod]
+    public void CategoryContentKindComesFromTheExplicitEndpointContract()
+    {
+        byte[] json = Utf8("""[{"category_id":"7","category_name":"Synthetic"}]""").ToArray();
+        DomainResult<XtreamProviderPage<XtreamCategoryInput>> live =
+            XtreamProviderJsonParser.ParseCategories(json, ContentKind.LiveTv);
+        DomainResult<XtreamProviderPage<XtreamCategoryInput>> movies =
+            XtreamProviderJsonParser.ParseCategories(json, ContentKind.Movie);
+        DomainResult<XtreamProviderPage<XtreamCategoryInput>> series =
+            XtreamProviderJsonParser.ParseCategories(json, ContentKind.Series);
+
+        Assert.AreEqual(ContentKind.LiveTv, live.Value!.Items.Single().ContentKind);
+        Assert.AreEqual(ContentKind.Movie, movies.Value!.Items.Single().ContentKind);
+        Assert.AreEqual(ContentKind.Series, series.Value!.Items.Single().ContentKind);
+    }
+
+    [TestMethod]
+    public void SeriesDetailsAreBoundedAndParsedOnlyFromTheExplicitHierarchyDocument()
+    {
+        DomainResult<XtreamSeriesDetails> result = XtreamProviderJsonParser.ParseSeriesDetails(Utf8("""
+            {
+              "seasons": [{"id":"season-1","season_number":1,"name":"Season 1"}],
+              "episodes": {
+                "1": [{
+                  "id":"episode-7",
+                  "episode_num":7,
+                  "title":"Episode 7",
+                  "container_extension":"mkv",
+                  "info":{"duration_secs":2520},
+                  "direct_source":"https://must-not-be-retained.invalid/private"
+                }]
+              }
+            }
+            """));
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(1, result.Value!.Seasons);
+        Assert.HasCount(1, result.Value.Episodes);
+        Assert.AreEqual(1, result.Value.Seasons[0].Number);
+        Assert.AreEqual("episode-7", result.Value.Episodes[0].ProviderPlaybackKey.Value);
+        Assert.AreEqual(TimeSpan.FromMinutes(42), result.Value.Episodes[0].Duration);
+        Assert.AreEqual("[XTREAM-SERIES-DETAILS]", result.Value.ToString());
+    }
+
+    [TestMethod]
+    public void CatalogParserAcceptsDocumentAboveSeriesDetailBudgetWhileDetailsRemainBounded()
+    {
+        const int seriesDetailsBudget = 16 * 1024 * 1024;
+        byte[] catalogDocument = CreatePaddedJson(
+            "[{\"stream_id\":\"1\",\"name\":\"Synthetic\",\"ignored\":\""u8,
+            "\"}]"u8,
+            seriesDetailsBudget + 1);
+        byte[] seriesDetailsDocument = CreatePaddedJson(
+            "{\"seasons\":[],\"episodes\":{},\"ignored\":\""u8,
+            "\"}"u8,
+            seriesDetailsBudget + 1);
+
+        DomainResult<XtreamProviderPage<XtreamStreamInput>> catalog =
+            XtreamProviderJsonParser.ParseLiveStreams(catalogDocument);
+        DomainResult<XtreamSeriesDetails> details =
+            XtreamProviderJsonParser.ParseSeriesDetails(seriesDetailsDocument);
+
+        Assert.IsTrue(catalog.IsSuccess);
+        Assert.HasCount(1, catalog.Value!.Items);
+        Assert.IsFalse(details.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, details.Error!.Code);
+    }
+
+    [TestMethod]
+    public void MalformedAndNonArrayDocumentsFailWithStableTypedError()
     {
         ReadOnlyMemory<byte>[] cases =
         [
             Utf8("{"),
             Utf8("{}"),
-            new byte[HttpTransportLimits.MaximumAllowedResponseBytes + 1],
         ];
 
         foreach (ReadOnlyMemory<byte> item in cases)
@@ -179,6 +283,22 @@ public sealed class XtreamProviderJsonParserTests
         Assert.AreEqual(
             XtreamProviderJsonParser.MaximumStreamCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             result.Value.Items[^1].ProviderPlaybackKey.Value);
+    }
+
+    private static byte[] CreatePaddedJson(
+        ReadOnlySpan<byte> prefix,
+        ReadOnlySpan<byte> suffix,
+        int totalLength)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
+            totalLength,
+            prefix.Length + suffix.Length);
+
+        byte[] document = new byte[totalLength];
+        prefix.CopyTo(document);
+        document.AsSpan(prefix.Length, totalLength - prefix.Length - suffix.Length).Fill((byte)'x');
+        suffix.CopyTo(document.AsSpan(totalLength - suffix.Length));
+        return document;
     }
 
     private static ReadOnlyMemory<byte> Utf8(string value) => Encoding.UTF8.GetBytes(value);

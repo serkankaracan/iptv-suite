@@ -347,6 +347,57 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
     }
 
     [TestMethod]
+    public async Task ReplacementKeepsSourceIdentityAndRetiresThePreviousLocator()
+    {
+        ContentSource existing = CreateExistingSource();
+        var store = new OnboardingSecretStore();
+        var importer = new OnboardingImporter(
+            RemotePlaylistCatalogImportResult.Committed(6, 1));
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
+
+        DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.ReplaceAsync(
+            existing,
+            "Replacement source",
+            "https://replacement.fixture.invalid/list.m3u");
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(existing.Id, result.Value!.SourceId);
+        Assert.IsFalse(result.Value.PreviousConfigurationCleanupPending);
+        Assert.AreEqual(existing.Id, importer.Source!.Id);
+        Assert.AreNotEqual(
+            existing.Configuration.ConfigurationId,
+            importer.Source.Configuration.ConfigurationId);
+        Assert.AreEqual(1, store.DeleteLocatorCount);
+        Assert.AreEqual(existing.Id, store.DeletedSourceId);
+        Assert.AreEqual(
+            ProtectedRecordOwner.ForSourceConfiguration(
+                existing.Configuration.ConfigurationId),
+            store.DeletedOwner);
+        Assert.AreEqual(
+            ((RemotePlaylistSourceConfiguration)existing.Configuration).LocatorReference,
+            store.DeletedReference);
+    }
+
+    [TestMethod]
+    public async Task CancelledNotCommittedImportDeletesTheStagedLocator()
+    {
+        var store = new OnboardingSecretStore();
+        var importer = new OnboardingImporter(
+            RemotePlaylistCatalogImportResult.NotCommitted(
+                DomainError.Create(DomainErrorCode.OperationCancelled)));
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
+
+        DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
+            "Synthetic source",
+            "https://fixture.invalid/list.m3u");
+
+        SecurityTestAssertions.IsFailure(result, DomainErrorCode.OperationCancelled);
+        Assert.AreEqual(1, store.DeleteLocatorCount);
+        Assert.AreEqual(store.CreatedOwner, store.DeletedOwner);
+        Assert.AreSame(store.IssuedReference, store.DeletedReference);
+    }
+
+    [TestMethod]
     public async Task PreCancelledAddDoesNotReachAnyDependency()
     {
         var events = new List<string>();
@@ -365,6 +416,22 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
                 cancellation.Token));
 
         Assert.IsEmpty(events);
+    }
+
+    private static ContentSource CreateExistingSource()
+    {
+        ValidatedSourceDraft draft = SourceDraftTestFixtures.CreateRemoteDraft(
+            SourceId.Generate(),
+            "Existing source",
+            "https://existing.fixture.invalid/list.m3u");
+        DomainResult<ContentSource> source = ContentSource.Create(
+            draft,
+            ContentSourceStatus.Testing,
+            FixedInstant,
+            FixedInstant);
+        return source.IsSuccess
+            ? source.Value!
+            : throw new InvalidOperationException("The synthetic source is invalid.");
     }
 
     private static RemotePlaylistSourceOnboardingService CreateService(

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="IptvSuite.Windows.ContentLibraryPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Padding="32" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Spacing="4">
+            <TextBlock x:Name="SectionTitleText" Style="{StaticResource TitleTextBlockStyle}" />
+            <TextBlock x:Name="SectionDescriptionText" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="3*" />
+            </Grid.ColumnDefinitions>
+            <ComboBox x:Name="LibrarySourceSelector" Header="Playlist source"
+                      AutomationProperties.AutomationId="LibrarySourceSelector"
+                      DisplayMemberPath="Name"
+                      SelectionChanged="LibrarySourceSelector_SelectionChanged" />
+            <ComboBox x:Name="LibraryCategorySelector" Grid.Column="1" Header="Category"
+                      AutomationProperties.AutomationId="LibraryCategorySelector"
+                      DisplayMemberPath="Name" IsEnabled="False"
+                      SelectionChanged="LibraryCategorySelector_SelectionChanged" />
+            <AutoSuggestBox x:Name="LibrarySearchBox" Grid.Column="2" PlaceholderText="Search"
+                            AutomationProperties.AutomationId="LibrarySearchBox"
+                            QuerySubmitted="LibrarySearchBox_QuerySubmitted"
+                            TextChanged="LibrarySearchBox_TextChanged" />
+        </Grid>
+
+        <Grid Grid.Row="2" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Button x:Name="LibraryBackButton" Visibility="Collapsed" IsEnabled="False"
+                    AutomationProperties.AutomationId="ContentLibraryBackButton"
+                    AutomationProperties.Name="Back to the previous content level"
+                    Click="LibraryBackButton_Click" Content="Back" />
+            <TextBlock x:Name="LibraryContextText" Grid.Column="1" VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" />
+            <ProgressRing x:Name="LibraryProgressRing" Grid.Column="2" Width="20" Height="20"
+                          IsActive="False" Visibility="Collapsed"
+                          AutomationProperties.Name="Loading content library" />
+        </Grid>
+
+        <ListView x:Name="LibraryItems" Grid.Row="3" IsItemClickEnabled="True"
+                  AutomationProperties.AutomationId="ContentLibraryItems"
+                  ItemClick="LibraryItems_ItemClick">
+            <ListView.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ItemsWrapGrid MaximumRowsOrColumns="5" Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </ListView.ItemsPanel>
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <Grid Width="220" MinHeight="120" Padding="12" RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8">
+                            <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="36" Glyph="&#xE714;" />
+                        </Border>
+                        <TextBlock Grid.Row="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Row="2" Opacity="0.72" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <Grid Grid.Row="4" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="LibraryStatusText"
+                       AutomationProperties.AutomationId="ContentLibraryStatusText"
+                       AutomationProperties.LiveSetting="Polite" TextWrapping="Wrap" />
+            <Button x:Name="LibraryPreviousButton" Grid.Column="1" IsEnabled="False"
+                    Click="LibraryPreviousButton_Click" Content="Previous" />
+            <Button x:Name="LibraryNextButton" Grid.Column="2" IsEnabled="False"
+                    Click="LibraryNextButton_Click" Content="Next" />
+        </Grid>
+    </Grid>
+</Page>

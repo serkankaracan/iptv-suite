@@ -33,6 +33,8 @@ internal sealed record PlaybackSourceResolutionResult(
 internal sealed class SqlitePlaybackSourceResolver
 {
     private const long XtreamLiveProviderItemKind = 1;
+    private const long XtreamMovieProviderItemKind = 2;
+    private const long XtreamEpisodeProviderItemKind = 3;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly string _databasePath;
     private readonly SqliteCatalogDatabase _database;
@@ -106,7 +108,8 @@ internal sealed class SqlitePlaybackSourceResolver
         PlaybackSourceBinding binding,
         CancellationToken cancellationToken)
     {
-        if (binding.StreamReference is null ||
+        if (selection.Target.Kind != PlaybackTargetKind.Live ||
+            binding.StreamReference is null ||
             binding.ProviderItemKind.HasValue ||
             binding.ProviderItemId is not null ||
             !ProtectedLocatorReference.Parse(binding.ConfigurationReference).IsSuccess)
@@ -161,9 +164,12 @@ internal sealed class SqlitePlaybackSourceResolver
         CancellationToken cancellationToken)
     {
         if (binding.StreamReference is not null ||
-            binding.ProviderItemKind != XtreamLiveProviderItemKind ||
+            binding.ProviderItemKind != ExpectedProviderItemKind(selection.Target.Kind) ||
             binding.ProviderItemId is null ||
-            !TryGetXtreamContainerExtension(binding.ContainerHint, out string? extension))
+            !TryGetXtreamContainerExtension(
+                selection.Target.Kind,
+                binding.ContainerHint,
+                out string? extension))
         {
             return Failed(PlaybackSourceResolutionFailure.UnsupportedSource);
         }
@@ -198,10 +204,11 @@ internal sealed class SqlitePlaybackSourceResolver
         if (!ProtectedSourcePayloadDecoder.TryDecodeXtream(
                 credentials.Value,
                 out XtreamSourcePayloadLayout layout) ||
-            !TryBuildXtreamLiveLocator(
+            !TryBuildXtreamLocator(
                 credentials.Value.Span,
                 layout,
                 parsedProviderItem.Value,
+                selection.Target.Kind,
                 extension!,
                 binding,
                 out SecretLease? locatorLease))
@@ -227,22 +234,53 @@ internal sealed class SqlitePlaybackSourceResolver
         }.ToString());
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT s.configuration_id, s.source_kind, s.endpoint_scheme, s.endpoint_host,
-                s.endpoint_port, s.configuration_reference, c.stream_reference,
-                c.provider_item_kind, c.provider_item_id, c.container_hint
-            FROM channels AS c
-            JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id
-            JOIN snapshots AS p
-                ON p.snapshot_id = c.snapshot_id AND p.source_id = s.source_id
-            WHERE s.source_id = $source AND c.channel_id = $channel AND s.status = $ready;
-            """;
+        (string sql, Guid targetId) = selection.Target.Kind switch
+        {
+            PlaybackTargetKind.Live => (
+                """
+                SELECT s.configuration_id, s.source_kind, s.endpoint_scheme, s.endpoint_host,
+                    s.endpoint_port, s.configuration_reference, c.stream_reference,
+                    c.provider_item_kind, c.provider_item_id, c.container_hint
+                FROM channels AS c
+                JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id
+                JOIN snapshots AS p
+                    ON p.snapshot_id = c.snapshot_id AND p.source_id = s.source_id
+                WHERE s.source_id = $source AND c.channel_id = $target AND s.status = $ready;
+                """,
+                selection.Target.ChannelId!.Value.Value),
+            PlaybackTargetKind.Movie => (
+                """
+                SELECT s.configuration_id, s.source_kind, s.endpoint_scheme, s.endpoint_host,
+                    s.endpoint_port, s.configuration_reference, NULL,
+                    2, item.provider_item_id, item.container_extension
+                FROM movies AS item
+                JOIN sources AS s ON s.active_snapshot_id = item.snapshot_id
+                JOIN snapshots AS p
+                    ON p.snapshot_id = item.snapshot_id AND p.source_id = s.source_id
+                WHERE s.source_id = $source AND item.movie_id = $target AND s.status = $ready;
+                """,
+                selection.Target.MovieId!.Value.Value),
+            PlaybackTargetKind.Episode => (
+                """
+                SELECT s.configuration_id, s.source_kind, s.endpoint_scheme, s.endpoint_host,
+                    s.endpoint_port, s.configuration_reference, NULL,
+                    3, item.provider_item_id, item.container_extension
+                FROM episodes AS item
+                JOIN sources AS s ON s.active_snapshot_id = item.snapshot_id
+                JOIN snapshots AS p
+                    ON p.snapshot_id = item.snapshot_id AND p.source_id = s.source_id
+                WHERE s.source_id = $source AND item.episode_id = $target AND s.status = $ready;
+                """,
+                selection.Target.EpisodeId!.Value.Value),
+            _ => throw new InvalidDataException("The playback target kind is invalid."),
+        };
+        command.CommandText = sql;
         command.Parameters.AddWithValue(
             "$source",
             selection.SourceId.Value.ToString("N"));
         command.Parameters.AddWithValue(
-            "$channel",
-            selection.ChannelId.Value.ToString("N"));
+            "$target",
+            targetId.ToString("N"));
         command.Parameters.AddWithValue("$ready", (int)ContentSourceStatus.Ready);
         await using SqliteDataReader reader = await command
             .ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -291,10 +329,11 @@ internal sealed class SqlitePlaybackSourceResolver
             reader.IsDBNull(9) ? null : reader.GetString(9));
     }
 
-    private static bool TryBuildXtreamLiveLocator(
+    private static bool TryBuildXtreamLocator(
         ReadOnlySpan<byte> payload,
         XtreamSourcePayloadLayout layout,
         ProviderItemKey providerItem,
+        PlaybackTargetKind targetKind,
         string extension,
         PlaybackSourceBinding binding,
         out SecretLease? locatorLease)
@@ -311,8 +350,17 @@ internal sealed class SqlitePlaybackSourceResolver
                 payload.Slice(layout.UsernameOffset, layout.UsernameLength));
             string password = StrictUtf8.GetString(
                 payload.Slice(layout.PasswordOffset, layout.PasswordLength));
-            DomainResult<PreparedXtreamSourceDraft> prepared =
-                SourceConfigurationValidator.PrepareXtream(
+            bool sourceUsesHttp = string.Equals(
+                binding.EndpointScheme,
+                Uri.UriSchemeHttp,
+                StringComparison.Ordinal);
+            DomainResult<PreparedXtreamSourceDraft> prepared = sourceUsesHttp
+                ? SourceConfigurationValidator.PrepareXtreamAllowingInsecureHttp(
+                    "Playback source",
+                    locator,
+                    username,
+                    password)
+                : SourceConfigurationValidator.PrepareXtream(
                     "Playback source",
                     locator,
                     username,
@@ -324,14 +372,19 @@ internal sealed class SqlitePlaybackSourceResolver
                 return false;
             }
 
-            string basePath = baseUri.AbsolutePath.EndsWith('/')
-                ? baseUri.AbsolutePath
-                : string.Concat(baseUri.AbsolutePath, "/");
+            string basePath = NormalizeXtreamBasePath(baseUri.AbsolutePath);
+            string segment = targetKind switch
+            {
+                PlaybackTargetKind.Live => "live/",
+                PlaybackTargetKind.Movie => "movie/",
+                PlaybackTargetKind.Episode => "series/",
+                _ => throw new ArgumentOutOfRangeException(nameof(targetKind)),
+            };
             var builder = new UriBuilder(baseUri)
             {
                 Path = string.Concat(
                     basePath,
-                    "live/",
+                    segment,
                     Uri.EscapeDataString(username),
                     "/",
                     Uri.EscapeDataString(password),
@@ -343,7 +396,7 @@ internal sealed class SqlitePlaybackSourceResolver
                 Fragment = string.Empty,
             };
             locatorBytes = StrictUtf8.GetBytes(builder.Uri.AbsoluteUri);
-            if (!IsValidHttpsLocator(locatorBytes))
+            if (!IsValidXtreamLocator(locatorBytes, binding))
             {
                 return false;
             }
@@ -376,20 +429,52 @@ internal sealed class SqlitePlaybackSourceResolver
         string.Equals(endpoint.Host, binding.EndpointHost, StringComparison.Ordinal) &&
         endpoint.Port == binding.EndpointPort;
 
+    private static long ExpectedProviderItemKind(PlaybackTargetKind targetKind) => targetKind switch
+    {
+        PlaybackTargetKind.Live => XtreamLiveProviderItemKind,
+        PlaybackTargetKind.Movie => XtreamMovieProviderItemKind,
+        PlaybackTargetKind.Episode => XtreamEpisodeProviderItemKind,
+        _ => long.MinValue,
+    };
+
     private static bool TryGetXtreamContainerExtension(
+        PlaybackTargetKind targetKind,
         string? containerHint,
         out string? extension)
     {
-        extension = containerHint switch
-        {
-            nameof(ChannelContainerHint.Hls) => "m3u8",
-            nameof(ChannelContainerHint.MpegTs) => "ts",
-            _ => null,
-        };
+        extension = targetKind == PlaybackTargetKind.Live
+            ? containerHint switch
+            {
+                nameof(ChannelContainerHint.Hls) => "m3u8",
+                nameof(ChannelContainerHint.MpegTs) => "ts",
+                _ => null,
+            }
+            : IsSafeContainerExtension(containerHint)
+                ? containerHint!.ToLowerInvariant()
+                : null;
         return extension is not null;
     }
 
-    private static bool IsValidHttpsLocator(ReadOnlySpan<byte> locatorBytes)
+    private static bool IsSafeContainerExtension(string? value) =>
+        value is { Length: >= 1 and <= 16 } &&
+        value.All(character => char.IsAsciiLetterOrDigit(character));
+
+    private static string NormalizeXtreamBasePath(string absolutePath)
+    {
+        string path = absolutePath;
+        string fileName = Path.GetFileName(path);
+        if (string.Equals(fileName, "get.php", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, "player_api.php", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[..^fileName.Length];
+        }
+
+        return path.EndsWith('/') ? path : string.Concat(path, "/");
+    }
+
+    private static bool IsValidXtreamLocator(
+        ReadOnlySpan<byte> locatorBytes,
+        PlaybackSourceBinding binding)
     {
         if (!TryDecodeLocator(locatorBytes, out string? locator) ||
             !Uri.TryCreate(locator, UriKind.Absolute, out Uri? locatorUri) ||
@@ -398,11 +483,18 @@ internal sealed class SqlitePlaybackSourceResolver
             return false;
         }
 
-        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
-            SourceConfigurationValidator.PrepareRemotePlaylist(
+        bool sourceUsesHttp = string.Equals(
+            binding.EndpointScheme,
+            Uri.UriSchemeHttp,
+            StringComparison.Ordinal);
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared = sourceUsesHttp
+            ? SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Playback source",
+                locator)
+            : SourceConfigurationValidator.PrepareRemotePlaylist(
                 "Playback source",
                 locator);
-        return prepared.IsSuccess;
+        return prepared.IsSuccess && MatchesEndpoint(prepared.Value!.SafeEndpoint, binding);
     }
 
     private static bool IsValidRemotePlaylistLocator(

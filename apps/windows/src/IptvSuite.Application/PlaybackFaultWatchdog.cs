@@ -122,7 +122,7 @@ public sealed class PlaybackFaultWatchdog : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            if (snapshot.State is PlaybackState.Closed or
+            if (snapshot.State is PlaybackState.Closed or PlaybackState.Completed or
                 PlaybackState.Stopping or PlaybackState.Failed)
             {
                 if (!snapshot.SessionId.IsEmpty && snapshot.SessionId == _activeSessionId)

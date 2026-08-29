@@ -42,6 +42,12 @@ internal enum HttpEndpointAddressPolicy
     ExplicitPrivateSourceOrigin,
 }
 
+internal enum HttpRedirectPolicy
+{
+    FollowValidated,
+    RejectAll,
+}
+
 public readonly record struct HttpTransportObservation(
     int AttemptCount,
     int RedirectCount,
@@ -58,6 +64,10 @@ public interface IHttpTransportObserver
 [DebuggerDisplay("[HTTP-TRANSPORT-REQUEST]")]
 public sealed class HttpTransportRequest : IDisposable
 {
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
+    private Uri? _requestUri;
+
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
     private byte[] _authorizationValue;
     private bool _disposed;
 
@@ -67,21 +77,27 @@ public sealed class HttpTransportRequest : IDisposable
         int maximumResponseBytes,
         byte[] authorizationValue,
         HttpEndpointAddressPolicy endpointAddressPolicy,
+        HttpRedirectPolicy redirectPolicy,
         TimeSpan? requestTimeoutOverride)
     {
-        RequestUri = requestUri;
+        _requestUri = requestUri;
         ExpectedEndpoint = expectedEndpoint;
         MaximumResponseBytes = maximumResponseBytes;
         _authorizationValue = authorizationValue;
         EndpointAddressPolicy = endpointAddressPolicy;
+        RedirectPolicy = redirectPolicy;
         RequestTimeoutOverride = requestTimeoutOverride;
     }
 
-    internal Uri RequestUri { get; }
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
+    internal Uri RequestUri =>
+        Volatile.Read(ref _requestUri) ?? throw new ObjectDisposedException(nameof(HttpTransportRequest));
 
     internal SafeEndpoint ExpectedEndpoint { get; }
 
     internal HttpEndpointAddressPolicy EndpointAddressPolicy { get; }
+
+    internal HttpRedirectPolicy RedirectPolicy { get; }
 
     internal TimeSpan? RequestTimeoutOverride { get; }
 
@@ -96,6 +112,7 @@ public sealed class HttpTransportRequest : IDisposable
         }
     }
 
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
     internal ReadOnlySpan<byte> AuthorizationValue
     {
         get
@@ -115,6 +132,7 @@ public sealed class HttpTransportRequest : IDisposable
             expectedEndpoint,
             maximumResponseBytes,
             HttpEndpointAddressPolicy.PublicOnly,
+            HttpRedirectPolicy.FollowValidated,
             allowInsecureHttp: false,
             maximumPermittedResponseBytes: HttpTransportLimits.MaximumAllowedResponseBytes,
             requestTimeoutOverride: null);
@@ -130,8 +148,26 @@ public sealed class HttpTransportRequest : IDisposable
             expectedEndpoint,
             maximumResponseBytes,
             HttpEndpointAddressPolicy.ExplicitPrivateSourceOrigin,
+            HttpRedirectPolicy.FollowValidated,
             allowInsecureHttp: false,
             maximumPermittedResponseBytes: HttpTransportLimits.MaximumAllowedResponseBytes,
+            requestTimeoutOverride: null);
+    }
+
+    internal static HttpTransportRequest CreateForExplicitXtreamSourceOrigin(
+        Uri requestUri,
+        SafeEndpoint expectedEndpoint,
+        int maximumResponseBytes,
+        bool allowInsecureHttp)
+    {
+        return CreateCore(
+            requestUri,
+            expectedEndpoint,
+            maximumResponseBytes,
+            HttpEndpointAddressPolicy.ExplicitPrivateSourceOrigin,
+            HttpRedirectPolicy.RejectAll,
+            allowInsecureHttp,
+            maximumPermittedResponseBytes: XtreamTransportLimits.MaximumCatalogResponseBytes,
             requestTimeoutOverride: null);
     }
 
@@ -144,6 +180,7 @@ public sealed class HttpTransportRequest : IDisposable
             expectedEndpoint,
             RemotePlaylistTransportLimits.MaximumResponseBytes,
             HttpEndpointAddressPolicy.ExplicitPrivateSourceOrigin,
+            HttpRedirectPolicy.FollowValidated,
             allowInsecureHttp: true,
             maximumPermittedResponseBytes: RemotePlaylistTransportLimits.MaximumResponseBytes,
             requestTimeoutOverride: RemotePlaylistTransportLimits.RequestTimeout);
@@ -154,6 +191,7 @@ public sealed class HttpTransportRequest : IDisposable
         SafeEndpoint expectedEndpoint,
         int maximumResponseBytes,
         HttpEndpointAddressPolicy endpointAddressPolicy,
+        HttpRedirectPolicy redirectPolicy,
         bool allowInsecureHttp,
         int maximumPermittedResponseBytes,
         TimeSpan? requestTimeoutOverride)
@@ -197,6 +235,7 @@ public sealed class HttpTransportRequest : IDisposable
             maximumResponseBytes,
             [],
             endpointAddressPolicy,
+            redirectPolicy,
             requestTimeoutOverride);
     }
 
@@ -237,6 +276,7 @@ public sealed class HttpTransportRequest : IDisposable
             return;
         }
 
+        _ = Interlocked.Exchange(ref _requestUri, null);
         byte[] authorizationValue = Interlocked.Exchange(ref _authorizationValue, []);
         if (authorizationValue.Length > 0)
         {
@@ -252,6 +292,14 @@ public static class HttpTransportLimits
 {
     public const int MaximumAllowedResponseBytes = 4 * 1024 * 1024;
     public const int MaximumRedirects = 5;
+}
+
+internal static class XtreamTransportLimits
+{
+    internal const int MaximumAccountResponseBytes = 64 * 1024;
+    internal const int MaximumCategoryResponseBytes = 1024 * 1024;
+    internal const int MaximumCatalogResponseBytes = 64 * 1024 * 1024;
+    internal const int MaximumSeriesDetailsResponseBytes = 16 * 1024 * 1024;
 }
 
 internal static class RemotePlaylistTransportLimits

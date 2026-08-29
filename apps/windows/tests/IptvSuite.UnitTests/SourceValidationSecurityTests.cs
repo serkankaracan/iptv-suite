@@ -8,7 +8,12 @@ namespace IptvSuite.UnitTests;
 public sealed class SourceValidationSecurityTests
 {
     private static readonly string[] ExpectedPublicValidatorMethods =
-        ["PrepareRemotePlaylist", "PrepareRemotePlaylistAllowingInsecureHttp", "PrepareXtream"];
+        [
+            "PrepareRemotePlaylist",
+            "PrepareRemotePlaylistAllowingInsecureHttp",
+            "PrepareXtream",
+            "PrepareXtreamAllowingInsecureHttp",
+        ];
 
     [TestMethod]
     public void SafeEndpointPublicStateContainsOnlySchemeHostAndEffectivePort()
@@ -142,7 +147,7 @@ public sealed class SourceValidationSecurityTests
     }
 
     [TestMethod]
-    public void ExplicitRemotePlaylistHttpCompatibilityIsBoundedAndDoesNotApplyToXtream()
+    public void ExplicitHttpCompatibilityIsBoundedAndRequiresASeparateXtreamGrant()
     {
         DomainResult<PreparedRemotePlaylistSourceDraft> remote =
             SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
@@ -170,6 +175,23 @@ public sealed class SourceValidationSecurityTests
                 "synthetic-user",
                 "synthetic-password"),
             DomainErrorCode.InsecureTransportRejected);
+
+        DomainResult<PreparedXtreamSourceDraft> xtream =
+            SourceConfigurationValidator.PrepareXtreamAllowingInsecureHttp(
+                "Source",
+                "http://example.test/player_api.php",
+                "synthetic-user",
+                "synthetic-password");
+        Assert.IsTrue(xtream.IsSuccess);
+        Assert.IsTrue(xtream.Value!.AllowsInsecureTransport);
+        Assert.AreEqual(Uri.UriSchemeHttp, xtream.Value.SafeEndpoint.Scheme);
+        SecurityTestAssertions.IsFailure(
+            SourceConfigurationValidator.PrepareXtreamAllowingInsecureHttp(
+                "Source",
+                "http://user:synthetic@example.test/player_api.php",
+                "synthetic-user",
+                "synthetic-password"),
+            DomainErrorCode.EndpointUserInfoNotAllowed);
     }
 
     [TestMethod]

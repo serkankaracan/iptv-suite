@@ -4,6 +4,9 @@ namespace IptvSuite.ArchitectureTests;
 public sealed class EndpointAddressPolicyRulesTests
 {
     private static readonly string[] ExpectedExplicitPrivatePolicyCallers =
+    [];
+
+    private static readonly string[] ExpectedXtreamPolicyCallers =
     [
         "apps/windows/src/IptvSuite.Infrastructure/XtreamProviderClient.cs",
     ];
@@ -66,7 +69,7 @@ public sealed class EndpointAddressPolicyRulesTests
             "windows",
             "src",
             "IptvSuite.Windows",
-            "MainPage.xaml"));
+            "SourceManagerPage.xaml"));
         string securityBaseline = File.ReadAllText(Path.Combine(
             repositoryRoot,
             "docs",
@@ -99,6 +102,7 @@ public sealed class EndpointAddressPolicyRulesTests
         StringAssert.Contains(policy, "new NetworkStream(socket, ownsSocket: true)");
         StringAssert.Contains(applicationContract, "internal enum HttpEndpointAddressPolicy");
         StringAssert.Contains(applicationContract, "internal static HttpTransportRequest CreateForExplicitPrivateSourceOrigin(");
+        StringAssert.Contains(applicationContract, "internal static HttpTransportRequest CreateForExplicitXtreamSourceOrigin(");
         StringAssert.Contains(applicationContract, "internal static HttpTransportRequest CreateForExplicitRemotePlaylistSourceOrigin(");
         StringAssert.Contains(applicationContract, "HttpEndpointAddressPolicy.PublicOnly");
         StringAssert.Contains(loader, "HttpTransportRequest.CreateForExplicitRemotePlaylistSourceOrigin(");
@@ -109,7 +113,9 @@ public sealed class EndpointAddressPolicyRulesTests
         StringAssert.Contains(logoProvider, "HttpTransportRequest.Create(uri, endpoint, MaximumLogoBytes)");
         Assert.IsFalse(logoProvider.Contains("CreateForExplicitPrivateSourceOrigin", StringComparison.Ordinal));
         Assert.IsFalse(logoProvider.Contains("CreateForExplicitRemotePlaylistSourceOrigin", StringComparison.Ordinal));
-        StringAssert.Contains(onboardingView, "özel/yerel ağdaysa yalnızca bu tam sunucu ve porta");
+        StringAssert.Contains(
+            onboardingView,
+            "private or local endpoint, I trust only the exact server and port");
         StringAssert.Contains(securityBaseline, "her zaman `PublicOnly` policy ile reddedilir");
         StringAssert.Contains(securityBaseline, "bu opt-in logo/image isteğine veya cross-origin redirect'e taşınmaz");
         StringAssert.Contains(securityBaseline, "Production transport OS/environment proxy'sini kullanmaz (`UseProxy=false`)");
@@ -136,6 +142,19 @@ public sealed class EndpointAddressPolicyRulesTests
         CollectionAssert.AreEqual(
             ExpectedExplicitPrivatePolicyCallers,
             explicitPrivatePolicyCallers);
+
+        string[] xtreamPolicyCallers = Directory
+            .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(path, applicationContractPath, StringComparison.OrdinalIgnoreCase))
+            .Where(path => File.ReadAllText(path).Contains(
+                "HttpTransportRequest.CreateForExplicitXtreamSourceOrigin(",
+                StringComparison.Ordinal))
+            .Select(path => Path.GetRelativePath(repositoryRoot, path).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            ExpectedXtreamPolicyCallers,
+            xtreamPolicyCallers);
 
         string[] remotePlaylistPolicyCallers = Directory
             .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)

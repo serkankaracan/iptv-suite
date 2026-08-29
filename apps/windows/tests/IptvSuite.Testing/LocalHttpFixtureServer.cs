@@ -227,6 +227,31 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
                         nameof(routes));
                 }
 
+                if (response.DeclaredContentLength is long declaredContentLength &&
+                    (declaredContentLength < body.LongLength || response.SupportsByteRanges))
+                {
+                    CryptographicOperations.ZeroMemory(body);
+                    throw new ArgumentException(
+                        "A declared fixture content length must cover the body and cannot override a byte-range response.",
+                        nameof(routes));
+                }
+
+                if (response.RedirectLocation is not null &&
+                    (response.StatusCode is < 300 or >= 400 ||
+                     response.RedirectLocation.Length > 4096 ||
+                     response.RedirectLocation.Contains('\r', StringComparison.Ordinal) ||
+                     response.RedirectLocation.Contains('\n', StringComparison.Ordinal) ||
+                     !Uri.TryCreate(
+                         response.RedirectLocation,
+                         UriKind.RelativeOrAbsolute,
+                         out _)))
+                {
+                    CryptographicOperations.ZeroMemory(body);
+                    throw new ArgumentException(
+                        "A redirect location must be a bounded valid URI on a redirect response.",
+                        nameof(routes));
+                }
+
                 ownedBodies.Add(body);
                 snapshot.Add(
                     validatedRoute,
@@ -234,7 +259,9 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
                         response.StatusCode,
                         response.ContentType,
                         body,
-                        response.SupportsByteRanges));
+                        response.SupportsByteRanges,
+                        response.DeclaredContentLength,
+                        response.RedirectLocation));
             }
 
             return (snapshot, ownedBodies);
@@ -281,7 +308,12 @@ public sealed class LocalHttpFixtureServer : IAsyncDisposable
 
             context.Response.StatusCode = response.StatusCode;
             context.Response.ContentType = response.ContentType;
-            context.Response.ContentLength = response.Body.Length;
+            context.Response.ContentLength = response.DeclaredContentLength ?? response.Body.Length;
+            if (response.RedirectLocation is not null)
+            {
+                context.Response.Headers.Location = response.RedirectLocation;
+            }
+
             if (!HttpMethods.IsHead(method))
             {
                 await context.Response.Body.WriteAsync(response.Body, context.RequestAborted)
@@ -485,7 +517,9 @@ public sealed record FixtureHttpResponse(
     int StatusCode,
     string ContentType,
     ReadOnlyMemory<byte> Body,
-    bool SupportsByteRanges = false);
+    bool SupportsByteRanges = false,
+    long? DeclaredContentLength = null,
+    string? RedirectLocation = null);
 
 internal sealed class FixtureHttpMetrics
 {

@@ -11,10 +11,15 @@ public sealed class SqliteCatalogDatabaseTests
         "catalog_metadata",
         "categories",
         "channels",
+        "episodes",
         "favorites",
+        "movies",
         "protected_locators",
+        "seasons",
+        "series",
         "snapshot_keys",
         "snapshots",
+        "source_configuration_retirements",
         "source_deletion_reconciliation_state",
         "source_deletion_tombstones",
         "sources",
@@ -39,7 +44,13 @@ public sealed class SqliteCatalogDatabaseTests
         "ix_channels_snapshot_category_name",
         "ix_channels_snapshot_name",
         "ix_channels_snapshot_number",
+        "ix_episodes_season_number",
         "ix_locators_snapshot_owner",
+        "ix_movies_snapshot_category_name",
+        "ix_movies_snapshot_name",
+        "ix_seasons_series_number",
+        "ix_series_snapshot_category_name",
+        "ix_series_snapshot_name",
         "ix_snapshots_source_cache",
         "ix_snapshots_source_state",
         "ix_sources_status",
@@ -56,7 +67,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection connection = await OpenAsync(databasePath);
-        Assert.AreEqual(5L, await ExecuteScalarInt64Async(connection, "PRAGMA user_version;"));
+        Assert.AreEqual(7L, await ExecuteScalarInt64Async(connection, "PRAGMA user_version;"));
         CollectionAssert.AreEqual(ExpectedTables, await ReadObjectNamesAsync(connection, "table"));
         CollectionAssert.AreEqual(ExpectedIndexes, await ReadObjectNamesAsync(connection, "index", "ix_%"));
         CollectionAssert.AreEqual(ExpectedTriggers, await ReadObjectNamesAsync(connection, "trigger"));
@@ -106,7 +117,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection migrated = await OpenAsync(databasePath);
-        Assert.AreEqual(5L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(7L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(
             migrated,
             "SELECT count(*) FROM pragma_table_info('snapshots') WHERE name = 'cache_key';"));
@@ -143,7 +154,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection migrated = await OpenAsync(databasePath);
-        Assert.AreEqual(5L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(7L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
         CollectionAssert.Contains(await ReadObjectNamesAsync(migrated, "index", "ix_%"), "ix_channels_snapshot_name");
         CollectionAssert.Contains(await ReadObjectNamesAsync(migrated, "index", "ix_%"), "ix_channels_snapshot_category_name");
         CollectionAssert.AreEqual(ExpectedTriggers, await ReadObjectNamesAsync(migrated, "trigger"));
@@ -171,7 +182,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection migrated = await OpenAsync(databasePath);
-        Assert.AreEqual(5L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(7L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
         CollectionAssert.Contains(
             await ReadObjectNamesAsync(migrated, "table"),
             "source_deletion_tombstones");
@@ -197,7 +208,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection migrated = await OpenAsync(databasePath);
-        Assert.AreEqual(5L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(7L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(
             migrated,
             "SELECT count(*) FROM source_deletion_reconciliation_state WHERE singleton = 1 AND after_source_id IS NULL;"));
@@ -240,7 +251,7 @@ public sealed class SqliteCatalogDatabaseTests
         await InitializeAsync(databasePath);
 
         await using SqliteConnection migrated = await OpenAsync(databasePath);
-        Assert.AreEqual(5L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
+        Assert.AreEqual(7L, await ExecuteScalarInt64Async(migrated, "PRAGMA user_version;"));
         Assert.AreEqual(1L, await ExecuteScalarInt64Async(
             migrated,
             """

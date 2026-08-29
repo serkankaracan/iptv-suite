@@ -143,6 +143,14 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
 
                 if (IsRedirect(response.StatusCode))
                 {
+                    if (request.RedirectPolicy == HttpRedirectPolicy.RejectAll)
+                    {
+                        return Finish(HttpTransportResult.Failed(
+                            HttpTransportFailure.RedirectRejected,
+                            HttpTransportRetryability.Never,
+                            (int)response.StatusCode));
+                    }
+
                     if (redirectCount >= HttpTransportLimits.MaximumRedirects)
                     {
                         return Finish(HttpTransportResult.Failed(
@@ -384,6 +392,14 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
                 {
                     using (response)
                     {
+                        if (request.RedirectPolicy == HttpRedirectPolicy.RejectAll)
+                        {
+                            return HttpStreamingResult.Failed(
+                                HttpTransportFailure.RedirectRejected,
+                                HttpTransportRetryability.Never,
+                                (int)response.StatusCode);
+                        }
+
                         if (redirectCount >= HttpTransportLimits.MaximumRedirects ||
                             !TryResolveRedirect(currentUri, response.Headers.Location, out Uri? redirectUri))
                         {

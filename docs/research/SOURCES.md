@@ -88,6 +88,9 @@
 | S30 | FFmpeg legal/license | FFmpeg | [Legal](https://ffmpeg.org/legal.html) | LGPL/GPL/nonfree build farkları ve redistribution checklist | Güncel | 2026-08-09 |
 | S31 | mpv release/manual/license | mpv | [Release](https://github.com/mpv-player/mpv/releases/tag/v0.41.0), [manual](https://mpv.io/manual/stable/), [license](https://github.com/mpv-player/mpv/blob/master/Copyright) | libmpv kapsamı, Windows/HW/reconnect yüzeyi ve varsayılan GPL build riski | 0.41.0, 2025-12-21 | 2026-08-09 |
 | S32 | HLS standard | IETF | [RFC 8216](https://www.rfc-editor.org/rfc/rfc8216.html) | HLS playlist/protocol terimleri ve temel davranış | RFC 8216 | 2026-08-09 |
+| S139 | Windows media player rehberi | Microsoft / Windows | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/media-playback) | `MediaPlayerElement` built-in transport controls'ünün play/pause/stop/volume/mute ile seeking/progress sağladığı; dedicated fullscreen ve geniş ekranda timeline için double-row önerisi. Bu rehber belirli bir provider stream'inin seek edilebilir olduğunu garanti etmez | Güncel Windows app rehberi | 2026-08-29 |
+| S140 | `MediaPlaybackSession` capability ve zaman yüzeyi | Microsoft / Windows | [Resmî API](https://learn.microsoft.com/en-us/uwp/api/windows.media.playback.mediaplaybacksession?view=winrt-26100) | `CanSeek`, `Position`, `NaturalDuration`, `GetSeekableRanges`, `PositionChanged`, `NaturalDurationChanged` ve `SeekCompleted`; seek UI'ının native capability + current session durumundan türetilmesi | Universal API contract v3+ | 2026-08-29 |
+| S141 | Custom media transport controls | Microsoft / Windows | [Resmî belge](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/custom-transport-controls) | Seek/progress kontrolünün `Slider` olduğu; transport control görünümü/davranışının özelleştirilebildiği ve uzun medyada slider granularity'sinin ayarlanabildiği. Static template kopyasının platform güncellemelerini otomatik almadığı trade-off'u | Güncel Windows app rehberi | 2026-08-29 |
 
 ## Yerel veri, HTTP ve güvenlik
 
@@ -207,6 +210,8 @@ Aşağıdaki maddeler kaynak taramasıyla kapanmamıştır:
 - Güncellenmiş Windows App SDK binary seti üzerinde WACK, gerçek cihaz/HW-decode, kalan surface/lifecycle ve soak matrisi.
 - Windows'ta DPAPI-per-locator bulk channel düzeni bütçe dışı olduğu için reddedildi; M8 production same-SQLite yerleşimi ile crash/recovery/atomik migration ve M14 production-path 50.000 component bütçeleri tamamlandı. Production PFN lifecycle/repair/identity, gerçek ikinci-user package registration, WACK/Store ve final cihaz/soak matrisi M15/M16'da `UNVERIFIED` kalır.
 - Gerçek sağlayıcıların Xtream-compatible varyasyonları ve cookie/redirect beklentileri.
+- Xtream-compatible endpoint/action/DTO/playback-path davranışı için repository'nin dayandığı resmi/normative public specification bulunmaması; M17–M19 profili `UNVERIFIED / proprietary compatibility family` ve yalnız sentetik contract corpus'u olarak kalır.
+- HTTP Xtream username/password/API/playback trafiğinin Store/privacy/hukuk kabulü ile native player alt-kaynak/redirect origin/address enforcement sonucu.
 - Uygulama yayıncısının tamamen cihaz-içi akışta KVKK rolü, VERBİS ve yurt dışı aktarım sorumluluğu.
 
 Bu maddeler ilgili ADR, risk kaydı ve milestone'da `UNVERIFIED` olarak izlenir.

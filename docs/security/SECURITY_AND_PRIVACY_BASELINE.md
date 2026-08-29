@@ -4,9 +4,11 @@
 
 **Remote M3U HTTP successor kararı (2026-08-29):** ADR-008, HTTPS'i varsayılan tutarak yalnız açık UI onaylı `RemotePlaylist` source için query/token taşıyabilen cleartext HTTP locator'ı kabul eder. HTTP catalog ilk 50.000 geçerli entry ile bounded tutulur; doğrulanan tail atlanır ve kullanıcıya truncation uyarısı gösterilir. User-info, Xtream HTTP, HTTP logo, HTTP request'te `Authorization`/`Cookie`/`Referer`, cross-origin HTTP redirect ve HTTPS→HTTP downgrade reddedilir. At-rest protection transit confidentiality/integrity sağlamaz; Store/hukuk sonucu `UNVERIFIED`dır. Bu successor production değişikliği önceki M15/M16 hosted closure'larını yeni aday için stale bırakır; yeni hosted `VERIFIED` iddiası yoktur.
 
+**Xtream HTTP post-MVP kararı (2026-08-29):** Kullanıcının açık talebiyle ADR-009, M17'den itibaren Xtream-compatible HTTP için Remote M3U'dan ayrı exact-source-configuration consent kabul eder. Endpoint veya credential replacement fresh configuration owner ve fresh consent ister; automatic redirect, HTTP image, cross-origin HTTP locator ve Authorization/Cookie/Referer fallback'i reddedilir. Username/password ile API/catalog/playback trafiği cleartext kalır; native player alt-kaynak/redirect kontrolü, Store/privacy/hukuk ve gerçek provider uyumluluğu `UNVERIFIED / RELEASE BLOCKER`dır. Bu yeni production kapsamı M15/M16 ledger'larını kapatmaz veya güncel yapmaz.
+
 **Tarih:** 2026-08-09
 
-**Durum:** M3 validation/redaction contract'ı, M4 CurrentUser protected-storage foundation ve M8 transactional layout/process-crash recovery `COMPLETED`; ADR-008 Remote M3U cleartext exception kararı `ACCEPTED`; M15/M16 successor hosted acceptance pending
+**Durum:** M3 validation/redaction contract'ı, M4 CurrentUser protected-storage foundation ve M8 transactional layout/process-crash recovery `COMPLETED`; ADR-008 Remote M3U ve ADR-009 M17 Xtream cleartext exception kararları `ACCEPTED / RELEASE GATED`; M15/M16 successor hosted acceptance pending
 
 **Kapsam:** Windows MVP; platformlar aynı ilkeleri kendi güvenli API'leriyle uygular
 
@@ -17,7 +19,7 @@ Uygulama yalnız kullanıcının yetkili source'u ile cihazdan doğrudan haberle
 Baseline hedefleri:
 
 - secret hiçbir zaman source code, Git, plaintext DB/config, log, telemetry, UI error veya test artifact'ına girmez;
-- credential-bearing trafik doğrulanmış TLS kullanır; tek istisna ADR-008 kapsamındaki açık-onaylı Remote M3U HTTP locator/query zinciridir ve transit güvenli sayılmaz;
+- credential-bearing trafik doğrulanmış TLS kullanır; dar istisnalar ADR-008 Remote M3U ve M17'den itibaren ADR-009 Xtream-compatible exact-source HTTP zincirleridir. Consent türleri ayrıdır ve ikisi de transit güvenli sayılmaz;
 - dış input bounded ve cancellation-aware işlenir;
 - local data minimum süre tutulur, kullanıcı tarafından silinebilir ve migration sırasında açığa çıkmaz;
 - exact native/OSS dependency seti izlenir ve güvenlik güncellemesi alır;
@@ -27,9 +29,13 @@ M3 local kabulü; raw locator/credential döndürmeyen source validation, scheme
 
 M3 opaque reference'ın temsilini doğrular, fakat protected record binding'ini kanıtlamaz. M4 foundation store-owned issuance ile kriptografik source/purpose/reference context binding'ini ekler. Owner-bound v2 dilimi ayrıca source credential/remote playlist kaydını fresh `SourceConfigurationId`ye; stream/logo kaydını `ChannelId`ye bağlar. Exact owner kind/ID hem store key, filename digest ve DPAPI entropy'de hem encrypted envelope context'inde doğrulanır; same-source/same-purpose cross-owner read/update fail-closed, yanlış-owner delete doğru kayda dokunmadan idempotent success'tir. Owner integrity context'idir, authorization principal değildir. Güncel source-draft application operation'ı validation'ı store mutation'ından önce tamamlar; protected create başarısından sonra exact store-issued reference, `SourceId` ve configuration owner'ı validated draft'a birlikte bağlar. Doğrudan await edilen çağrıda commit sonrası cancellation yeniden gözlenmez ve reference başarılı sonuçla döner. Bu davranış caller abandonment/retry, aynı `SourceId` için yinelenen create, process crash/OOM, metadata/configuration persistence, update rollback, deletion veya reconciliation atomikliği sağlamaz. M5'te resolve edilen locator yeniden HTTPS validation'dan geçirilip beklenen endpoint/source ile eşleştirilir. Owner+reference+endpoint tuple'ının birlikte değiştirilmesi, missing-reference ve origin equality geçmeden opaque ID/owner tek başına authorization veya origin kanıtı sayılmaz.
 
-ADR-008 successor'ında son cümledeki M5 HTTPS-only kaydı tarihsel kalır: Xtream yine HTTPS doğrular; Remote M3U ise persisted source scheme'i ve explicit cleartext admission'ı üzerinden `http`/`https` doğrular. Scheme, IDNA host ve effective port origin equality'nin parçasıdır; HTTP onayı başka source, configuration veya origin'e taşınmaz.
+ADR-008 successor'ında son cümledeki M5 HTTPS-only kaydı tarihsel kalır: Remote M3U persisted source scheme'i ve explicit cleartext admission'ı üzerinden `http`/`https` doğrular. M1–M16 Xtream HTTPS-only kaydı da kendi tarihsel kapsamında geçerlidir; M17 ADR-009 successor'ı HTTP Xtream'i yalnız ayrı exact source/configuration/origin consent'iyle açar. Scheme, IDNA host ve effective port origin equality'nin parçasıdır; hiçbir HTTP onayı başka source kind, source, configuration veya origin'e taşınmaz.
 
-Remote M3U onboarding, HTTP/HTTPS ayrımı olmadan preliminary full-body probe yapmaz; local validation — HTTP için ayrıca açık onay — sonrasında owner-bound protected staging ve tek bounded streaming import isteği kullanır. Açık `NotCommitted` sonuçta exact staging kaydı cancellation'dan bağımsız silinir; indeterminate commit recovery için korunur. HTTP tarafında bu azaltım tek cleartext request'e confidentiality/integrity kazandırmaz. Remote M3U decompressed body `128 MiB`, total request iki dakika ile bounded kalır; genel HTTP/Xtream `4 MiB`/varsayılan 15 saniye sınırı genişlemez.
+Remote M3U onboarding, HTTP/HTTPS ayrımı olmadan preliminary full-body probe yapmaz; local validation — HTTP için ayrıca açık onay — sonrasında owner-bound protected staging ve tek bounded streaming import isteği kullanır. Açık `NotCommitted` sonuçta exact staging kaydı cancellation'dan bağımsız silinir; indeterminate commit recovery için korunur. HTTP tarafında bu azaltım tek cleartext request'e confidentiality/integrity kazandırmaz. Remote M3U decompressed body `128 MiB`, total request iki dakika ile bounded kalır. `VERIFIED — local synthetic contract, 2026-08-29`: M17 Xtream account/category/top-level-list/selected-series-info response tavanları sırasıyla `64 KiB / 1 MiB / 64 MiB / 16 MiB`dir; genel HTTP `4 MiB` ve Xtream varsayılan 15 saniye süresi değişmez.
+
+`IMPLEMENTED LOCALLY / ACCEPTANCE PENDING — 2026-08-29`: Source Manager, Remote M3U ve Xtream için ayrı cleartext açıklaması ve ayrı transient checkbox kullanır. Add, replace, source-kind değişimi ve ilgili endpoint/credential edit'i onayı yeniden unchecked yapar; private/local authorization metni seçili türün exact server/port trust'ını, HTTP metni ise o türün credential/locator/catalog/playback MITM riskini açıklar. Persisted semantik ayrı bir genel “HTTP izni” değildir: source kind + fresh `SourceConfigurationId` + `http` scheme exact configuration grant'ını temsil eder ve kalıcı warning bu kaynaktan türetilir. Remote M3U grant'i Xtream grant'i yerine geçmez.
+
+Configuration replace same `SourceId` üzerinde yeni owner/reference + complete snapshot'ı tek SQLite activation transaction'ında old-or-new görünür yapar. Önceki opaque configuration tuple'ı aynı transaction'da durable retirement journal'ına alınır; startup reconciler exact DPAPI kaydını idempotent temizler. Known `NotCommitted`, `OperationCancelled` dahil staged yeni kaydı cancellation'dan bağımsız siler; activation başladıktan sonraki cancellation/fault `Indeterminate` tutulur. Buna karşın protected-store create ile SQLite activation/journal başlangıcı arasındaki process termination/OOM penceresinde staged kaydı enumerate edecek durable intent bulunmadığı **UNVERIFIED / M17 ACCEPTANCE BLOCKER**dır; bu aralık crash/restart testi ve reconciliation ile kapanmadan orphan-yokluğu iddia edilmez.
 
 Incremental Remote M3U reader'ın fiziksel satır hard cap'i `65.536` UTF-16 kod birimidir. Bu bounded compatibility düzeltmesi semantik sınırları büyütmez: locator ve generic metadata değeri `4.096`, `tvg-id` `512`, channel/group name `256` ile sınırlı; decoded toplam `128 Mi` UTF-16 kod birimi ve decompressed response `128 MiB` bütçeleri değişmeden kalır. Cap üzerindeki satır tüm importu raw içerik yayımlamadan fail-closed durdurur.
 
@@ -60,7 +66,7 @@ Run number `#22` UI kaydı, bu threat-model kararı ve production `asInvoker` / 
 | Sınıf | Örnek | Saklama | Log/diagnostics |
 |---|---|---|---|
 | Secret | Password, token, Authorization, Cookie, URI user-info, credential-bearing full M3U/stream URL | Yalnız platform-protected store/blob; mümkün olan en kısa plaintext lifetime | Hiçbir koşulda yazılmaz |
-| Sensitive metadata | Provider origin, channel list, categories, favorites, recently played, logo host | Device-local DB/cache; minimizasyon ve delete lifecycle | Default loglanmaz; source ID ve count kullanılır |
+| Sensitive metadata | Provider origin, Live/Movie/Series/Season/Episode catalog, categories, favorites, future watch state, image host | Device-local DB/cache; minimizasyon ve delete lifecycle | Default loglanmaz; source ID ve count kullanılır |
 | Public/config | App version, schema/parser version, feature flag, player build | Secretsiz local config/package | Yapılandırılmış biçimde yazılabilir |
 | Untrusted content | Channel/category name, provider error/body, playlist directive, image bytes | Length/type-bound; normalize veya cache | Raw değer yok; gerekirse hash/count/warning code |
 | Operational | Random operation ID, duration, item count, stable domain error code | Bounded local log | İzinli, secret-free |
@@ -75,7 +81,7 @@ Run number `#22` UI kaydı, bu threat-model kararı ve production `asInvoker` / 
 | Malicious logo/image | Decompression bomb, malformed codec, local-network probing, cache abuse | MIME+magic validation, byte/pixel/dimension cap, bounded decode/concurrency, address policy, LRU |
 | Malicious/broken stream | Native parser exploit, hang, endless buffer/retry, secret echo | Patched engine, bounded open/retry, adapter isolation boundary, sanitized logs, corpus/fuzz/soak |
 | Credential leak | Query/user-info/header, exception, crash dump, clipboard, screenshot | Opaque refs, central sanitizer, no full memory dump support artifact, scan tests |
-| Network attacker | HTTP sniffing/tamper, invalid certificate, downgrade, redirect theft | HTTPS default, OS trust validation, no bypass, manual redirect, no cross-origin auth; ADR-008 HTTP exception'ında disclosure/tamper açık residual risk ve kalıcı warning |
+| Network attacker | HTTP sniffing/tamper, invalid certificate, downgrade, redirect theft | HTTPS default, OS trust validation, no bypass, manual redirect, no cross-origin auth; ADR-008 Remote M3U ve ADR-009 Xtream exception'larında ayrı consent, kalıcı warning ve açık disclosure/tamper residual riski |
 | Local DB theft | Channel preferences visible; protected secrets targeted | DPAPI CurrentUser blobs, app-data ACL, minimization, deletion; acknowledge same-user threat |
 | Same-user malicious process | Can read app files/process memory under desktop threat model | DPAPI reduces at-rest theft but is not process sandbox; OS account security and short secret lifetime |
 | Supply-chain compromise | Native DLL/plugin or NuGet update | Exact lock, official source, hashes/signatures where supplied, SBOM, license/CVE review |
@@ -171,7 +177,7 @@ Response body, playlist satırı, player command line, environment ve full excep
 - Production transport OS/environment proxy'sini kullanmaz (`UseProxy=false`); connect callback her request'te bağlanan IDNA-canonical exact host + effective port authority ile gerçek socket authority'sini eşleştirmeden DNS/connect yapmaz; geçersiz IDN fail-closed reddedilir.
 - Retry yalnız safe/idempotent GET ve transient sınıflarda; exponential backoff + jitter + `Retry-After` cap. Auth, TLS, validation ve parse error retry edilmez.
 - DNS sonucu connect öncesi address policy'ye, redirect sonrası tekrar policy'ye tabi olur; mixed public/private cevap ile special-use adresler (en az `192.88.99.0/24`, `2001::/23`, `2002::/16`, `3fff::/20`) fail-closed reddedilir.
-- Direct cleartext HTTP yalnız ADR-008'e göre source admission sırasında açıkça onaylanmış `RemotePlaylist` configuration'ında kullanılabilir. Genel transport factory, Xtream, logo veya başka feature için HTTP fallback açmaz.
+- Direct cleartext HTTP yalnız ADR-008'e göre açıkça onaylanmış `RemotePlaylist` veya M17 ADR-009'a göre ayrıca açıkça onaylanmış exact Xtream source configuration'ında kullanılabilir. Genel transport factory, logo/image veya başka feature için HTTP fallback açmaz; Remote M3U ve Xtream consent'i birbirine dönüştürülmez.
 
 ### 6.2 Remote M3U cleartext HTTP kararı
 
@@ -188,14 +194,30 @@ ADR-008 yalnız `RemotePlaylist` source için dar bir compatibility exception ka
 
 `UNVERIFIED / HIGH RESIDUAL / RELEASE BLOCKER`: Same-origin kontrolü yalnız initial channel locator admission'ında uygulanır. Native `MediaSource` HLS/media alt-kaynaklarını ve player-internal redirect zincirini uygulamanın source-download transport'u dışında açar; uygulama bunları güvenilir biçimde gözlemleyip `EndpointAddressPolicy` veya same-origin policy ile enforce edemez. Release öncesi bu yüzeyi denetleyen bir mimari kontrol ya da açık Product/Security/Privacy/Legal risk kabulü ve adversarial packaged-device kanıtı gerekir.
 
-### 6.3 Image ve local-network policy
+### 6.3 Xtream-compatible cleartext HTTP kararı
+
+ADR-009 M17 için ayrı compatibility exception kabul eder [S135]:
+
+- HTTPS varsayılandır. `XtreamCompatible + http`, probe/catalog/playback öncesi username/password ve content trafiğinin şifrelenmeden taşınacağını açıklayan ayrı blocking consent ister.
+- Consent exact `SourceId + SourceConfigurationId + SafeEndpoint` bağına aittir. Endpoint veya credential replace fresh owner ve fresh consent ister; display-name rename istemez.
+- Username/password yalnız owner-bound protected lease'ten operation/session lifetime'ında çözülür. Full API/playback locator domain, UI, SQLite metadata, log, exception veya artifact'a girmez.
+- HTTP API yalnız approved exact origin'e gider; automatic redirect, cross-origin HTTP locator, URI user-info, Authorization/Cookie/Referer fallback'i ve HTTP image reddedilir.
+- Initial HTTP Live/Movie/Episode locator yalnız exact approved source origin'inde kabul edilir. Native player alt-kaynak/redirect zincirinde aynı-origin/address enforcement iddia edilmez.
+- Private/local origin izni ayrı consent'tir ve image/cross-origin request'e taşınmaz.
+- Xtream endpoint/action/DTO/playback path'i `UNVERIFIED / proprietary compatibility family`dir. Typed content yalnız provider operation sonucundan gelir; URL/path/category/name heuristic'i kullanılmaz.
+- Xtream account/category/top-level-list/selected-series-info hard cap'leri `64 KiB / 1 MiB / 64 MiB / 16 MiB`, request süresi 15 saniyedir. Declared/body over-limit fail-closed reddedilir; genel HTTP `4 MiB` sınırı büyütülmez ve unbounded JSON/body/depth/string/item yoktur.
+- Source replace başarısızsa eski configuration/snapshot kalır. Delete secret, consent, Live/Movie/Series/Season/Episode graph'ı, user-state ve owned cache'i idempotent reconciliation ile temizler.
+
+`UNVERIFIED / HIGH RESIDUAL / RELEASE BLOCKER`: HTTP username/password, catalog ve playback trafiği on-path okunabilir/değiştirilebilir. Native subresource/redirect enforcement, provider evreni ve Store/privacy/hukuk sonucu doğrulanmamıştır. Consent bu riski teknik olarak gidermez; public/private flight öncesi açık Product/Security/Privacy/Legal kabulü veya HTTP Xtream'in release scope'tan çıkarılması gerekir.
+
+### 6.4 Image ve local-network policy
 
 Logo fetch player request'inden ayrıdır:
 
 - yalnız `https`; HTTP logo ile `file/data/javascript/ftp/smb` reddedilir;
 - credential, Cookie, Authorization ve Referer verilmez;
 - logo/image isteğinde loopback, link-local, multicast, unspecified ve private address her zaman `PublicOnly` policy ile reddedilir;
-- kullanıcı onboarding ekranında private/local kaynak erişimini açıkça onayladıysa yalnız yetkilendirilmiş Remote M3U source'un exact approved `http`/`https` scheme + host + effective port origin'i veya kalıcı Xtream source'un exact HTTPS origin'i probe/import/catalog isteğinde private/local policy ile değerlendirilebilir; bu opt-in logo/image isteğine veya cross-origin redirect'e taşınmaz;
+- kullanıcı onboarding ekranında private/local kaynak erişimini açıkça onayladıysa yalnız yetkilendirilmiş Remote M3U source'un veya ADR-009 Xtream source configuration'ının exact approved `http`/`https` scheme + host + effective port origin'i probe/import/catalog isteğinde private/local policy ile değerlendirilebilir; cleartext ve private/local consent ayrı kalır, bu opt-in logo/image isteğine veya cross-origin redirect'e taşınmaz;
 - Bu pre-release modelde desteklenen legacy upgrade yoktur: kalıcı source kaydının varlığı, kaydın clean-install onboarding'deki aynı exact-origin private/local onay yolundan üretildiğinin kanıtıdır. Xtream production composition'a bağlanmadan önce de aynı açık consent UI/contract yolu zorunlu kılınmalı ve packaged acceptance ile doğrulanmalıdır; aksi durumda private/local opt-in verilemez.
 - DNS rebinding/redirect'te final IP tekrar kontrol edilir;
 - exact Content-Type ile bounded image header signature/dimension/pixel metadata doğrulanır ve byte sınırı uygulanır; bu kontrol tam bitstream geçerliliğini veya decode-time bütçesini kanıtlamaz, OS image decoder'ın codec karmaşıklığı/failure maliyeti residual risk olarak kalır;
@@ -209,9 +231,10 @@ Logo fetch player request'inden ayrıdır:
 |---|---|---|---|---|
 | Draft/validation fail | Persist edilmez | Draft ancak secretsizse | Yok | Safe error code |
 | Successful source save | Protected create/update | Source metadata | Yok | Source ID |
+| Configuration replace (M17) | Fresh configuration owner + fresh protected credential; HTTP Xtream fresh consent | Stage + bounded validate/sync; success'te old-or-new atomic active pointer, failure'da eski configuration/snapshot | Eski namespace yalnız commit sonrası cleanup | Safe source ID + result code |
 | Successful refresh | Fresh generation; active key yalnız decrypt | Tek SQLite transaction'da key-state + snapshot + active pointer hedefi; current container production değildir | Lazy | Counts/duration |
 | Failed/cancelled refresh | Staging generation abandon; aynı DEK/nonce state resume edilmez | Staging rollback/reconcile; old active kalır | Partial temp silinir | Safe stage/error |
-| Source delete | Önce admission kapat/drain, sonra wrapped key'leri erişilemez kıl ve bounded cleanup | Source/snapshot/favorites policy delete | Namespace delete | Deletion result |
+| Source delete | Önce admission kapat/drain, sonra credential/consent/wrapped key'leri erişilemez kıl ve bounded cleanup | Source + Live/Movie/Series/Season/Episode snapshots + user-state policy delete | Namespace delete | Deletion result |
 | “Clear all local data” | Bütün protected refs delete | DB close/delete/recreate | Tümü | Son güvenli kayıt ardından log delete |
 | Upgrade/migration | Plaintext temp yok | Forward migration + backup/recovery policy | Version invalidation | Schema version only |
 | Reset/uninstall | Disposable test PFN için reset + live-state current-user uninstall/reinstall fresh-state lane'i schema v3'te run number `#20` ile hosted workflow/UI düzeyinde **VERIFIED**; artifact içeriği, production PFN ve repair M15 dahil açık | Reset/uninstall sırasında exact package app-data yokluğu test edilir; production metadata policy açık | Test-only owned state yokluğu test edilir; production cache policy açık | Test harness PFN/full-name/path/user/record/reference/secret yayımlamaz; production log policy açık |
@@ -292,10 +315,12 @@ KVKK'da saklama ve koruma veri işleme kapsamına girebilir. Aydınlatma ile aç
 |---|---|---|
 | Redaction | Canary secret table tests + log/artifact binary scan | M3–M5, her release |
 | Protected storage | Packaged create/read/update/delete + reset/uninstall/reinstall/repair; per-record bulk locator düzeni reddedildi; test-only immutable-container comparative `Decision` tamamlandı; production SQLite state machine uygulanmadı ve end-to-end 50k/crash kanıtı açık | M4/M8/M15 |
-| Transport | TLS fail; explicit HTTP admission/warning; initial same-origin HTTP ve HTTP→HTTPS upgrade; cross-origin HTTP/HTTPS→HTTP reddi; header/cookie/referer yokluğu; native HLS/media subresource + player redirect origin/address residual'ı; timeout, cancellation, oversize | M5/M16 successor; native residual release blocker |
+| Transport | TLS fail; Remote M3U/Xtream ayrı explicit HTTP admission/warning; exact source/configuration/origin bağı; cross-origin HTTP/HTTPS→HTTP reddi; header/cookie/referer yokluğu; native HLS/media subresource + player redirect origin/address residual'ı; timeout, cancellation, oversize | M5/M16 successor + M17; native residual release blocker |
 | Hostile input | Parser/API/image malformed and budget corpus | M6–M8 |
 | Native player | Codec/network/malformed corpus, diagnostics scan, SBOM/CVE | M10 |
 | Data deletion | Source delete, clear-all, orphan reconciliation, migration fault injection | M4/M8/M15 |
+| Source Manager CRUD | Fresh configuration owner/consent; stage→validate/sync→atomic swap; fault/cancel/crash old-or-new; full content/secret/consent/cache delete | M17 |
+| VOD timeline | Typed Movie/Episode only; `CanSeek`/duration/range gate; stale session event rejection; Live seek disabled; UIA/accessibility | M18–M19 |
 | Store/privacy | Policy checklist, privacy text, synthetic reviewer access, WACK/private preflight | M15 |
 | Release | Secret scan, license/patent review, no critical open security issue | M16 |
 
@@ -313,8 +338,8 @@ KVKK'da saklama ve koruma veri işleme kapsamına girebilir. Aydınlatma ile aç
 - Microsoft/Samsung Store'un genel BYO IPTV acceptance sonucu.
 - Codec patent sonucu ve exact license obligations.
 - KVKK role/transfer sonucu.
-- Backend, telemetry, crash SDK, ads, sync, export, DRM, recording/download veya ADR-008'den daha geniş HTTP scope'u girerse bu belge ve ilgili ADR'ler yeniden açılır.
+- Backend, telemetry, crash SDK, ads, sync, export, DRM, recording/download veya ADR-008/ADR-009'dan daha geniş HTTP scope'u girerse bu belge ve ilgili ADR'ler yeniden açılır.
 
 ## Kaynaklar
 
-[S10–S13, S21, S27, S30, S33–S41, S47, S51–S52, S60–S65, S96–S106, S135](../research/SOURCES.md)
+[S10–S13, S21, S27, S30, S33–S41, S47, S51–S52, S60–S65, S96–S106, S135, S139–S141](../research/SOURCES.md)

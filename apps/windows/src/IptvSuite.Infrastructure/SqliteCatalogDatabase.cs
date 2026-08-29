@@ -5,7 +5,7 @@ namespace IptvSuite.Infrastructure;
 
 internal sealed class SqliteCatalogDatabase
 {
-    internal const int SchemaVersion = 5;
+    internal const int SchemaVersion = 7;
 
     private static readonly string[] LegacyRequiredTables =
     [
@@ -26,10 +26,25 @@ internal sealed class SqliteCatalogDatabase
         "source_deletion_tombstones",
     ];
 
-    private static readonly string[] RequiredTables =
+    private static readonly string[] VersionFiveRequiredTables =
     [
         .. VersionFourRequiredTables,
         "source_deletion_reconciliation_state",
+    ];
+
+    private static readonly string[] VersionSixRequiredTables =
+    [
+        .. VersionFiveRequiredTables,
+        "movies",
+        "series",
+        "seasons",
+        "episodes",
+    ];
+
+    private static readonly string[] RequiredTables =
+    [
+        .. VersionSixRequiredTables,
+        "source_configuration_retirements",
     ];
 
     private static readonly string[] RequiredTriggers =
@@ -100,6 +115,18 @@ internal sealed class SqliteCatalogDatabase
             return;
         }
 
+        if (version == 5)
+        {
+            await MigrateVersionFiveAsync(connection, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (version == 6)
+        {
+            await MigrateVersionSixAsync(connection, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (version != SchemaVersion)
         {
             throw new InvalidDataException("Catalog schema version is unsupported.");
@@ -127,6 +154,8 @@ internal sealed class SqliteCatalogDatabase
             transaction).ConfigureAwait(false);
         await CreateCatalogBrowseIndexesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateContentCatalogTablesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateSourceConfigurationRetirementsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
         await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -142,6 +171,8 @@ internal sealed class SqliteCatalogDatabase
             .ConfigureAwait(false);
         await CreateCatalogBrowseIndexesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateContentCatalogTablesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateSourceConfigurationRetirementsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
         await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -156,6 +187,8 @@ internal sealed class SqliteCatalogDatabase
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
         await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateContentCatalogTablesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateSourceConfigurationRetirementsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
         await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -177,8 +210,53 @@ internal sealed class SqliteCatalogDatabase
             connection,
             transaction,
             cancellationToken).ConfigureAwait(false);
+        await CreateContentCatalogTablesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateSourceConfigurationRetirementsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
+        await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task MigrateVersionFiveAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await ValidateSchemaAsync(
+            connection,
+            VersionFiveRequiredTables,
+            RequiredTriggers,
+            cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await CreateContentCatalogTablesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateSourceConfigurationRetirementsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
+            .ConfigureAwait(false);
+        await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task MigrateVersionSixAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await ValidateSchemaAsync(
+            connection,
+            VersionSixRequiredTables,
+            RequiredTriggers,
+            cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await CreateSourceConfigurationRetirementsAsync(
+            connection,
+            transaction,
+            cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection,
+            $"PRAGMA user_version = {SchemaVersion};",
+            cancellationToken,
+            transaction).ConfigureAwait(false);
         await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
         await ValidateCurrentSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
     }
@@ -206,6 +284,8 @@ internal sealed class SqliteCatalogDatabase
             .ConfigureAwait(false);
         await ExecuteAsync(connection, SchemaSql, cancellationToken, transaction).ConfigureAwait(false);
         await CreateSourceDeletionBoundaryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateContentCatalogTablesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await CreateSourceConfigurationRetirementsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken, transaction)
             .ConfigureAwait(false);
         await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -259,6 +339,22 @@ internal sealed class SqliteCatalogDatabase
         SqliteTransaction transaction,
         CancellationToken cancellationToken) =>
         ExecuteAsync(connection, SourceDeletionReconciliationStateSql, cancellationToken, transaction);
+
+    private static Task CreateContentCatalogTablesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(connection, ContentCatalogSql, cancellationToken, transaction);
+
+    private static Task CreateSourceConfigurationRetirementsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            SourceConfigurationRetirementSql,
+            cancellationToken,
+            transaction);
 
     private static async Task<long> ReadSchemaVersionAsync(
         SqliteConnection connection,
@@ -502,6 +598,75 @@ internal sealed class SqliteCatalogDatabase
         ) STRICT;
         INSERT INTO source_deletion_reconciliation_state(singleton, after_source_id)
         VALUES (1, NULL);
+        """;
+
+    private const string ContentCatalogSql = """
+        CREATE TABLE IF NOT EXISTS movies (
+            movie_id TEXT NOT NULL PRIMARY KEY CHECK (length(movie_id) = 32),
+            snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id) ON DELETE CASCADE,
+            category_id TEXT NULL REFERENCES categories(category_id) ON DELETE SET NULL,
+            provider_item_id TEXT NOT NULL CHECK (length(provider_item_id) BETWEEN 1 AND 512),
+            display_name TEXT NOT NULL CHECK (length(display_name) BETWEEN 1 AND 256),
+            container_extension TEXT NULL CHECK (container_extension IS NULL OR length(container_extension) <= 32),
+            is_adult INTEGER NOT NULL CHECK (is_adult IN (0, 1)),
+            UNIQUE(snapshot_id, provider_item_id)
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS series (
+            series_id TEXT NOT NULL PRIMARY KEY CHECK (length(series_id) = 32),
+            snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id) ON DELETE CASCADE,
+            category_id TEXT NULL REFERENCES categories(category_id) ON DELETE SET NULL,
+            provider_item_id TEXT NOT NULL CHECK (length(provider_item_id) BETWEEN 1 AND 512),
+            display_name TEXT NOT NULL CHECK (length(display_name) BETWEEN 1 AND 256),
+            is_adult INTEGER NOT NULL CHECK (is_adult IN (0, 1)),
+            UNIQUE(snapshot_id, provider_item_id)
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS seasons (
+            season_id TEXT NOT NULL PRIMARY KEY CHECK (length(season_id) = 32),
+            snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id) ON DELETE CASCADE,
+            series_id TEXT NOT NULL REFERENCES series(series_id) ON DELETE CASCADE,
+            provider_item_id TEXT NULL CHECK (provider_item_id IS NULL OR length(provider_item_id) BETWEEN 1 AND 512),
+            season_number INTEGER NOT NULL CHECK (season_number >= 0),
+            display_name TEXT NOT NULL CHECK (length(display_name) BETWEEN 1 AND 256),
+            UNIQUE(series_id, season_number)
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS episodes (
+            episode_id TEXT NOT NULL PRIMARY KEY CHECK (length(episode_id) = 32),
+            snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id) ON DELETE CASCADE,
+            season_id TEXT NOT NULL REFERENCES seasons(season_id) ON DELETE CASCADE,
+            provider_item_id TEXT NOT NULL CHECK (length(provider_item_id) BETWEEN 1 AND 512),
+            episode_number INTEGER NOT NULL CHECK (episode_number > 0),
+            display_name TEXT NOT NULL CHECK (length(display_name) BETWEEN 1 AND 256),
+            container_extension TEXT NULL CHECK (container_extension IS NULL OR length(container_extension) <= 32),
+            duration_ms INTEGER NULL CHECK (duration_ms IS NULL OR duration_ms BETWEEN 1 AND 172800000),
+            UNIQUE(season_id, provider_item_id)
+        ) STRICT;
+
+        CREATE INDEX IF NOT EXISTS ix_movies_snapshot_name
+            ON movies(snapshot_id, display_name COLLATE NOCASE, movie_id);
+        CREATE INDEX IF NOT EXISTS ix_movies_snapshot_category_name
+            ON movies(snapshot_id, category_id, display_name COLLATE NOCASE, movie_id);
+        CREATE INDEX IF NOT EXISTS ix_series_snapshot_name
+            ON series(snapshot_id, display_name COLLATE NOCASE, series_id);
+        CREATE INDEX IF NOT EXISTS ix_series_snapshot_category_name
+            ON series(snapshot_id, category_id, display_name COLLATE NOCASE, series_id);
+        CREATE INDEX IF NOT EXISTS ix_seasons_series_number
+            ON seasons(series_id, season_number, season_id);
+        CREATE INDEX IF NOT EXISTS ix_episodes_season_number
+            ON episodes(season_id, episode_number, episode_id);
+        """;
+
+    private const string SourceConfigurationRetirementSql = """
+        CREATE TABLE IF NOT EXISTS source_configuration_retirements (
+            source_id TEXT NOT NULL CHECK (length(source_id) = 32),
+            configuration_id TEXT NOT NULL CHECK (length(configuration_id) = 32),
+            source_kind INTEGER NOT NULL CHECK (source_kind IN (0, 1)),
+            configuration_reference TEXT NOT NULL CHECK (length(configuration_reference) IN (46, 47)),
+            retired_utc TEXT NOT NULL,
+            PRIMARY KEY(source_id, configuration_id)
+        ) WITHOUT ROWID, STRICT;
         """;
 
     private const string SchemaSql = """

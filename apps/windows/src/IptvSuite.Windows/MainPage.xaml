@@ -22,42 +22,11 @@
                 <ColumnDefinition Width="2*" />
                 <ColumnDefinition Width="3*" />
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <ComboBox x:Name="SourceSelector" MinWidth="240" HorizontalAlignment="Stretch" TabIndex="0" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSourceSelector" AutomationProperties.Name="Playlist source" DisplayMemberPath="Name" Header="Playlist source" SelectionChanged="SourceSelector_SelectionChanged" />
             <ComboBox x:Name="CategorySelector" Grid.Column="1" TabIndex="1" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogCategorySelector" AutomationProperties.Name="Channel category" DisplayMemberPath="Name" SelectionChanged="CategorySelector_SelectionChanged" />
             <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" TabIndex="2" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSearchBox" AutomationProperties.Name="Search channels" PlaceholderText="Search channels" QuerySubmitted="SearchBox_QuerySubmitted" TextChanged="SearchBox_TextChanged" />
-            <Button x:Name="AddRemotePlaylistButton" Grid.Column="3" TabIndex="3" IsEnabled="False" AutomationProperties.AutomationId="CatalogAddSourceButton" AutomationProperties.Name="Add authorized remote M3U catalog" Click="AddRemotePlaylistButton_Click" Content="Add Remote M3U" />
-            <Button x:Name="DeleteSourceButton" Grid.Column="4" TabIndex="9" IsEnabled="False" AutomationProperties.AutomationId="CatalogDeleteSourceButton" AutomationProperties.Name="Delete selected playlist source" Click="DeleteSourceButton_Click" Content="Delete source" />
-        </Grid>
-        <Grid x:Name="RemotePlaylistOnboardingPanel" Grid.Row="2" Canvas.ZIndex="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" Visibility="Collapsed">
-            <Border Margin="16" Padding="16" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                <StackPanel Spacing="10">
-                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Add an authorized Remote M3U catalog" />
-                    <TextBlock Text="Use only a playlist you are authorized to access. The full URL is protected for this Windows user and is never shown in diagnostics." TextWrapping="Wrap" />
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="2*" />
-                            <ColumnDefinition Width="3*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox x:Name="RemotePlaylistSourceNameTextBox" TabIndex="4" MaxLength="100" AutomationProperties.AutomationId="RemotePlaylistSourceNameTextBox" AutomationProperties.Name="Source name" Header="Source name" PlaceholderText="My authorized playlist" />
-                        <TextBox x:Name="RemotePlaylistLocatorTextBox" Grid.Column="1" TabIndex="5" MaxLength="4096" IsSpellCheckEnabled="False" AutomationProperties.AutomationId="RemotePlaylistLocatorTextBox" AutomationProperties.Name="HTTP or HTTPS playlist URL" Header="HTTP or HTTPS playlist URL" PlaceholderText="https:// or http://" />
-                    </Grid>
-                    <CheckBox x:Name="RemotePlaylistAuthorizationCheckBox" TabIndex="6" AutomationProperties.AutomationId="RemotePlaylistAuthorizationCheckBox" AutomationProperties.Name="Kaynak erişimini ve HTTP açık metin/MITM riskini onayla" Checked="RemotePlaylistAuthorizationCheckBox_Changed" Unchecked="RemotePlaylistAuthorizationCheckBox_Changed" Content="Bu kaynağa erişim yetkim olduğunu; özel/yerel ağdaysa yalnızca bu tam sunucu ve porta güvendiğimi; HTTP kullanırsam trafiğin şifrelenmeden açık metin taşınacağını ve ağdaki kişilerce görülebileceğini veya değiştirilebileceğini (MITM) kabul ediyorum." />
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Button x:Name="RemotePlaylistAddButton" TabIndex="7" IsEnabled="False" AutomationProperties.AutomationId="RemotePlaylistAddButton" AutomationProperties.Name="Validate and add source" Click="RemotePlaylistAddButton_Click" Content="Validate and add" />
-                        <Button x:Name="RemotePlaylistCancelButton" Grid.Column="1" TabIndex="8" AutomationProperties.AutomationId="RemotePlaylistCancelButton" AutomationProperties.Name="Cancel source onboarding" Click="RemotePlaylistCancelButton_Click" Content="Cancel" />
-                        <ProgressRing x:Name="RemotePlaylistProgressRing" Grid.Column="2" Width="20" Height="20" VerticalAlignment="Center" IsActive="False" Visibility="Collapsed" AutomationProperties.AutomationId="RemotePlaylistProgressRing" AutomationProperties.Name="Validating and importing remote playlist" />
-                        <TextBlock x:Name="RemotePlaylistStatusText" Grid.Column="3" VerticalAlignment="Center" AutomationProperties.AutomationId="RemotePlaylistStatusText" AutomationProperties.LiveSetting="Polite" TextWrapping="Wrap" />
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <Button x:Name="DeleteSourceButton" Grid.Column="3" TabIndex="3" IsEnabled="False" Visibility="Collapsed" AutomationProperties.AutomationId="CatalogDeleteSourceButton" AutomationProperties.Name="Delete selected playlist source" Click="DeleteSourceButton_Click" Content="Delete source" />
         </Grid>
         <Grid x:Name="ContentPanel" Grid.Row="2" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
@@ -93,6 +62,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -101,11 +71,31 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="PlayButton" AutomationProperties.AutomationId="PlaybackPlayButton" AutomationProperties.Name="Play channel" Click="PlayButton_Click" Content="Play" IsEnabled="False" />
-                    <Button x:Name="PauseButton" Grid.Column="1" AutomationProperties.AutomationId="PlaybackPauseButton" AutomationProperties.Name="Pause channel" Click="PauseButton_Click" Content="Pause" IsEnabled="False" />
-                    <Button x:Name="StopButton" Grid.Column="2" AutomationProperties.AutomationId="PlaybackStopButton" AutomationProperties.Name="Stop channel" Click="StopButton_Click" Content="Stop" IsEnabled="False" />
-                    <Button x:Name="RetryPlaybackButton" Grid.Column="3" AutomationProperties.AutomationId="PlaybackRetryReconnectButton" AutomationProperties.Name="Retry playback connection" Click="RetryPlaybackButton_Click" Content="Retry" IsEnabled="False" Visibility="Collapsed" />
-                    <StackPanel Grid.Column="4" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Grid x:Name="PlaybackTimelinePanel" Grid.ColumnSpan="5" ColumnSpacing="8" Visibility="Collapsed"
+                          AutomationProperties.AutomationId="PlaybackTimelinePanel"
+                          AutomationProperties.Name="On-demand playback timeline">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="PlaybackStartTimeText" VerticalAlignment="Center" Text="00:00" />
+                        <TextBlock x:Name="PlaybackCurrentTimeText" Grid.Column="1" MinWidth="54" VerticalAlignment="Center" Text="00:00" TextAlignment="Right" />
+                        <Slider x:Name="PlaybackTimelineSlider" Grid.Column="2" Minimum="0" Maximum="1" Value="0"
+                                IsEnabled="False" StepFrequency="1"
+                                 AutomationProperties.AutomationId="PlaybackTimelineSlider"
+                                 AutomationProperties.Name="Seek through on-demand content"
+                                 PointerCaptureLost="PlaybackTimelineSlider_PointerCaptureLost"
+                                 ValueChanged="PlaybackTimelineSlider_ValueChanged"
+                                 KeyUp="PlaybackTimelineSlider_KeyUp" />
+                        <TextBlock x:Name="PlaybackEndTimeText" Grid.Column="3" MinWidth="54" VerticalAlignment="Center" Text="--:--" />
+                    </Grid>
+                    <Button x:Name="PlayButton" Grid.Row="1" AutomationProperties.AutomationId="PlaybackPlayButton" AutomationProperties.Name="Play content" Click="PlayButton_Click" Content="Play" IsEnabled="False" />
+                    <Button x:Name="PauseButton" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="PlaybackPauseButton" AutomationProperties.Name="Pause content" Click="PauseButton_Click" Content="Pause" IsEnabled="False" />
+                    <Button x:Name="StopButton" Grid.Row="1" Grid.Column="2" AutomationProperties.AutomationId="PlaybackStopButton" AutomationProperties.Name="Stop content" Click="StopButton_Click" Content="Stop" IsEnabled="False" />
+                    <Button x:Name="RetryPlaybackButton" Grid.Row="1" Grid.Column="3" AutomationProperties.AutomationId="PlaybackRetryReconnectButton" AutomationProperties.Name="Retry playback connection" Click="RetryPlaybackButton_Click" Content="Retry" IsEnabled="False" Visibility="Collapsed" />
+                    <StackPanel Grid.Row="1" Grid.Column="4" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <TextBlock x:Name="PlaybackChannelText" AutomationProperties.AutomationId="PlaybackChannelText" AutomationProperties.LiveSetting="Polite" HorizontalAlignment="Right" Text="No channel selected." TextTrimming="CharacterEllipsis" />
                         <TextBlock x:Name="PlaybackStatusText" AutomationProperties.AutomationId="PlaybackStatusText" AutomationProperties.LiveSetting="Polite" HorizontalAlignment="Right" Text="Playback stopped." />
                         <TextBlock x:Name="PlaybackReconnectCountdownText" AutomationProperties.AutomationId="PlaybackReconnectCountdownText" AutomationProperties.LiveSetting="Off" HorizontalAlignment="Right" Visibility="Collapsed" />
@@ -117,7 +107,7 @@
                             <TextBlock x:Name="PlaybackConnectivityHintText" AutomationProperties.AutomationId="PlaybackConnectivityHintText" AutomationProperties.LiveSetting="Off" HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap" Visibility="Collapsed" />
                         </StackPanel>
                     </StackPanel>
-                    <StackPanel Grid.Row="1" Grid.ColumnSpan="5" Orientation="Horizontal" Spacing="8">
+                    <StackPanel Grid.Row="2" Grid.ColumnSpan="5" Orientation="Horizontal" Spacing="8">
                         <Button x:Name="VolumeDownButton" AutomationProperties.AcceleratorKey="Ctrl+Shift+Down" AutomationProperties.AutomationId="PlaybackVolumeDownButton" AutomationProperties.Name="Decrease playback volume" Click="VolumeDownButton_Click" Content="Volume −" IsEnabled="False" />
                         <Button x:Name="VolumeUpButton" AutomationProperties.AcceleratorKey="Ctrl+Shift+Up" AutomationProperties.AutomationId="PlaybackVolumeUpButton" AutomationProperties.Name="Increase playback volume" Click="VolumeUpButton_Click" Content="Volume +" IsEnabled="False" />
                         <Button x:Name="MuteButton" AutomationProperties.AcceleratorKey="Ctrl+Shift+M" AutomationProperties.AutomationId="PlaybackMuteButton" AutomationProperties.Name="Mute playback" Click="MuteButton_Click" Content="Mute" IsEnabled="False" />

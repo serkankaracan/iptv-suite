@@ -47,14 +47,29 @@ public sealed class XtreamSourceConfiguration : SourceConfiguration
     internal XtreamSourceConfiguration(
         SourceConfigurationId configurationId,
         SafeEndpoint safeEndpoint,
-        SecretReference credentialsReference)
+        SecretReference credentialsReference,
+        bool allowsInsecureTransport)
         : base(configurationId, SourceKind.XtreamCompatible, safeEndpoint)
     {
         ArgumentNullException.ThrowIfNull(credentialsReference);
+        bool usesHttp = string.Equals(
+            safeEndpoint.Scheme,
+            Uri.UriSchemeHttp,
+            StringComparison.Ordinal);
+        if (usesHttp != allowsInsecureTransport)
+        {
+            throw new ArgumentException(
+                "Cleartext Xtream transport requires an explicit source-scoped grant.",
+                nameof(allowsInsecureTransport));
+        }
+
         CredentialsReference = credentialsReference;
+        AllowsInsecureTransport = allowsInsecureTransport;
     }
 
     public SecretReference CredentialsReference { get; }
+
+    public bool AllowsInsecureTransport { get; }
 }
 
 public sealed class RemotePlaylistSourceConfiguration : SourceConfiguration
@@ -75,17 +90,23 @@ public sealed class RemotePlaylistSourceConfiguration : SourceConfiguration
 [DebuggerDisplay("[PREPARED-XTREAM-SOURCE-DRAFT]")]
 public sealed class PreparedXtreamSourceDraft
 {
-    internal PreparedXtreamSourceDraft(string normalizedDisplayName, SafeEndpoint safeEndpoint)
+    internal PreparedXtreamSourceDraft(
+        string normalizedDisplayName,
+        SafeEndpoint safeEndpoint,
+        bool allowsInsecureTransport)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(normalizedDisplayName);
         ArgumentNullException.ThrowIfNull(safeEndpoint);
         NormalizedDisplayName = normalizedDisplayName;
         SafeEndpoint = safeEndpoint;
+        AllowsInsecureTransport = allowsInsecureTransport;
     }
 
     public string NormalizedDisplayName { get; }
 
     public SafeEndpoint SafeEndpoint { get; }
+
+    public bool AllowsInsecureTransport { get; }
 
     public override string ToString() => "[PREPARED-XTREAM-SOURCE-DRAFT]";
 }

@@ -365,6 +365,93 @@ public sealed class SqliteCatalogSnapshotWriterTests
 
     [TestMethod]
     [Timeout(30_000)]
+    public async Task SameSourceReplacementCommitsConfigurationAndSnapshotAtomicallyAndJournalsCleanup()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "m17-source-replacement-atomic");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(databasePath);
+        using var store = new M4InMemorySecretStore();
+        ContentSource initialSource = await CreateSourceAsync(store);
+        TestBatch initial = await CreateBatchAsync(initialSource, "initial");
+        await ActivateAsync(databasePath, initial.Batch);
+        ContentSource replacementSource = await CreateReplacementSourceAsync(
+            store,
+            initialSource.Id);
+        TestBatch replacement = await CreateBatchAsync(replacementSource, "replacement");
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await ActivateAsync(databasePath, replacement.Batch, injectFault: true));
+
+        await using (SqliteConnection unchanged = await OpenAsync(databasePath))
+        {
+            Assert.AreEqual(
+                Id(initialSource.Configuration.ConfigurationId.Value),
+                await ScalarStringAsync(
+                    unchanged,
+                    "SELECT configuration_id FROM sources WHERE source_id = $source;",
+                    ("$source", Id(initialSource.Id.Value))));
+            Assert.AreEqual(
+                Id(initial.Snapshot.Id.Value),
+                await ScalarStringAsync(
+                    unchanged,
+                    "SELECT active_snapshot_id FROM sources WHERE source_id = $source;",
+                    ("$source", Id(initialSource.Id.Value))));
+            Assert.AreEqual(0L, await ScalarInt64Async(
+                unchanged,
+                "SELECT count(*) FROM source_configuration_retirements;"));
+        }
+
+        await ActivateAsync(databasePath, replacement.Batch);
+
+        await using (SqliteConnection committed = await OpenAsync(databasePath))
+        {
+            Assert.AreEqual(1L, await ScalarInt64Async(committed, "SELECT count(*) FROM sources;"));
+            Assert.AreEqual(
+                Id(replacementSource.Configuration.ConfigurationId.Value),
+                await ScalarStringAsync(
+                    committed,
+                    "SELECT configuration_id FROM sources WHERE source_id = $source;",
+                    ("$source", Id(initialSource.Id.Value))));
+            Assert.AreEqual(
+                Id(replacement.Snapshot.Id.Value),
+                await ScalarStringAsync(
+                    committed,
+                    "SELECT active_snapshot_id FROM sources WHERE source_id = $source;",
+                    ("$source", Id(initialSource.Id.Value))));
+            Assert.AreEqual(1L, await ScalarInt64Async(
+                committed,
+                """
+                SELECT count(*)
+                FROM source_configuration_retirements
+                WHERE source_id = $source AND configuration_id = $configuration;
+                """,
+                ("$source", Id(initialSource.Id.Value)),
+                ("$configuration", Id(initialSource.Configuration.ConfigurationId.Value))));
+        }
+
+        var reconciler = new SqliteSourceConfigurationRetirementReconciler(
+            databasePath,
+            store);
+        SourceConfigurationRetirementReconciliationResult reconciliation =
+            await reconciler.ReconcileAsync();
+        Assert.IsTrue(reconciliation.IsSuccess);
+        Assert.AreEqual(1, reconciliation.AttemptedCount);
+        Assert.AreEqual(1, reconciliation.CompletedCount);
+        Assert.IsTrue(store.RetiredBuffersAreZeroed);
+        await using SqliteConnection reconciled = await OpenAsync(databasePath);
+        Assert.AreEqual(0L, await ScalarInt64Async(
+            reconciled,
+            "SELECT count(*) FROM source_configuration_retirements;"));
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
     public async Task PreCancelledActivationDoesNotMutateDatabase()
     {
         if (!OperatingSystem.IsWindows())
@@ -516,7 +603,14 @@ public sealed class SqliteCatalogSnapshotWriterTests
         Type batchType = assembly.GetType("IptvSuite.Infrastructure.CatalogSnapshotBatch", true)!;
         object batch = Activator.CreateInstance(
             batchType,
-            [source, snapshot.Value!, new[] { category.Value! }, new[] { channel.Value! }, locators])!;
+            [
+                source,
+                snapshot.Value!,
+                new[] { category.Value! },
+                new[] { channel.Value! },
+                locators,
+                null,
+            ])!;
         return new(
             batch,
             source,
@@ -669,6 +763,26 @@ public sealed class SqliteCatalogSnapshotWriterTests
                 "https://fixtures.invalid/catalog/list.m3u");
         Assert.IsTrue(draft.IsSuccess);
         DateTimeOffset now = new(2026, 8, 20, 11, 0, 0, TimeSpan.Zero);
+        DomainResult<ContentSource> source = ContentSource.Create(
+            draft.Value,
+            ContentSourceStatus.Testing,
+            now,
+            now);
+        Assert.IsTrue(source.IsSuccess);
+        return source.Value!;
+    }
+
+    private static async Task<ContentSource> CreateReplacementSourceAsync(
+        M4InMemorySecretStore store,
+        SourceId sourceId)
+    {
+        DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(store)
+            .ProtectRemotePlaylistAsync(
+                sourceId,
+                "Replacement catalog",
+                "https://replacement.invalid/catalog/list.m3u");
+        Assert.IsTrue(draft.IsSuccess);
+        DateTimeOffset now = new(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
         DomainResult<ContentSource> source = ContentSource.Create(
             draft.Value,
             ContentSourceStatus.Testing,

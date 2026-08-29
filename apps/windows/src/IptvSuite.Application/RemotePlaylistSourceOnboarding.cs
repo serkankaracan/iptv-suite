@@ -91,7 +91,8 @@ public sealed class RemotePlaylistSourceOnboardingResult
         SourceId sourceId,
         int importedChannelCount,
         int warningCount,
-        bool entryLimitReached)
+        bool entryLimitReached,
+        bool previousConfigurationCleanupPending = false)
     {
         if (sourceId.IsEmpty)
         {
@@ -105,6 +106,7 @@ public sealed class RemotePlaylistSourceOnboardingResult
         ImportedChannelCount = importedChannelCount;
         WarningCount = warningCount;
         EntryLimitReached = entryLimitReached;
+        PreviousConfigurationCleanupPending = previousConfigurationCleanupPending;
     }
 
     public SourceId SourceId { get; }
@@ -114,6 +116,8 @@ public sealed class RemotePlaylistSourceOnboardingResult
     public int WarningCount { get; }
 
     public bool EntryLimitReached { get; }
+
+    public bool PreviousConfigurationCleanupPending { get; }
 
     public override string ToString() => "[REMOTE-PLAYLIST-SOURCE-ONBOARDING-RESULT]";
 }
@@ -142,6 +146,7 @@ public sealed class RemotePlaylistSourceOnboardingService
             displayName,
             locator,
             allowInsecureHttp: false,
+            replacementSource: null,
             cancellationToken: cancellationToken);
 
     public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>
@@ -153,15 +158,51 @@ public sealed class RemotePlaylistSourceOnboardingService
             displayName,
             locator,
             allowInsecureHttp: true,
+            replacementSource: null,
             cancellationToken: cancellationToken);
+
+    public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> ReplaceAsync(
+        ContentSource source,
+        string? displayName,
+        string? locator,
+        CancellationToken cancellationToken = default) =>
+        AddCoreAsync(
+            displayName,
+            locator,
+            allowInsecureHttp: false,
+            replacementSource: source,
+            cancellationToken);
+
+    public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>
+        ReplaceAllowingInsecureHttpAsync(
+            ContentSource source,
+            string? displayName,
+            string? locator,
+            CancellationToken cancellationToken = default) =>
+        AddCoreAsync(
+            displayName,
+            locator,
+            allowInsecureHttp: true,
+            replacementSource: source,
+            cancellationToken);
 
     private async ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddCoreAsync(
         string? displayName,
         string? locator,
         bool allowInsecureHttp,
+        ContentSource? replacementSource,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (replacementSource is not null &&
+            (replacementSource.Id.IsEmpty ||
+             replacementSource.Kind != SourceKind.RemotePlaylist ||
+             replacementSource.Status == ContentSourceStatus.DeletionPending))
+        {
+            return DomainResult.Failure<RemotePlaylistSourceOnboardingResult>(
+                DomainErrorCode.DomainInvariantViolation);
+        }
+
         DomainResult<PreparedRemotePlaylistSourceDraft> prepared = allowInsecureHttp
             ? SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
                 displayName,
@@ -200,7 +241,7 @@ public sealed class RemotePlaylistSourceOnboardingService
             return StorageUnavailable();
         }
 
-        SourceId sourceId = SourceId.Generate();
+        SourceId sourceId = replacementSource?.Id ?? SourceId.Generate();
         DomainResult<ValidatedSourceDraft> protectedDraft;
         try
         {
@@ -264,12 +305,16 @@ public sealed class RemotePlaylistSourceOnboardingService
 
         if (import.Disposition is CatalogImportCommitDisposition.Committed)
         {
+            bool cleanupPending = replacementSource is not null &&
+                !await TryDeleteProtectedConfigurationAsync(replacementSource, now)
+                    .ConfigureAwait(false);
             return DomainResult.Success(
                 new RemotePlaylistSourceOnboardingResult(
                     sourceId,
                     import.ImportedChannelCount!.Value,
                     import.WarningCount!.Value,
-                    import.EntryLimitReached));
+                    import.EntryLimitReached,
+                    cleanupPending));
         }
 
         if (import.Disposition is CatalogImportCommitDisposition.Indeterminate)
@@ -317,6 +362,17 @@ public sealed class RemotePlaylistSourceOnboardingService
         {
             return false;
         }
+    }
+
+    private ValueTask<bool> TryDeleteProtectedConfigurationAsync(
+        ContentSource source,
+        DateTimeOffset now)
+    {
+        var draft = new ValidatedSourceDraft(
+            source.Id,
+            source.DisplayName,
+            source.Configuration);
+        return TryDeleteProtectedConfigurationAsync(draft, now);
     }
 
     private static DomainResult<RemotePlaylistSourceOnboardingResult> StorageUnavailable() =>

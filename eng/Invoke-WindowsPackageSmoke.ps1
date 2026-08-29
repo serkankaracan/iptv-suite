@@ -819,7 +819,6 @@ $expectedCatalogSourceName = "Synthetic 50k source"
 $expectedPlaybackSourceName = "00 Synthetic protected playback source"
 $expectedPlaybackChannelAName = "Synthetic protected Tier A channel A"
 $expectedPlaybackChannelBName = "Synthetic protected Tier A channel B"
-$expectedOnboardingEmptyStatus = "No imported Live TV catalog is available."
 $expectedOnboardingCatalogStatus = "Showing 1$([char]0x2013)2 of 2 channels."
 $expectedOnboardingPlaylistPath = if ($EmitM16FinalArtifactSurfaces) {
     "/$testCanaryMarker/synthetic-onboarding.m3u"
@@ -2844,6 +2843,199 @@ function Set-PackagedOnboardingText {
     ([System.Windows.Automation.ValuePattern]$valuePatternObject).SetValue($Value)
 }
 
+function Enter-PackagedApplicationSection {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Instance,
+
+        [Parameter(Mandatory)]
+        [string]$NavigationAutomationId,
+
+        [Parameter(Mandatory)]
+        [string]$NavigationAccessibleName,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedAutomationId
+    )
+
+    Assert-PackagedProcessAlive -Process $Instance.Process
+    $navigationItem = Get-RequiredAutomationElement `
+        $Instance.Root `
+        $NavigationAutomationId `
+        ([System.Windows.Automation.ControlType]::ListItem) `
+        $NavigationAccessibleName
+    $selectionItemObject = $null
+    if ($navigationItem.TryGetCurrentPattern(
+            [System.Windows.Automation.SelectionItemPattern]::Pattern,
+            [ref]$selectionItemObject)) {
+        ([System.Windows.Automation.SelectionItemPattern]$selectionItemObject).Select()
+    }
+    else {
+        $invokeObject = $null
+        if (-not $navigationItem.TryGetCurrentPattern(
+                [System.Windows.Automation.InvokePattern]::Pattern,
+                [ref]$invokeObject)) {
+            throw "The packaged navigation item has no supported activation pattern."
+        }
+        ([System.Windows.Automation.InvokePattern]$invokeObject).Invoke()
+    }
+
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        Assert-PackagedProcessAlive -Process $Instance.Process
+        try {
+            $expectedElement = Get-AutomationElementById `
+                $Instance.Root `
+                $ExpectedAutomationId
+            if ($null -ne $expectedElement -and
+                -not $expectedElement.Current.IsOffscreen) {
+                return $expectedElement
+            }
+        }
+        catch [System.Windows.Automation.ElementNotAvailableException] {
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged application section did not become visible before the deadline."
+}
+
+function Enter-PackagedLiveTvSection {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Instance
+    )
+
+    return Enter-PackagedApplicationSection `
+        -Instance $Instance `
+        -NavigationAutomationId "AppNavigationLiveTvItem" `
+        -NavigationAccessibleName "Live TV" `
+        -ExpectedAutomationId "CatalogSourceSelector"
+}
+
+function Enter-PackagedSourcesSection {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Instance
+    )
+
+    return Enter-PackagedApplicationSection `
+        -Instance $Instance `
+        -NavigationAutomationId "AppNavigationSourcesItem" `
+        -NavigationAccessibleName "Sources" `
+        -ExpectedAutomationId "SourceManagerAddButton"
+}
+
+function Select-PackagedSourceManagerItem {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Instance,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedSourceName
+    )
+
+    $null = Enter-PackagedSourcesSection -Instance $Instance
+    $sourceList = Get-RequiredAutomationElement `
+        $Instance.Root `
+        "SourceManagerList" `
+        ([System.Windows.Automation.ControlType]::List) `
+        "Playlist sources"
+    $listItemCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    $deadline = (Get-Date).AddSeconds(30)
+    $targetItem = $null
+    do {
+        Assert-PackagedProcessAlive -Process $Instance.Process
+        $items = $sourceList.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $listItemCondition)
+        for ($index = 0; $index -lt $items.Count; $index++) {
+            if ($items[$index].Current.Name -ceq $ExpectedSourceName) {
+                $targetItem = $items[$index]
+                break
+            }
+        }
+        if ($null -ne $targetItem) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+    if ($null -eq $targetItem) {
+        throw "The packaged Source Manager did not expose the expected source."
+    }
+
+    $selectionItemObject = $null
+    if (-not $targetItem.TryGetCurrentPattern(
+            [System.Windows.Automation.SelectionItemPattern]::Pattern,
+            [ref]$selectionItemObject)) {
+        throw "The packaged Source Manager item has no SelectionItemPattern."
+    }
+    ([System.Windows.Automation.SelectionItemPattern]$selectionItemObject).Select()
+
+    $deleteButton = $null
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        Assert-PackagedProcessAlive -Process $Instance.Process
+        $deleteButton = Get-AutomationElementById `
+            $Instance.Root `
+            "SourceManagerDeleteButton"
+        if ($null -ne $deleteButton -and
+            $deleteButton.Current.IsEnabled -and
+            -not $deleteButton.Current.IsOffscreen) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+    if ($null -eq $deleteButton -or
+        $deleteButton.Current.ControlType -ne
+            [System.Windows.Automation.ControlType]::Button -or
+        $deleteButton.Current.Name -cne "Delete authorized source" -or
+        -not $deleteButton.Current.IsEnabled) {
+        throw "The packaged Source Manager delete command is unavailable."
+    }
+
+    return $deleteButton
+}
+
+function Get-PackagedLiveTvChannelItem {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Instance,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedChannelName
+    )
+
+    $null = Enter-PackagedLiveTvSection -Instance $Instance
+    $channelList = Get-RequiredAutomationElement `
+        $Instance.Root `
+        "CatalogChannelList" `
+        ([System.Windows.Automation.ControlType]::List) `
+        "Channels"
+    $listItemCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        Assert-PackagedProcessAlive -Process $Instance.Process
+        $items = $channelList.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $listItemCondition)
+        for ($index = 0; $index -lt $items.Count; $index++) {
+            if (Test-AutomationElementContainsExactText `
+                    -Root $items[$index] `
+                    -ExpectedText $ExpectedChannelName) {
+                return $items[$index]
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "The packaged Live TV catalog did not expose the expected channel."
+}
+
 function Invoke-ExactDevelopmentPackageReset {
     param(
         [Parameter(Mandatory)]
@@ -3873,6 +4065,7 @@ function Get-PackagedPlaybackTargetContext {
 
     $process = $Instance.Process
     $root = $Instance.Root
+    $null = Enter-PackagedLiveTvSection -Instance $Instance
     $sourceElement = Get-RequiredAutomationElement `
         $root `
         "CatalogSourceSelector" `
@@ -4028,11 +4221,9 @@ function Get-PackagedPlaybackTargetContext {
         -ChannelElement $currentChannelElement `
         -ExpectedChannelName $expectedPlaybackChannelAName
 
-    $deleteButton = Get-RequiredAutomationElement `
-        $root `
-        "CatalogDeleteSourceButton" `
-        ([System.Windows.Automation.ControlType]::Button) `
-        "Delete selected playlist source"
+    $deleteButton = Select-PackagedSourceManagerItem `
+        -Instance $Instance `
+        -ExpectedSourceName $expectedPlaybackSourceName
     return [pscustomobject]@{
         StatusElement = $statusElement
         CurrentChannelElement = $currentChannelElement
@@ -4115,12 +4306,12 @@ function Wait-PackagedPendingSourceCleanupState {
         [pscustomobject]$Instance
     )
 
+    $null = Enter-PackagedLiveTvSection -Instance $Instance
     $disabledControlIds = @(
         "CatalogSourceSelector",
         "CatalogCategorySelector",
         "CatalogSearchBox",
         "CatalogChannelList",
-        "CatalogDeleteSourceButton",
         "CatalogPreviousPage",
         "CatalogNextPage")
     $deadline = (Get-Date).AddSeconds(30)
@@ -4176,6 +4367,7 @@ function Wait-PackagedDeletedSourceState {
         [pscustomobject]$Instance
     )
 
+    $null = Enter-PackagedLiveTvSection -Instance $Instance
     $deadline = (Get-Date).AddSeconds(30)
     $listItemCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -4692,64 +4884,58 @@ try {
         $onboardingWindowHandle = $onboardingInstance.WindowHandle
         $onboardingProcessId = $onboardingInstance.ProcessId
 
+        $null = Enter-PackagedSourcesSection -Instance $onboardingInstance
         $onboardingStatusElement = Get-AutomationElementById `
             $onboardingRoot `
-            "CatalogStatusText"
+            "SourceManagerStatusText"
         $onboardingEmptyDeadline = (Get-Date).AddSeconds(30)
         while (($null -eq $onboardingStatusElement -or
-                $onboardingStatusElement.Current.Name -cne $expectedOnboardingEmptyStatus) -and
+                $onboardingStatusElement.Current.Name -cne
+                    "No authorized source has been added.") -and
             (Get-Date) -lt $onboardingEmptyDeadline) {
             Assert-PackagedProcessAlive -Process $launchedProcess
             if ($null -eq $onboardingStatusElement) {
                 $onboardingStatusElement = Get-AutomationElementById `
                     $onboardingRoot `
-                    "CatalogStatusText"
+                    "SourceManagerStatusText"
             }
             Start-Sleep -Milliseconds 100
         }
         if ($null -eq $onboardingStatusElement -or
-            $onboardingStatusElement.Current.Name -cne $expectedOnboardingEmptyStatus) {
-            throw "The clean-install packaged catalog did not expose its exact empty state."
+            $onboardingStatusElement.Current.Name -cne
+                "No authorized source has been added.") {
+            throw "The clean-install packaged Source Manager did not expose its exact empty state."
         }
 
         $onboardingOpenButton = Get-RequiredAutomationElement `
             $onboardingRoot `
-            "CatalogAddSourceButton" `
+            "SourceManagerAddButton" `
             ([System.Windows.Automation.ControlType]::Button) `
-            "Add authorized remote M3U catalog"
+            "Add authorized source"
         Invoke-PackagedOnboardingButton `
             -Process $launchedProcess `
             -ButtonElement $onboardingOpenButton
 
         $onboardingNameInput = Get-RequiredAutomationElement `
             $onboardingRoot `
-            "RemotePlaylistSourceNameTextBox" `
+            "SourceManagerNameTextBox" `
             ([System.Windows.Automation.ControlType]::Edit) `
             "Source name"
         $onboardingLocatorInput = Get-RequiredAutomationElement `
             $onboardingRoot `
-            "RemotePlaylistLocatorTextBox" `
+            "SourceManagerM3uUrlTextBox" `
             ([System.Windows.Automation.ControlType]::Edit) `
             "HTTP or HTTPS playlist URL"
-        # Windows PowerShell 5.1 reads BOM-less UTF-8 script literals through the
-        # active ANSI code page, so decode the localized exact name from ASCII.
-        $onboardingAuthorizationAccessibleName =
-            [System.Text.Encoding]::UTF8.GetString(
-                [System.Convert]::FromBase64String(
-                    "S2F5bmFrIGVyacWfaW1pbmkgdmUgSFRUUCBhw6fEsWsgbWV0aW4vTUlUTSByaXNraW5pIG9uYXlsYQ=="))
         $onboardingAuthorization = Get-RequiredAutomationElement `
             $onboardingRoot `
-            "RemotePlaylistAuthorizationCheckBox" `
+            "SourceManagerAuthorizationCheckBox" `
             ([System.Windows.Automation.ControlType]::CheckBox) `
-            $onboardingAuthorizationAccessibleName
+            "Confirm authorization for the selected source kind"
         $onboardingSubmitButton = Get-RequiredAutomationElement `
             $onboardingRoot `
-            "RemotePlaylistAddButton" `
+            "SourceManagerSaveButton" `
             ([System.Windows.Automation.ControlType]::Button) `
-            "Validate and add source"
-        if ($onboardingSubmitButton.Current.IsEnabled) {
-            throw "The packaged onboarding command did not require explicit authorization."
-        }
+            "Validate and save"
 
         Set-PackagedOnboardingText `
             -Element $onboardingNameInput `
@@ -4772,16 +4958,14 @@ try {
         $togglePattern.Toggle()
         $authorizationDeadline = (Get-Date).AddSeconds(5)
         while (($togglePattern.Current.ToggleState -ne
-                [System.Windows.Automation.ToggleState]::On -or
-                -not $onboardingSubmitButton.Current.IsEnabled) -and
+                [System.Windows.Automation.ToggleState]::On) -and
             (Get-Date) -lt $authorizationDeadline) {
             Assert-PackagedProcessAlive -Process $launchedProcess
             Start-Sleep -Milliseconds 50
         }
         if ($togglePattern.Current.ToggleState -ne
-                [System.Windows.Automation.ToggleState]::On -or
-            -not $onboardingSubmitButton.Current.IsEnabled) {
-            throw "The packaged onboarding authorization did not enable the exact command."
+                [System.Windows.Automation.ToggleState]::On) {
+            throw "The packaged Source Manager authorization was not retained."
         }
         $cleanInstallOnboardingAuthorizationVerified = $true
 
@@ -4789,6 +4973,12 @@ try {
             -Process $launchedProcess `
             -ButtonElement $onboardingSubmitButton
         $onboardingLocator = $null
+
+        $null = Select-PackagedSourceManagerItem `
+            -Instance $onboardingInstance `
+            -ExpectedSourceName $expectedPlaybackSourceName
+        $cleanInstallOnboardingSourceVerified = $true
+        $null = Enter-PackagedLiveTvSection -Instance $onboardingInstance
 
         $onboardingSourceSelector = Get-RequiredAutomationElement `
             $onboardingRoot `
@@ -5070,6 +5260,13 @@ try {
     if ($null -eq $automationRoot) {
         throw "The packaged application window has no UI Automation root."
     }
+    $catalogInstance = [pscustomobject]@{
+        Process = $launchedProcess
+        ProcessId = [uint32]$activationProcessId
+        WindowHandle = $windowHandle
+        Root = $automationRoot
+    }
+    $null = Enter-PackagedLiveTvSection -Instance $catalogInstance
     $sourceElement = Get-RequiredAutomationElement $automationRoot "CatalogSourceSelector" `
         ([System.Windows.Automation.ControlType]::ComboBox) "Playlist source"
     $categoryElement = Get-RequiredAutomationElement $automationRoot "CatalogCategorySelector" `
@@ -5732,6 +5929,13 @@ try {
     if ($null -eq $playbackAutomationRoot) {
         throw "The packaged playback application has no UI Automation root."
     }
+    $playbackInstance = [pscustomobject]@{
+        Process = $launchedProcess
+        ProcessId = [uint32]$playbackActivationProcessId
+        WindowHandle = $playbackWindowHandle
+        Root = $playbackAutomationRoot
+    }
+    $null = Enter-PackagedLiveTvSection -Instance $playbackInstance
     $playbackSourceElement = Get-RequiredAutomationElement `
         $playbackAutomationRoot `
         "CatalogSourceSelector" `
@@ -6593,11 +6797,9 @@ try {
         -ChannelElement $playbackCurrentChannelElement `
         -ExpectedChannelName $expectedPlaybackChannelAName
 
-    $deleteSourceButtonElement = Get-RequiredAutomationElement `
-        $playbackAutomationRoot `
-        "CatalogDeleteSourceButton" `
-        ([System.Windows.Automation.ControlType]::Button) `
-        "Delete selected playlist source"
+    $deleteSourceButtonElement = Select-PackagedSourceManagerItem `
+        -Instance $playbackInstance `
+        -ExpectedSourceName $expectedPlaybackSourceName
     Invoke-PackagedPlaybackControlButton `
         -Process $launchedProcess `
         -ButtonElement $deleteSourceButtonElement
@@ -6612,6 +6814,14 @@ try {
         -Process $launchedProcess `
         -Root $playbackAutomationRoot `
         -DeleteButton $deleteSourceButtonElement
+    $playbackChannelItemA = Get-PackagedLiveTvChannelItem `
+        -Instance $playbackInstance `
+        -ExpectedChannelName $expectedPlaybackChannelAName
+    Invoke-PackagedPlaybackChannelItem `
+        -Process $launchedProcess `
+        -ChannelItem $playbackChannelItemA `
+        -WindowHandle $playbackWindowHandle `
+        -ExpectedProcessId ([uint32]$playbackActivationProcessId)
     Wait-PackagedPlaybackSelection `
         -Process $launchedProcess `
         -StatusElement $playbackStatusElement `
@@ -6627,6 +6837,9 @@ try {
             "cancel-result.json"))
     $sourceDeletionCancelNoMutationVerified = $true
 
+    $deleteSourceButtonElement = Select-PackagedSourceManagerItem `
+        -Instance $playbackInstance `
+        -ExpectedSourceName $expectedPlaybackSourceName
     Invoke-PackagedPlaybackControlButton `
         -Process $launchedProcess `
         -ButtonElement $deleteSourceButtonElement
@@ -6658,6 +6871,7 @@ try {
     $playbackCurrentChannelElement = $null
     $playbackChannelItemA = $null
     $playbackChannelItemB = $null
+    $playbackInstance = $null
     $deleteSourceButtonElement = $null
     $cancelDeleteButtonElement = $null
 

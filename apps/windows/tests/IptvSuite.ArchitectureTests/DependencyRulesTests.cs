@@ -650,9 +650,9 @@ public sealed class DependencyRulesTests
             page,
             "x:Name=\"SourceSelector\" MinWidth=\"240\" HorizontalAlignment=\"Stretch\" TabIndex=\"0\"");
         StringAssert.Contains(page, "Header=\"Playlist source\"");
-        StringAssert.Contains(
-            codeBehind,
-            "New playlist is selected; use Playlist source to return to earlier playlists.");
+        Assert.IsFalse(
+            codeBehind.Contains("ConfigureSourceOnboarding", StringComparison.Ordinal),
+            "M17 moved source onboarding out of the Live TV browse surface.");
         StringAssert.Contains(page, "x:Name=\"CategorySelector\" Grid.Column=\"1\" TabIndex=\"1\"");
         StringAssert.Contains(page, "x:Name=\"SearchBox\" Grid.Column=\"2\" TabIndex=\"2\"");
         Assert.HasCount(3, Regex.Matches(page, "IsTabStop=\"True\""));
@@ -1961,7 +1961,7 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
-    public void DomainRemainsPureAndMvpScoped()
+    public void DomainRemainsPureAndPostMvpContentScoped()
     {
         string domainRoot = Path.Combine(RepositoryRoot, "apps", "windows", "src", "IptvSuite.Domain");
         string[] sourceFiles = Directory.EnumerateFiles(domainRoot, "*.cs", SearchOption.AllDirectories)
@@ -1993,12 +1993,28 @@ public sealed class DependencyRulesTests
                 $"M3 Domain must not contain runtime/infrastructure symbol {forbiddenSymbol}.");
         }
 
-        string[] futureTypes = ["Movie", "Series", "Season", "Episode", "EpgProgramme"];
-        foreach (string futureType in futureTypes)
+        string[] postMvpContentTypes = ["Movie", "Series", "Season", "Episode"];
+        foreach (string contentType in postMvpContentTypes)
+        {
+            Assert.IsTrue(
+                Regex.IsMatch(combinedSource, $@"\b(?:class|record|struct)\s+{contentType}\b"),
+                $"Post-MVP content type {contentType} must remain explicitly modeled by M18/M19.");
+        }
+
+        string[] unapprovedTypes =
+        [
+            "EpgProgramme",
+            "CatchUpProgramme",
+            "TimeshiftSession",
+            "RecordingSchedule",
+            "ContentDownload",
+            "ContinueWatchingEntry",
+        ];
+        foreach (string unapprovedType in unapprovedTypes)
         {
             Assert.IsFalse(
-                Regex.IsMatch(combinedSource, $@"\b(?:class|record|struct)\s+{futureType}\b"),
-                $"Future type {futureType} must not be added before its milestone.");
+                Regex.IsMatch(combinedSource, $@"\b(?:class|record|struct)\s+{unapprovedType}\b"),
+                $"Unapproved content type {unapprovedType} must remain specification-only.");
         }
     }
 
@@ -2052,7 +2068,7 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
-    public void M6XtreamParserIsLiveOnlyBoundedAndDoesNotRetainDirectLocators()
+    public void M17ToM19XtreamParserIsContentTypedBoundedAndDoesNotRetainDirectLocators()
     {
         string parserSource = File.ReadAllText(Path.Combine(
             RepositoryRoot,
@@ -2075,24 +2091,74 @@ public sealed class DependencyRulesTests
             "src",
             "IptvSuite.Infrastructure",
             "XtreamProviderClient.cs"));
+        string transportContract = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "HttpTransportContracts.cs"));
 
         StringAssert.Contains(parserSource, "MaximumCategoryCount = 10_000");
         StringAssert.Contains(parserSource, "MaximumStreamCount = 50_000");
+        StringAssert.Contains(parserSource, "MaximumSeasonCount = 100");
+        StringAssert.Contains(parserSource, "MaximumEpisodeCount = 5_000");
         StringAssert.Contains(parserSource, "document.RootElement.ValueKind != JsonValueKind.Array");
         StringAssert.Contains(parserSource, "HashSet<string> identifiers = new(StringComparer.Ordinal)");
+        StringAssert.Contains(parserSource, "ParseCategories(content, ContentKind.LiveTv)");
+        StringAssert.Contains(parserSource, "ParseMovies(");
+        StringAssert.Contains(parserSource, "ParseSeries(");
+        StringAssert.Contains(parserSource, "ParseSeriesDetails(");
+        Assert.IsTrue(Regex.IsMatch(
+            parserSource,
+            @"ParseDocument\(\s*content,\s*XtreamTransportLimits\.MaximumCatalogResponseBytes\)",
+            RegexOptions.CultureInvariant));
+        Assert.IsTrue(Regex.IsMatch(
+            parserSource,
+            @"ParseDocument\(\s*content,\s*XtreamTransportLimits\.MaximumSeriesDetailsResponseBytes\)",
+            RegexOptions.CultureInvariant));
         StringAssert.Contains(contractSource, "sealed record XtreamStreamInput(");
+        StringAssert.Contains(contractSource, "sealed record XtreamMovieInput(");
+        StringAssert.Contains(contractSource, "sealed record XtreamSeriesInput(");
         StringAssert.Contains(contractSource, "ProviderItemKey ProviderPlaybackKey");
         Assert.IsFalse(contractSource.Contains("DirectSource", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(contractSource.Contains("StreamUrl", StringComparison.OrdinalIgnoreCase));
-        Assert.IsFalse(parserSource.Contains("get_vod", StringComparison.OrdinalIgnoreCase));
-        Assert.IsFalse(parserSource.Contains("get_series", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(parserSource.Contains("get_epg", StringComparison.OrdinalIgnoreCase));
-        StringAssert.Contains(clientSource, "action=get_live_categories");
-        StringAssert.Contains(clientSource, "action=get_live_streams");
+        StringAssert.Contains(clientSource, "\"get_live_categories\",");
+        StringAssert.Contains(clientSource, "\"get_live_streams\",");
+        StringAssert.Contains(clientSource, "\"get_vod_categories\",");
+        StringAssert.Contains(clientSource, "\"get_vod_streams\",");
+        StringAssert.Contains(clientSource, "\"get_series_categories\",");
+        StringAssert.Contains(clientSource, "\"get_series\",");
+        StringAssert.Contains(clientSource, "get_series_info");
+        StringAssert.Contains(clientSource, "ContentKind.LiveTv");
+        StringAssert.Contains(clientSource, "ContentKind.Movie");
+        StringAssert.Contains(clientSource, "ContentKind.Series");
+        StringAssert.Contains(transportContract, "MaximumAccountResponseBytes = 64 * 1024");
+        StringAssert.Contains(transportContract, "MaximumCategoryResponseBytes = 1024 * 1024");
+        StringAssert.Contains(transportContract, "MaximumCatalogResponseBytes = 64 * 1024 * 1024");
+        StringAssert.Contains(
+            transportContract,
+            "MaximumSeriesDetailsResponseBytes = 16 * 1024 * 1024");
+        StringAssert.Contains(
+            transportContract,
+            "maximumPermittedResponseBytes: XtreamTransportLimits.MaximumCatalogResponseBytes");
+        StringAssert.Contains(
+            transportContract,
+            "public const int MaximumAllowedResponseBytes = 4 * 1024 * 1024");
+        StringAssert.Contains(
+            transportContract,
+            "internal const int MaximumResponseBytes = 128 * 1024 * 1024");
+        StringAssert.Contains(clientSource, "XtreamTransportLimits.MaximumAccountResponseBytes");
+        StringAssert.Contains(clientSource, "XtreamTransportLimits.MaximumCategoryResponseBytes");
+        StringAssert.Contains(clientSource, "XtreamTransportLimits.MaximumCatalogResponseBytes");
+        StringAssert.Contains(clientSource, "XtreamTransportLimits.MaximumSeriesDetailsResponseBytes");
+        StringAssert.Contains(
+            clientSource,
+            "HttpTransportRequest.CreateForExplicitXtreamSourceOrigin(");
+        StringAssert.Contains(clientSource, "configuration.AllowsInsecureTransport");
         StringAssert.Contains(clientSource, "ReadCredentialsAsync");
         StringAssert.Contains(clientSource, "ProtectedRecordOwner.ForSourceConfiguration");
-        Assert.IsFalse(clientSource.Contains("get_vod", StringComparison.OrdinalIgnoreCase));
-        Assert.IsFalse(clientSource.Contains("get_series", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(clientSource.Contains("get_epg", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -6415,8 +6481,13 @@ public sealed class DependencyRulesTests
             restartNonAdmission > manualRetry &&
             finalStop > restartNonAdmission,
             "Packaged deletion must run after the resource guard and preserve the exact bounded phase order.");
-        StringAssert.Contains(packageSmoke, "\"CatalogDeleteSourceButton\"");
-        StringAssert.Contains(packageSmoke, "\"Delete selected playlist source\"");
+        StringAssert.Contains(packageSmoke, "\"SourceManagerDeleteButton\"");
+        StringAssert.Contains(packageSmoke, "\"Delete authorized source\"");
+        StringAssert.Contains(packageSmoke, "Select-PackagedSourceManagerItem");
+        StringAssert.Contains(packageSmoke, "Enter-PackagedLiveTvSection");
+        Assert.IsFalse(
+            packageSmoke.Contains("CatalogDeleteSourceButton", StringComparison.Ordinal),
+            "The successor package smoke must not depend on the retired Live TV delete command.");
         StringAssert.Contains(packageSmoke, "Wait-PackagedSourceDeletionDialogDismissed");
         StringAssert.Contains(packageSmoke, "Start-PackagedPlaybackApplicationInstance");
         StringAssert.Contains(packageSmoke, "$ownershipTransferred = $true");
@@ -6532,7 +6603,7 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
-    public void M11PlaybackSourceResolutionIsInternalCurrentSnapshotBoundAndFailClosed()
+    public void PlaybackSourceResolutionIsInternalCurrentSnapshotBoundAndFailClosedAcrossTypedTargets()
     {
         string resolver = File.ReadAllText(Path.Combine(
             RepositoryRoot,
@@ -6548,13 +6619,30 @@ public sealed class DependencyRulesTests
             "src",
             "IptvSuite.Application",
             "CatalogBrowserContracts.cs"));
+        string contentCatalogContract = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "ContentCatalogContracts.cs"));
 
         StringAssert.Contains(resolver, "internal sealed class SqlitePlaybackSourceResolver");
         StringAssert.Contains(resolver, "internal sealed record PlaybackSourceResolutionResult(");
         StringAssert.Contains(resolver, "JOIN sources AS s ON s.active_snapshot_id = c.snapshot_id");
         StringAssert.Contains(
             resolver,
-            "WHERE s.source_id = $source AND c.channel_id = $channel AND s.status = $ready;");
+            "WHERE s.source_id = $source AND c.channel_id = $target AND s.status = $ready;");
+        StringAssert.Contains(
+            resolver,
+            "WHERE s.source_id = $source AND item.movie_id = $target AND s.status = $ready;");
+        StringAssert.Contains(
+            resolver,
+            "WHERE s.source_id = $source AND item.episode_id = $target AND s.status = $ready;");
+        StringAssert.Contains(resolver, "(string sql, Guid targetId) = selection.Target.Kind switch");
+        StringAssert.Contains(resolver, "PlaybackTargetKind.Live => (");
+        StringAssert.Contains(resolver, "PlaybackTargetKind.Movie => (");
+        StringAssert.Contains(resolver, "PlaybackTargetKind.Episode => (");
         StringAssert.Contains(
             resolver,
             "s.configuration_reference, c.stream_reference,");
@@ -6566,6 +6654,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(resolver, "Uri.EscapeDataString(username)");
         StringAssert.Contains(resolver, "Uri.EscapeDataString(password)");
         StringAssert.Contains(resolver, "Uri.EscapeDataString(providerItem.Value)");
+        StringAssert.Contains(resolver, "PlaybackTargetKind.Live => \"live/\"");
+        StringAssert.Contains(resolver, "PlaybackTargetKind.Movie => \"movie/\"");
+        StringAssert.Contains(resolver, "PlaybackTargetKind.Episode => \"series/\"");
         StringAssert.Contains(resolver, "CryptographicOperations.ZeroMemory(locatorBytes)");
         StringAssert.Contains(resolver, "StrictUtf8.GetString(locatorBytes)");
         StringAssert.Contains(resolver, "SourceConfigurationValidator.PrepareRemotePlaylist(");
@@ -6580,9 +6671,10 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(resolver.Contains("Console.", StringComparison.Ordinal));
         Assert.IsFalse(resolver.Contains("Trace.", StringComparison.Ordinal));
         Assert.IsFalse(resolver.Contains("Debug.", StringComparison.Ordinal));
-        Assert.IsFalse(catalogContract.Contains("StreamReference", StringComparison.Ordinal));
-        Assert.IsFalse(catalogContract.Contains("SecretLease", StringComparison.Ordinal));
-        Assert.IsFalse(catalogContract.Contains("Uri", StringComparison.Ordinal));
+        string publicCatalogContracts = string.Concat(catalogContract, contentCatalogContract);
+        Assert.IsFalse(publicCatalogContracts.Contains("StreamReference", StringComparison.Ordinal));
+        Assert.IsFalse(publicCatalogContracts.Contains("SecretLease", StringComparison.Ordinal));
+        Assert.IsFalse(publicCatalogContracts.Contains("Uri", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -6608,7 +6700,8 @@ public sealed class DependencyRulesTests
             adapter,
             "internal sealed class WindowsNativePlaybackEngine : IPlaybackEngine");
         StringAssert.Contains(adapter, "using SecretLease lease = resolved.Lease!;");
-        StringAssert.Contains(adapter, "new SessionContext(sessionId, generation, source)");
+        StringAssert.Contains(adapter, "new SessionContext(");
+        StringAssert.Contains(adapter, "PlaybackContentIntent ContentIntent { get; } = contentIntent;");
         StringAssert.Contains(adapter, "context.Source.OpenOperationCompleted += context.SourceOpenHandler;");
         StringAssert.Contains(adapter, "PostNativeCallback(");
         StringAssert.Contains(adapter, "ReferenceEquals(_active, context)");
@@ -6649,6 +6742,50 @@ public sealed class DependencyRulesTests
         Assert.IsFalse(adapter.Contains("exception.Message", StringComparison.Ordinal));
         Assert.IsFalse(adapter.Contains("HResult", StringComparison.Ordinal));
         Assert.IsFalse(adapter.Contains("NativePlaybackCompatibilitySpike", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void OnDemandTimelineAdapterIsSessionBoundAndKeepsLivePlaybackRealTime()
+    {
+        string adapter = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Windows",
+            "WindowsNativePlaybackEngine.cs"));
+
+        StringAssert.Contains(
+            adapter,
+            "WindowsNativePlaybackEngine : IPlaybackEngine, IPlaybackTimelineEngine");
+        StringAssert.Contains(
+            adapter,
+            "_mediaPlayer.RealTimePlayback = contentIntent == PlaybackContentIntent.Live;");
+        StringAssert.Contains(
+            adapter,
+            "context.ContentIntent != PlaybackContentIntent.OnDemand");
+        StringAssert.Contains(
+            adapter,
+            "_mediaPlayer.PlaybackSession.Position = position;");
+        StringAssert.Contains(
+            adapter,
+            "_mediaPlayer.PlaybackSession.PositionChanged += context.TimelineChangedHandler;");
+        StringAssert.Contains(
+            adapter,
+            "_mediaPlayer.PlaybackSession.NaturalDurationChanged += context.TimelineChangedHandler;");
+        StringAssert.Contains(
+            adapter,
+            "_mediaPlayer.PlaybackSession.SeekCompleted += context.TimelineChangedHandler;");
+        StringAssert.Contains(
+            adapter,
+            "context.ContentIntent == PlaybackContentIntent.OnDemand");
+        StringAssert.Contains(
+            adapter,
+            "PlaybackState.Completed");
+        StringAssert.Contains(
+            adapter,
+            "callback is NativeCallback.SourceFailed or\n" +
+                "            NativeCallback.MediaFailed or NativeCallback.MediaEnded");
     }
 
     [TestMethod]
@@ -7449,6 +7586,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(close, "await RunOnDispatcherAsync(_mainPage.Dispose);");
         StringAssert.Contains(close, "await _playback.DisposeAsync();");
         StringAssert.Contains(close, "await _mainPage.WaitForPendingOperationsAsync();");
+        StringAssert.Contains(close, "await _sourceReplacement.DisposeAsync();");
         StringAssert.Contains(close, "_catalogServices.Dispose();");
         Assert.IsTrue(
             close.IndexOf("await RunOnDispatcherAsync(_mainPage.Dispose);", StringComparison.Ordinal) <
@@ -7458,17 +7596,20 @@ public sealed class DependencyRulesTests
             close.IndexOf("await _sourceDeletion.DisposeAsync();", StringComparison.Ordinal));
         Assert.IsTrue(
             close.IndexOf("await _sourceDeletion.DisposeAsync();", StringComparison.Ordinal) <
+            close.IndexOf("await _sourceReplacement.DisposeAsync();", StringComparison.Ordinal));
+        Assert.IsTrue(
+            close.IndexOf("await _sourceReplacement.DisposeAsync();", StringComparison.Ordinal) <
             close.IndexOf("await _playback.DisposeAsync();", StringComparison.Ordinal));
         Assert.IsTrue(
             close.IndexOf("await _playback.DisposeAsync();", StringComparison.Ordinal) <
             close.IndexOf("_catalogServices.Dispose();", StringComparison.Ordinal));
         Assert.AreEqual(
-            5,
+            6,
             Regex.Count(
                 close,
                 @"catch \(Exception exception\) when \(IsRecoverable\(exception\)\)",
                 RegexOptions.CultureInvariant),
-            "Page, operation drain, deletion, playback, and catalog cleanup must fail independently.");
+            "Page, operation drain, deletion, replacement, playback, and catalog cleanup must fail independently.");
         Assert.IsFalse(
             Regex.IsMatch(window, @"\.Wait\s*\(|\.Result\b|GetAwaiter\s*\(\)\.GetResult"),
             "Window close must not block the UI thread while native playback is released.");
@@ -7610,7 +7751,7 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(window, "args.DidPresenterChange");
         StringAssert.Contains(window, "sender.Presenter.Kind == AppWindowPresenterKind.FullScreen");
         StringAssert.Contains(window, "_mainPage.SetFullscreenState(isFullscreen)");
-        StringAssert.Contains(window, "DetachFullscreenEvents");
+        StringAssert.Contains(window, "DetachWindowEvents");
         Assert.IsFalse(codeBehind.Contains("WindowsNativePlaybackEngine", StringComparison.Ordinal));
         Assert.IsFalse(Regex.IsMatch(codeBehind, @"\bMediaPlayer\b"));
         Assert.IsFalse(codeBehind.Contains("Microsoft.UI.Windowing", StringComparison.Ordinal));
@@ -7845,7 +7986,7 @@ public sealed class DependencyRulesTests
             "StopButton.Content = isReconnecting ? \"Cancel reconnect\" : \"Stop\";");
         StringAssert.Contains(
             codeBehind,
-            "isReconnecting ? \"Cancel reconnect\" : \"Stop channel\"");
+            "isReconnecting ? \"Cancel reconnect\" : \"Stop content\"");
 
         int retryHandlerStart = codeBehind.IndexOf(
             "private void RetryPlaybackButton_Click(",
@@ -8683,13 +8824,13 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             Regex.IsMatch(
                 application,
-                @"public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddAsync\(\s*string\? displayName,\s*string\? locator,\s*CancellationToken cancellationToken = default\)\s*=>\s*AddCoreAsync\(\s*displayName,\s*locator,\s*allowInsecureHttp: false,\s*cancellationToken: cancellationToken\);",
+                @"public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddAsync\(\s*string\? displayName,\s*string\? locator,\s*CancellationToken cancellationToken = default\)\s*=>\s*AddCoreAsync\(\s*displayName,\s*locator,\s*allowInsecureHttp: false,\s*replacementSource: null,\s*cancellationToken: cancellationToken\);",
                 RegexOptions.CultureInvariant),
             "The existing onboarding API must remain an HTTPS-only wrapper.");
         Assert.IsTrue(
             Regex.IsMatch(
                 application,
-                @"public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>\s*AddAllowingInsecureHttpAsync\(\s*string\? displayName,\s*string\? locator,\s*CancellationToken cancellationToken = default\)\s*=>\s*AddCoreAsync\(\s*displayName,\s*locator,\s*allowInsecureHttp: true,\s*cancellationToken: cancellationToken\);",
+                @"public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>\s*AddAllowingInsecureHttpAsync\(\s*string\? displayName,\s*string\? locator,\s*CancellationToken cancellationToken = default\)\s*=>\s*AddCoreAsync\(\s*displayName,\s*locator,\s*allowInsecureHttp: true,\s*replacementSource: null,\s*cancellationToken: cancellationToken\);",
                 RegexOptions.CultureInvariant),
             "Cleartext onboarding must use an explicitly named API.");
         Assert.IsTrue(
@@ -8983,18 +9124,23 @@ public sealed class DependencyRulesTests
                 factory,
                 @"new RemotePlaylistSourceOnboardingService\(\s*secretStore,\s*importer,\s*TimeProvider\.System\s*\)",
                 RegexOptions.CultureInvariant));
-        Assert.IsTrue(
-            Regex.IsMatch(
-                factory,
-                @"new WindowsCatalogServices\(\s*new SqliteCatalogQuery\(databasePath\),\s*logoCache,\s*onboarding,\s*transport,\s*databasePath\s*\)",
-                RegexOptions.CultureInvariant));
+        StringAssert.Contains(factory, "new WindowsCatalogServices(");
+        StringAssert.Contains(factory, "new SqliteCatalogQuery(databasePath)");
+        StringAssert.Contains(factory, "new SqliteContentCatalog(databasePath)");
+        StringAssert.Contains(factory, "new SqliteSourceManagementCatalog(databasePath)");
+        StringAssert.Contains(factory, "logoCache,");
+        StringAssert.Contains(factory, "onboarding,");
+        StringAssert.Contains(factory, "transport,");
+        StringAssert.Contains(factory, "databasePath);");
         StringAssert.Contains(app, "WindowsCatalogBrowserFactory.Create(secretStore)");
         StringAssert.Contains(app, "new MainWindow(catalogServices, secretStore)");
-        Assert.IsTrue(
-            Regex.IsMatch(
-                window,
-                @"_mainPage\.ConfigureSourceOnboarding\(\s*\(displayName,\s*locator,\s*cancellationToken\)\s*=>\s*_catalogServices\.Onboarding\.AddAllowingInsecureHttpAsync\(\s*displayName,\s*locator,\s*cancellationToken:\s*cancellationToken\)\s*\)",
-                RegexOptions.CultureInvariant));
+        StringAssert.Contains(window, "AddRemotePlaylistFromManagerAsync");
+        StringAssert.Contains(
+            window,
+            "_catalogServices.Onboarding.AddAllowingInsecureHttpAsync(");
+        Assert.IsFalse(
+            window.Contains("ConfigureSourceOnboarding", StringComparison.Ordinal),
+            "M17 Source Manager must be the only source-onboarding presentation route.");
     }
 
     [TestMethod]
@@ -9010,6 +9156,99 @@ public sealed class DependencyRulesTests
         XDocument markup = XDocument.Load(markupPath, LoadOptions.PreserveWhitespace);
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
         string codeBehind = File.ReadAllText(Path.Combine(windowsRoot, "MainPage.xaml.cs"));
+
+        bool legacyOnboardingExists = markup.Descendants().Any(element => string.Equals(
+            element.Attribute(x + "Name")?.Value,
+            "RemotePlaylistOnboardingPanel",
+            StringComparison.Ordinal));
+        if (!legacyOnboardingExists)
+        {
+            XDocument sourceManagerMarkup = XDocument.Load(
+                Path.Combine(windowsRoot, "SourceManagerPage.xaml"),
+                LoadOptions.PreserveWhitespace);
+            string sourceManagerCode = File.ReadAllText(
+                Path.Combine(windowsRoot, "SourceManagerPage.xaml.cs"));
+            XElement RequiredManagerElement(string name) => sourceManagerMarkup
+                .Descendants()
+                .Single(element => string.Equals(
+                    element.Attribute(x + "Name")?.Value,
+                    name,
+                    StringComparison.Ordinal));
+
+            Assert.AreEqual(
+                "4096",
+                RequiredManagerElement("RemotePlaylistLocatorTextBox")
+                    .Attribute("MaxLength")?.Value);
+            XElement managerAuthorization = RequiredManagerElement(
+                "SourceAuthorizationCheckBox");
+            string authorizationText = string.Join(
+                " ",
+                managerAuthorization
+                    .DescendantsAndSelf()
+                    .SelectMany(element => element.Attributes())
+                    .Where(attribute => attribute.Name.LocalName is
+                        "Content" or "Text" or "AutomationProperties.Name")
+                    .Select(attribute => attribute.Value));
+            StringAssert.Contains(authorizationText, "MITM");
+            XElement managerProgressRing = RequiredManagerElement(
+                "SourceOperationProgressRing");
+            Assert.AreEqual("False", managerProgressRing.Attribute("IsActive")?.Value);
+            Assert.AreEqual(
+                "Collapsed",
+                managerProgressRing.Attribute("Visibility")?.Value);
+            Assert.AreEqual(
+                "Authorized source operation in progress",
+                managerProgressRing.Attribute("AutomationProperties.Name")?.Value);
+            Assert.AreEqual(
+                "Polite",
+                RequiredManagerElement("SourceStatusText")
+                    .Attribute("AutomationProperties.LiveSetting")?.Value);
+            StringAssert.Contains(
+                sourceManagerCode,
+                "SourceAuthorizationCheckBox.IsChecked != true");
+            StringAssert.Contains(
+                sourceManagerCode,
+                "Validating and importing the authorized source.");
+            XElement remoteHttpConsent = RequiredManagerElement(
+                "RemotePlaylistHttpConsentCheckBox");
+            XElement xtreamHttpConsent = RequiredManagerElement(
+                "XtreamHttpConsentCheckBox");
+            static string VisibleText(XElement element) => string.Join(
+                " ",
+                element
+                    .DescendantsAndSelf()
+                    .SelectMany(descendant => descendant.Attributes())
+                    .Where(attribute => attribute.Name.LocalName is
+                        "Content" or "Text" or "AutomationProperties.Name")
+                    .Select(attribute => attribute.Value));
+            StringAssert.Contains(
+                VisibleText(remoteHttpConsent),
+                "M3U");
+            StringAssert.Contains(
+                VisibleText(remoteHttpConsent),
+                "MITM");
+            StringAssert.Contains(
+                VisibleText(xtreamHttpConsent),
+                "Xtream");
+            StringAssert.Contains(
+                VisibleText(xtreamHttpConsent),
+                "MITM");
+            StringAssert.Contains(
+                sourceManagerCode,
+                "RemotePlaylistHttpConsentCheckBox.IsChecked = false;");
+            StringAssert.Contains(
+                sourceManagerCode,
+                "XtreamHttpConsentCheckBox.IsChecked = false;");
+            StringAssert.Contains(sourceManagerCode, "_reloadGeneration");
+            StringAssert.Contains(sourceManagerCode, "IsCurrentReload(");
+            StringAssert.Contains(sourceManagerCode, "previous?.Cancel();");
+            StringAssert.Contains(sourceManagerCode, "ClearSensitiveEditorFields();");
+            Assert.IsFalse(
+                codeBehind.Contains("ConfigureSourceOnboarding", StringComparison.Ordinal) ||
+                codeBehind.Contains("_addRemotePlaylist", StringComparison.Ordinal),
+                "Live TV must not retain a second source-onboarding route after M17 migration.");
+            return;
+        }
 
         XElement RequiredNamedElement(string name) => markup
             .Descendants()
@@ -9278,7 +9517,7 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
-    public void M16PackagedCleanInstallOnboardingUsesTransientLocatorChannelAndExactReset()
+    public void M17PackagedSourceManagerOnboardingUsesTransientLocatorChannelAndExactReset()
     {
         string harness = File.ReadAllText(Path.Combine(
             RepositoryRoot,
@@ -9315,9 +9554,13 @@ public sealed class DependencyRulesTests
             "$onboardingLocator = Read-ExactOnboardingLocator",
             startHarness,
             StringComparison.Ordinal);
-        int openPanel = packageSmoke.IndexOf(
-            "\"CatalogAddSourceButton\"",
+        int openSources = packageSmoke.IndexOf(
+            "$null = Enter-PackagedSourcesSection -Instance $onboardingInstance",
             readLocator,
+            StringComparison.Ordinal);
+        int openPanel = packageSmoke.IndexOf(
+            "\"SourceManagerAddButton\"",
+            openSources,
             StringComparison.Ordinal);
         int setLocator = packageSmoke.IndexOf(
             "-Value $onboardingLocator",
@@ -9335,9 +9578,13 @@ public sealed class DependencyRulesTests
             "$onboardingLocator = $null",
             invokeSubmit,
             StringComparison.Ordinal);
+        int openLiveTv = packageSmoke.IndexOf(
+            "$null = Enter-PackagedLiveTvSection -Instance $onboardingInstance",
+            clearLocator,
+            StringComparison.Ordinal);
         int reset = packageSmoke.IndexOf(
             "Invoke-ExactDevelopmentPackageReset",
-            clearLocator,
+            openLiveTv,
             StringComparison.Ordinal);
         int seed50k = packageSmoke.IndexOf(
             "$catalogUiHarnessAssemblyPath seed $catalogDatabasePath 50000",
@@ -9346,25 +9593,30 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             startHarness >= 0 &&
             readLocator > startHarness &&
-            openPanel > readLocator &&
+            openSources > readLocator &&
+            openPanel > openSources &&
             setLocator > openPanel &&
             authorization > setLocator &&
             invokeSubmit > authorization &&
             clearLocator > invokeSubmit &&
-            reset > clearLocator &&
+            openLiveTv > clearLocator &&
+            reset > openLiveTv &&
             seed50k > reset,
-            "Clean-install onboarding must authorize and import through UIA, clear the locator, then reset before legacy seeding.");
+            "The M17 Source Manager successor must authorize and import through UIA, clear the locator, return to Live TV, then reset before legacy seeding.");
 
-        StringAssert.Contains(packageSmoke, "RemotePlaylistSourceNameTextBox");
-        StringAssert.Contains(packageSmoke, "RemotePlaylistLocatorTextBox");
-        StringAssert.Contains(packageSmoke, "RemotePlaylistAuthorizationCheckBox");
+        StringAssert.Contains(packageSmoke, "SourceManagerNameTextBox");
+        StringAssert.Contains(packageSmoke, "SourceManagerM3uUrlTextBox");
+        StringAssert.Contains(packageSmoke, "SourceManagerAuthorizationCheckBox");
+        StringAssert.Contains(packageSmoke, "SourceManagerSaveButton");
+        StringAssert.Contains(packageSmoke, "AppNavigationSourcesItem");
+        StringAssert.Contains(packageSmoke, "AppNavigationLiveTvItem");
+        Assert.IsFalse(
+            packageSmoke.Contains("CatalogAddSourceButton", StringComparison.Ordinal),
+            "The package smoke must not depend on the removed inline Live TV onboarding command.");
         StringAssert.Contains(packageSmoke, "\"HTTP or HTTPS playlist URL\"");
         StringAssert.Contains(
             packageSmoke,
             "$expectedOnboardingCatalogStatus =");
-        StringAssert.Contains(
-            packageSmoke,
-            $"\"{ExpectedAuthorizationAccessibleNameUtf8Base64}\"");
         StringAssert.Contains(packageSmoke, "[System.Net.IPAddress]::IsLoopback(");
         StringAssert.Contains(packageSmoke, "Reset-AppxPackage `");
         StringAssert.Contains(packageSmoke, "CleanInstallOnboardingVerified = $cleanInstallOnboardingVerified");

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using IptvSuite.Application;
@@ -34,7 +35,388 @@ public sealed class XtreamProviderClientTests
         Assert.IsTrue(transport.AllRequestsUsedPlayerApi);
         Assert.IsTrue(transport.AllRequestsContainedEncodedSyntheticCredentials);
         Assert.IsTrue(transport.AllRequestsUsedExplicitPrivateSourcePolicy);
+        Assert.IsTrue(transport.AllRequestsRejectRedirects);
+        Assert.IsTrue(store.LastIssuedLeaseMemory.Span.IndexOfAnyExcept((byte)0) < 0);
         Assert.AreEqual("[XTREAM-LIVE-CATALOG]", result.Value.ToString());
+    }
+
+    [TestMethod]
+    public async Task ExplicitContentLoadUsesSeparateLiveVodAndSeriesEndpoints()
+    {
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        var transport = new ScriptedTransport(
+            """{"user_info":{"auth":1}}""",
+            """[{"category_id":"1","category_name":"Live"}]""",
+            """[{"stream_id":"2","name":"Channel"}]""",
+            """[{"category_id":"3","category_name":"Movies"}]""",
+            """[{"stream_id":"4","name":"Movie","category_id":"3","container_extension":"mp4"}]""",
+            """[{"category_id":"5","category_name":"Series"}]""",
+            """[{"series_id":"6","name":"Series","category_id":"5"}]"""
+        );
+        var client = new XtreamProviderClient(store, transport);
+
+        DomainResult<XtreamContentCatalog> result = await client.LoadContentCatalogAsync(source);
+
+        Assert.IsTrue(result.IsSuccess);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                string.Empty,
+                "get_live_categories",
+                "get_live_streams",
+                "get_vod_categories",
+                "get_vod_streams",
+                "get_series_categories",
+                "get_series",
+            },
+            transport.Actions);
+        Assert.AreEqual(ContentKind.LiveTv, result.Value!.LiveCategories.Items.Single().ContentKind);
+        Assert.AreEqual(ContentKind.Movie, result.Value.MovieCategories.Items.Single().ContentKind);
+        Assert.AreEqual(ContentKind.Series, result.Value.SeriesCategories.Items.Single().ContentKind);
+        Assert.HasCount(1, result.Value.Movies.Items);
+        Assert.HasCount(1, result.Value.Series.Items);
+        Assert.AreEqual("[XTREAM-CONTENT-CATALOG]", result.Value.ToString());
+    }
+
+    [TestMethod]
+    public async Task ContentEndpointsUseDistinctHardResponseBudgets()
+    {
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        var transport = new ScriptedTransport(
+            """{"user_info":{"auth":1}}""",
+            "[]",
+            "[]",
+            "[]",
+            "[]",
+            "[]",
+            "[]",
+            """{"seasons":[],"episodes":{}}""");
+        var client = new XtreamProviderClient(store, transport);
+
+        DomainResult<XtreamContentCatalog> catalog = await client.LoadContentCatalogAsync(source);
+        DomainResult<XtreamSeriesDetails> details = await client.LoadSeriesDetailsAsync(
+            source,
+            ProviderItemKey.Create("synthetic-series").Value);
+
+        Assert.IsTrue(catalog.IsSuccess);
+        Assert.IsTrue(details.IsSuccess);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                64 * 1024,
+                1024 * 1024,
+                64 * 1024 * 1024,
+                1024 * 1024,
+                64 * 1024 * 1024,
+                1024 * 1024,
+                64 * 1024 * 1024,
+                16 * 1024 * 1024,
+            },
+            transport.MaximumResponseBytes);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                string.Empty,
+                "get_live_categories",
+                "get_live_streams",
+                "get_vod_categories",
+                "get_vod_streams",
+                "get_series_categories",
+                "get_series",
+                "get_series_info",
+            },
+            transport.Actions);
+    }
+
+    [TestMethod]
+    public async Task ExplicitHttpXtreamGrantUsesBoundedPlayerApiRequests()
+    {
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(
+            store,
+            allowInsecureHttp: true,
+            locator: "http://fixture.invalid/get.php?type=m3u_plus&output=ts");
+        var transport = new ScriptedTransport(
+            """{"user_info":{"auth":1}}""",
+            "[]",
+            "[]");
+        var client = new XtreamProviderClient(store, transport);
+
+        DomainResult<XtreamLiveCatalog> result = await client.LoadLiveCatalogAsync(source);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.IsTrue(transport.Schemes.All(scheme => scheme == Uri.UriSchemeHttp));
+        Assert.IsTrue(transport.Paths.All(path => path == "/player_api.php"));
+        Assert.IsTrue(transport.AllRequestsUsedExplicitPrivateSourcePolicy);
+        Assert.IsTrue(transport.AllRequestsRejectRedirects);
+    }
+
+    [TestMethod]
+    [Timeout(15_000)]
+    public async Task ExplicitHttpXtreamGrantReachesOnlyTheSyntheticLoopbackPlayerApi()
+    {
+        Dictionary<string, FixtureHttpResponse> routes = new(StringComparer.Ordinal)
+        {
+            ["/player_api.php"] = new FixtureHttpResponse(
+                200,
+                "application/json",
+                Encoding.UTF8.GetBytes("""{"user_info":{"auth":1}}""")),
+        };
+        await using LocalHttpFixtureServer server = await LocalHttpFixtureServer.StartAsync(routes);
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(
+            store,
+            allowInsecureHttp: true,
+            locator: new Uri(server.BaseAddress, "player_api.php").AbsoluteUri);
+        using var transport = new BoundedHttpTransport();
+        var client = new XtreamProviderClient(store, transport);
+
+        DomainResult<XtreamLiveCatalog> result = await client.LoadLiveCatalogAsync(source);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, result.Error!.Code);
+        Assert.HasCount(2, server.Requests);
+        Assert.IsTrue(server.Requests.All(request => request.Path == "/player_api.php"));
+    }
+
+    [TestMethod]
+    [Timeout(15_000)]
+    public async Task XtreamClientRejectsSyntheticLoopbackRedirectBeforeCredentialReplay()
+    {
+        Dictionary<string, FixtureHttpResponse> routes = new(StringComparer.Ordinal)
+        {
+            ["/player_api.php"] = new FixtureHttpResponse(
+                302,
+                "application/json",
+                ReadOnlyMemory<byte>.Empty,
+                RedirectLocation: "/redirected"),
+            ["/redirected"] = new FixtureHttpResponse(
+                200,
+                "application/json",
+                Encoding.UTF8.GetBytes("""{"user_info":{"auth":1}}""")),
+        };
+        await using LocalHttpFixtureServer server = await LocalHttpFixtureServer.StartAsync(routes);
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(
+            store,
+            allowInsecureHttp: true,
+            locator: new Uri(server.BaseAddress, "player_api.php").AbsoluteUri);
+        using var transport = new BoundedHttpTransport();
+        var client = new XtreamProviderClient(store, transport);
+
+        DomainResult<XtreamLiveCatalog> result = await client.LoadLiveCatalogAsync(source);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.RemoteRequestRejected, result.Error!.Code);
+        Assert.HasCount(1, server.Requests);
+        Assert.AreEqual("/player_api.php", server.Requests[0].Path);
+        Assert.IsTrue(store.LastIssuedLeaseMemory.Span.IndexOfAnyExcept((byte)0) < 0);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    [SupportedOSPlatform("windows")]
+    public async Task XtreamImportAndStoredRefreshPopulateExplicitTopLevelCatalogs()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("post-mvp-xtream-import");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        string[] cycle =
+        [
+            """{"user_info":{"auth":1}}""",
+            """[{"category_id":"1","category_name":"Live"}]""",
+            """[{"stream_id":"2","name":"Channel","category_id":"1"}]""",
+            """[{"category_id":"3","category_name":"Movies"}]""",
+            """[{"stream_id":"4","name":"Movie","category_id":"3","container_extension":"mp4"}]""",
+            """[{"category_id":"5","category_name":"Series"}]""",
+            """[{"series_id":"6","name":"Series","category_id":"5"}]""",
+        ];
+        var transport = new ScriptedTransport([.. cycle, .. cycle]);
+        var importer = new XtreamCatalogImportService(databasePath, store, transport);
+
+        DomainResult<ContentCatalogCounts> imported = await importer.ImportAsync(source);
+        DomainResult<ContentCatalogCounts> refreshed =
+            await importer.RefreshFromStoredConfigurationAsync(source.Id);
+        var liveBrowser = new SqliteCatalogQuery(databasePath);
+        var contentBrowser = new SqliteContentCatalog(databasePath);
+        IReadOnlyList<CatalogCategoryItem> liveCategories =
+            await liveBrowser.ReadCategoriesAsync(source.Id);
+        IReadOnlyList<CatalogCategoryItem> movieCategories =
+            await contentBrowser.ReadCategoriesAsync(source.Id, ContentKind.Movie);
+        IReadOnlyList<CatalogCategoryItem> seriesCategories =
+            await contentBrowser.ReadCategoriesAsync(source.Id, ContentKind.Series);
+
+        Assert.IsTrue(imported.IsSuccess);
+        Assert.IsTrue(refreshed.IsSuccess);
+        Assert.AreEqual(new ContentCatalogCounts(1, 1, 1, 0), imported.Value);
+        Assert.AreEqual(imported.Value, refreshed.Value);
+        Assert.HasCount(1, liveCategories);
+        Assert.AreEqual("Live", liveCategories[0].Name);
+        Assert.HasCount(1, movieCategories);
+        Assert.AreEqual("Movies", movieCategories[0].Name);
+        Assert.HasCount(1, seriesCategories);
+        Assert.AreEqual("Series", seriesCategories[0].Name);
+        CollectionAssert.AreEqual(
+            Enumerable.Repeat(
+                    new[]
+                    {
+                        string.Empty,
+                        "get_live_categories",
+                        "get_live_streams",
+                        "get_vod_categories",
+                        "get_vod_streams",
+                        "get_series_categories",
+                        "get_series",
+                    },
+                    2)
+                .SelectMany(actions => actions)
+                .ToArray(),
+            transport.Actions);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    [SupportedOSPlatform("windows")]
+    public async Task ProviderFailureBeforeCatalogWriteIsKnownNotCommitted()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("post-mvp-xtream-reject");
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        var transport = new ScriptedTransport("""{"user_info":{"auth":0}}""");
+        var importer = new XtreamCatalogImportService(
+            Path.Combine(temporary.FullPath, "catalog.db"),
+            store,
+            transport);
+
+        XtreamCatalogImportResult result = await importer.ImportWithDispositionAsync(source);
+
+        Assert.AreEqual(CatalogImportCommitDisposition.NotCommitted, result.Disposition);
+        Assert.AreEqual(DomainErrorCode.AuthenticationRejected, result.Error!.Code);
+        Assert.IsNull(result.Counts);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    [SupportedOSPlatform("windows")]
+    public async Task CancellationBeforeCatalogActivationIsKnownNotCommitted()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "post-mvp-xtream-cancel");
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        var importer = new XtreamCatalogImportService(
+            Path.Combine(temporary.FullPath, "catalog.db"),
+            store,
+            new ScriptedTransport("{}"));
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+
+        XtreamCatalogImportResult result = await importer.ImportWithDispositionAsync(
+            source,
+            cancellation.Token);
+
+        Assert.AreEqual(CatalogImportCommitDisposition.NotCommitted, result.Disposition);
+        Assert.AreEqual(DomainErrorCode.OperationCancelled, result.Error!.Code);
+        Assert.IsNull(result.Counts);
+    }
+
+    [TestMethod]
+    public async Task SeriesHierarchyIsFetchedLazilyForOnlyTheSelectedSeries()
+    {
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        var transport = new ScriptedTransport("""
+            {
+              "seasons":[{"id":"season-1","season_number":1,"name":"Season 1"}],
+              "episodes":{"1":[{"id":"episode-1","episode_num":1,"title":"Episode 1"}]}
+            }
+            """);
+        var client = new XtreamProviderClient(store, transport);
+
+        DomainResult<XtreamSeriesDetails> result = await client.LoadSeriesDetailsAsync(
+            source,
+            ProviderItemKey.Create("series-42").Value);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(1, transport.Actions);
+        Assert.AreEqual("get_series_info", transport.Actions[0]);
+        Assert.HasCount(1, result.Value!.Episodes);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    [SupportedOSPlatform("windows")]
+    public async Task SelectedSeriesDetailRefreshPersistsOnlyTheRequestedHierarchy()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("post-mvp-series-detail");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        var transport = new ScriptedTransport(
+            """{"user_info":{"auth":1}}""",
+            "[]",
+            "[]",
+            "[]",
+            "[]",
+            """[{"category_id":"5","category_name":"Series"}]""",
+            """
+            [
+              {"series_id":"series-1","name":"Alpha","category_id":"5"},
+              {"series_id":"series-2","name":"Beta","category_id":"5"}
+            ]
+            """,
+            """
+            {
+              "seasons":[],
+              "episodes":{
+                "2":[{
+                  "id":"episode-201",
+                  "episode_num":1,
+                  "title":"Synthetic episode",
+                  "container_extension":"mkv",
+                  "info":{"duration_secs":3600}
+                }]
+              }
+            }
+            """);
+        var importer = new XtreamCatalogImportService(databasePath, store, transport);
+        DomainResult<ContentCatalogCounts> imported = await importer.ImportAsync(source);
+        var browser = new SqliteContentCatalog(databasePath);
+        ContentPage<ContentSeriesItem> series = await browser.ReadSeriesAsync(
+            source.Id,
+            categoryId: null,
+            searchText: null,
+            offset: 0,
+            limit: 10);
+        var detailService = new XtreamSeriesDetailService(databasePath, store, transport);
+
+        DomainResult<SeriesDetailRefreshResult> refreshed = await detailService.RefreshAsync(
+            source.Id,
+            series.Items[0].SeriesId);
+        IReadOnlyList<ContentSeasonItem> selectedSeasons = await browser.ReadSeasonsAsync(
+            source.Id,
+            series.Items[0].SeriesId);
+        IReadOnlyList<ContentSeasonItem> unselectedSeasons = await browser.ReadSeasonsAsync(
+            source.Id,
+            series.Items[1].SeriesId);
+        IReadOnlyList<ContentEpisodeItem> episodes = await browser.ReadEpisodesAsync(
+            source.Id,
+            selectedSeasons[0].SeasonId);
+
+        Assert.IsTrue(imported.IsSuccess);
+        Assert.IsTrue(refreshed.IsSuccess);
+        Assert.AreEqual(1, refreshed.Value!.SeasonCount);
+        Assert.AreEqual(1, refreshed.Value.EpisodeCount);
+        Assert.HasCount(1, selectedSeasons);
+        Assert.AreEqual(2, selectedSeasons[0].Number);
+        Assert.IsEmpty(unselectedSeasons);
+        Assert.HasCount(1, episodes);
+        Assert.AreEqual(TimeSpan.FromHours(1), episodes[0].Duration);
+        Assert.AreEqual("get_series_info", transport.Actions[^1]);
+        Assert.AreEqual("series-1", transport.SeriesIdentifiers[^1]);
     }
 
     [TestMethod]
@@ -150,16 +532,26 @@ public sealed class XtreamProviderClientTests
         Assert.IsTrue(store.LastIssuedLeaseMemory.Span.IndexOfAnyExcept((byte)0) < 0);
     }
 
-    private static async Task<ContentSource> CreateSourceAsync(CredentialMemoryStore store)
+    private static async Task<ContentSource> CreateSourceAsync(
+        CredentialMemoryStore store,
+        bool allowInsecureHttp = false,
+        string locator = "https://fixture.invalid/provider")
     {
         SourceId sourceId = SourceId.Generate();
         var protection = new SourceDraftProtectionService(store);
-        DomainResult<ValidatedSourceDraft> draft = await protection.ProtectXtreamAsync(
-            sourceId,
-            "Synthetic source",
-            "https://fixture.invalid/provider",
-            "synthetic-user",
-            "synthetic password");
+        DomainResult<ValidatedSourceDraft> draft = allowInsecureHttp
+            ? await protection.ProtectXtreamAllowingInsecureHttpAsync(
+                sourceId,
+                "Synthetic source",
+                locator,
+                "synthetic-user",
+                "synthetic password")
+            : await protection.ProtectXtreamAsync(
+                sourceId,
+                "Synthetic source",
+                locator,
+                "synthetic-user",
+                "synthetic password");
         Assert.IsTrue(draft.IsSuccess);
         DateTimeOffset now = new(2026, 8, 20, 0, 0, 0, TimeSpan.Zero);
         DomainResult<ContentSource> source = ContentSource.Create(
@@ -177,6 +569,8 @@ public sealed class XtreamProviderClientTests
             .GetProperty("RequestUri", BindingFlags.Instance | BindingFlags.NonPublic)!;
         private static readonly PropertyInfo EndpointAddressPolicyProperty = typeof(HttpTransportRequest)
             .GetProperty("EndpointAddressPolicy", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        private static readonly PropertyInfo RedirectPolicyProperty = typeof(HttpTransportRequest)
+            .GetProperty("RedirectPolicy", BindingFlags.Instance | BindingFlags.NonPublic)!;
         private readonly Queue<HttpTransportResult> _responses;
 
         internal ScriptedTransport(params string[] bodies)
@@ -193,6 +587,8 @@ public sealed class XtreamProviderClientTests
 
         internal List<string> Actions { get; } = [];
 
+        internal List<string?> SeriesIdentifiers { get; } = [];
+
         internal bool AllRequestsUsedHttps { get; private set; } = true;
 
         internal bool AllRequestsUsedPlayerApi { get; private set; } = true;
@@ -201,20 +597,36 @@ public sealed class XtreamProviderClientTests
 
         internal bool AllRequestsUsedExplicitPrivateSourcePolicy { get; private set; } = true;
 
+        internal bool AllRequestsRejectRedirects { get; private set; } = true;
+
+        internal List<string> Schemes { get; } = [];
+
+        internal List<string> Paths { get; } = [];
+
+        internal List<int> MaximumResponseBytes { get; } = [];
+
         public ValueTask<HttpTransportResult> GetAsync(
             HttpTransportRequest request,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Uri uri = (Uri)RequestUriProperty.GetValue(request)!;
+            MaximumResponseBytes.Add(request.MaximumResponseBytes);
+            Schemes.Add(uri.Scheme);
+            Paths.Add(uri.AbsolutePath);
             AllRequestsUsedExplicitPrivateSourcePolicy &= string.Equals(
                 EndpointAddressPolicyProperty.GetValue(request)?.ToString(),
                 "ExplicitPrivateSourceOrigin",
+                StringComparison.Ordinal);
+            AllRequestsRejectRedirects &= string.Equals(
+                RedirectPolicyProperty.GetValue(request)?.ToString(),
+                "RejectAll",
                 StringComparison.Ordinal);
             AllRequestsUsedHttps &= uri.Scheme == Uri.UriSchemeHttps;
             AllRequestsUsedPlayerApi &= uri.AbsolutePath == "/provider/player_api.php";
             Dictionary<string, string> query = ParseQuery(uri.Query);
             Actions.Add(query.TryGetValue("action", out string? action) ? action : string.Empty);
+            SeriesIdentifiers.Add(query.GetValueOrDefault("series_id"));
             AllRequestsContainedEncodedSyntheticCredentials &=
                 query.GetValueOrDefault("username") == "synthetic-user" &&
                 query.GetValueOrDefault("password") == "synthetic password";

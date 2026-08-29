@@ -12,7 +12,8 @@ Bu dosya repository kökünün tamamı için geçerlidir. Daha derindeki bir `AG
 
 - **IPTV Suite** yalnızca doğrulanmamış bir codename'dir. Marka doğrulamasından önce kalıcı package/store identifier, logo veya hukuki marka iddiası oluşturma.
 - Ürün “bring your own authorized playlist/account” oynatıcısıdır. Hazır kanal/hizmet sağlama, korsan servis tanıtma, DRM veya erişim kontrolü aşma ve kullanıcı trafiğini izinsiz bir backend üzerinden geçirme kapsam dışıdır.
-- İstenen milestone dışındaki feature, platform, dependency, scaffold veya refactor işini ekleme. VOD, series ve EPG temel Live TV zinciri stabil olmadan production kapsamına alınmaz.
+- İstenen milestone dışındaki feature, platform, dependency, scaffold veya refactor işini ekleme. M1–M16 tarihsel Windows MVP kapsamını geriye dönük genişletme: post-MVP Home/Source Manager foundation yalnız M17'de, Movie/VOD seek yalnız M18'de, Series/Season/Episode yalnız M19'da production kapsamına alınabilir. EPG/XMLTV, catch-up/timeshift, recording, download ve continue-watching ayrıca onaylanmış milestone olmadan specification düzeyini aşamaz.
+- M17–M19 implementation veya local test sonucu M15/M16 completion sayılmaz. ADR-008/ADR-009 sonrası M15/M16 successor package/SBOM/CVE ve acceptance ledger'ları yeni exact source closure'larıyla yenilenmeden `current` veya `completed` yazma.
 
 ## Dil ve adlandırma
 

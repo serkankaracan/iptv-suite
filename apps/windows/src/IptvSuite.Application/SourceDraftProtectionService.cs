@@ -18,15 +18,54 @@ public sealed class SourceDraftProtectionService
         string? locator,
         string? username,
         string? password,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        ValidateSource(sourceId);
-        DomainResult<PreparedXtreamSourceDraft> prepared = SourceConfigurationValidator.PrepareXtream(
+        CancellationToken cancellationToken = default) =>
+        await ProtectXtreamCoreAsync(
+            sourceId,
             displayName,
             locator,
             username,
-            password);
+            password,
+            allowInsecureHttp: false,
+            cancellationToken).ConfigureAwait(false);
+
+    public async ValueTask<DomainResult<ValidatedSourceDraft>> ProtectXtreamAllowingInsecureHttpAsync(
+        SourceId sourceId,
+        string? displayName,
+        string? locator,
+        string? username,
+        string? password,
+        CancellationToken cancellationToken = default) =>
+        await ProtectXtreamCoreAsync(
+            sourceId,
+            displayName,
+            locator,
+            username,
+            password,
+            allowInsecureHttp: true,
+            cancellationToken).ConfigureAwait(false);
+
+    private async ValueTask<DomainResult<ValidatedSourceDraft>> ProtectXtreamCoreAsync(
+        SourceId sourceId,
+        string? displayName,
+        string? locator,
+        string? username,
+        string? password,
+        bool allowInsecureHttp,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateSource(sourceId);
+        DomainResult<PreparedXtreamSourceDraft> prepared = allowInsecureHttp
+            ? SourceConfigurationValidator.PrepareXtreamAllowingInsecureHttp(
+                displayName,
+                locator,
+                username,
+                password)
+            : SourceConfigurationValidator.PrepareXtream(
+                displayName,
+                locator,
+                username,
+                password);
         if (!prepared.IsSuccess)
         {
             return DomainResult.Failure<ValidatedSourceDraft>(prepared.Error!);

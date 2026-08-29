@@ -19,7 +19,8 @@ internal sealed record CatalogSnapshotBatch(
     PlaylistSnapshot Snapshot,
     IReadOnlyList<ChannelCategory> Categories,
     IReadOnlyList<LiveChannel> Channels,
-    IReadOnlyList<CatalogLocatorPlaintext> Locators);
+    IReadOnlyList<CatalogLocatorPlaintext> Locators,
+    ContentCatalogMutation? Content = null);
 
 internal enum CatalogActivationFaultPoint
 {
@@ -88,6 +89,14 @@ internal sealed class SqliteCatalogSnapshotWriter
                 cancellationToken).ConfigureAwait(false);
             await InsertCategoriesAsync(connection, transaction, batch.Categories, cancellationToken).ConfigureAwait(false);
             await InsertChannelsAsync(connection, transaction, batch.Channels, cancellationToken).ConfigureAwait(false);
+            if (batch.Content is not null)
+            {
+                await SqliteContentCatalog.InsertSnapshotContentAsync(
+                    connection,
+                    transaction,
+                    batch.Content,
+                    cancellationToken).ConfigureAwait(false);
+            }
             await InsertLocatorsAsync(
                 connection,
                 transaction,
@@ -139,7 +148,12 @@ internal sealed class SqliteCatalogSnapshotWriter
             batch.Channels.Any(channel =>
                 channel.SnapshotId != batch.Snapshot.Id || channel.StableKey.SourceId != batch.Source.Id) ||
             batch.Channels.Select(channel => channel.Id).Distinct().Count() != batch.Channels.Count ||
-            batch.Categories.Select(category => category.Id).Distinct().Count() != batch.Categories.Count)
+            batch.Categories.Select(category => category.Id).Distinct().Count() != batch.Categories.Count ||
+            batch.Content is not null &&
+                (batch.Content.SourceId != batch.Source.Id ||
+                 batch.Content.SnapshotId != batch.Snapshot.Id ||
+                 batch.Content.Categories.Any(category =>
+                     batch.Categories.Any(live => live.Id == category.Id))))
         {
             throw new ArgumentException("Catalog snapshot aggregate is inconsistent.", nameof(batch));
         }
@@ -204,6 +218,14 @@ internal sealed class SqliteCatalogSnapshotWriter
                 remote.LocatorReference),
             _ => throw new ArgumentException("Source configuration is unsupported.", nameof(source)),
         };
+        string configurationReference =
+            $"{(configurationKey.ReferenceKind == ProtectedReferenceKind.Secret ? "secret-ref-v1:" : "locator-ref-v1:")}{configurationKey.RecordIdentifier:N}";
+        await JournalReplacedSourceConfigurationAsync(
+            connection,
+            transaction,
+            source,
+            configurationReference,
+            cancellationToken).ConfigureAwait(false);
         const string sql = """
             INSERT INTO sources(
                 source_id, configuration_id, source_kind, display_name, endpoint_scheme, endpoint_host,
@@ -232,7 +254,7 @@ internal sealed class SqliteCatalogSnapshotWriter
             ("$scheme", source.SafeEndpoint.Scheme),
             ("$host", source.SafeEndpoint.Host),
             ("$port", source.SafeEndpoint.Port),
-            ("$reference", $"{(configurationKey.ReferenceKind == ProtectedReferenceKind.Secret ? "secret-ref-v1:" : "locator-ref-v1:")}{configurationKey.RecordIdentifier:N}"),
+            ("$reference", configurationReference),
             ("$status", (int)source.Status),
             ("$deletionPending", (int)ContentSourceStatus.DeletionPending),
             ("$created", Timestamp(source.CreatedAt)),
@@ -241,6 +263,35 @@ internal sealed class SqliteCatalogSnapshotWriter
             .ConfigureAwait(false);
         return affected == 1;
     }
+
+    private static Task JournalReplacedSourceConfigurationAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ContentSource source,
+        string configurationReference,
+        CancellationToken cancellationToken) => ExecuteAsync(
+        connection,
+        transaction,
+        """
+        INSERT OR IGNORE INTO source_configuration_retirements(
+            source_id, configuration_id, source_kind, configuration_reference, retired_utc)
+        SELECT source_id, configuration_id, source_kind, configuration_reference, $retired
+        FROM sources
+        WHERE source_id = $source
+          AND status <> $deletionPending
+          AND (
+              configuration_id <> $configuration
+              OR source_kind <> $kind
+              OR configuration_reference <> $reference
+          );
+        """,
+        cancellationToken,
+        ("$source", Id(source.Id.Value)),
+        ("$configuration", Id(source.Configuration.ConfigurationId.Value)),
+        ("$kind", (int)source.Kind),
+        ("$reference", configurationReference),
+        ("$retired", Timestamp(source.UpdatedAt)),
+        ("$deletionPending", (int)ContentSourceStatus.DeletionPending));
 
     private static Task InsertSnapshotAsync(
         SqliteConnection connection,

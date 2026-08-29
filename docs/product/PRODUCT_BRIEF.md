@@ -6,6 +6,8 @@
 
 **Ad durumu:** “IPTV Suite” yalnızca doğrulanmamış iç codename'dir.
 
+**Post-MVP successor — 2026-08-29:** Home hub, ayrı Source Manager CRUD, Live TV/Movie/Series ayrımı, Movie/Episode seek deneyimi ve ayrı açık-onaylı HTTP Xtream compatibility kapsamı [Post-MVP Content Experience Product Brief](POST_MVP_CONTENT_EXPERIENCE_BRIEF.md) ile M17–M19 için onaylanmıştır. Bu successor, aşağıdaki Windows MVP kapsamını veya M1–M16 tarihsel completion/blocked durumlarını geriye dönük değiştirmez.
+
 ## Ürün amacı
 
 IPTV Suite, kullanıcının kendi yetkili IPTV hesabını veya uzak M3U/M3U8 playlist'ini ekleyip Live TV içeriğini güvenli ve kararlı biçimde oynatmasına yarayan ticari kalite hedefli bir medya oynatıcıdır. Uygulama bir IPTV hizmeti değildir; içerik, kanal paketi veya hesap satmaz ve ilk sürümde medya trafiğini bize ait bir sunucudan geçirmez.

@@ -2,9 +2,11 @@
 
 **Tarih:** 2026-08-09
 
-**Durum:** M1–M9, M11, M13 ve M14 completed; M10 conditional success; M12 partial verified; M15 ve M16 `IN PROGRESS / BLOCKED`
+**Durum:** M1–M9, M11, M13 ve M14 completed; M10 conditional success; M12 partial verified; M15 ve M16 `IN PROGRESS / BLOCKED`; post-MVP M17–M19 `IN PROGRESS / ACCEPTANCE PENDING`
 
 **ADR-008 successor status — `POLICY ACCEPTED / LOCAL SUCCESSOR, HOSTED ACCEPTANCE STALE, 2026-08-29`:** Kullanıcı geri bildirimi üzerine açık UI onaylı Remote M3U HTTP locator/query compatibility kapsamına alınmıştır. User-info, Xtream HTTP, HTTP logo, HTTP Authorization/Cookie/Referer, cross-origin HTTP playlist redirect ve HTTPS→HTTP downgrade reddedilir; initial HTTP channel yalnız HTTP source'un exact `SafeEndpoint` origin'inde, HTTPS channel ise URI/scheme validation ile kabul edilir. Remote M3U onboarding HTTP/HTTPS ayrımı olmadan preliminary full-body probe yapmaz; protected staging sonrasında `128 MiB` decompressed-response ve iki dakikalık total request bütçeli tek bounded streaming import isteği kullanır. Açık-onaylı HTTP catalog 50.000 geçerli entry'yi aşarsa ilk 50.000 provider sırasıyla commit edilir, tail bounded olarak doğrulanıp atlanır ve UI truncation uyarısı verir; HTTPS/direct 50.001 fail-closed matrisi korunur. Genel HTTP/Xtream `4 MiB`/15 saniye sınırı değişmez. Protected-at-rest locator cleartext transit trafiğini güvenli yapmaz. Native player HLS/media alt-kaynak ve redirect origin/address enforcement'ı `UNVERIFIED`, yüksek residual ve release blocker'dır. M3/M5/M7 completion sonuçları kendi exact tarihsel kapsamlarında geçerlidir; successor production değişikliği M15 package/SBOM/CVE ve M16 final-artifact/security-architecture/synthetic-journey kabullerini yeni aday için stale bırakır. Yeni hosted `VERIFIED`, Store veya hukuk kabulü yoktur; [ADR-008](../adr/ADR-008-remote-m3u-cleartext-http-compatibility.md).
+
+**Post-MVP expansion decision — `SCOPE APPROVED / ACCEPTANCE PENDING, 2026-08-29`:** Home hub, ayrı Source Manager CRUD, authoritative Live TV/Movie/Series counts, Movie/Episode VOD seek ve Series→Season→Episode navigation M17–M19 olarak açılmıştır. HTTP Xtream compatibility, ADR-008 Remote M3U onayından ayrı exact-source-configuration consent ile [ADR-009](../adr/ADR-009-xtream-cleartext-http-compatibility.md) altında kabul edilmiştir. Xtream endpoint/action/DTO/playback-path davranışı `UNVERIFIED / proprietary compatibility family`dir. Local sentetik hard-budget contract'ı account/category/top-level-list/selected-series-info için `64 KiB / 1 MiB / 64 MiB / 16 MiB` sınırlarını doğrular; genel HTTP `4 MiB` ve Remote M3U `128 MiB` izolasyonu korunur. Bu yeni kapsam M15/M16'yı kapatmaz; onların current successor ledger'ları stale kalır ve post-MVP source/package değişiklikleri için yeniden acceptance gerekir. Ürün sözleşmesi: [Post-MVP Content Experience Product Brief](../product/POST_MVP_CONTENT_EXPERIENCE_BRIEF.md).
 
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
@@ -911,6 +913,166 @@ Son dakika scope genişlemesi, unsupported provider vaadi veya dış hukuk/Store
 
 Private flight RC'de source oluşturma → 50k catalog → search → live playback → controls/fullscreen → network fail/reconnect → source delete uçtan uca demo ve release evidence pack.
 
-## M16 sonrası
+## M17 — Home hub, kaynak yönetimi ve içerik ayrımı
 
-Playback/Store/field verileri incelendikten sonra ayrı Product Brief/ADR/milestone ile sırasıyla VOD/Series, EPG/XMLTV, catch-up ve ilgili data/UI/performance işleri değerlendirilebilir. Bunların hiçbiri M1–M16 issue'larına önceden scaffold edilmez.
+**Implementation status:** `IN PROGRESS / LOCAL AUTOMATED CHECKPOINT PASS / MANUAL + SIGNED PACKAGE + CRASH-INTENT PENDING, 2026-08-29`
+
+**M17–M19 local automated checkpoint — `PASS WITH PRE-EXISTING RELEASE BLOCKERS, 2026-08-29`:** Exact SDK locked restore ile Debug/Release x64 solution build'leri `0 warning / 0 error`, unit suite `409/409` ve izinli sentetik HTTPS loopback dahil integration suite `230/230` PASS'tir. Architecture suite `84/86` PASS'tir; yalnız M17–M19'dan önce açık olan M15 `PackageSbomAcceptanceInvalid` ve M16 final-artifact acceptance binding kapıları fail kalır. PowerShell package-smoke parser ve retired UIA identifier taraması PASS'tir. Bu local checkpoint signed MSIX yolculuğu, accessibility/manual checklist veya aşağıdaki durable staging-intent açığını kapatmaz; M17–M19 completion iddiası değildir.
+
+**Local source-replace checkpoint — `IMPLEMENTED / ACCEPTANCE BLOCKED, 2026-08-29`:** Replace mevcut `SourceId`yi koruyarak fresh configuration ve complete snapshot'ı tek SQLite activation transaction'ında old-or-new görünür yapar; önceki configuration tuple'ı durable retirement journal'ından startup/replace-sonrası idempotent cleanup'a alınır. Remote M3U/Xtream HTTP açıklamaları ve transient onayları ayrıdır, her add/replace/kind/input değişiminde fresh unchecked başlar. Known `NotCommitted` cancellation staged kaydı siler; activation sonrası belirsizlik success sayılmaz. Protected-store create ile SQLite activation/journal başlangıcı arasındaki process-termination orphan penceresi henüz durable intent/restart reconciliation taşımadığından M17 CRUD crash/orphan acceptance kriteri açıktır.
+
+### Amaç
+
+Kaynak CRUD işlerini katalog/player yüzeyinden ayırmak; uygulamayı Home → Live TV / Movies / Series bilgi mimarisine geçirmek ve Xtream-compatible kaynakta içerik türlerini güvenilir provider operations ile ayırmak.
+
+### Kapsam
+
+- Uygulama açılışında ayrı `HomePage`; Live TV, Movies, Series ve Sources navigation tile'ları.
+- Seçili source ve `All sources` bağlamında authoritative `LiveChannelCount`, `MovieCount`, `SeriesCount` ve `TotalContentCount`.
+- `TotalContentCount = LiveChannelCount + MovieCount + SeriesCount`; Episode sayısı bu toplamda yeniden sayılmaz. Cross-source duplicate adlar deduplicate edilmez.
+- `SourceManagerPage`, katalog/player'dan ayrı navigation destination; source list/status/count/cleartext warning görünümü.
+- Create, rename, configuration replace, refresh ve delete işlemleri. Replace fresh configuration owner altında stage→validate/sync→atomic swap; failure eski çalışan configuration/snapshot'ı korur. Delete admission/drain + idempotent secret/catalog/user-state/cache cleanup uygular.
+- Remote M3U ve Xtream-compatible editor akışları; form Live/Movies/Series katalog sayfalarına inline veya overlay olarak eklenmez.
+- Xtream Live/VOD/Series category/catalog operations üzerinden typed content-kind/count foundation. Remote M3U için URL/path/category/name heuristic'iyle Movie/Series ayrımı yoktur.
+- HTTPS default; HTTP Xtream yalnız [ADR-009](../adr/ADR-009-xtream-cleartext-http-compatibility.md) exact configuration consent'i ve kalıcı warning'iyle. Remote M3U consent'i Xtream consent sayılmaz.
+- Endpoint-specific bounded response/depth/string/item/time budget; gerçek provider capture/credential olmadan sentetik loopback compatibility corpus.
+- Source/category/search/page state'inin navigation destination ve source generation'a bağlanması; eski filter/result yeni source'u boş gösteremez.
+
+### Kapsam dışı
+
+Movie playback/seek, Series detail/episode playback, EPG/XMLTV, catch-up, timeshift, recording, download, continue-watching ve provider-specific cookie/header workaround.
+
+### Acceptance criteria
+
+- Home ayrı page olarak açılır; Live TV, Movies, Series ve Sources hedefleri keyboard/UIA ile erişilebilir ve doğru page'e gider.
+- En az iki sentetik source için source-scoped ve all-source count'lar exact fixture toplamlarıyla eşleşir; loading/stale/unavailable state sayı uydurmaz.
+- Remote M3U güvenilir type metadata vermediğinde yalnız Live TV olarak kalır; heuristic classification architecture/test guard'ı geçer.
+- Source Manager formu katalog/player page'inde bulunmaz. Create/rename/replace/refresh/delete happy path ile cancel/fault/restart old-or-new matrisi geçer.
+- Configuration replace failure'ında eski source oynatılabilir kalır; success'te eski secret/consent orphan bırakmadan temizlenir.
+- HTTP Xtream consent öncesi request count `0`; consent exact source/configuration/origin'e bağlı; replace fresh consent ister; restart sonrası warning görünür.
+- Raw username/password/full locator UI, log, DB metadata, TRX, screenshot automation veya artifact'ta bulunmaz.
+- Malformed/deep/oversized/duplicate proprietary response bounded safe error üretir; Xtream global “standard supported” iddiası yoktur.
+- Locked restore, Debug/Release x64 build, deterministic full suite, signed package navigation/CRUD journey ve canary scan geçer.
+
+### Testler / doğrulama
+
+- Kullanıcıyla exact PASS belirteçli manuel Home/count/navigation, ayrı Sources CRUD ve multi-source akışı: [M17 manuel kabul kontrolü](../quality/M17_M19_MANUAL_ACCEPTANCE_CHECKLIST.md#m17-manuel-kabul).
+- Home/source navigation, keyboard/Narrator/UIA ve stale-focus tests.
+- Count aggregation/property tests; source switch/category reset/generation-race matrisi.
+- CRUD transaction, cancellation, process-crash/restart ve orphan reconciliation integration tests.
+- HTTP/HTTPS Xtream consent isolation, address/redirect/header/cookie/image policy contract tests.
+- Sentetik Live/VOD/Series provider variants; JSON budget ve tolerant-reader/fail-closed corpus.
+- Signed MSIX: Home → Sources → create/replace/refresh/delete → Home count update journey.
+
+### Ana risk
+
+Proprietary Xtream davranışını resmi standard sanmak, cleartext consent'i başka source/configuration'a taşımak veya kısmi CRUD başarısında secret/catalog orphan bırakmak.
+
+### Demo çıktısı
+
+Ana Home hub'da doğru Live TV/Movie/Series/Total sayıları; ayrı Source Manager'da sentetik HTTPS ve açık-onaylı HTTP Xtream source CRUD; Live TV sayfasına geri dönüş.
+
+## M18 — Movies kataloğu ve VOD seek playback
+
+**Implementation status:** `IMPLEMENTED / LOCAL AUTOMATED CHECKPOINT PASS / MANUAL + SIGNED PACKAGE PENDING, 2026-08-29`
+
+### Amaç
+
+Typed Movie kataloğunu source/category/search/page akışıyla göstermek ve sonlu, seek-capable VOD medyasında güvenilir ileri/geri sarma ile zaman bilgisini sağlamak.
+
+### Kapsam
+
+- `Movie`, Movie category ve Movie stable identity/persistence migration'ı; yalnız M18'de kullanılan alanlar.
+- `MoviesPage` virtualized category/search/page; Movie seçimi ve safe loading/empty/failure state.
+- Provider item key + exact source configuration üzerinden JIT Movie playback locator resolution; proprietary path domain'e sızmaz.
+- `Movie` playback session kind ve Live session'dan ayrı natural-completion davranışı.
+- Seekbar/progress: başlangıç `00:00`, current `Position`, total/end `NaturalDuration`; `CanSeek`, seekable ranges ve `SeekCompleted` capability zinciri [S139][S140][S141].
+- Drag sırasında player update suppression; bounded UI cadence; target clamp; current session/generation dışındaki position/seek event'lerini düşürme.
+- Fullscreen auto-hide controls içinde seekbar/time labels; mouse/keyboard/touch input'ta görünürlük ve accessibility.
+- HTTP Movie playback yalnız ADR-009 exact initial-origin ve persistent cleartext warning sınırında.
+
+### Kapsam dışı
+
+Series/Season/Episode, persisted continue-watching/resume, offline download, DRM bypass, playback-rate UI, subtitle download, Live TV timeshift/catch-up ve cross-origin HTTP CDN exception'ı.
+
+### Acceptance criteria
+
+- Sentetik Movie fixture'ları doğru source/category/search/page sonuçlarını ve Home Movie count'unu verir.
+- Sonlu seek-capable corpus'ta `00:00`, current ve total/end değerleri doğru; ileri ve geri seek tamamlandıktan sonra player/UI aynı position'a yakınsar.
+- Kullanıcı thumb'ı sürüklerken background position update'i değeri geri çekmez; hızlı ardışık seek, pause/resume, source/movie switch ve stop stale event üretmez.
+- `CanSeek == false`, unknown/zero duration veya boş seekable range'de seek disabled/hidden olur; fake success gösterilmez.
+- Live TV playback'te timeshift yoksa seek disabled ve `Live` görünür kalır.
+- Natural Movie completion `Stopped`/completed ürün state'ine gider; Live EOF reconnect semantiğiyle karışmaz.
+- Fullscreen auto-hide/show, keyboard slider semantics, Narrator name/value ve normal-window dönüşü geçer.
+- Exact synthetic finite-media package journey, resource/canary scan ve full quality gate geçer.
+
+### Testler / doğrulama
+
+- Kullanıcıyla exact PASS belirteçli Live no-seek regresyonu, Movie seek/time ve fullscreen auto-hide akışı: [M18 manuel kabul kontrolü](../quality/M17_M19_MANUAL_ACCEPTANCE_CHECKLIST.md#m18-manuel-kabul).
+- Movie mapping/identity/category/paging ve hostile DTO corpus.
+- Playback capability matrix: finite seekable, finite unseekable, unknown duration, sparse seekable ranges.
+- Slider drag/keyboard/boundary/clamp/seek-completed/session-race unit + packaged UI tests.
+- Movie end/pause/resume/stop/fullscreen/source-delete lifecycle.
+- HTTP initial-origin, redirect/subresource non-claim ve credential leak gates.
+
+### Ana risk
+
+Native player'ın geçici duration/seek bilgisini authoritative sanmak, position event yarışında yanlış medyayı seek etmek veya HTTP playback credential'ını native diagnostic/network yüzeyine sızdırmak.
+
+### Demo çıktısı
+
+Movies tile → Movie category/search → finite Movie playback → seekbar ile ileri/geri → doğru start/current/end → fullscreen auto-hide → stop.
+
+## M19 — Series, Season ve Episode deneyimi
+
+**Implementation status:** `IMPLEMENTED / LOCAL AUTOMATED CHECKPOINT PASS / MANUAL + SIGNED PACKAGE PENDING, 2026-08-29`
+
+### Amaç
+
+Series kataloğunu Series → Season → Episode hiyerarşisiyle sunmak ve Episode'ları M18'in capability-gated VOD seek zincirinde oynatmak.
+
+### Kapsam
+
+- Yalnız M19'da kullanılan `Series`, `Season` ve `Episode` type/persistence migration'ları.
+- `SeriesPage` source/category/search/page ve `SeriesDetailPage` season/episode hierarchy.
+- Provider key'leri source-scoped; missing/duplicate/non-numeric season/episode alanlarında deterministic bounded ordering ve visible warning.
+- Series count kök Series kayıtlarını sayar; Season/Episode Home total'ına katılmaz.
+- Episode playback locator'ının exact Series/Season/Episode/source/configuration binding ile JIT çözülmesi.
+- M18 seek/time/fullscreen/natural-completion contract'ının Episode session'ında yeniden kullanılması; Live state'e sızmaması.
+- Refresh/replacement/delete sırasında Series graph atomik old-or-new görünür; orphan Episode veya playback reference kalmaz.
+- HTTP Episode playback ADR-009 initial-origin/consent/warning sınırını korur.
+
+### Kapsam dışı
+
+Continue-watching/watch-again, watch-history retention, episode download, auto-next, trailer, recommendation, EPG/XMLTV, catch-up, recording ve provider-specific heuristic scraper.
+
+### Acceptance criteria
+
+- Sentetik Series fixture'ında category/search/page, season/episode grouping ve deterministic ordering exact expected sonuç verir.
+- Series count kökleri doğru sayar; Episode sayısı Total içinde double-count edilmez.
+- Series → Season → Episode navigation keyboard/Narrator/UIA ile erişilebilir; back navigation focus ve query state'i doğru geri yükler.
+- Episode seekable/unseekable/duration/session-race matrisi M18 ile aynı invariant'ları geçer.
+- Refresh/replace/delete fault/cancel/restart zinciri orphan Series/Season/Episode/secret/playback reference bırakmaz.
+- Proprietary missing/variant fields bounded warning veya stable error üretir; isim/path heuristic'i type/season/episode uydurmaz.
+- Signed package Series journey, resource/canary scan ve full quality gate geçer.
+
+### Testler / doğrulama
+
+- Kullanıcıyla exact PASS belirteçli lazy Series → Season → Episode, play/seek/back ve restart akışı: [M19 manuel kabul kontrolü](../quality/M17_M19_MANUAL_ACCEPTANCE_CHECKLIST.md#m19-manuel-kabul).
+- Series/Season/Episode mapper, hierarchy, identity, ordering ve malformed/deep/oversized DTO corpus.
+- Home count + all-source/source-scoped aggregation.
+- Navigation/back/focus/UIA/accessibility packaged tests.
+- Episode play/seek/pause/resume/stop/end/fullscreen ve source switch/delete races.
+- Atomic graph activation, crash recovery ve deletion reconciliation.
+
+### Ana risk
+
+Provider'ın proprietary ve düzensiz Series graph'ını uydurulmuş hierarchy'ye çevirmek, Episode playback identity'sini yanlış source/configuration'a bağlamak veya içerik sayısını episode'larla şişirmek.
+
+### Demo çıktısı
+
+Series tile → Series search → season → episode → ileri/geri seek ve doğru zaman göstergeleri → back navigation → source delete sonrası temiz Home counts.
+
+## M19 sonrası
+
+EPG/XMLTV, catch-up/Live timeshift, continue-watching retention, recording/download, multi-screen ve diğer görsel özellikler ancak ayrı Product Brief/ADR/milestone ile değerlendirilebilir. M17–M19 bunları önceden scaffold etmez.

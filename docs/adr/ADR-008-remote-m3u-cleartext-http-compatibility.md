@@ -4,6 +4,8 @@
 
 **Date:** 2026-08-28
 
+**Successor boundary — 2026-08-29:** Bu ADR yalnız `RemotePlaylist` cleartext zincirini yönetmeye devam eder. Kullanıcının daha sonraki açık talebiyle Xtream-compatible HTTP için **ayrı** source-configuration consent ve risk sınırı [ADR-009](ADR-009-xtream-cleartext-http-compatibility.md) altında kabul edilmiştir. ADR-009, buradaki Remote M3U onayını Xtream'e devretmez ve bu ADR'nin tarihsel M1–M16 kapsamını geriye dönük değiştirmez.
+
 ## Context / Problem
 
 Windows MVP'nin M3, M5 ve M7 kabul zinciri remote playlist kaynaklarını HTTPS ile sınırlar. Gerçek kullanıcı geri bildirimi, yetkili bir Remote M3U kaynağının yalnız `http` locator sunduğunu göstermiştir. HTTPS-only davranış bu kaynağı daha ağ isteği başlamadan reddeder.
@@ -111,6 +113,7 @@ Bu ADR hukuki görüş değildir. Public release öncesi Product/Security/Privac
 ## References
 
 - [Security and Privacy Baseline](../security/SECURITY_AND_PRIVACY_BASELINE.md)
+- [ADR-009 — Xtream cleartext HTTP compatibility](ADR-009-xtream-cleartext-http-compatibility.md)
 - [Domain and Data Contracts](../architecture/DOMAIN_AND_DATA_CONTRACTS.md)
 - [Windows MVP Roadmap](../roadmap/WINDOWS_MVP_ROADMAP.md)
 - [Risk Register](../risks/RISK_REGISTER.md)

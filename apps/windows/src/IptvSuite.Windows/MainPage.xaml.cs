@@ -8,6 +8,7 @@ using IptvSuite.Infrastructure;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -29,10 +30,6 @@ public sealed partial class MainPage : Page, IDisposable
         TimeSpan.FromSeconds(3);
     private const string InsecureHttpCatalogWarning =
         "Warning: cleartext HTTP traffic is unencrypted and can be observed or modified in transit (MITM).";
-    private const string RemotePlaylistEntryLimitWarning =
-        "Warning: only the first 50,000 valid entries were imported; additional entries were skipped to keep the catalog bounded.";
-    private const string NewPlaylistSelectedHint =
-        "New playlist is selected; use Playlist source to return to earlier playlists.";
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _catalogOperationSync = new();
     private readonly object _operationSync = new();
@@ -40,6 +37,8 @@ public sealed partial class MainPage : Page, IDisposable
     private readonly DispatcherQueueTimer _fullscreenControlsAutoHideTimer;
     private readonly PointerEventHandler _fullscreenPointerMovedHandler;
     private readonly KeyEventHandler _fullscreenKeyDownHandler;
+    private readonly PointerEventHandler _timelinePointerPressedHandler;
+    private readonly PointerEventHandler _timelinePointerReleasedHandler;
     private CatalogBrowseCoordinator? _coordinator;
     private ChannelLogoCache? _logoCache;
     private PlaybackSessionCoordinator? _playback;
@@ -47,11 +46,9 @@ public sealed partial class MainPage : Page, IDisposable
     private INetworkAvailabilityHintSource? _networkAvailabilityHintSource;
     private Func<Task<SourceDeletionReconciliationResult>>? _retryPendingSourceCleanup;
     private Func<SourceId, CancellationToken, ValueTask<SourceDeletionResult>>? _deleteSource;
-    private Func<string?, string?, CancellationToken,
-        ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>>? _addRemotePlaylist;
     private ChannelRow? _playbackChannel;
+    private string? _playbackItemName;
     private ContentDialog? _sourceDeletionDialog;
-    private CancellationTokenSource? _sourceOnboardingCancellation;
     private CancellationTokenSource _logoPageCancellation = new();
     private int _offset;
     private bool _updatingSelectors;
@@ -60,6 +57,10 @@ public sealed partial class MainPage : Page, IDisposable
     private bool _movingTabFocus;
     private bool _isFullscreen;
     private bool _fullscreenTransitionPending;
+    private bool _onDemandWorkspace;
+    private bool _timelinePointerInteractionActive;
+    private PlaybackSessionId _timelinePointerSessionId;
+    private int _timelineSeekInProgress;
     private WeakReference<Control>? _focusBeforeFullscreen;
     private long _loadingGeneration;
     private int _activeCatalogOperations;
@@ -67,8 +68,6 @@ public sealed partial class MainPage : Page, IDisposable
     private TaskCompletionSource? _catalogOperationsDrained;
     private TaskCompletionSource? _operationsDrained;
     private bool _sourceDeletionOperationPending;
-    private bool _sourceOnboardingOperationPending;
-    private bool _sourceOnboardingPanelOpen;
     private bool _playbackControlGateDisposed;
     private PlaybackSessionSnapshot? _presentedFailureSnapshot;
     private DomainErrorPresentation? _presentedFailure;
@@ -83,6 +82,8 @@ public sealed partial class MainPage : Page, IDisposable
             FullscreenControlsAutoHideTimer_Tick;
         _fullscreenPointerMovedHandler = FullscreenSurface_PointerMoved;
         _fullscreenKeyDownHandler = FullscreenSurface_KeyDown;
+        _timelinePointerPressedHandler = PlaybackTimelineSlider_PointerPressed;
+        _timelinePointerReleasedHandler = PlaybackTimelineSlider_PointerReleased;
         PageRoot.AddHandler(
             UIElement.PointerMovedEvent,
             _fullscreenPointerMovedHandler,
@@ -92,6 +93,14 @@ public sealed partial class MainPage : Page, IDisposable
             _fullscreenKeyDownHandler,
             handledEventsToo: true);
         PageRoot.GettingFocus += FullscreenSurface_GettingFocus;
+        PlaybackTimelineSlider.AddHandler(
+            UIElement.PointerPressedEvent,
+            _timelinePointerPressedHandler,
+            handledEventsToo: true);
+        PlaybackTimelineSlider.AddHandler(
+            UIElement.PointerReleasedEvent,
+            _timelinePointerReleasedHandler,
+            handledEventsToo: true);
         AddHandler(
             UIElement.LosingFocusEvent,
             new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus),
@@ -136,7 +145,6 @@ public sealed partial class MainPage : Page, IDisposable
             VirtualKey.F11,
             VirtualKeyModifiers.None,
             ToggleFullscreenAsync);
-        Unloaded += MainPage_Unloaded;
         string assemblyVersion = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 #if DEBUG
         const string configuration = "Debug";
@@ -171,22 +179,6 @@ public sealed partial class MainPage : Page, IDisposable
         _deleteSource = deleteSource;
     }
 
-    internal void ConfigureSourceOnboarding(
-        Func<string?, string?, CancellationToken,
-            ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>> addRemotePlaylist)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(addRemotePlaylist);
-        if (_addRemotePlaylist is not null)
-        {
-            throw new InvalidOperationException(
-                "The source-onboarding route is already configured.");
-        }
-
-        _addRemotePlaylist = addRemotePlaylist;
-        UpdateSourceMutationControls();
-    }
-
     internal void SetFullscreenState(bool isFullscreen)
     {
         if (_disposed)
@@ -199,13 +191,11 @@ public sealed partial class MainPage : Page, IDisposable
         _isFullscreen = isFullscreen;
         _fullscreenTransitionPending = false;
         Visibility catalogVisibility = isFullscreen
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+            || _onDemandWorkspace
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         HeaderPanel.Visibility = catalogVisibility;
         FilterPanel.Visibility = catalogVisibility;
-        RemotePlaylistOnboardingPanel.Visibility = !isFullscreen && _sourceOnboardingPanelOpen
-            ? Visibility.Visible
-            : Visibility.Collapsed;
         ChannelList.Visibility = catalogVisibility;
         CatalogStatusPanel.Visibility = catalogVisibility;
         CatalogPagingPanel.Visibility = catalogVisibility;
@@ -213,6 +203,11 @@ public sealed partial class MainPage : Page, IDisposable
         PageRoot.RowSpacing = isFullscreen ? 0 : 16;
         Grid.SetColumn(PlaybackPanel, isFullscreen ? 0 : 1);
         Grid.SetColumnSpan(PlaybackPanel, isFullscreen ? 2 : 1);
+        if (_onDemandWorkspace)
+        {
+            Grid.SetColumn(PlaybackPanel, 0);
+            Grid.SetColumnSpan(PlaybackPanel, 2);
+        }
         FullscreenButton.Content = isFullscreen ? "Exit fullscreen" : "Fullscreen";
         AutomationProperties.SetName(
             FullscreenButton,
@@ -285,7 +280,9 @@ public sealed partial class MainPage : Page, IDisposable
         RetryPendingDeletionButton.Visibility = Visibility.Collapsed;
         RetryPendingDeletionButton.IsEnabled = false;
         _playback.StateChanged += Playback_StateChanged;
+        _playback.TimelineChanged += Playback_TimelineChanged;
         ApplyPlaybackState(_playback.Current);
+        ApplyPlaybackTimeline(_playback.CurrentTimeline);
         await LoadSourcesAsync();
         UpdateSourceMutationControls();
     }
@@ -297,7 +294,6 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
 
-        HideSourceOnboardingPanel(clearStatus: true);
         _catalogAdmissionReady = false;
         SourceSelector.IsEnabled = false;
         CategorySelector.IsEnabled = false;
@@ -306,9 +302,6 @@ public sealed partial class MainPage : Page, IDisposable
         PreviousButton.IsEnabled = false;
         NextButton.IsEnabled = false;
         DeleteSourceButton.IsEnabled = false;
-        AddRemotePlaylistButton.IsEnabled = false;
-        RemotePlaylistAddButton.IsEnabled = false;
-        RemotePlaylistCancelButton.IsEnabled = false;
         RetryPendingDeletionButton.Visibility = Visibility.Visible;
         RetryPendingDeletionButton.IsEnabled = !_sourceDeletionOperationPending &&
             _retryPendingSourceCleanup is not null;
@@ -336,6 +329,96 @@ public sealed partial class MainPage : Page, IDisposable
         RetryPendingDeletionButton.IsEnabled = false;
         await LoadSourcesAsync();
         UpdateSourceMutationControls();
+    }
+
+    internal async Task PrepareSourceMutationAsync(
+        SourceId sourceId,
+        string operationStatus)
+    {
+        if (_disposed || sourceId.IsEmpty)
+        {
+            return;
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationStatus);
+        BeginCatalogRetirement(operationStatus);
+        await CancelAndWaitForCatalogOperationsAsync(sourceId);
+    }
+
+    internal void SetOnDemandWorkspace(bool enabled)
+    {
+        if (_disposed || _onDemandWorkspace == enabled)
+        {
+            return;
+        }
+
+        _onDemandWorkspace = enabled;
+        SetFullscreenState(_isFullscreen);
+        if (!enabled)
+        {
+            PlaybackTimelinePanel.Visibility = Visibility.Collapsed;
+        }
+        else if (_playback?.Current.ContentIntent == PlaybackContentIntent.OnDemand)
+        {
+            PlaybackTimelinePanel.Visibility = Visibility.Visible;
+        }
+    }
+
+    internal Task PlayMovieAsync(
+        SourceId sourceId,
+        MovieId movieId,
+        string displayName,
+        CancellationToken cancellationToken = default) =>
+        StartOnDemandAsync(
+            sourceId,
+            displayName,
+            token => _playback!.StartAsync(sourceId, movieId, token),
+            cancellationToken);
+
+    internal Task PlayEpisodeAsync(
+        SourceId sourceId,
+        EpisodeId episodeId,
+        string displayName,
+        CancellationToken cancellationToken = default) =>
+        StartOnDemandAsync(
+            sourceId,
+            displayName,
+            token => _playback!.StartAsync(sourceId, episodeId, token),
+            cancellationToken);
+
+    private async Task StartOnDemandAsync(
+        SourceId sourceId,
+        string displayName,
+        Func<CancellationToken, ValueTask<PlaybackSessionSnapshot?>> start,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        ArgumentNullException.ThrowIfNull(start);
+        PlaybackSessionCoordinator? playback = _playback;
+        if (_disposed || playback is null || sourceId.IsEmpty)
+        {
+            return;
+        }
+
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetime.Token);
+        _playbackChannel = null;
+        _playbackItemName = displayName;
+        PlaybackChannelText.Text = displayName;
+        SetOnDemandWorkspace(enabled: true);
+        try
+        {
+            await start(linked.Token);
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            ApplyPlaybackState(playback.Current);
+        }
     }
 
     private async Task LoadSourcesAsync(SourceId? preferredSourceId = null)
@@ -427,8 +510,6 @@ public sealed partial class MainPage : Page, IDisposable
         CategorySelector.IsEnabled = false;
         SearchBox.IsEnabled = false;
         DeleteSourceButton.IsEnabled = false;
-        AddRemotePlaylistButton.IsEnabled = false;
-        RemotePlaylistAddButton.IsEnabled = false;
         return generation;
     }
 
@@ -452,177 +533,6 @@ public sealed partial class MainPage : Page, IDisposable
     {
         PreviousButton.IsEnabled = _offset > 0;
         NextButton.IsEnabled = _offset + PageSize < totalCount;
-    }
-
-    private void AddRemotePlaylistButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_disposed || !_catalogAdmissionReady || _addRemotePlaylist is null ||
-            _sourceDeletionOperationPending || _sourceOnboardingOperationPending ||
-            LoadingIndicator.IsActive)
-        {
-            return;
-        }
-
-        _sourceOnboardingPanelOpen = true;
-        RemotePlaylistOnboardingPanel.Visibility = _isFullscreen
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        RemotePlaylistStatusText.Text = string.Empty;
-        RemotePlaylistAuthorizationCheckBox.IsChecked = false;
-        UpdateSourceMutationControls();
-        _ = RemotePlaylistSourceNameTextBox.Focus(FocusState.Programmatic);
-    }
-
-    private void RemotePlaylistAuthorizationCheckBox_Changed(
-        object sender,
-        RoutedEventArgs e) =>
-        UpdateSourceMutationControls();
-
-    private async void RemotePlaylistAddButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_disposed || !_catalogAdmissionReady ||
-            !_sourceOnboardingPanelOpen || LoadingIndicator.IsActive ||
-            RemotePlaylistAuthorizationCheckBox.IsChecked is not true ||
-            _addRemotePlaylist is not { } addRemotePlaylist ||
-            !TryBeginSourceOnboardingOperation())
-        {
-            return;
-        }
-
-        using AsyncOperationLease operation = BeginAsyncOperation();
-        string? displayName = RemotePlaylistSourceNameTextBox.Text;
-        string? locator = RemotePlaylistLocatorTextBox.Text;
-        RemotePlaylistSourceNameTextBox.Text = string.Empty;
-        RemotePlaylistLocatorTextBox.Text = string.Empty;
-        RemotePlaylistAuthorizationCheckBox.IsChecked = false;
-        RemotePlaylistStatusText.Text = "Validating and importing the authorized source.";
-        try
-        {
-            CancellationToken cancellationToken =
-                _sourceOnboardingCancellation?.Token ?? _lifetime.Token;
-            DomainResult<RemotePlaylistSourceOnboardingResult> result =
-                await addRemotePlaylist(displayName, locator, cancellationToken);
-            if (_disposed)
-            {
-                return;
-            }
-
-            if (!result.IsSuccess)
-            {
-                DomainErrorPresentation? presentation = _domainErrorPresenter?.Present(
-                    result.Error!,
-                    ReadNetworkAvailabilityHint());
-                RemotePlaylistStatusText.Text = presentation is null
-                    ? "The source could not be added safely."
-                    : $"{presentation.Message} {presentation.OperationIdLabel}: " +
-                        presentation.OperationId.Value;
-                await LoadSourcesAsync();
-                return;
-            }
-
-            RemotePlaylistSourceOnboardingResult onboardingResult = result.Value!;
-            SourceId sourceId = onboardingResult.SourceId;
-            bool entryLimitReached = onboardingResult.EntryLimitReached;
-            HideSourceOnboardingPanel(clearStatus: true);
-            ResetLogoPageCancellation();
-            ClearCatalogView();
-            await LoadSourcesAsync(sourceId);
-            if (!_disposed)
-            {
-                StatusText.Text = string.IsNullOrWhiteSpace(StatusText.Text)
-                    ? NewPlaylistSelectedHint
-                    : $"{StatusText.Text} {NewPlaylistSelectedHint}";
-            }
-
-            if (entryLimitReached && !_disposed)
-            {
-                StatusText.Text = string.IsNullOrWhiteSpace(StatusText.Text)
-                    ? RemotePlaylistEntryLimitWarning
-                    : $"{StatusText.Text} {RemotePlaylistEntryLimitWarning}";
-            }
-        }
-        catch (OperationCanceledException) when (
-            _sourceOnboardingCancellation?.IsCancellationRequested is true ||
-            _lifetime.IsCancellationRequested)
-        {
-            if (!_disposed)
-            {
-                RemotePlaylistStatusText.Text = "Source import was cancelled.";
-                await LoadSourcesAsync();
-            }
-        }
-        catch (Exception exception) when (IsRecoverable(exception))
-        {
-            if (!_disposed)
-            {
-                RemotePlaylistStatusText.Text =
-                    "The source could not be added safely.";
-                await LoadSourcesAsync();
-            }
-        }
-        finally
-        {
-            displayName = null;
-            locator = null;
-            EndSourceOnboardingOperation();
-        }
-    }
-
-    private void RemotePlaylistCancelButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_sourceOnboardingOperationPending)
-        {
-            RemotePlaylistStatusText.Text = "Cancelling source import.";
-            RemotePlaylistCancelButton.IsEnabled = false;
-            _sourceOnboardingCancellation?.Cancel();
-            return;
-        }
-
-        HideSourceOnboardingPanel(clearStatus: true);
-        UpdateSourceMutationControls();
-        _ = AddRemotePlaylistButton.Focus(FocusState.Programmatic);
-    }
-
-    private bool TryBeginSourceOnboardingOperation()
-    {
-        if (_disposed || !_catalogAdmissionReady || LoadingIndicator.IsActive ||
-            !_sourceOnboardingPanelOpen ||
-            _sourceOnboardingOperationPending || _sourceDeletionOperationPending ||
-            _addRemotePlaylist is null)
-        {
-            return false;
-        }
-
-        _sourceOnboardingOperationPending = true;
-        _sourceOnboardingCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            _lifetime.Token);
-        UpdateSourceMutationControls();
-        return true;
-    }
-
-    private void EndSourceOnboardingOperation()
-    {
-        CancellationTokenSource? cancellation = _sourceOnboardingCancellation;
-        _sourceOnboardingCancellation = null;
-        _sourceOnboardingOperationPending = false;
-        cancellation?.Dispose();
-        if (!_disposed)
-        {
-            UpdateSourceMutationControls();
-        }
-    }
-
-    private void HideSourceOnboardingPanel(bool clearStatus)
-    {
-        _sourceOnboardingPanelOpen = false;
-        RemotePlaylistOnboardingPanel.Visibility = Visibility.Collapsed;
-        RemotePlaylistSourceNameTextBox.Text = string.Empty;
-        RemotePlaylistLocatorTextBox.Text = string.Empty;
-        RemotePlaylistAuthorizationCheckBox.IsChecked = false;
-        if (clearStatus)
-        {
-            RemotePlaylistStatusText.Text = string.Empty;
-        }
     }
 
     private async void DeleteSourceButton_Click(object sender, RoutedEventArgs e)
@@ -662,7 +572,7 @@ public sealed partial class MainPage : Page, IDisposable
                 return;
             }
 
-            BeginCatalogRetirement();
+            BeginCatalogRetirement("Deleting the selected source.");
             await CancelAndWaitForCatalogOperationsAsync(sourceId);
             if (_disposed)
             {
@@ -788,7 +698,7 @@ public sealed partial class MainPage : Page, IDisposable
         }
     }
 
-    private void BeginCatalogRetirement()
+    private void BeginCatalogRetirement(string operationStatus)
     {
         _catalogAdmissionReady = false;
         Interlocked.Increment(ref _loadingGeneration);
@@ -800,7 +710,7 @@ public sealed partial class MainPage : Page, IDisposable
         PreviousButton.IsEnabled = false;
         NextButton.IsEnabled = false;
         DeleteSourceButton.IsEnabled = false;
-        StatusText.Text = "Deleting the selected source.";
+        StatusText.Text = operationStatus;
     }
 
     private async Task CancelAndWaitForCatalogOperationsAsync(SourceId sourceId)
@@ -826,8 +736,7 @@ public sealed partial class MainPage : Page, IDisposable
 
     private bool TryBeginSourceDeletionOperation()
     {
-        if (_sourceDeletionOperationPending || _sourceOnboardingOperationPending ||
-            _sourceOnboardingPanelOpen)
+        if (_sourceDeletionOperationPending)
         {
             return false;
         }
@@ -847,31 +756,14 @@ public sealed partial class MainPage : Page, IDisposable
     {
         bool mutationIdle = !_disposed &&
             !_sourceDeletionOperationPending &&
-            !_sourceOnboardingOperationPending &&
             !LoadingIndicator.IsActive;
         bool commonAdmission = mutationIdle && _catalogAdmissionReady;
-        AddRemotePlaylistButton.IsEnabled = commonAdmission &&
-            _addRemotePlaylist is not null &&
-            !_sourceOnboardingPanelOpen;
         DeleteSourceButton.IsEnabled = commonAdmission &&
-            !_sourceOnboardingPanelOpen &&
             _deleteSource is not null &&
             SourceSelector.SelectedItem is CatalogSourceItem;
         RetryPendingDeletionButton.IsEnabled = mutationIdle &&
-            !_sourceOnboardingPanelOpen &&
             RetryPendingDeletionButton.Visibility == Visibility.Visible &&
             _retryPendingSourceCleanup is not null;
-        RemotePlaylistSourceNameTextBox.IsEnabled = !_sourceOnboardingOperationPending;
-        RemotePlaylistLocatorTextBox.IsEnabled = !_sourceOnboardingOperationPending;
-        RemotePlaylistAuthorizationCheckBox.IsEnabled = !_sourceOnboardingOperationPending;
-        RemotePlaylistProgressRing.IsActive = _sourceOnboardingOperationPending;
-        RemotePlaylistProgressRing.Visibility = _sourceOnboardingOperationPending
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        RemotePlaylistAddButton.IsEnabled = commonAdmission &&
-            _sourceOnboardingPanelOpen &&
-            RemotePlaylistAuthorizationCheckBox.IsChecked is true;
-        RemotePlaylistCancelButton.IsEnabled = _sourceOnboardingPanelOpen;
     }
 
     private void ClearCatalogView()
@@ -1017,6 +909,8 @@ public sealed partial class MainPage : Page, IDisposable
         }
 
         _playbackChannel = channel;
+        _playbackItemName = channel.Name;
+        SetOnDemandWorkspace(enabled: false);
         using AsyncOperationLease operation = BeginAsyncOperation();
         try
         {
@@ -1383,6 +1277,219 @@ public sealed partial class MainPage : Page, IDisposable
         DispatcherQueue.TryEnqueue(() => ApplyPlaybackState(snapshot));
     }
 
+    private void Playback_TimelineChanged(
+        object? sender,
+        PlaybackTimelineChangedEventArgs args)
+    {
+        PlaybackTimelineSnapshot snapshot = args.Snapshot;
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            ApplyPlaybackTimeline(snapshot);
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(() => ApplyPlaybackTimeline(snapshot));
+    }
+
+    private void ApplyPlaybackTimeline(PlaybackTimelineSnapshot snapshot)
+    {
+        PlaybackSessionCoordinator? playback = _playback;
+        if (_disposed || playback is null ||
+            !ReferenceEquals(playback.CurrentTimeline, snapshot))
+        {
+            return;
+        }
+
+        PlaybackSessionSnapshot current = playback.Current;
+        bool onDemand = current.ContentIntent == PlaybackContentIntent.OnDemand &&
+            current.State != PlaybackState.Closed;
+        PlaybackTimelinePanel.Visibility = onDemand
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        TimeSpan position = snapshot.Position;
+        TimeSpan duration = snapshot.Duration;
+        PlaybackStartTimeText.Text = "00:00";
+        PlaybackEndTimeText.Text = duration > TimeSpan.Zero
+            ? FormatPlaybackTime(duration)
+            : "--:--";
+        PlaybackTimelineSlider.Maximum = duration > TimeSpan.Zero
+            ? duration.TotalSeconds
+            : 1;
+        bool timelineCanSeek = onDemand && snapshot.CanSeek &&
+            current.State is PlaybackState.Playing or PlaybackState.Paused;
+        bool currentPointerInteraction = timelineCanSeek &&
+            _timelinePointerInteractionActive &&
+            _timelinePointerSessionId == snapshot.SessionId;
+        TimeSpan displayedPosition;
+        if (!currentPointerInteraction)
+        {
+            _timelinePointerInteractionActive = false;
+            _timelinePointerSessionId = default;
+            PlaybackTimelineSlider.Value = duration > TimeSpan.Zero
+                ? Math.Clamp(position.TotalSeconds, 0, duration.TotalSeconds)
+                : 0;
+            displayedPosition = position;
+        }
+        else
+        {
+            double previewSeconds = duration > TimeSpan.Zero
+                ? Math.Clamp(
+                    PlaybackTimelineSlider.Value,
+                    0,
+                    duration.TotalSeconds)
+                : 0;
+            displayedPosition = TimeSpan.FromSeconds(previewSeconds);
+        }
+
+        PlaybackCurrentTimeText.Text = FormatPlaybackTime(displayedPosition);
+
+        PlaybackTimelineSlider.IsEnabled = timelineCanSeek;
+        AutomationProperties.SetName(
+            PlaybackTimelineSlider,
+            snapshot.CanSeek
+                ? $"Seek through on-demand content, {FormatPlaybackTime(displayedPosition)} of {FormatPlaybackTime(duration)}"
+                : "On-demand timeline is not seekable");
+    }
+
+    private void PlaybackTimelineSlider_PointerPressed(
+        object sender,
+        PointerRoutedEventArgs args)
+    {
+        PlaybackTimelineSnapshot? timeline = _playback?.CurrentTimeline;
+        if (_disposed || !PlaybackTimelineSlider.IsEnabled ||
+            timeline is null || timeline.SessionId.IsEmpty || !timeline.CanSeek)
+        {
+            return;
+        }
+
+        _timelinePointerInteractionActive = true;
+        _timelinePointerSessionId = timeline.SessionId;
+    }
+
+    private async void PlaybackTimelineSlider_PointerReleased(
+        object sender,
+        PointerRoutedEventArgs args) =>
+        await CompleteTimelinePointerInteractionAsync();
+
+    private async void PlaybackTimelineSlider_PointerCaptureLost(
+        object sender,
+        PointerRoutedEventArgs args) =>
+        await CompleteTimelinePointerInteractionAsync();
+
+    private void PlaybackTimelineSlider_ValueChanged(
+        object sender,
+        RangeBaseValueChangedEventArgs args)
+    {
+        if (!_timelinePointerInteractionActive)
+        {
+            return;
+        }
+
+        PlaybackTimelineSnapshot? timeline = _playback?.CurrentTimeline;
+        if (timeline is null || timeline.SessionId != _timelinePointerSessionId ||
+            timeline.Duration <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        double previewSeconds = Math.Clamp(
+            args.NewValue,
+            0,
+            timeline.Duration.TotalSeconds);
+        PlaybackCurrentTimeText.Text = FormatPlaybackTime(
+            TimeSpan.FromSeconds(previewSeconds));
+    }
+
+    private async void PlaybackTimelineSlider_KeyUp(
+        object sender,
+        KeyRoutedEventArgs args)
+    {
+        if (args.Key is VirtualKey.Left or VirtualKey.Right or
+            VirtualKey.Home or VirtualKey.End or VirtualKey.Enter or VirtualKey.Space)
+        {
+            PlaybackTimelineSnapshot? timeline = _playback?.CurrentTimeline;
+            if (timeline is not null)
+            {
+                await SeekToTimelineSliderAsync(
+                    timeline.SessionId,
+                    PlaybackTimelineSlider.Value);
+            }
+        }
+    }
+
+    private async Task CompleteTimelinePointerInteractionAsync()
+    {
+        if (!_timelinePointerInteractionActive)
+        {
+            return;
+        }
+
+        PlaybackSessionId sessionId = _timelinePointerSessionId;
+        double requestedSeconds = PlaybackTimelineSlider.Value;
+        _timelinePointerInteractionActive = false;
+        _timelinePointerSessionId = default;
+        await SeekToTimelineSliderAsync(sessionId, requestedSeconds);
+    }
+
+    private async Task SeekToTimelineSliderAsync(
+        PlaybackSessionId sessionId,
+        double requestedSeconds)
+    {
+        PlaybackSessionCoordinator? playback = _playback;
+        if (_disposed || playback is null || sessionId.IsEmpty ||
+            !double.IsFinite(requestedSeconds) ||
+            !PlaybackTimelineSlider.IsEnabled ||
+            Interlocked.Exchange(ref _timelineSeekInProgress, 1) != 0)
+        {
+            return;
+        }
+
+        using AsyncOperationLease operation = BeginAsyncOperation();
+        try
+        {
+            PlaybackTimelineSnapshot timeline = playback.CurrentTimeline;
+            if (timeline.SessionId != sessionId || !timeline.CanSeek ||
+                timeline.Duration <= TimeSpan.Zero)
+            {
+                ApplyPlaybackTimeline(timeline);
+                return;
+            }
+
+            requestedSeconds = Math.Clamp(
+                requestedSeconds,
+                0,
+                timeline.Duration.TotalSeconds);
+            PlaybackEngineOperationResult result = await playback.SeekAsync(
+                sessionId,
+                TimeSpan.FromSeconds(requestedSeconds),
+                _lifetime.Token);
+            if (!result.IsSuccess)
+            {
+                ApplyPlaybackTimeline(playback.CurrentTimeline);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            ApplyPlaybackTimeline(playback.CurrentTimeline);
+        }
+        finally
+        {
+            Volatile.Write(ref _timelineSeekInProgress, 0);
+        }
+    }
+
+    private static string FormatPlaybackTime(TimeSpan value)
+    {
+        value = value < TimeSpan.Zero ? TimeSpan.Zero : value;
+        return value.TotalHours >= 1
+            ? $"{(long)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}"
+            : $"{value.Minutes:00}:{value.Seconds:00}";
+    }
+
     private void ApplyPlaybackState(PlaybackSessionSnapshot snapshot)
     {
         PlaybackSessionCoordinator? playback = _playback;
@@ -1405,9 +1512,16 @@ public sealed partial class MainPage : Page, IDisposable
         {
             PlaybackChannelText.Text = playbackChannel.Name;
         }
+        else if (snapshot.ContentIntent == PlaybackContentIntent.OnDemand &&
+            !string.IsNullOrWhiteSpace(_playbackItemName))
+        {
+            PlaybackChannelText.Text = _playbackItemName;
+        }
         else if (snapshot.State == PlaybackState.Closed)
         {
-            PlaybackChannelText.Text = "No channel selected.";
+            PlaybackChannelText.Text = _onDemandWorkspace
+                ? "No movie or episode selected."
+                : "No channel selected.";
         }
 
         bool canRetryReconnect = snapshot.State == PlaybackState.Failed &&
@@ -1437,7 +1551,7 @@ public sealed partial class MainPage : Page, IDisposable
         StopButton.Content = isReconnecting ? "Cancel reconnect" : "Stop";
         AutomationProperties.SetName(
             StopButton,
-            isReconnecting ? "Cancel reconnect" : "Stop channel");
+            isReconnecting ? "Cancel reconnect" : "Stop content");
         RetryPlaybackButton.Visibility = canRetryReconnect
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -1482,6 +1596,7 @@ public sealed partial class MainPage : Page, IDisposable
         AutomationProperties.SetName(
             AspectModeButton,
             isFit ? "Use fill aspect mode" : "Use fit aspect mode");
+        ApplyPlaybackTimeline(playback.CurrentTimeline);
     }
 
     private static bool CanChangePlaybackControls(PlaybackState state) =>
@@ -1525,19 +1640,24 @@ public sealed partial class MainPage : Page, IDisposable
 
     private static string GetPlaybackStatusText(
         PlaybackSessionSnapshot snapshot,
-        bool canRetryReconnect) => snapshot.State switch
+        bool canRetryReconnect)
     {
-        PlaybackState.Opening => "Opening channel.",
-        PlaybackState.Buffering => "Buffering channel.",
-        PlaybackState.Playing => "Channel is playing.",
-        PlaybackState.Paused => "Playback paused.",
-        PlaybackState.Reconnecting => GetReconnectStatusText(snapshot.Reconnect),
-        PlaybackState.Stopping => "Stopping playback.",
-        PlaybackState.Failed when canRetryReconnect =>
-            "Playback could not reconnect. Check your connection and retry.",
-        PlaybackState.Failed => "Playback is unavailable.",
-        _ => "Playback stopped.",
-    };
+        bool onDemand = snapshot.ContentIntent == PlaybackContentIntent.OnDemand;
+        return snapshot.State switch
+        {
+            PlaybackState.Opening => onDemand ? "Opening content." : "Opening channel.",
+            PlaybackState.Buffering => onDemand ? "Buffering content." : "Buffering channel.",
+            PlaybackState.Playing => onDemand ? "Content is playing." : "Channel is playing.",
+            PlaybackState.Paused => "Playback paused.",
+            PlaybackState.Completed => "Playback completed.",
+            PlaybackState.Reconnecting => GetReconnectStatusText(snapshot.Reconnect),
+            PlaybackState.Stopping => "Stopping playback.",
+            PlaybackState.Failed when canRetryReconnect =>
+                "Playback could not reconnect. Check your connection and retry.",
+            PlaybackState.Failed => "Playback is unavailable.",
+            _ => "Playback stopped.",
+        };
+    }
 
     private static string GetReconnectStatusText(PlaybackReconnectSnapshot? reconnect) =>
         reconnect?.Phase switch
@@ -1619,11 +1739,6 @@ public sealed partial class MainPage : Page, IDisposable
         }
     }
 
-    private void MainPage_Unloaded(object sender, RoutedEventArgs e)
-    {
-        Dispose();
-    }
-
     public void Dispose()
     {
         if (_disposed) return;
@@ -1646,14 +1761,19 @@ public sealed partial class MainPage : Page, IDisposable
         PageRoot.RemoveHandler(
             UIElement.KeyDownEvent,
             _fullscreenKeyDownHandler);
+        PlaybackTimelineSlider.RemoveHandler(
+            UIElement.PointerPressedEvent,
+            _timelinePointerPressedHandler);
+        PlaybackTimelineSlider.RemoveHandler(
+            UIElement.PointerReleasedEvent,
+            _timelinePointerReleasedHandler);
         PageRoot.GettingFocus -= FullscreenSurface_GettingFocus;
         _disposed = true;
         _catalogAdmissionReady = false;
-        _sourceOnboardingCancellation?.Cancel();
-        HideSourceOnboardingPanel(clearStatus: true);
         if (_playback is not null)
         {
             _playback.StateChanged -= Playback_StateChanged;
+            _playback.TimelineChanged -= Playback_TimelineChanged;
             _playback = null;
         }
 
@@ -1666,7 +1786,6 @@ public sealed partial class MainPage : Page, IDisposable
         _coordinator?.Dispose();
         _retryPendingSourceCleanup = null;
         _deleteSource = null;
-        _addRemotePlaylist = null;
         FullscreenToggleRequested = null;
         _lifetime.Dispose();
         _logoPageCancellation.Dispose();
