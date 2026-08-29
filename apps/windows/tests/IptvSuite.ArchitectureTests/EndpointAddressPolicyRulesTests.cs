@@ -5,9 +5,12 @@ public sealed class EndpointAddressPolicyRulesTests
 {
     private static readonly string[] ExpectedExplicitPrivatePolicyCallers =
     [
-        "apps/windows/src/IptvSuite.Application/RemotePlaylistSourceOnboarding.cs",
-        "apps/windows/src/IptvSuite.Infrastructure/RemotePlaylistCatalogLoader.cs",
         "apps/windows/src/IptvSuite.Infrastructure/XtreamProviderClient.cs",
+    ];
+
+    private static readonly string[] ExpectedRemotePlaylistPolicyCallers =
+    [
+        "apps/windows/src/IptvSuite.Infrastructure/RemotePlaylistCatalogLoader.cs",
     ];
 
     [TestMethod]
@@ -96,11 +99,16 @@ public sealed class EndpointAddressPolicyRulesTests
         StringAssert.Contains(policy, "new NetworkStream(socket, ownsSocket: true)");
         StringAssert.Contains(applicationContract, "internal enum HttpEndpointAddressPolicy");
         StringAssert.Contains(applicationContract, "internal static HttpTransportRequest CreateForExplicitPrivateSourceOrigin(");
+        StringAssert.Contains(applicationContract, "internal static HttpTransportRequest CreateForExplicitRemotePlaylistSourceOrigin(");
         StringAssert.Contains(applicationContract, "HttpEndpointAddressPolicy.PublicOnly");
-        StringAssert.Contains(onboarding, "HttpTransportRequest.CreateForExplicitPrivateSourceOrigin(");
-        StringAssert.Contains(loader, "HttpTransportRequest.CreateForExplicitPrivateSourceOrigin(");
+        StringAssert.Contains(loader, "HttpTransportRequest.CreateForExplicitRemotePlaylistSourceOrigin(");
+        Assert.IsFalse(onboarding.Contains("HttpTransportRequest", StringComparison.Ordinal));
+        Assert.IsFalse(onboarding.Contains("ConnectionProbeService", StringComparison.Ordinal));
+        Assert.IsFalse(onboarding.Contains("CreateForExplicitPrivateSourceOrigin", StringComparison.Ordinal));
+        Assert.IsFalse(loader.Contains("CreateForExplicitPrivateSourceOrigin", StringComparison.Ordinal));
         StringAssert.Contains(logoProvider, "HttpTransportRequest.Create(uri, endpoint, MaximumLogoBytes)");
         Assert.IsFalse(logoProvider.Contains("CreateForExplicitPrivateSourceOrigin", StringComparison.Ordinal));
+        Assert.IsFalse(logoProvider.Contains("CreateForExplicitRemotePlaylistSourceOrigin", StringComparison.Ordinal));
         StringAssert.Contains(onboardingView, "özel/yerel ağdaysa yalnızca bu tam sunucu ve porta");
         StringAssert.Contains(securityBaseline, "her zaman `PublicOnly` policy ile reddedilir");
         StringAssert.Contains(securityBaseline, "bu opt-in logo/image isteğine veya cross-origin redirect'e taşınmaz");
@@ -128,6 +136,19 @@ public sealed class EndpointAddressPolicyRulesTests
         CollectionAssert.AreEqual(
             ExpectedExplicitPrivatePolicyCallers,
             explicitPrivatePolicyCallers);
+
+        string[] remotePlaylistPolicyCallers = Directory
+            .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(path, applicationContractPath, StringComparison.OrdinalIgnoreCase))
+            .Where(path => File.ReadAllText(path).Contains(
+                "HttpTransportRequest.CreateForExplicitRemotePlaylistSourceOrigin(",
+                StringComparison.Ordinal))
+            .Select(path => Path.GetRelativePath(repositoryRoot, path).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            ExpectedRemotePlaylistPolicyCallers,
+            remotePlaylistPolicyCallers);
     }
 
     private static string FindRepositoryRoot()

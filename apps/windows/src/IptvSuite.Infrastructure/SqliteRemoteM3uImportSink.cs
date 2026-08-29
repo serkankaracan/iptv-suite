@@ -70,6 +70,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     private SqliteImportCommitDisposition _commitDisposition;
     private int? _committedChannelCount;
     private int? _committedWarningCount;
+    private bool _committedEntryLimitReached;
 
     internal SqliteRemoteM3uImportSink(string databasePath) : this(databasePath, false)
     {
@@ -104,6 +105,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     internal SqliteImportCommitDisposition CommitDisposition => _commitDisposition;
     internal int? CommittedChannelCount => _committedChannelCount;
     internal int? CommittedWarningCount => _committedWarningCount;
+    internal bool CommittedEntryLimitReached => _committedEntryLimitReached;
 
     public async ValueTask<DomainResult<bool>> BeginAsync(
         ContentSource source,
@@ -209,6 +211,11 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
     {
         ArgumentNullException.ThrowIfNull(entry);
         if (_transaction is null || _source is null || _dek is null || _contentHash is null)
+        {
+            return ValueTask.FromResult(DomainResult.Failure<bool>(DomainErrorCode.DomainInvariantViolation));
+        }
+
+        if (_written >= RemoteM3uPlaylistParser.MaximumEntries)
         {
             return ValueTask.FromResult(DomainResult.Failure<bool>(DomainErrorCode.DomainInvariantViolation));
         }
@@ -352,13 +359,19 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
         ArgumentNullException.ThrowIfNull(parseResult);
         if (_transaction is null || _source is null || _contentHash is null ||
             parseResult.ContentKind != PlaylistContentKind.ExtendedM3uCatalog ||
-            parseResult.ProcessedEntryCount != _written)
+            parseResult.ProcessedEntryCount != _written ||
+            parseResult.ProcessedEntryCount > RemoteM3uPlaylistParser.MaximumEntries ||
+            parseResult.SkippedEntryCount < 0 ||
+            (parseResult.EntryLimitReached &&
+             (parseResult.ProcessedEntryCount != RemoteM3uPlaylistParser.MaximumEntries ||
+              parseResult.SkippedEntryCount == 0)))
         {
             return DomainResult.Failure<bool>(DomainErrorCode.DomainInvariantViolation);
         }
 
         try
         {
+            int warningCount = checked(_warnings + parseResult.SkippedEntryCount);
             byte[] hash = _contentHash.GetHashAndReset();
             byte[] cache = BuildCacheKey(hash, _entityTag, _lastModified);
             try
@@ -372,7 +385,7 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                     UPDATE snapshot_keys SET wrapped_dek = NULL, key_state = 2
                     WHERE snapshot_id = (SELECT active_snapshot_id FROM sources WHERE source_id = $source);
                     """, cancellationToken,
-                    ("$hash", hash), ("$cache", cache), ("$items", _written), ("$warnings", _warnings),
+                    ("$hash", hash), ("$cache", cache), ("$items", _written), ("$warnings", warningCount),
                     ("$snapshot", _snapshotText!), ("$source", _sourceText!)).ConfigureAwait(false);
                 if (!await TryActivateSourceAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -386,13 +399,14 @@ internal sealed class SqliteRemoteM3uImportSink : IRemoteM3uImportSink, IAsyncDi
                         persisted_count = $items, warning_count = $warnings, failure_code = NULL
                     WHERE sync_run_id = $run;
                     """, cancellationToken,
-                    ("$items", _written), ("$warnings", _warnings), ("$run", Id(_syncRunId)),
+                    ("$items", _written), ("$warnings", warningCount), ("$run", Id(_syncRunId)),
                     ("$completed", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))).ConfigureAwait(false);
                 _commitDisposition = SqliteImportCommitDisposition.Indeterminate;
                 await _transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 _commitDisposition = SqliteImportCommitDisposition.Committed;
                 _committedChannelCount = _written;
-                _committedWarningCount = _warnings;
+                _committedWarningCount = warningCount;
+                _committedEntryLimitReached = parseResult.EntryLimitReached;
                 await DisposeSessionAsync().ConfigureAwait(false);
                 return DomainResult.Success(true);
             }

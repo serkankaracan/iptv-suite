@@ -130,6 +130,52 @@ public sealed class PlaybackFaultWatchdogTests
     }
 
     [TestMethod]
+    public void PausedReadinessWithNoLaterPlayingCallbackExpiresStartup()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        using var watchdog = Create(time);
+        PlaybackSessionId session = Session(1);
+        var expired = new ConcurrentQueue<PlaybackFaultWatchdogExpiredEventArgs>();
+        watchdog.Expired += (_, args) => expired.Enqueue(args);
+
+        watchdog.Observe(Active(session, PlaybackState.Opening));
+        time.Advance(TimeSpan.FromSeconds(4));
+        watchdog.Observe(Active(session, PlaybackState.Paused));
+        time.Advance(TimeSpan.FromSeconds(6));
+
+        Assert.AreEqual(1, expired.Count);
+        Assert.IsTrue(expired.TryDequeue(out PlaybackFaultWatchdogExpiredEventArgs? observed));
+        Assert.AreEqual(session, observed!.SessionId);
+        Assert.AreEqual(
+            PlaybackFaultWatchdogFailureKind.StartupTimeout,
+            observed.FailureKind);
+        Assert.AreEqual(DomainErrorCode.PlaybackStartFailed, observed.Error.Code);
+    }
+
+    [TestMethod]
+    public void PlayReconciliationFromPausedWithoutNativeCallbackExpiresRebuffer()
+    {
+        FakeTimeProvider time = TestTime.Create(Start);
+        using var watchdog = Create(time);
+        PlaybackSessionId session = Session(1);
+        var expired = new ConcurrentQueue<PlaybackFaultWatchdogExpiredEventArgs>();
+        watchdog.Expired += (_, args) => expired.Enqueue(args);
+
+        watchdog.Observe(Active(session, PlaybackState.Playing));
+        watchdog.Observe(Active(session, PlaybackState.Paused));
+        watchdog.Observe(Active(session, PlaybackState.Buffering));
+        time.Advance(RebufferTimeout);
+
+        Assert.AreEqual(1, expired.Count);
+        Assert.IsTrue(expired.TryDequeue(out PlaybackFaultWatchdogExpiredEventArgs? observed));
+        Assert.AreEqual(session, observed!.SessionId);
+        Assert.AreEqual(
+            PlaybackFaultWatchdogFailureKind.RebufferTimeout,
+            observed.FailureKind);
+        Assert.AreEqual(DomainErrorCode.StreamInterrupted, observed.Error.Code);
+    }
+
+    [TestMethod]
     public void PlayingOrPausedCancelsRebufferUntilALaterBufferingTransition()
     {
         FakeTimeProvider time = TestTime.Create(Start);

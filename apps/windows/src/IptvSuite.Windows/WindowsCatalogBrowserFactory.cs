@@ -23,7 +23,6 @@ internal static class WindowsCatalogBrowserFactory
             transport);
         var onboarding = new RemotePlaylistSourceOnboardingService(
             secretStore,
-            transport,
             importer,
             TimeProvider.System);
         return new WindowsCatalogServices(

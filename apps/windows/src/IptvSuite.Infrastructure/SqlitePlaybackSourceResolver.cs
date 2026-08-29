@@ -138,7 +138,7 @@ internal sealed class SqlitePlaybackSourceResolver
         SecretLease? lease = locator.Lease!;
         try
         {
-            if (!IsValidHttpsLocator(lease.Value.Span))
+            if (!IsValidRemotePlaylistLocator(lease.Value.Span, binding))
             {
                 return Failed(PlaybackSourceResolutionFailure.InvalidLocator);
             }
@@ -391,12 +391,9 @@ internal sealed class SqlitePlaybackSourceResolver
 
     private static bool IsValidHttpsLocator(ReadOnlySpan<byte> locatorBytes)
     {
-        string locator;
-        try
-        {
-            locator = StrictUtf8.GetString(locatorBytes);
-        }
-        catch (DecoderFallbackException)
+        if (!TryDecodeLocator(locatorBytes, out string? locator) ||
+            !Uri.TryCreate(locator, UriKind.Absolute, out Uri? locatorUri) ||
+            !string.IsNullOrEmpty(locatorUri.UserInfo))
         {
             return false;
         }
@@ -406,6 +403,57 @@ internal sealed class SqlitePlaybackSourceResolver
                 "Playback source",
                 locator);
         return prepared.IsSuccess;
+    }
+
+    private static bool IsValidRemotePlaylistLocator(
+        ReadOnlySpan<byte> locatorBytes,
+        PlaybackSourceBinding binding)
+    {
+        bool sourceUsesHttp = string.Equals(
+            binding.EndpointScheme,
+            Uri.UriSchemeHttp,
+            StringComparison.Ordinal);
+        if (!TryDecodeLocator(locatorBytes, out string? locator) ||
+            !Uri.TryCreate(locator, UriKind.Absolute, out Uri? locatorUri) ||
+            !string.IsNullOrEmpty(locatorUri.UserInfo))
+        {
+            return false;
+        }
+
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared = sourceUsesHttp
+            ? SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Playback source",
+                locator)
+            : SourceConfigurationValidator.PrepareRemotePlaylist(
+                "Playback source",
+                locator);
+        if (!prepared.IsSuccess)
+        {
+            return false;
+        }
+
+        SafeEndpoint locatorEndpoint = prepared.Value!.SafeEndpoint;
+        return string.Equals(
+                locatorEndpoint.Scheme,
+                Uri.UriSchemeHttps,
+                StringComparison.Ordinal) ||
+            (sourceUsesHttp && MatchesEndpoint(locatorEndpoint, binding));
+    }
+
+    private static bool TryDecodeLocator(
+        ReadOnlySpan<byte> locatorBytes,
+        out string? locator)
+    {
+        try
+        {
+            locator = StrictUtf8.GetString(locatorBytes);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            locator = null;
+            return false;
+        }
     }
 
     private static PlaybackSourceResolutionResult Failed(

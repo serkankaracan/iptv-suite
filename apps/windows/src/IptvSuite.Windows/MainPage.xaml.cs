@@ -17,6 +17,7 @@ using Windows.Foundation;
 using Windows.Storage.Streams;
 using Windows.System;
 using Windows.UI.Core;
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
 namespace IptvSuite.Windows;
 
@@ -24,10 +25,21 @@ public sealed partial class MainPage : Page, IDisposable
 {
     private const int PageSize = 200;
     private const int VolumeStep = 5;
+    private static readonly TimeSpan FullscreenControlsAutoHideDelay =
+        TimeSpan.FromSeconds(3);
+    private const string InsecureHttpCatalogWarning =
+        "Warning: cleartext HTTP traffic is unencrypted and can be observed or modified in transit (MITM).";
+    private const string RemotePlaylistEntryLimitWarning =
+        "Warning: only the first 50,000 valid entries were imported; additional entries were skipped to keep the catalog bounded.";
+    private const string NewPlaylistSelectedHint =
+        "New playlist is selected; use Playlist source to return to earlier playlists.";
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _catalogOperationSync = new();
     private readonly object _operationSync = new();
     private readonly SemaphoreSlim _playbackControlGate = new(1, 1);
+    private readonly DispatcherQueueTimer _fullscreenControlsAutoHideTimer;
+    private readonly PointerEventHandler _fullscreenPointerMovedHandler;
+    private readonly KeyEventHandler _fullscreenKeyDownHandler;
     private CatalogBrowseCoordinator? _coordinator;
     private ChannelLogoCache? _logoCache;
     private PlaybackSessionCoordinator? _playback;
@@ -64,6 +76,22 @@ public sealed partial class MainPage : Page, IDisposable
     public MainPage()
     {
         InitializeComponent();
+        _fullscreenControlsAutoHideTimer = DispatcherQueue.CreateTimer();
+        _fullscreenControlsAutoHideTimer.Interval = FullscreenControlsAutoHideDelay;
+        _fullscreenControlsAutoHideTimer.IsRepeating = false;
+        _fullscreenControlsAutoHideTimer.Tick +=
+            FullscreenControlsAutoHideTimer_Tick;
+        _fullscreenPointerMovedHandler = FullscreenSurface_PointerMoved;
+        _fullscreenKeyDownHandler = FullscreenSurface_KeyDown;
+        PageRoot.AddHandler(
+            UIElement.PointerMovedEvent,
+            _fullscreenPointerMovedHandler,
+            handledEventsToo: true);
+        PageRoot.AddHandler(
+            UIElement.KeyDownEvent,
+            _fullscreenKeyDownHandler,
+            handledEventsToo: true);
+        PageRoot.GettingFocus += FullscreenSurface_GettingFocus;
         AddHandler(
             UIElement.LosingFocusEvent,
             new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus),
@@ -182,6 +210,7 @@ public sealed partial class MainPage : Page, IDisposable
         CatalogStatusPanel.Visibility = catalogVisibility;
         CatalogPagingPanel.Visibility = catalogVisibility;
         PageRoot.Padding = isFullscreen ? new Thickness(0) : new Thickness(32);
+        PageRoot.RowSpacing = isFullscreen ? 0 : 16;
         Grid.SetColumn(PlaybackPanel, isFullscreen ? 0 : 1);
         Grid.SetColumnSpan(PlaybackPanel, isFullscreen ? 2 : 1);
         FullscreenButton.Content = isFullscreen ? "Exit fullscreen" : "Fullscreen";
@@ -190,6 +219,15 @@ public sealed partial class MainPage : Page, IDisposable
             isFullscreen ? "Exit fullscreen" : "Enter fullscreen");
         PlaybackState state = _playback?.Current.State ?? PlaybackState.Closed;
         FullscreenButton.IsEnabled = _isFullscreen || CanChangePlaybackControls(state);
+        if (isFullscreen)
+        {
+            ShowFullscreenControlsAndRestartAutoHide();
+        }
+        else
+        {
+            StopFullscreenControlsAutoHide(showControls: true);
+        }
+
         if (restoreFocus)
         {
             DispatcherQueue.TryEnqueue(RestoreFocusAfterFullscreen);
@@ -204,6 +242,15 @@ public sealed partial class MainPage : Page, IDisposable
         }
 
         _fullscreenTransitionPending = false;
+        if (_isFullscreen)
+        {
+            ShowFullscreenControlsAndRestartAutoHide();
+        }
+        else
+        {
+            StopFullscreenControlsAutoHide(showControls: true);
+        }
+
         PlaybackState state = _playback?.Current.State ?? PlaybackState.Closed;
         FullscreenButton.IsEnabled = _isFullscreen || CanChangePlaybackControls(state);
         PlaybackStatusText.Text = "Fullscreen is unavailable.";
@@ -308,6 +355,7 @@ public sealed partial class MainPage : Page, IDisposable
             SourceSelector.SelectedIndex = sources.Count == 0
                 ? -1
                 : Math.Max(0, preferredIndex);
+            ResetCategoryFilterForSourceChange();
             _updatingSelectors = false;
             if (sources.Count == 0)
             {
@@ -358,7 +406,12 @@ public sealed partial class MainPage : Page, IDisposable
             }
             int first = result.Channels.TotalCount == 0 ? 0 : result.Channels.Offset + 1;
             int last = Math.Min(result.Channels.Offset + result.Channels.Items.Count, result.Channels.TotalCount);
-            StatusText.Text = result.Channels.TotalCount == 0 ? "No channels match the current filters." : $"Showing {first}–{last} of {result.Channels.TotalCount} channels.";
+            string browseStatus = result.Channels.TotalCount == 0
+                ? "No channels match the current filters."
+                : $"Showing {first}–{last} of {result.Channels.TotalCount} channels.";
+            StatusText.Text = source.UsesInsecureHttp
+                ? $"{browseStatus} {InsecureHttpCatalogWarning}"
+                : browseStatus;
             UpdatePaging(result.Channels.TotalCount);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
@@ -467,11 +520,26 @@ public sealed partial class MainPage : Page, IDisposable
                 return;
             }
 
-            SourceId sourceId = result.Value!.SourceId;
+            RemotePlaylistSourceOnboardingResult onboardingResult = result.Value!;
+            SourceId sourceId = onboardingResult.SourceId;
+            bool entryLimitReached = onboardingResult.EntryLimitReached;
             HideSourceOnboardingPanel(clearStatus: true);
             ResetLogoPageCancellation();
             ClearCatalogView();
             await LoadSourcesAsync(sourceId);
+            if (!_disposed)
+            {
+                StatusText.Text = string.IsNullOrWhiteSpace(StatusText.Text)
+                    ? NewPlaylistSelectedHint
+                    : $"{StatusText.Text} {NewPlaylistSelectedHint}";
+            }
+
+            if (entryLimitReached && !_disposed)
+            {
+                StatusText.Text = string.IsNullOrWhiteSpace(StatusText.Text)
+                    ? RemotePlaylistEntryLimitWarning
+                    : $"{StatusText.Text} {RemotePlaylistEntryLimitWarning}";
+            }
         }
         catch (OperationCanceledException) when (
             _sourceOnboardingCancellation?.IsCancellationRequested is true ||
@@ -796,6 +864,10 @@ public sealed partial class MainPage : Page, IDisposable
         RemotePlaylistSourceNameTextBox.IsEnabled = !_sourceOnboardingOperationPending;
         RemotePlaylistLocatorTextBox.IsEnabled = !_sourceOnboardingOperationPending;
         RemotePlaylistAuthorizationCheckBox.IsEnabled = !_sourceOnboardingOperationPending;
+        RemotePlaylistProgressRing.IsActive = _sourceOnboardingOperationPending;
+        RemotePlaylistProgressRing.Visibility = _sourceOnboardingOperationPending
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         RemotePlaylistAddButton.IsEnabled = commonAdmission &&
             _sourceOnboardingPanelOpen &&
             RemotePlaylistAuthorizationCheckBox.IsChecked is true;
@@ -832,9 +904,29 @@ public sealed partial class MainPage : Page, IDisposable
         if (!_updatingSelectors)
         {
             _offset = 0;
+            ResetCategoryFilterForSourceChange();
             await BrowseAsync(false);
         }
     }
+
+    private void ResetCategoryFilterForSourceChange()
+    {
+        bool wasUpdatingSelectors = _updatingSelectors;
+        _updatingSelectors = true;
+        try
+        {
+            CategorySelector.ItemsSource = new[]
+            {
+                new CategoryOption("All categories", null),
+            };
+            CategorySelector.SelectedIndex = 0;
+        }
+        finally
+        {
+            _updatingSelectors = wasUpdatingSelectors;
+        }
+    }
+
     private async void CategorySelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_updatingSelectors) { _offset = 0; await BrowseAsync(false); } }
     private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { _offset = 0; await BrowseAsync(false); }
     private async void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) { if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput) { _offset = 0; await BrowseAsync(debounce: true); } }
@@ -1011,6 +1103,94 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async void FullscreenButton_Click(object sender, RoutedEventArgs e) =>
         await ToggleFullscreenAsync();
+
+    private void FullscreenSurface_PointerMoved(
+        object sender,
+        PointerRoutedEventArgs args) =>
+        ShowFullscreenControlsAndRestartAutoHide();
+
+    private void FullscreenSurface_KeyDown(object sender, KeyRoutedEventArgs args) =>
+        ShowFullscreenControlsAndRestartAutoHide();
+
+    private void FullscreenSurface_GettingFocus(
+        UIElement sender,
+        GettingFocusEventArgs args) =>
+        ShowFullscreenControlsAndRestartAutoHide();
+
+    private void FullscreenControlsAutoHideTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        sender.Stop();
+        if (_disposed || !_isFullscreen)
+        {
+            return;
+        }
+
+        if (IsKeyboardFocusWithinPlaybackControls())
+        {
+            RestartFullscreenControlsAutoHideTimer();
+            return;
+        }
+
+        PlaybackControlsPanel.Visibility = Visibility.Collapsed;
+        PlaybackPanel.RowSpacing = 0;
+    }
+
+    private void ShowFullscreenControlsAndRestartAutoHide()
+    {
+        if (_disposed || !_isFullscreen)
+        {
+            return;
+        }
+
+        PlaybackControlsPanel.Visibility = Visibility.Visible;
+        PlaybackPanel.RowSpacing = 8;
+        RestartFullscreenControlsAutoHideTimer();
+    }
+
+    private void RestartFullscreenControlsAutoHideTimer()
+    {
+        _fullscreenControlsAutoHideTimer.Stop();
+        _fullscreenControlsAutoHideTimer.Start();
+    }
+
+    private void StopFullscreenControlsAutoHide(bool showControls)
+    {
+        _fullscreenControlsAutoHideTimer.Stop();
+        if (!showControls)
+        {
+            return;
+        }
+
+        PlaybackControlsPanel.Visibility = Visibility.Visible;
+        PlaybackPanel.RowSpacing = 8;
+    }
+
+    private bool IsKeyboardFocusWithinPlaybackControls()
+    {
+        if (XamlRoot is not { } xamlRoot ||
+            FocusManager.GetFocusedElement(xamlRoot) is not Control
+            {
+                FocusState: FocusState.Keyboard,
+            } focusedControl)
+        {
+            return false;
+        }
+
+        DependencyObject? current = focusedControl;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, PlaybackControlsPanel))
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
 
     private Task ChangeVolumeAsync(int delta)
         => ExecutePlaybackControlAsync(
@@ -1457,6 +1637,16 @@ public sealed partial class MainPage : Page, IDisposable
         }
 
         _sourceDeletionDialog = null;
+        StopFullscreenControlsAutoHide(showControls: false);
+        _fullscreenControlsAutoHideTimer.Tick -=
+            FullscreenControlsAutoHideTimer_Tick;
+        PageRoot.RemoveHandler(
+            UIElement.PointerMovedEvent,
+            _fullscreenPointerMovedHandler);
+        PageRoot.RemoveHandler(
+            UIElement.KeyDownEvent,
+            _fullscreenKeyDownHandler);
+        PageRoot.GettingFocus -= FullscreenSurface_GettingFocus;
         _disposed = true;
         _catalogAdmissionReady = false;
         _sourceOnboardingCancellation?.Cancel();

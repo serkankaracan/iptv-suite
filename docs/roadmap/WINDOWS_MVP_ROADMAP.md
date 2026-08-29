@@ -4,6 +4,8 @@
 
 **Durum:** M1–M9, M11, M13 ve M14 completed; M10 conditional success; M12 partial verified; M15 ve M16 `IN PROGRESS / BLOCKED`
 
+**ADR-008 successor status — `POLICY ACCEPTED / LOCAL SUCCESSOR, HOSTED ACCEPTANCE STALE, 2026-08-29`:** Kullanıcı geri bildirimi üzerine açık UI onaylı Remote M3U HTTP locator/query compatibility kapsamına alınmıştır. User-info, Xtream HTTP, HTTP logo, HTTP Authorization/Cookie/Referer, cross-origin HTTP playlist redirect ve HTTPS→HTTP downgrade reddedilir; initial HTTP channel yalnız HTTP source'un exact `SafeEndpoint` origin'inde, HTTPS channel ise URI/scheme validation ile kabul edilir. Remote M3U onboarding HTTP/HTTPS ayrımı olmadan preliminary full-body probe yapmaz; protected staging sonrasında `128 MiB` decompressed-response ve iki dakikalık total request bütçeli tek bounded streaming import isteği kullanır. Açık-onaylı HTTP catalog 50.000 geçerli entry'yi aşarsa ilk 50.000 provider sırasıyla commit edilir, tail bounded olarak doğrulanıp atlanır ve UI truncation uyarısı verir; HTTPS/direct 50.001 fail-closed matrisi korunur. Genel HTTP/Xtream `4 MiB`/15 saniye sınırı değişmez. Protected-at-rest locator cleartext transit trafiğini güvenli yapmaz. Native player HLS/media alt-kaynak ve redirect origin/address enforcement'ı `UNVERIFIED`, yüksek residual ve release blocker'dır. M3/M5/M7 completion sonuçları kendi exact tarihsel kapsamlarında geçerlidir; successor production değişikliği M15 package/SBOM/CVE ve M16 final-artifact/security-architecture/synthetic-journey kabullerini yeni aday için stale bırakır. Yeni hosted `VERIFIED`, Store veya hukuk kabulü yoktur; [ADR-008](../adr/ADR-008-remote-m3u-cleartext-http-compatibility.md).
+
 **Kural:** Her milestone clean checkout'tan build/test edilebilir, sentetik veriyle demo edilebilir ve geri alınabilir olmalıdır.
 
 Bu sıra temel Live TV playback zincirini bitirmeden VOD, Series veya EPG'yi başlatmaz. Exact komutlar M1'de gerçek projeden doğrulanıp `AGENTS.md`'ye yazılacaktır; Phase 0'da uydurulmamıştır.
@@ -860,6 +862,8 @@ Native DLL/capability/identity, IPTV content policy, privacy ya da codec/license
 Private Store flight'tan kurulmuş build'de sentetik source ekleme, 50k catalog browse ve Tier A playback; WACK/preflight/SBOM/privacy evidence pack.
 
 ## M16 — Windows MVP Release Candidate
+
+**HTTP compatibility successor etkisi:** Aşağıdaki `current` M16 ledger sayıları yalnız kaydedildikleri exact commit ve source closure'ları için tarihsel kanıttır. ADR-008 production-source değişikliğiyle successor candidate `stale-reopen` durumundadır; feature-freeze, release-operations, fiziksel matrix ve soak blocker'larına ek olarak package/SBOM/CVE ile üç M16 automated acceptance lane'i yeniden üretilmeden yeni aday için teknik kapanış iddia edilmez. Local implementation veya test sonucu hosted provenance yerine geçmez.
 
 ### Amaç
 

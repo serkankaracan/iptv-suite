@@ -320,7 +320,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
             parseResultType,
             BindingFlags.Instance | BindingFlags.NonPublic,
             null,
-            [PlaylistContentKind.ExtendedM3uCatalog, entries, 1, 0, null],
+            [PlaylistContentKind.ExtendedM3uCatalog, entries, 1, 0, false, null],
             null)!;
         await InvokeDomainValueTaskAsync(
             sinkType.GetMethod("CompleteAsync")!,
@@ -344,6 +344,84 @@ public sealed class RemotePlaylistCatalogLoaderTests
         Assert.IsTrue(result.IsSuccess);
         Assert.AreEqual(1, result.EntryCount);
         Assert.AreEqual("https://fixtures.invalid/catalog/final/stream/news.ts", result.FirstLocator);
+        Assert.AreEqual(128 * 1024 * 1024, transport.MaximumResponseBytes);
+        Assert.AreEqual(TimeSpan.FromMinutes(2), transport.RequestTimeoutOverride);
+    }
+
+    [TestMethod]
+    public async Task HttpSourceUsesExplicitFactoryAndAppliesFinalAndEntryOriginPolicy()
+    {
+        var store = new M4InMemorySecretStore();
+        ContentSource source = await CreateSourceAsync(
+            store,
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            allowInsecureHttp: true);
+        const string playlist = "#EXTM3U\n" +
+            "#EXTINF:-1 group-title=\"News\",Relative\nstream/relative.ts\n" +
+            "#EXTINF:-1 group-title=\"News\",Secure\nhttps://media.invalid/live/secure.ts\n" +
+            "#EXTINF:-1 group-title=\"News\",Other HTTP\nhttp://other.invalid:8080/live/rejected.ts\n";
+        var sameOriginTransport = new SingleResponseTransport(
+            playlist,
+            new Uri("http://fixtures.invalid:8080/catalog/final/list.m3u"));
+
+        LoaderSnapshot sameOrigin = await InvokeLoaderAsync(store, sameOriginTransport, source);
+
+        Assert.IsTrue(sameOrigin.IsSuccess);
+        Assert.AreEqual(2, sameOrigin.EntryCount);
+        Assert.AreEqual(
+            "http://fixtures.invalid:8080/catalog/final/stream/relative.ts",
+            sameOrigin.FirstLocator);
+        Assert.AreEqual(Uri.UriSchemeHttp, sameOriginTransport.RequestScheme);
+        Assert.AreEqual(128 * 1024 * 1024, sameOriginTransport.MaximumResponseBytes);
+        Assert.AreEqual(TimeSpan.FromMinutes(2), sameOriginTransport.RequestTimeoutOverride);
+
+        LoaderSnapshot otherHttpOrigin = await InvokeLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                playlist,
+                new Uri("http://redirect.invalid:8080/catalog/final/list.m3u")),
+            source);
+        LoaderSnapshot httpsUpgrade = await InvokeLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                playlist,
+                new Uri("https://redirect.invalid/catalog/final/list.m3u")),
+            source);
+
+        Assert.AreEqual(DomainErrorCode.PlaylistResponseAddressRejected, otherHttpOrigin.ErrorCode);
+        Assert.IsTrue(httpsUpgrade.IsSuccess);
+        Assert.AreEqual(2, httpsUpgrade.EntryCount);
+        Assert.AreEqual(
+            "https://redirect.invalid/catalog/final/stream/relative.ts",
+            httpsUpgrade.FirstLocator);
+    }
+
+    [TestMethod]
+    public async Task SafeFormatReasonsPropagateWithoutResponseOrEntryDetails()
+    {
+        var store = new M4InMemorySecretStore();
+        ContentSource httpsSource = await CreateSourceAsync(store);
+        LoaderSnapshot hls = await InvokeLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                "#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:10,\nsegment.ts\n#EXT-X-ENDLIST\n"),
+            httpsSource);
+
+        ContentSource httpSource = await CreateSourceAsync(
+            store,
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            allowInsecureHttp: true);
+        LoaderSnapshot rejectedEntries = await InvokeLoaderAsync(
+            store,
+            new SingleResponseTransport(
+                "#EXTM3U\n#EXTINF:-1,Synthetic\nhttp://media.invalid:8080/live.ts\n",
+                new Uri("http://fixtures.invalid:8080/catalog/final/list.m3u")),
+            httpSource);
+
+        Assert.AreEqual(DomainErrorCode.PlaylistHlsManifestUnsupported, hls.ErrorCode);
+        Assert.AreEqual(
+            DomainErrorCode.PlaylistEntriesRejectedByAddressPolicy,
+            rejectedEntries.ErrorCode);
     }
 
     [TestMethod]
@@ -385,13 +463,23 @@ public sealed class RemotePlaylistCatalogLoaderTests
         Assert.AreEqual("[HTTP-TRANSPORT-REQUEST]", transport.RequestText);
     }
 
-    private static async Task<ContentSource> CreateSourceAsync(M4InMemorySecretStore store)
+    private static async Task<ContentSource> CreateSourceAsync(
+        M4InMemorySecretStore store,
+        string locator = "https://fixtures.invalid/catalog/list.m3u",
+        bool allowInsecureHttp = false)
     {
         var protection = new SourceDraftProtectionService(store);
-        DomainResult<ValidatedSourceDraft> draft = await protection.ProtectRemotePlaylistAsync(
-            SourceId.Generate(),
-            "Synthetic remote",
-            "https://fixtures.invalid/catalog/list.m3u");
+        DomainResult<ValidatedSourceDraft> draft = allowInsecureHttp
+            ? await protection.ProtectRemotePlaylistAllowingInsecureHttpAsync(
+                SourceId.Generate(),
+                "Synthetic remote",
+                locator,
+                CancellationToken.None)
+            : await protection.ProtectRemotePlaylistAsync(
+                SourceId.Generate(),
+                "Synthetic remote",
+                locator,
+                CancellationToken.None);
         Assert.IsTrue(draft.IsSuccess);
         DateTimeOffset now = new(2026, 8, 20, 0, 0, 0, TimeSpan.Zero);
         DomainResult<ContentSource> source = ContentSource.Create(
@@ -565,21 +653,41 @@ public sealed class RemotePlaylistCatalogLoaderTests
     {
         private readonly string? _body;
         private readonly HttpStreamingResult? _failure;
+        private readonly Uri? _effectiveUri;
 
         internal SingleResponseTransport(string body)
+            : this(body, new Uri("https://fixtures.invalid/catalog/final/list.m3u"))
+        {
+        }
+
+        internal SingleResponseTransport(string body, Uri effectiveUri)
         {
             _body = body;
+            _effectiveUri = effectiveUri ?? throw new ArgumentNullException(nameof(effectiveUri));
         }
 
         internal SingleResponseTransport(HttpStreamingResult failure) => _failure = failure;
 
         internal string? RequestText { get; private set; }
 
+        internal string? RequestScheme { get; private set; }
+
+        internal int MaximumResponseBytes { get; private set; }
+
+        internal TimeSpan? RequestTimeoutOverride { get; private set; }
+
         public ValueTask<HttpStreamingResult> GetStreamAsync(
             HttpTransportRequest request,
             CancellationToken cancellationToken = default)
         {
             RequestText = request.ToString();
+            MaximumResponseBytes = request.MaximumResponseBytes;
+            RequestTimeoutOverride = (TimeSpan?)request.GetType().GetProperty(
+                "RequestTimeoutOverride",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(request);
+            RequestScheme = ((Uri)request.GetType().GetProperty(
+                "RequestUri",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(request)!).Scheme;
             if (_failure is not null) return ValueTask.FromResult(_failure);
             var stream = new MemoryStream(Encoding.UTF8.GetBytes(_body!), writable: false);
             ConstructorInfo constructor = typeof(HttpStreamingResponseLease).GetConstructors(
@@ -587,7 +695,7 @@ public sealed class RemotePlaylistCatalogLoaderTests
             var lease = (HttpStreamingResponseLease)constructor.Invoke(
                 [
                     stream,
-                    new Uri("https://fixtures.invalid/catalog/final/list.m3u"),
+                    _effectiveUri!,
                     new EmptyResponseOwner(),
                     "\"catalog-v1\"",
                     new DateTimeOffset(2026, 8, 21, 12, 34, 56, TimeSpan.Zero),

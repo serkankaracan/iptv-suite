@@ -41,7 +41,28 @@ public static class SourceConfigurationValidator
 
     public static DomainResult<PreparedRemotePlaylistSourceDraft> PrepareRemotePlaylist(
         string? displayName,
-        string? locator)
+        string? locator) =>
+        PrepareRemotePlaylistCore(
+            displayName,
+            locator,
+            allowInsecureHttp: false,
+            rejectUserInfo: false);
+
+    public static DomainResult<PreparedRemotePlaylistSourceDraft>
+        PrepareRemotePlaylistAllowingInsecureHttp(
+            string? displayName,
+            string? locator) =>
+        PrepareRemotePlaylistCore(
+            displayName,
+            locator,
+            allowInsecureHttp: true,
+            rejectUserInfo: true);
+
+    private static DomainResult<PreparedRemotePlaylistSourceDraft> PrepareRemotePlaylistCore(
+        string? displayName,
+        string? locator,
+        bool allowInsecureHttp,
+        bool rejectUserInfo)
     {
         DomainResult<string> normalizedName = ValidateDisplayName(displayName);
         if (!normalizedName.IsSuccess)
@@ -49,7 +70,10 @@ public static class SourceConfigurationValidator
             return DomainResult.Failure<PreparedRemotePlaylistSourceDraft>(normalizedName.Error!);
         }
 
-        DomainResult<SafeEndpoint> endpoint = ValidateHttpsLocator(locator, rejectUserInfo: false);
+        DomainResult<SafeEndpoint> endpoint = ValidateWebLocator(
+            locator,
+            rejectUserInfo,
+            allowInsecureHttp);
         if (!endpoint.IsSuccess)
         {
             return DomainResult.Failure<PreparedRemotePlaylistSourceDraft>(endpoint.Error!);
@@ -114,6 +138,12 @@ public static class SourceConfigurationValidator
     }
 
     internal static DomainResult<SafeEndpoint> ValidateHttpsLocator(string? locator, bool rejectUserInfo)
+        => ValidateWebLocator(locator, rejectUserInfo, allowInsecureHttp: false);
+
+    internal static DomainResult<SafeEndpoint> ValidateWebLocator(
+        string? locator,
+        bool rejectUserInfo,
+        bool allowInsecureHttp)
     {
         if (string.IsNullOrWhiteSpace(locator))
         {
@@ -150,12 +180,16 @@ public static class SourceConfigurationValidator
             return DomainResult.Failure<SafeEndpoint>(DomainErrorCode.EndpointSchemeUnsupported);
         }
 
-        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        bool isHttps = string.Equals(
+            uri.Scheme,
+            Uri.UriSchemeHttps,
+            StringComparison.OrdinalIgnoreCase);
+        if (!isHttps && !allowInsecureHttp)
         {
             return DomainResult.Failure<SafeEndpoint>(DomainErrorCode.InsecureTransportRejected);
         }
 
-        if (rejectUserInfo && !string.IsNullOrEmpty(uri.UserInfo))
+        if ((rejectUserInfo || !isHttps) && !string.IsNullOrEmpty(uri.UserInfo))
         {
             return DomainResult.Failure<SafeEndpoint>(DomainErrorCode.EndpointUserInfoNotAllowed);
         }

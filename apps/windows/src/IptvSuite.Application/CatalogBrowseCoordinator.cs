@@ -57,11 +57,25 @@ public sealed class CatalogBrowseCoordinator : IDisposable
 
             IReadOnlyList<CatalogCategoryItem> categories = await _browser
                 .ReadCategoriesAsync(sourceId, request.Token).ConfigureAwait(false);
+            CategoryId? admittedCategoryId = categoryId.HasValue && categories.Any(
+                category => category.CategoryId.Equals(categoryId.Value))
+                ? categoryId
+                : null;
             CatalogChannelPage channels = await _browser
-                .ReadChannelsAsync(sourceId, categoryId, searchText, offset, limit, request.Token)
+                .ReadChannelsAsync(
+                    sourceId,
+                    admittedCategoryId,
+                    searchText,
+                    offset,
+                    limit,
+                    request.Token)
                 .ConfigureAwait(false);
             return generation == Volatile.Read(ref _generation)
-                ? new CatalogBrowseResult(categories, channels, categoryId, searchText)
+                ? new CatalogBrowseResult(
+                    categories,
+                    channels,
+                    admittedCategoryId,
+                    searchText)
                 : null;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

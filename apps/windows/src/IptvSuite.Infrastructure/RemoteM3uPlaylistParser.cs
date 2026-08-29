@@ -45,12 +45,14 @@ internal sealed class RemoteM3uParseResult
         IReadOnlyList<RemoteM3uEntry> entries,
         int processedEntryCount,
         int skippedEntryCount,
+        bool entryLimitReached,
         string? hlsLocator = null)
     {
         ContentKind = contentKind;
         Entries = entries;
         ProcessedEntryCount = processedEntryCount;
         SkippedEntryCount = skippedEntryCount;
+        EntryLimitReached = entryLimitReached;
         HlsLocator = hlsLocator;
     }
 
@@ -58,6 +60,7 @@ internal sealed class RemoteM3uParseResult
     internal IReadOnlyList<RemoteM3uEntry> Entries { get; }
     internal int ProcessedEntryCount { get; }
     internal int SkippedEntryCount { get; }
+    internal bool EntryLimitReached { get; }
     internal string? HlsLocator { get; }
 
     public override string ToString() => $"[REMOTE-M3U-RESULT:{ProcessedEntryCount}]";
@@ -88,17 +91,37 @@ internal interface IRemoteM3uImportSink : IRemoteM3uEntrySink
 internal static class RemoteM3uPlaylistParser
 {
     internal const int MaximumEntries = 50_000;
-    internal const int MaximumLineCharacters = 8_192;
+    internal const int MaximumLineCharacters = 64 * 1024;
     internal const int MaximumMetadataValueCharacters = 4_096;
     internal const int MaximumLocatorCharacters = 4_096;
-    internal const int MaximumTotalCharacters = 32 * 1024 * 1024;
+    internal const int MaximumTotalCharacters = 128 * 1024 * 1024;
 
     internal static async ValueTask<DomainResult<RemoteM3uParseResult>> ParseAsync(
         Stream content,
         Uri finalPlaylistUri,
         CancellationToken cancellationToken = default)
-        => await ParseCoreAsync(content, finalPlaylistUri, sink: null, cancellationToken)
+        => await ParseCoreAsync(
+            content,
+            finalPlaylistUri,
+            configuredSourceEndpoint: null,
+            sink: null,
+            cancellationToken)
             .ConfigureAwait(false);
+
+    internal static async ValueTask<DomainResult<RemoteM3uParseResult>> ParseForSourceAsync(
+        Stream content,
+        Uri finalPlaylistUri,
+        SafeEndpoint configuredSourceEndpoint,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(configuredSourceEndpoint);
+        return await ParseCoreAsync(
+            content,
+            finalPlaylistUri,
+            configuredSourceEndpoint,
+            sink: null,
+            cancellationToken).ConfigureAwait(false);
+    }
 
     internal static async ValueTask<DomainResult<RemoteM3uParseResult>> ParseToSinkAsync(
         Stream content,
@@ -107,30 +130,60 @@ internal static class RemoteM3uPlaylistParser
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sink);
-        return await ParseCoreAsync(content, finalPlaylistUri, sink, cancellationToken)
+        return await ParseCoreAsync(
+            content,
+            finalPlaylistUri,
+            configuredSourceEndpoint: null,
+            sink,
+            cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    internal static async ValueTask<DomainResult<RemoteM3uParseResult>> ParseToSinkForSourceAsync(
+        Stream content,
+        Uri finalPlaylistUri,
+        SafeEndpoint configuredSourceEndpoint,
+        IRemoteM3uEntrySink sink,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(configuredSourceEndpoint);
+        ArgumentNullException.ThrowIfNull(sink);
+        return await ParseCoreAsync(
+            content,
+            finalPlaylistUri,
+            configuredSourceEndpoint,
+            sink,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask<DomainResult<RemoteM3uParseResult>> ParseCoreAsync(
         Stream content,
         Uri finalPlaylistUri,
+        SafeEndpoint? configuredSourceEndpoint,
         IRemoteM3uEntrySink? sink,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(finalPlaylistUri);
 
-        if (!IsSafeAbsoluteHttpsUri(finalPlaylistUri))
+        if (!IsAllowedFinalPlaylistUri(finalPlaylistUri, configuredSourceEndpoint))
         {
-            return Unsupported();
+            return FormatFailure(DomainErrorCode.PlaylistResponseAddressRejected);
         }
 
         List<RemoteM3uEntry>? entries = sink is null ? [] : null;
         var tvgIdentifiers = new HashSet<string>(StringComparer.Ordinal);
         int processedEntryCount = 0;
         int skipped = 0;
+        int entriesRejectedByAddressPolicy = 0;
         int totalCharacters = 0;
+        bool entryLimitReached = false;
+        bool truncateAtEntryLimit = string.Equals(
+            configuredSourceEndpoint?.Scheme,
+            Uri.UriSchemeHttp,
+            StringComparison.Ordinal);
         PendingMetadata? pending = null;
+        bool discardPendingLocator = false;
         bool hlsSeen = false;
         bool hlsMasterSeen = false;
         bool hlsMediaSeen = false;
@@ -144,10 +197,11 @@ internal static class RemoteM3uPlaylistParser
                 bufferSize: 4_096,
                 leaveOpen: true);
 
-            string? firstLine = await ReadBoundedLineAsync(reader, cancellationToken).ConfigureAwait(false);
+            var lineReader = new BoundedPlaylistLineReader(reader);
+            string? firstLine = await lineReader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (firstLine is null)
             {
-                return Unsupported();
+                return FormatFailure(DomainErrorCode.PlaylistHeaderInvalid);
             }
 
             totalCharacters = firstLine.Length;
@@ -157,24 +211,23 @@ internal static class RemoteM3uPlaylistParser
                 header = header[1..];
             }
 
-            if (!header.Trim().SequenceEqual("#EXTM3U"))
+            if (!IsExtendedM3uHeader(header.Trim()))
             {
-                return Unsupported();
+                return FormatFailure(DomainErrorCode.PlaylistHeaderInvalid);
             }
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string? line = await ReadBoundedLineAsync(reader, cancellationToken).ConfigureAwait(false);
+                string? line = await lineReader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                 if (line is null)
                 {
                     break;
                 }
 
-                totalCharacters = checked(totalCharacters + line.Length);
-                if (totalCharacters > MaximumTotalCharacters)
+                if (!TryAccumulateTotalCharacters(ref totalCharacters, line.Length))
                 {
-                    return Unsupported();
+                    return FormatFailure(DomainErrorCode.PlaylistTotalLimitExceeded);
                 }
 
                 ReadOnlySpan<char> trimmed = line.AsSpan().Trim();
@@ -187,7 +240,7 @@ internal static class RemoteM3uPlaylistParser
                 {
                     if (processedEntryCount > 0)
                     {
-                        return Unsupported();
+                        return FormatFailure(DomainErrorCode.PlaylistStructureInvalid);
                     }
 
                     hlsSeen = true;
@@ -204,11 +257,15 @@ internal static class RemoteM3uPlaylistParser
 
                 if (trimmed.StartsWith("#EXTINF:", StringComparison.Ordinal))
                 {
-                    pending = TryParseMetadata(trimmed[8..], out PendingMetadata metadata)
-                        ? metadata
-                        : null;
-                    if (pending is null)
+                    if (TryParseMetadata(trimmed[8..], out PendingMetadata metadata))
                     {
+                        pending = metadata;
+                        discardPendingLocator = false;
+                    }
+                    else
+                    {
+                        pending = null;
+                        discardPendingLocator = true;
                         skipped++;
                     }
 
@@ -220,25 +277,48 @@ internal static class RemoteM3uPlaylistParser
                     continue;
                 }
 
+                if (discardPendingLocator)
+                {
+                    discardPendingLocator = false;
+                    continue;
+                }
+
                 if (pending is null)
                 {
                     skipped++;
                     continue;
                 }
 
-                if (!TryResolveLocator(finalPlaylistUri, trimmed, out string locator))
+                if (!TryResolveLocator(
+                        finalPlaylistUri,
+                        trimmed,
+                        configuredSourceEndpoint,
+                        out string locator))
                 {
                     skipped++;
+                    entriesRejectedByAddressPolicy++;
                     pending = null;
                     continue;
                 }
 
                 if (processedEntryCount == MaximumEntries)
                 {
-                    return Unsupported();
+                    if (!truncateAtEntryLimit)
+                    {
+                        return FormatFailure(DomainErrorCode.PlaylistEntryLimitExceeded);
+                    }
+
+                    entryLimitReached = true;
+                    skipped++;
+                    pending = null;
+                    continue;
                 }
 
                 PendingMetadata completed = pending.Value;
+                completed = ApplyLogoPolicy(
+                    completed,
+                    finalPlaylistUri,
+                    configuredSourceEndpoint);
                 if (completed.TvgId is not null && !tvgIdentifiers.Add(completed.TvgId))
                 {
                     completed = completed with
@@ -267,13 +347,13 @@ internal static class RemoteM3uPlaylistParser
                 pending = null;
             }
         }
+        catch (PlaylistLineLimitExceededException)
+        {
+            return FormatFailure(DomainErrorCode.PlaylistLineLimitExceeded);
+        }
         catch (DecoderFallbackException)
         {
-            return Unsupported();
-        }
-        catch (OverflowException)
-        {
-            return Unsupported();
+            return FormatFailure(DomainErrorCode.PlaylistTextEncodingInvalid);
         }
         catch (OperationCanceledException)
         {
@@ -284,7 +364,7 @@ internal static class RemoteM3uPlaylistParser
         {
             if (hlsMasterSeen == hlsMediaSeen)
             {
-                return Unsupported();
+                return FormatFailure(DomainErrorCode.PlaylistStructureInvalid);
             }
 
             return DomainResult.Success(new RemoteM3uParseResult(
@@ -294,27 +374,23 @@ internal static class RemoteM3uPlaylistParser
                 [],
                 processedEntryCount: 0,
                 skippedEntryCount: 0,
+                entryLimitReached: false,
                 finalPlaylistUri.AbsoluteUri));
+        }
+
+        if (processedEntryCount == 0)
+        {
+            return FormatFailure(entriesRejectedByAddressPolicy > 0
+                ? DomainErrorCode.PlaylistEntriesRejectedByAddressPolicy
+                : DomainErrorCode.PlaylistNoUsableEntries);
         }
 
         return DomainResult.Success(new RemoteM3uParseResult(
             PlaylistContentKind.ExtendedM3uCatalog,
             entries ?? [],
             processedEntryCount,
-            skipped));
-    }
-
-    private static async ValueTask<string?> ReadBoundedLineAsync(
-        StreamReader reader,
-        CancellationToken cancellationToken)
-    {
-        string? line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-        if (line is not null && line.Length > MaximumLineCharacters)
-        {
-            throw new DecoderFallbackException("Playlist line exceeds the bounded parser contract.");
-        }
-
-        return line;
+            skipped,
+            entryLimitReached));
     }
 
     private static bool TryParseMetadata(ReadOnlySpan<char> value, out PendingMetadata metadata)
@@ -356,7 +432,8 @@ internal static class RemoteM3uPlaylistParser
             ReadOnlySpan<char> attributeValue = attributes.Slice(cursor + 1, closing);
             cursor += closing + 2;
 
-            if (!TryBounded(attributeValue, MaximumMetadataValueCharacters, required: false, out string? normalized))
+            int maximumValueCharacters = GetMaximumAttributeValueCharacters(key);
+            if (!TryBounded(attributeValue, maximumValueCharacters, required: false, out string? normalized))
             {
                 return false;
             }
@@ -377,6 +454,22 @@ internal static class RemoteM3uPlaylistParser
         if (group is null) warnings |= ChannelNormalizationWarnings.MissingGroup;
         metadata = new PendingMetadata(name!, tvgId, tvgName, logo, group, number, warnings);
         return true;
+    }
+
+    private static int GetMaximumAttributeValueCharacters(ReadOnlySpan<char> key)
+    {
+        if (key.Equals("tvg-id", StringComparison.OrdinalIgnoreCase))
+        {
+            return Math.Min(
+                LiveChannel.MaximumProviderKeyLength,
+                ChannelStableKeyBuilder.MaximumProviderIdentifierLength);
+        }
+
+        return key.Equals("group-title", StringComparison.OrdinalIgnoreCase)
+            ? Math.Min(
+                ChannelCategory.MaximumProviderKeyLength,
+                ChannelCategory.MaximumNameLength)
+            : MaximumMetadataValueCharacters;
     }
 
     private static int FindUnquotedComma(ReadOnlySpan<char> value)
@@ -407,12 +500,23 @@ internal static class RemoteM3uPlaylistParser
         line.StartsWith(directive, StringComparison.Ordinal) &&
         (line.Length == directive.Length || line[directive.Length] == ':');
 
+    private static bool IsExtendedM3uHeader(ReadOnlySpan<char> line) =>
+        line.StartsWith("#EXTM3U", StringComparison.Ordinal) &&
+        (line.Length == "#EXTM3U".Length || char.IsWhiteSpace(line["#EXTM3U".Length]));
+
     private static bool TryResolveLocator(Uri baseUri, ReadOnlySpan<char> value, out string locator)
+        => TryResolveLocator(baseUri, value, configuredSourceEndpoint: null, out locator);
+
+    private static bool TryResolveLocator(
+        Uri baseUri,
+        ReadOnlySpan<char> value,
+        SafeEndpoint? configuredSourceEndpoint,
+        out string locator)
     {
         locator = string.Empty;
         if (value.Length is 0 or > MaximumLocatorCharacters ||
             !Uri.TryCreate(baseUri, value.ToString(), out Uri? resolved) ||
-            !IsSafeAbsoluteHttpsUri(resolved))
+            !IsAllowedEntryUri(resolved, configuredSourceEndpoint))
         {
             return false;
         }
@@ -421,11 +525,72 @@ internal static class RemoteM3uPlaylistParser
         return true;
     }
 
-    private static bool IsSafeAbsoluteHttpsUri(Uri uri) =>
+    private static bool IsSafeAbsoluteWebUri(Uri uri) =>
         uri.IsAbsoluteUri &&
-        uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+        (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+         uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)) &&
         string.IsNullOrEmpty(uri.UserInfo) &&
         string.IsNullOrEmpty(uri.Fragment);
+
+    private static bool IsAllowedFinalPlaylistUri(
+        Uri uri,
+        SafeEndpoint? configuredSourceEndpoint) =>
+        IsSafeAbsoluteWebUri(uri) &&
+        (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+         IsExactConfiguredHttpOrigin(uri, configuredSourceEndpoint));
+
+    private static bool IsAllowedEntryUri(
+        Uri uri,
+        SafeEndpoint? configuredSourceEndpoint) =>
+        IsSafeAbsoluteWebUri(uri) &&
+        (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+         IsExactConfiguredHttpOrigin(uri, configuredSourceEndpoint));
+
+    private static bool IsExactConfiguredHttpOrigin(
+        Uri uri,
+        SafeEndpoint? configuredSourceEndpoint)
+    {
+        if (configuredSourceEndpoint is null ||
+            !configuredSourceEndpoint.Scheme.Equals(
+                Uri.UriSchemeHttp,
+                StringComparison.Ordinal) ||
+            !uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
+            SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Remote playlist origin",
+                uri.AbsoluteUri);
+        return prepared.IsSuccess && configuredSourceEndpoint.Equals(prepared.Value!.SafeEndpoint);
+    }
+
+    private static PendingMetadata ApplyLogoPolicy(
+        PendingMetadata metadata,
+        Uri baseUri,
+        SafeEndpoint? configuredSourceEndpoint)
+    {
+        if (metadata.Logo is null || configuredSourceEndpoint is null)
+        {
+            return metadata;
+        }
+
+        if (!Uri.TryCreate(baseUri, metadata.Logo, out Uri? resolved) ||
+            !resolved.IsAbsoluteUri ||
+            !string.Equals(resolved.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrEmpty(resolved.UserInfo) ||
+            !string.IsNullOrEmpty(resolved.Fragment))
+        {
+            return metadata with { Logo = null };
+        }
+
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
+            SourceConfigurationValidator.PrepareRemotePlaylist("Channel logo", resolved.AbsoluteUri);
+        return prepared.IsSuccess && configuredSourceEndpoint.Equals(prepared.Value!.SafeEndpoint)
+            ? metadata with { Logo = resolved.AbsoluteUri }
+            : metadata with { Logo = null };
+    }
 
     private static bool TryBounded(
         ReadOnlySpan<char> value,
@@ -446,8 +611,128 @@ internal static class RemoteM3uPlaylistParser
         return normalized.Length <= maximumCharacters;
     }
 
-    private static DomainResult<RemoteM3uParseResult> Unsupported() =>
-        DomainResult.Failure<RemoteM3uParseResult>(DomainErrorCode.UnsupportedPlaylistFormat);
+    private static DomainResult<RemoteM3uParseResult> FormatFailure(DomainErrorCode code) =>
+        DomainResult.Failure<RemoteM3uParseResult>(code);
+
+    private static bool TryAccumulateTotalCharacters(ref int totalCharacters, int lineCharacters)
+    {
+        long nextTotal = (long)totalCharacters + lineCharacters;
+        if (nextTotal > MaximumTotalCharacters)
+        {
+            return false;
+        }
+
+        totalCharacters = (int)nextTotal;
+        return true;
+    }
+
+    private sealed class PlaylistLineLimitExceededException : Exception
+    {
+    }
+
+    private sealed class BoundedPlaylistLineReader(StreamReader reader)
+    {
+        private const int BufferSize = 4_096;
+        private readonly char[] _buffer = new char[BufferSize];
+        private int _bufferLength;
+        private int _bufferOffset;
+        private bool _skipLeadingLineFeed;
+
+        internal async ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken)
+        {
+            StringBuilder? builder = null;
+            while (true)
+            {
+                if (!await EnsureBufferedAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return builder?.ToString();
+                }
+
+                if (_skipLeadingLineFeed)
+                {
+                    _skipLeadingLineFeed = false;
+                    if (_buffer[_bufferOffset] == '\n')
+                    {
+                        _bufferOffset++;
+                        continue;
+                    }
+                }
+
+                ReadOnlySpan<char> available = _buffer.AsSpan(
+                    _bufferOffset,
+                    _bufferLength - _bufferOffset);
+                int terminatorOffset = available.IndexOfAny('\r', '\n');
+                if (terminatorOffset < 0)
+                {
+                    AppendBounded(ref builder, available);
+                    _bufferOffset = _bufferLength;
+                    continue;
+                }
+
+                ReadOnlySpan<char> segment = available[..terminatorOffset];
+                string line;
+                if (builder is null)
+                {
+                    EnsureBounded(segment.Length);
+                    line = segment.ToString();
+                }
+                else
+                {
+                    AppendBounded(ref builder, segment);
+                    line = builder!.ToString();
+                }
+
+                char terminator = available[terminatorOffset];
+                _bufferOffset += terminatorOffset + 1;
+                if (terminator == '\r')
+                {
+                    if (_bufferOffset < _bufferLength)
+                    {
+                        if (_buffer[_bufferOffset] == '\n')
+                        {
+                            _bufferOffset++;
+                        }
+                    }
+                    else
+                    {
+                        _skipLeadingLineFeed = true;
+                    }
+                }
+
+                return line;
+            }
+        }
+
+        private async ValueTask<bool> EnsureBufferedAsync(CancellationToken cancellationToken)
+        {
+            if (_bufferOffset < _bufferLength)
+            {
+                return true;
+            }
+
+            _bufferLength = await reader.ReadAsync(_buffer, cancellationToken).ConfigureAwait(false);
+            _bufferOffset = 0;
+            return _bufferLength > 0;
+        }
+
+        private static void AppendBounded(
+            ref StringBuilder? builder,
+            ReadOnlySpan<char> value)
+        {
+            int currentLength = builder?.Length ?? 0;
+            EnsureBounded(checked(currentLength + value.Length));
+            builder ??= new StringBuilder(Math.Min(MaximumLineCharacters, BufferSize * 2));
+            builder.Append(value);
+        }
+
+        private static void EnsureBounded(int length)
+        {
+            if (length > MaximumLineCharacters)
+            {
+                throw new PlaylistLineLimitExceededException();
+            }
+        }
+    }
 
     private readonly record struct PendingMetadata(
         string Name,

@@ -14,9 +14,9 @@ public sealed class DependencyRulesTests
     private const string LifecycleHarnessIdentity = "ProtectedStore.PackageLifecycleTest.Local.5d8c7a91";
     private const string LifecycleHarnessPublisher = "CN=Protected Store Package Lifecycle Local Test";
     private const string ExpectedAuthorizationAccessibleName =
-        "Kaynak erişim ve özel veya yerel ağ güvenini onayla";
+        "Kaynak erişimini ve HTTP açık metin/MITM riskini onayla";
     private const string ExpectedAuthorizationAccessibleNameUtf8Base64 =
-        "S2F5bmFrIGVyacWfaW0gdmUgw7Z6ZWwgdmV5YSB5ZXJlbCBhxJ8gZ8O8dmVuaW5pIG9uYXlsYQ==";
+        "S2F5bmFrIGVyacWfaW1pbmkgdmUgSFRUUCBhw6fEsWsgbWV0aW4vTUlUTSByaXNraW5pIG9uYXlsYQ==";
 
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string[] RequiredCapabilities = ["runFullTrust"];
@@ -646,11 +646,25 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSourceSelector\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogCategorySelector\"");
         StringAssert.Contains(page, "AutomationProperties.AutomationId=\"CatalogSearchBox\"");
-        StringAssert.Contains(page, "x:Name=\"SourceSelector\" TabIndex=\"0\"");
+        StringAssert.Contains(
+            page,
+            "x:Name=\"SourceSelector\" MinWidth=\"240\" HorizontalAlignment=\"Stretch\" TabIndex=\"0\"");
+        StringAssert.Contains(page, "Header=\"Playlist source\"");
+        StringAssert.Contains(
+            codeBehind,
+            "New playlist is selected; use Playlist source to return to earlier playlists.");
         StringAssert.Contains(page, "x:Name=\"CategorySelector\" Grid.Column=\"1\" TabIndex=\"1\"");
         StringAssert.Contains(page, "x:Name=\"SearchBox\" Grid.Column=\"2\" TabIndex=\"2\"");
         Assert.HasCount(3, Regex.Matches(page, "IsTabStop=\"True\""));
-        StringAssert.Contains(codeBehind, "InitializeComponent();\n        AddHandler(");
+        int initializeComponent = codeBehind.IndexOf(
+            "InitializeComponent();",
+            StringComparison.Ordinal);
+        int losingFocusRegistration = codeBehind.IndexOf(
+            "new TypedEventHandler<UIElement, LosingFocusEventArgs>(CatalogFilter_LosingFocus)",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            initializeComponent >= 0 && losingFocusRegistration > initializeComponent,
+            "Catalog focus routing must be registered after the XAML surface is initialized.");
         StringAssert.Contains(codeBehind, "SourceSelector.AddHandler(");
         Assert.HasCount(3, Regex.Matches(codeBehind, "UIElement.PreviewKeyDownEvent"));
         Assert.HasCount(3, Regex.Matches(codeBehind, @"new KeyEventHandler\(CatalogFilter_PreviewKeyDown\)"));
@@ -670,6 +684,35 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "new KeyEventHandler(CategorySelector_KeyDown)");
         StringAssert.Contains(codeBehind, "MoveForwardOnTab(args, SourceSelector, CategorySelector)");
         StringAssert.Contains(codeBehind, "MoveForwardOnTab(args, CategorySelector, SearchBox)");
+        string sourceSelection = ExtractRequiredBlock(
+            codeBehind,
+            "private async void SourceSelector_SelectionChanged(",
+            "private void ResetCategoryFilterForSourceChange()");
+        Assert.IsTrue(
+            sourceSelection.IndexOf(
+                "ResetCategoryFilterForSourceChange();",
+                StringComparison.Ordinal) < sourceSelection.IndexOf(
+                "await BrowseAsync(false);",
+                StringComparison.Ordinal),
+            "A source change must clear its source-scoped category before browsing.");
+        string sourceReload = ExtractRequiredBlock(
+            codeBehind,
+            "private async Task LoadSourcesAsync(",
+            "private async Task BrowseAsync(");
+        Assert.IsTrue(
+            sourceReload.IndexOf(
+                "SourceSelector.SelectedIndex =",
+                StringComparison.Ordinal) < sourceReload.IndexOf(
+                "ResetCategoryFilterForSourceChange();",
+                StringComparison.Ordinal),
+            "Reloading sources must clear a category inherited from the previous source.");
+        string categoryReset = ExtractRequiredBlock(
+            codeBehind,
+            "private void ResetCategoryFilterForSourceChange()",
+            "private async void CategorySelector_SelectionChanged(");
+        StringAssert.Contains(categoryReset, "new CategoryOption(\"All categories\", null)");
+        StringAssert.Contains(categoryReset, "CategorySelector.SelectedIndex = 0;");
+        StringAssert.Contains(categoryReset, "_updatingSelectors = wasUpdatingSelectors;");
         StringAssert.Contains(codeBehind, "args.OriginalSource is not DependencyObject origin || !IsWithin(origin, owner)");
         StringAssert.Contains(codeBehind, "InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)");
         StringAssert.Contains(codeBehind, "args.Handled = true;");
@@ -1982,6 +2025,8 @@ public sealed class DependencyRulesTests
 
         StringAssert.Contains(applicationSource, "public interface IHttpTransport");
         StringAssert.Contains(applicationSource, "MaximumAllowedResponseBytes = 4 * 1024 * 1024");
+        StringAssert.Contains(applicationSource, "MaximumResponseBytes = 128 * 1024 * 1024");
+        StringAssert.Contains(applicationSource, "RequestTimeout = TimeSpan.FromMinutes(2)");
         StringAssert.Contains(applicationSource, "MaximumRedirects = 5");
         StringAssert.Contains(applicationSource, "CryptographicOperations.ZeroMemory(content)");
         StringAssert.Contains(applicationSource, "CryptographicOperations.ZeroMemory(authorizationValue)");
@@ -1995,6 +2040,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(infrastructureSource, "UseCookies = false");
         StringAssert.Contains(infrastructureSource, "public BoundedHttpTransport(IHttpTransportObserver? observer)");
         StringAssert.Contains(infrastructureSource, "HttpCompletionOption.ResponseHeadersRead");
+        StringAssert.Contains(
+            infrastructureSource,
+            "request.RequestTimeoutOverride ?? _requestTimeout");
         StringAssert.Contains(infrastructureSource, "RedirectTargetPolicy.Evaluate");
         StringAssert.Contains(infrastructureSource, "OriginRelation == RedirectOriginRelation.CrossOrigin");
         StringAssert.Contains(infrastructureSource, "ArrayPool<byte>.Shared.Rent(maximumBytes)");
@@ -2075,9 +2123,27 @@ public sealed class DependencyRulesTests
 
         StringAssert.Contains(parserSource, "internal static class RemoteM3uPlaylistParser");
         StringAssert.Contains(parserSource, "MaximumEntries = 50_000");
-        StringAssert.Contains(parserSource, "MaximumLineCharacters = 8_192");
-        StringAssert.Contains(parserSource, "MaximumTotalCharacters = 32 * 1024 * 1024");
+        StringAssert.Contains(parserSource, "bool entryLimitReached = false;");
+        StringAssert.Contains(parserSource, "bool truncateAtEntryLimit = string.Equals(");
+        StringAssert.Contains(parserSource, "if (!truncateAtEntryLimit)");
+        StringAssert.Contains(parserSource, "if (processedEntryCount == 0)");
+        StringAssert.Contains(parserSource, "MaximumLineCharacters = 64 * 1024");
+        StringAssert.Contains(parserSource, "MaximumTotalCharacters = 128 * 1024 * 1024");
         StringAssert.Contains(parserSource, "new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)");
+        StringAssert.Contains(parserSource, "sealed class BoundedPlaylistLineReader");
+        StringAssert.Contains(parserSource, "reader.ReadAsync(_buffer, cancellationToken)");
+        Assert.IsFalse(parserSource.Contains("reader.ReadLineAsync(", StringComparison.Ordinal));
+        StringAssert.Contains(parserSource, "DomainErrorCode.PlaylistHeaderInvalid");
+        StringAssert.Contains(parserSource, "DomainErrorCode.PlaylistTextEncodingInvalid");
+        StringAssert.Contains(parserSource, "DomainErrorCode.PlaylistLineLimitExceeded");
+        StringAssert.Contains(parserSource, "DomainErrorCode.PlaylistTotalLimitExceeded");
+        StringAssert.Contains(parserSource, "DomainErrorCode.PlaylistEntryLimitExceeded");
+        StringAssert.Contains(parserSource, "TryAccumulateTotalCharacters(ref totalCharacters, line.Length)");
+        Assert.IsFalse(parserSource.Contains(
+            "DomainErrorCode.PlaylistSafeLimitExceeded",
+            StringComparison.Ordinal));
+        StringAssert.Contains(parserSource, "DomainErrorCode.PlaylistEntriesRejectedByAddressPolicy");
+        StringAssert.Contains(parserSource, "int entriesRejectedByAddressPolicy = 0;");
         StringAssert.Contains(parserSource, "trimmed.StartsWith(\"#EXT-X-\"");
         StringAssert.Contains(parserSource, "uri.Scheme.Equals(Uri.UriSchemeHttps");
         StringAssert.Contains(parserSource, "string.IsNullOrEmpty(uri.UserInfo)");
@@ -2086,6 +2152,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(parserSource, "internal interface IRemoteM3uEntrySink");
         StringAssert.Contains(parserSource, "internal interface IRemoteM3uImportSink : IRemoteM3uEntrySink");
         StringAssert.Contains(parserSource, "ParseToSinkAsync(");
+        StringAssert.Contains(parserSource, "completed = ApplyLogoPolicy(");
+        StringAssert.Contains(
+            parserSource,
+            "configuredSourceEndpoint.Equals(prepared.Value!.SafeEndpoint)");
         Assert.IsFalse(parserSource.Contains("public sealed class RemoteM3uEntry", StringComparison.Ordinal));
         Assert.IsFalse(parserSource.Contains("HttpClient", StringComparison.Ordinal));
         StringAssert.Contains(loaderSource, "ReadLocatorAsync(");
@@ -2103,13 +2173,18 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(sqliteSinkSource, "http_last_modified_utc");
         StringAssert.Contains(loaderSource, "_sink.CompleteAsync(parsed.Value, cancellationToken)");
         StringAssert.Contains(loaderSource, "_sink.AbortAsync(CancellationToken.None)");
-        StringAssert.Contains(loaderSource, "RemoteM3uPlaylistParser.ParseToSinkAsync(");
+        StringAssert.Contains(loaderSource, "RemoteM3uPlaylistParser.ParseToSinkForSourceAsync(");
         Assert.IsFalse(loaderSource.Contains("RemoteM3uPlaylistParser.ParseAsync(", StringComparison.Ordinal));
         Assert.IsFalse(loaderSource.Contains("public sealed class RemotePlaylistCatalogLoader", StringComparison.Ordinal));
         StringAssert.Contains(sqliteSinkSource, "IRemoteM3uImportSink, IAsyncDisposable");
         StringAssert.Contains(sqliteSinkSource, "BeginTransactionAsync");
         StringAssert.Contains(sqliteSinkSource, "CommitAsync");
         StringAssert.Contains(sqliteSinkSource, "RollbackAsync");
+        StringAssert.Contains(
+            sqliteSinkSource,
+            "parseResult.ProcessedEntryCount > RemoteM3uPlaylistParser.MaximumEntries");
+        StringAssert.Contains(sqliteSinkSource, "parseResult.EntryLimitReached");
+        StringAssert.Contains(sqliteSinkSource, "parseResult.SkippedEntryCount");
         Assert.IsFalse(sqliteSinkSource.Contains("List<RemoteM3uEntry>", StringComparison.Ordinal));
     }
 
@@ -5986,7 +6061,7 @@ public sealed class DependencyRulesTests
             "Pending source cleanup must finish before the catalog can be opened.");
         StringAssert.Contains(
             pageMarkup,
-            "x:Name=\"SourceSelector\" TabIndex=\"0\" IsTabStop=\"True\" IsEnabled=\"False\"");
+            "x:Name=\"SourceSelector\" MinWidth=\"240\" HorizontalAlignment=\"Stretch\" TabIndex=\"0\" IsTabStop=\"True\" IsEnabled=\"False\"");
         StringAssert.Contains(
             pageMarkup,
             "x:Name=\"CategorySelector\" Grid.Column=\"1\" TabIndex=\"1\" IsTabStop=\"True\" IsEnabled=\"False\"");
@@ -6494,6 +6569,11 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(resolver, "CryptographicOperations.ZeroMemory(locatorBytes)");
         StringAssert.Contains(resolver, "StrictUtf8.GetString(locatorBytes)");
         StringAssert.Contains(resolver, "SourceConfigurationValidator.PrepareRemotePlaylist(");
+        StringAssert.Contains(
+            resolver,
+            "SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(");
+        StringAssert.Contains(resolver, "!string.IsNullOrEmpty(locatorUri.UserInfo)");
+        StringAssert.Contains(resolver, "sourceUsesHttp && MatchesEndpoint(locatorEndpoint, binding)");
         StringAssert.Contains(resolver, "lease?.Dispose();");
         StringAssert.Contains(resolver, "catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)");
         StringAssert.Contains(resolver, "[PLAYBACK-SOURCE-RESOLUTION:SUCCESS]");
@@ -6572,7 +6652,7 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
-    public void M13WindowsNativeFailuresUseOnlySafePlaybackPhaseSignals()
+    public void M13WindowsNativeFailuresUseSafePlatformEnumsAndPlaybackPhaseFallbacks()
     {
         string adapter = File.ReadAllText(Path.Combine(
             RepositoryRoot,
@@ -6582,7 +6662,8 @@ public sealed class DependencyRulesTests
             "IptvSuite.Windows",
             "WindowsNativePlaybackEngine.cs"));
 
-        StringAssert.Contains(adapter, "SetNativeFailure(context, callback)");
+        StringAssert.Contains(adapter, "MediaPlayerError? mediaPlayerError");
+        StringAssert.Contains(adapter, "SetNativeFailure(");
         StringAssert.Contains(
             adapter,
             "(callback is NativeCallback.MediaFailed or NativeCallback.MediaEnded)");
@@ -6593,17 +6674,130 @@ public sealed class DependencyRulesTests
             "                    PlaybackState.Playing or PlaybackState.Paused;");
         StringAssert.Contains(
             adapter,
-            "? DomainErrorCode.StreamInterrupted\n" +
+            "DomainErrorCode phaseFallback = isActiveMediaFailure\n" +
+            "                ? DomainErrorCode.StreamInterrupted\n" +
             "                : DomainErrorCode.PlaybackStartFailed;");
         StringAssert.Contains(
             adapter,
-            "state.Value is PlaybackState.Playing or PlaybackState.Paused");
+            "state.Value == PlaybackState.Playing");
+        StringAssert.Contains(adapter, "PlaybackIntent Intent { get; set; } = PlaybackIntent.Play;");
+        StringAssert.Contains(
+            adapter,
+            "MediaPlaybackState.Paused when intent == PlaybackIntent.Pause => PlaybackState.Paused");
+        StringAssert.Contains(
+            adapter,
+            "MediaPlaybackState.Paused => PlaybackState.Buffering");
+        StringAssert.Contains(adapter, "previousIntent = context.Intent;");
+        StringAssert.Contains(adapter, "context.Intent = intent;");
+        StringAssert.Contains(adapter, "context.Intent = previousIntent;");
+        StringAssert.Contains(
+            adapter,
+            "PlaybackIntent.Play,\n                _mediaPlayer.Play");
+        StringAssert.Contains(adapter, "reconciled ??= PlaybackState.Buffering;");
+        StringAssert.Contains(adapter, "PublishNativeState(context, reconciled);");
+        string playbackCommand = ExtractRequiredBlock(
+            adapter,
+            "private void ExecutePlaybackCommandOnUiThread(",
+            "private void AttachSessionHandlers(");
+        Assert.IsTrue(
+            playbackCommand.IndexOf(
+                "_mediaPlayer.AutoPlay = intent == PlaybackIntent.Play;",
+                StringComparison.Ordinal) < playbackCommand.IndexOf(
+                "operation();",
+                StringComparison.Ordinal),
+            "Play intent must enable native AutoPlay before the single Play command.");
+        StringAssert.Contains(
+            adapter,
+            "PlaybackIntent.Pause,\n                _mediaPlayer.Pause");
+        Assert.IsFalse(adapter.Contains(
+            "IssuePendingPlayAfterMediaOpened",
+            StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("PlayRequested", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("MediaOpenedObserved", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("PlayIssuedAfterMediaOpened", StringComparison.Ordinal));
+        Assert.AreEqual(
+            1,
+            Regex.Count(
+                adapter,
+                @"PlaybackIntent\.Play,\s*_mediaPlayer\.Play\)",
+                RegexOptions.CultureInvariant),
+            "Each logical Play command must issue exactly one documented native Play call.");
+
+        string open = ExtractRequiredBlock(
+            adapter,
+            "private PlaybackEngineOperationResult OpenOnUiThread(",
+            "private PlaybackEngineOperationResult StopOnUiThread(");
+        Assert.IsTrue(
+            open.IndexOf("_mediaPlayer.AutoPlay = false;", StringComparison.Ordinal) <
+            open.IndexOf("_mediaPlayer.Source = source;", StringComparison.Ordinal),
+            "A new source must clear the previous native AutoPlay intent before assignment.");
+
+        string release = ExtractRequiredBlock(
+            adapter,
+            "private void ReleaseContextOnUiThread(",
+            "private void PublishNativeState(");
+        Assert.IsTrue(
+            release.IndexOf("_mediaPlayer.AutoPlay = false;", StringComparison.Ordinal) <
+            release.IndexOf("_mediaPlayer.PlaybackSession.CanPause", StringComparison.Ordinal),
+            "Release must clear AutoPlay before pause and source detachment.");
+
+        string dispose = ExtractRequiredBlock(
+            adapter,
+            "private bool DisposeOnUiThread()",
+            "private async Task<T> RunOnDispatcherAsync<T>(");
+        Assert.IsTrue(
+            dispose.IndexOf("_mediaPlayer.AutoPlay = false;", StringComparison.Ordinal) <
+            dispose.IndexOf("_mediaPlayer.Dispose();", StringComparison.Ordinal),
+            "Final disposal must clear AutoPlay before releasing the native player.");
+
+        string nativeCallback = ExtractRequiredBlock(
+            adapter,
+            "private void ProcessNativeCallback(",
+            "private void FaultWatchdog_Expired(");
+        int currentAdmission = nativeCallback.IndexOf(
+            "if (!IsCurrentContext(context, source))",
+            StringComparison.Ordinal);
+        int guardedStateRead = nativeCallback.IndexOf(
+            "_mediaPlayer.PlaybackSession.PlaybackState",
+            StringComparison.Ordinal);
+        Assert.IsTrue(
+            currentAdmission >= 0 && guardedStateRead > currentAdmission,
+            "Native playback state may only be read on the UI dispatcher after exact-context admission.");
+        StringAssert.Contains(
+            nativeCallback,
+            "catch (Exception exception) when (IsRecoverable(exception))");
+        StringAssert.Contains(
+            nativeCallback,
+            "Native crash attribution remains unverified");
+
+        string handlers = ExtractRequiredBlock(
+            adapter,
+            "private void AttachSessionHandlers(",
+            "private bool DetachSessionHandlers(");
+        StringAssert.Contains(
+            handlers,
+            "context.PlaybackStateChangedHandler = (_, _) => PostNativeCallback(");
+        Assert.IsFalse(
+            Regex.IsMatch(
+                handlers,
+                @"(?:sender|_mediaPlayer\.PlaybackSession)\.PlaybackState\b",
+                RegexOptions.CultureInvariant),
+            "The native event thread must only enqueue callback identity, not read player state.");
+
+        string currentContext = ExtractRequiredBlock(
+            adapter,
+            "private bool IsCurrentContext(",
+            "private void ReleaseContextOnUiThread(");
+        StringAssert.Contains(currentContext, "ReferenceEquals(_active, context)");
+        StringAssert.Contains(currentContext, "!context.Retired");
+        StringAssert.Contains(currentContext, "context.Generation == _generation");
         StringAssert.Contains(
             adapter,
             "context.SourceOpenHandler = (sender, args) => PostNativeCallback(");
         StringAssert.Contains(
             adapter,
-            "context.MediaFailedHandler = (_, _) => PostNativeCallback(");
+            "context.MediaFailedHandler = (_, args) => PostNativeCallback(");
+        StringAssert.Contains(adapter, "mediaPlayerError: args.Error);");
         StringAssert.Contains(adapter, "context.MediaEndedHandler = (sender, _) =>");
         StringAssert.Contains(adapter, "ReferenceEquals(sender, _mediaPlayer)");
         StringAssert.Contains(adapter, "NativeCallback.MediaEnded");
@@ -6623,7 +6817,7 @@ public sealed class DependencyRulesTests
         string terminalCallback = adapter[adapter.IndexOf(
             "if (callback is NativeCallback.SourceFailed or",
             StringComparison.Ordinal)..adapter.IndexOf(
-                "PlaybackState? state = callback switch",
+                "PlaybackState? state;",
                 StringComparison.Ordinal)];
         StringAssert.Contains(
             terminalCallback,
@@ -6645,6 +6839,18 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             nativeClassifier,
             "context.SessionId != _current.SessionId");
+        StringAssert.Contains(
+            nativeClassifier,
+            "MediaPlayerError.NetworkError => DomainErrorCode.PlaybackNetworkFailed");
+        StringAssert.Contains(
+            nativeClassifier,
+            "MediaPlayerError.SourceNotSupported =>\n" +
+            "                        DomainErrorCode.PlaybackSourceUnsupported");
+        StringAssert.Contains(
+            nativeClassifier,
+            "MediaPlayerError.DecodingError =>\n" +
+            "                        DomainErrorCode.PlaybackDecodingFailed");
+        StringAssert.Contains(nativeClassifier, "_ => phaseFallback,");
         Assert.IsFalse(nativeClassifier.Contains("Duration", StringComparison.Ordinal));
         Assert.IsFalse(nativeClassifier.Contains("Position", StringComparison.Ordinal));
         Assert.IsFalse(nativeClassifier.Contains("MediaPlaybackState.None", StringComparison.Ordinal));
@@ -7382,6 +7588,19 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(codeBehind, "previousFocus.Focus(FocusState.Keyboard)");
         StringAssert.Contains(codeBehind, "DispatcherQueue.TryEnqueue(RestoreFocusAfterFullscreen)");
         StringAssert.Contains(codeBehind, "Grid.SetColumnSpan(PlaybackPanel, isFullscreen ? 2 : 1)");
+        StringAssert.Contains(page, "x:Name=\"PlaybackControlsPanel\"");
+        StringAssert.Contains(codeBehind, "TimeSpan.FromSeconds(3)");
+        StringAssert.Contains(codeBehind, "PageRoot.RowSpacing = isFullscreen ? 0 : 16;");
+        StringAssert.Contains(codeBehind, "ShowFullscreenControlsAndRestartAutoHide();");
+        StringAssert.Contains(codeBehind, "IsKeyboardFocusWithinPlaybackControls()");
+        StringAssert.Contains(codeBehind, "PlaybackControlsPanel.Visibility = Visibility.Collapsed;");
+        StringAssert.Contains(codeBehind, "PlaybackPanel.RowSpacing = 0;");
+        StringAssert.Contains(codeBehind, "PlaybackControlsPanel.Visibility = Visibility.Visible;");
+        StringAssert.Contains(codeBehind, "PlaybackPanel.RowSpacing = 8;");
+        StringAssert.Contains(codeBehind, "UIElement.PointerMovedEvent");
+        StringAssert.Contains(codeBehind, "UIElement.KeyDownEvent");
+        StringAssert.Contains(codeBehind, "FocusState: FocusState.Keyboard");
+        StringAssert.Contains(codeBehind, "_fullscreenControlsAutoHideTimer.Tick -=");
         StringAssert.Contains(codeBehind, "_playbackChannel = channel;");
         StringAssert.Contains(codeBehind, "playbackChannel.SourceId.Equals(sourceId)");
         StringAssert.Contains(codeBehind, "playbackChannel.ChannelId.Equals(channelId)");
@@ -7706,12 +7925,26 @@ public sealed class DependencyRulesTests
             "Errors.Authentication.Rejected",
             "Errors.Playlist.DownloadFailed",
             "Errors.Playlist.UnsupportedFormat",
+            "Errors.Playlist.ResponseAddressRejected",
+            "Errors.Playlist.HeaderInvalid",
+            "Errors.Playlist.TextEncodingInvalid",
+            "Errors.Playlist.SafeLimitExceeded",
+            "Errors.Playlist.LineLimitExceeded",
+            "Errors.Playlist.TotalLimitExceeded",
+            "Errors.Playlist.EntryLimitExceeded",
+            "Errors.Playlist.StructureInvalid",
+            "Errors.Playlist.NoUsableEntries",
+            "Errors.Playlist.EntriesRejectedByAddressPolicy",
+            "Errors.Playlist.HlsManifestUnsupported",
             "Errors.Network.RequestTimedOut",
             "Errors.Network.TlsValidationFailed",
             "Errors.Playback.StartFailed",
             "Errors.Playback.ControlFailed",
             "Errors.Playback.StreamInterrupted",
             "Errors.Playback.ReconnectExhausted",
+            "Errors.Playback.NetworkFailed",
+            "Errors.Playback.SourceUnsupported",
+            "Errors.Playback.DecodingFailed",
             "Errors.Storage.Unavailable",
             "Errors.Operation.Cancelled",
             "Errors.Network.ResourceNotFound",
@@ -7758,7 +7991,40 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(project, "<DefaultLanguage>en-US</DefaultLanguage>");
         StringAssert.Contains(presenter, "new ResourceLoader()");
         StringAssert.Contains(presenter, "DomainError.Create(error.Code)");
+        StringAssert.Contains(presenter, "return canonical == error ? canonical : null;");
         StringAssert.Contains(presenter, "canonical.ResourceKey");
+        StringAssert.Contains(
+            presenter,
+            "canonical is not null && IsConnectivityRelated(canonical.Code)");
+        string connectivityClassifier = presenter[presenter.IndexOf(
+            "private static bool IsConnectivityRelated(",
+            StringComparison.Ordinal)..presenter.IndexOf(
+                "private string GetString(",
+                StringComparison.Ordinal)];
+        StringAssert.Contains(
+            connectivityClassifier,
+            "DomainErrorCode.PlaybackNetworkFailed");
+        Assert.IsFalse(
+            connectivityClassifier.Contains(
+                "DomainErrorCode.PlaybackStartFailed",
+                StringComparison.Ordinal));
+        Assert.IsFalse(
+            connectivityClassifier.Contains(
+                "DomainErrorCode.PlaybackSourceUnsupported",
+                StringComparison.Ordinal));
+        Assert.IsFalse(
+            connectivityClassifier.Contains(
+                "DomainErrorCode.PlaybackDecodingFailed",
+                StringComparison.Ordinal));
+        StringAssert.Contains(
+            presenter,
+            "_resources.GetString(ToPriResourcePath(resourceKey))");
+        StringAssert.Contains(
+            presenter,
+            "resourceKey.Replace('.', '/')");
+        Assert.IsFalse(
+            presenter.Contains("_resources.GetString(resourceKey)", StringComparison.Ordinal),
+            "Dot-delimited RESW names must be converted to PRI resource paths before lookup.");
         StringAssert.Contains(presenter, "RandomNumberGenerator.GetBytes(ByteCount)");
         StringAssert.Contains(presenter, "Convert.ToHexString");
         StringAssert.Contains(presenter, "private const int ByteCount = 16;");
@@ -8379,7 +8645,7 @@ public sealed class DependencyRulesTests
     }
 
     [TestMethod]
-    public void M16RemotePlaylistOnboardingPreservesProbeProtectImportAndCommitBoundaries()
+    public void M16RemotePlaylistOnboardingPreservesSingleStreamingProtectImportAndCommitBoundaries()
     {
         string application = File.ReadAllText(Path.Combine(
             RepositoryRoot,
@@ -8388,6 +8654,13 @@ public sealed class DependencyRulesTests
             "src",
             "IptvSuite.Application",
             "RemotePlaylistSourceOnboarding.cs"));
+        string protection = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Application",
+            "SourceDraftProtectionService.cs"));
         string importer = File.ReadAllText(Path.Combine(
             RepositoryRoot,
             "apps",
@@ -8405,16 +8678,52 @@ public sealed class DependencyRulesTests
 
         string add = ExtractRequiredBlock(
             application,
-            "public async ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddAsync(",
+            "private async ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddCoreAsync(",
             "private async ValueTask<bool> TryDeleteProtectedConfigurationAsync(");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                application,
+                @"public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddAsync\(\s*string\? displayName,\s*string\? locator,\s*CancellationToken cancellationToken = default\)\s*=>\s*AddCoreAsync\(\s*displayName,\s*locator,\s*allowInsecureHttp: false,\s*cancellationToken: cancellationToken\);",
+                RegexOptions.CultureInvariant),
+            "The existing onboarding API must remain an HTTPS-only wrapper.");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                application,
+                @"public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>\s*AddAllowingInsecureHttpAsync\(\s*string\? displayName,\s*string\? locator,\s*CancellationToken cancellationToken = default\)\s*=>\s*AddCoreAsync\(\s*displayName,\s*locator,\s*allowInsecureHttp: true,\s*cancellationToken: cancellationToken\);",
+                RegexOptions.CultureInvariant),
+            "Cleartext onboarding must use an explicitly named API.");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                protection,
+                @"public ValueTask<DomainResult<ValidatedSourceDraft>> ProtectRemotePlaylistAsync\(\s*SourceId sourceId,\s*string\? displayName,\s*string\? locator,\s*CancellationToken cancellationToken = default\)\s*=>\s*ProtectRemotePlaylistCoreAsync\(\s*sourceId,\s*displayName,\s*locator,\s*allowInsecureHttp: false,\s*cancellationToken: cancellationToken\);",
+                RegexOptions.CultureInvariant),
+            "The existing protection API must remain an HTTPS-only wrapper.");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                protection,
+                @"public ValueTask<DomainResult<ValidatedSourceDraft>>\s*ProtectRemotePlaylistAllowingInsecureHttpAsync\(\s*SourceId sourceId,\s*string\? displayName,\s*string\? locator,\s*CancellationToken cancellationToken = default\)\s*=>\s*ProtectRemotePlaylistCoreAsync\(\s*sourceId,\s*displayName,\s*locator,\s*allowInsecureHttp: true,\s*cancellationToken: cancellationToken\);",
+                RegexOptions.CultureInvariant),
+            "Cleartext locator protection must use an explicitly named API.");
+        StringAssert.Contains(add, "bool allowInsecureHttp,");
+        StringAssert.Contains(add, "PrepareRemotePlaylistAllowingInsecureHttp(");
+        StringAssert.Contains(add, "PrepareRemotePlaylist(displayName, locator)");
+        StringAssert.Contains(protection, "PrepareRemotePlaylistAllowingInsecureHttp(");
+        StringAssert.Contains(protection, "PrepareRemotePlaylist(displayName, locator)");
+        Assert.IsFalse(add.Contains("HttpTransportRequest", StringComparison.Ordinal));
+        Assert.IsFalse(add.Contains("ConnectionProbeService", StringComparison.Ordinal));
+        Assert.IsFalse(add.Contains("ProbeAsync(", StringComparison.Ordinal));
+        Assert.IsFalse(application.Contains("_probeService", StringComparison.Ordinal));
+        Assert.IsFalse(application.Contains("IHttpTransport", StringComparison.Ordinal));
+        StringAssert.Contains(add, "allowInsecureHttp");
+        StringAssert.Contains(add, "ProtectRemotePlaylistAllowingInsecureHttpAsync(");
+        StringAssert.Contains(add, "ProtectRemotePlaylistAsync(");
         int prepare = add.IndexOf(
-            "SourceConfigurationValidator.PrepareRemotePlaylist(",
+            "DomainResult<PreparedRemotePlaylistSourceDraft> prepared =",
             StringComparison.Ordinal);
         int rejectUserInfo = add.IndexOf(
             "!string.IsNullOrEmpty(requestUri.UserInfo)",
             StringComparison.Ordinal);
-        int probe = add.IndexOf("_probeService.ProbeAsync(", StringComparison.Ordinal);
-        int protect = add.IndexOf(".ProtectRemotePlaylistAsync(", StringComparison.Ordinal);
+        int protect = add.IndexOf("protectionOperation =", StringComparison.Ordinal);
         int createTestingSource = add.IndexOf(
             "ContentSourceStatus.Testing",
             StringComparison.Ordinal);
@@ -8422,12 +8731,14 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             prepare >= 0 &&
             rejectUserInfo > prepare &&
-            probe > rejectUserInfo &&
-            protect > probe &&
+            protect > rejectUserInfo &&
             createTestingSource > protect &&
             import > createTestingSource,
-            "Remote onboarding must validate and probe before protecting the locator and importing the catalog.");
-        StringAssert.Contains(add, "HttpTransportLimits.MaximumAllowedResponseBytes");
+            "HTTP and HTTPS onboarding must validate, stage the protected locator, and then delegate one streaming import without a preliminary full-body probe.");
+        Assert.AreEqual(
+            1,
+            Regex.Count(add, @"_importer\.ImportAsync\("),
+            "Onboarding must delegate exactly one bounded streaming import attempt.");
 
         int committed = add.IndexOf(
             "if (import.Disposition is CatalogImportCommitDisposition.Committed)",
@@ -8670,7 +8981,7 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             Regex.IsMatch(
                 factory,
-                @"new RemotePlaylistSourceOnboardingService\(\s*secretStore,\s*transport,\s*importer,\s*TimeProvider\.System\s*\)",
+                @"new RemotePlaylistSourceOnboardingService\(\s*secretStore,\s*importer,\s*TimeProvider\.System\s*\)",
                 RegexOptions.CultureInvariant));
         Assert.IsTrue(
             Regex.IsMatch(
@@ -8682,7 +8993,7 @@ public sealed class DependencyRulesTests
         Assert.IsTrue(
             Regex.IsMatch(
                 window,
-                @"_mainPage\.ConfigureSourceOnboarding\(\s*_catalogServices\.Onboarding\.AddAsync\s*\)",
+                @"_mainPage\.ConfigureSourceOnboarding\(\s*\(displayName,\s*locator,\s*cancellationToken\)\s*=>\s*_catalogServices\.Onboarding\.AddAllowingInsecureHttpAsync\(\s*displayName,\s*locator,\s*cancellationToken:\s*cancellationToken\)\s*\)",
                 RegexOptions.CultureInvariant));
     }
 
@@ -8715,6 +9026,7 @@ public sealed class DependencyRulesTests
             ("RemotePlaylistAuthorizationCheckBox", "RemotePlaylistAuthorizationCheckBox"),
             ("RemotePlaylistAddButton", "RemotePlaylistAddButton"),
             ("RemotePlaylistCancelButton", "RemotePlaylistCancelButton"),
+            ("RemotePlaylistProgressRing", "RemotePlaylistProgressRing"),
             ("RemotePlaylistStatusText", "RemotePlaylistStatusText"),
         ];
         foreach ((string name, string automationId) in automationContracts)
@@ -8725,9 +9037,51 @@ public sealed class DependencyRulesTests
                 $"The packaged onboarding automation contract changed for {name}.");
         }
 
+        XElement pageRoot = RequiredNamedElement("PageRoot");
+        XElement onboardingPanel = RequiredNamedElement("RemotePlaylistOnboardingPanel");
+        XElement contentPanel = RequiredNamedElement("ContentPanel");
+        XElement[] rootRows = pageRoot
+            .Elements()
+            .Single(element => element.Name.LocalName == "Grid.RowDefinitions")
+            .Elements()
+            .ToArray();
+        string? onboardingRow = onboardingPanel.Attribute("Grid.Row")?.Value;
+        Assert.AreEqual(
+            contentPanel.Attribute("Grid.Row")?.Value,
+            onboardingRow,
+            "Onboarding must overlay the catalog/player content row instead of consuming layout height.");
+        Assert.IsTrue(
+            int.TryParse(onboardingRow, out int onboardingRowIndex) &&
+            onboardingRowIndex >= 0 &&
+            onboardingRowIndex < rootRows.Length &&
+            string.Equals(
+                "*",
+                rootRows[onboardingRowIndex].Attribute("Height")?.Value,
+                StringComparison.Ordinal),
+            "Onboarding must share the bounded star content row, not a root Auto row.");
+        Assert.AreEqual("1", onboardingPanel.Attribute("Canvas.ZIndex")?.Value);
+        Assert.AreEqual("Stretch", onboardingPanel.Attribute("HorizontalAlignment")?.Value);
+        Assert.AreEqual("Stretch", onboardingPanel.Attribute("VerticalAlignment")?.Value);
+        Assert.AreEqual(
+            "{ThemeResource SolidBackgroundFillColorBaseBrush}",
+            onboardingPanel.Attribute("Background")?.Value,
+            "The full-row overlay must use an opaque surface that masks active content beneath its card and margins.");
+        XElement onboardingCard = onboardingPanel
+            .Elements()
+            .Single(element => element.Name.LocalName == "Border");
+        Assert.AreEqual("16", onboardingCard.Attribute("Margin")?.Value);
+        Assert.AreEqual("Center", onboardingCard.Attribute("VerticalAlignment")?.Value);
+
         XElement locatorInput = RequiredNamedElement("RemotePlaylistLocatorTextBox");
         Assert.AreEqual("4096", locatorInput.Attribute("MaxLength")?.Value);
         Assert.AreEqual("False", locatorInput.Attribute("IsSpellCheckEnabled")?.Value);
+        Assert.AreEqual(
+            "HTTP or HTTPS playlist URL",
+            locatorInput.Attribute("AutomationProperties.Name")?.Value);
+        Assert.AreEqual(
+            "HTTP or HTTPS playlist URL",
+            locatorInput.Attribute("Header")?.Value);
+        Assert.AreEqual("https:// or http://", locatorInput.Attribute("PlaceholderText")?.Value);
         XElement authorization = RequiredNamedElement("RemotePlaylistAuthorizationCheckBox");
         Assert.AreEqual(
             ExpectedAuthorizationAccessibleName,
@@ -8742,6 +9096,15 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(
             authorization.Attribute("Content")?.Value ?? string.Empty,
             "özel/yerel ağdaysa yalnızca bu tam sunucu ve porta");
+        StringAssert.Contains(
+            authorization.Attribute("Content")?.Value ?? string.Empty,
+            "HTTP kullanırsam");
+        StringAssert.Contains(
+            authorization.Attribute("Content")?.Value ?? string.Empty,
+            "şifrelenmeden açık metin");
+        StringAssert.Contains(
+            authorization.Attribute("Content")?.Value ?? string.Empty,
+            "görülebileceğini veya değiştirilebileceğini (MITM)");
         Assert.AreEqual(
             "RemotePlaylistAuthorizationCheckBox_Changed",
             authorization.Attribute("Checked")?.Value);
@@ -8751,6 +9114,12 @@ public sealed class DependencyRulesTests
         Assert.AreEqual(
             "False",
             RequiredNamedElement("RemotePlaylistAddButton").Attribute("IsEnabled")?.Value);
+        XElement progressRing = RequiredNamedElement("RemotePlaylistProgressRing");
+        Assert.AreEqual("False", progressRing.Attribute("IsActive")?.Value);
+        Assert.AreEqual("Collapsed", progressRing.Attribute("Visibility")?.Value);
+        Assert.AreEqual(
+            "Validating and importing remote playlist",
+            progressRing.Attribute("AutomationProperties.Name")?.Value);
 
         string addHandler = ExtractRequiredBlock(
             codeBehind,
@@ -8783,6 +9152,8 @@ public sealed class DependencyRulesTests
             "using AsyncOperationLease operation = BeginAsyncOperation();",
             StringComparison.Ordinal);
         Assert.IsTrue(operationLease > 0, "The onboarding operation lease is missing.");
+        StringAssert.Contains(addHandler, "finally");
+        StringAssert.Contains(addHandler, "EndSourceOnboardingOperation();");
         string submitAdmission = addHandler[..operationLease];
         StringAssert.Contains(submitAdmission, "_sourceOnboardingPanelOpen");
         StringAssert.Contains(submitAdmission, "LoadingIndicator.IsActive");
@@ -8805,11 +9176,91 @@ public sealed class DependencyRulesTests
                 @"\b(?:Console|Trace|Debug)\.",
                 RegexOptions.CultureInvariant),
             "The onboarding UI must not log user input.");
+        int loadImportedSource = addHandler.IndexOf(
+            "await LoadSourcesAsync(sourceId);",
+            StringComparison.Ordinal);
+        int appendEntryLimitWarning = addHandler.IndexOf(
+            "$\"{StatusText.Text} {RemotePlaylistEntryLimitWarning}\"",
+            StringComparison.Ordinal);
+        StringAssert.Contains(addHandler, "onboardingResult.EntryLimitReached");
+        Assert.IsTrue(
+            loadImportedSource >= 0 && appendEntryLimitWarning > loadImportedSource,
+            "The bounded-entry warning must be appended after the imported source status is loaded.");
+        StringAssert.Contains(
+            codeBehind,
+            "Warning: only the first 50,000 valid entries were imported; additional entries were skipped to keep the catalog bounded.");
+
+        string browseHandler = ExtractRequiredBlock(
+            codeBehind,
+            "private async Task BrowseAsync(",
+            "private long BeginLoading()");
+        StringAssert.Contains(browseHandler, "source.UsesInsecureHttp");
+        StringAssert.Contains(
+            browseHandler,
+            "$\"{browseStatus} {InsecureHttpCatalogWarning}\"");
+        StringAssert.Contains(
+            codeBehind,
+            "Warning: cleartext HTTP traffic is unencrypted and can be observed or modified in transit (MITM).");
+
+        string ReadResourceValue(string culture, string key)
+        {
+            XDocument resources = XDocument.Load(Path.Combine(
+                windowsRoot,
+                "Strings",
+                culture,
+                "Resources.resw"));
+            return resources
+                .Descendants("data")
+                .Single(item => string.Equals(
+                    item.Attribute("name")?.Value,
+                    key,
+                    StringComparison.Ordinal))
+                .Element("value")!
+                .Value;
+        }
+
+        Assert.AreEqual(
+            "Enter the URL for the source.",
+            ReadResourceValue("en-US", "Errors.Endpoint.Required"));
+        Assert.AreEqual(
+            "Kaynağın adresini girin.",
+            ReadResourceValue("tr-TR", "Errors.Endpoint.Required"));
 
         string mutationControls = ExtractRequiredBlock(
             codeBehind,
             "private void UpdateSourceMutationControls()",
             "private void ResetLogoPageCancellation()");
+        string beginOnboarding = ExtractRequiredBlock(
+            codeBehind,
+            "private bool TryBeginSourceOnboardingOperation()",
+            "private void EndSourceOnboardingOperation()");
+        string endOnboarding = ExtractRequiredBlock(
+            codeBehind,
+            "private void EndSourceOnboardingOperation()",
+            "private void HideSourceOnboardingPanel(");
+        Assert.IsTrue(
+            beginOnboarding.IndexOf(
+                "_sourceOnboardingOperationPending = true;",
+                StringComparison.Ordinal) < beginOnboarding.IndexOf(
+                "UpdateSourceMutationControls();",
+                StringComparison.Ordinal),
+            "The progress state must be refreshed after onboarding starts.");
+        Assert.IsTrue(
+            endOnboarding.IndexOf(
+                "_sourceOnboardingOperationPending = false;",
+                StringComparison.Ordinal) < endOnboarding.IndexOf(
+                "UpdateSourceMutationControls();",
+                StringComparison.Ordinal),
+            "The progress state must be refreshed after every onboarding completion path.");
+        StringAssert.Contains(
+            mutationControls,
+            "RemotePlaylistProgressRing.IsActive = _sourceOnboardingOperationPending;");
+        Assert.IsTrue(
+            Regex.IsMatch(
+                mutationControls,
+                @"RemotePlaylistProgressRing\.Visibility\s*=\s*_sourceOnboardingOperationPending\s*\?\s*Visibility\.Visible\s*:\s*Visibility\.Collapsed;",
+                RegexOptions.CultureInvariant),
+            "The onboarding progress ring must be visible only while the operation is pending.");
         Match retryEligibility = Regex.Match(
             mutationControls,
             @"RetryPendingDeletionButton\.IsEnabled\s*=\s*(?<condition>[^;]+);",
@@ -8907,6 +9358,10 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(packageSmoke, "RemotePlaylistSourceNameTextBox");
         StringAssert.Contains(packageSmoke, "RemotePlaylistLocatorTextBox");
         StringAssert.Contains(packageSmoke, "RemotePlaylistAuthorizationCheckBox");
+        StringAssert.Contains(packageSmoke, "\"HTTP or HTTPS playlist URL\"");
+        StringAssert.Contains(
+            packageSmoke,
+            "$expectedOnboardingCatalogStatus =");
         StringAssert.Contains(
             packageSmoke,
             $"\"{ExpectedAuthorizationAccessibleNameUtf8Base64}\"");

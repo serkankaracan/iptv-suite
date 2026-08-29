@@ -48,14 +48,28 @@ public static class RedirectTargetPolicy
     {
         ArgumentNullException.ThrowIfNull(sourceEndpoint);
 
-        DomainResult<SafeEndpoint> target =
-            SourceConfigurationValidator.ValidateHttpsLocator(redirectTarget, rejectUserInfo: true);
+        bool sourceUsesHttp = string.Equals(
+            sourceEndpoint.Scheme,
+            Uri.UriSchemeHttp,
+            StringComparison.Ordinal);
+        DomainResult<SafeEndpoint> target = SourceConfigurationValidator.ValidateWebLocator(
+            redirectTarget,
+            rejectUserInfo: true,
+            allowInsecureHttp: sourceUsesHttp);
         if (!target.IsSuccess)
         {
             return DomainResult.Failure<RedirectTargetAssessment>(target.Error!);
         }
 
         bool sameOrigin = sourceEndpoint.Equals(target.Value);
+        if (sourceUsesHttp &&
+            string.Equals(target.Value!.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) &&
+            !sameOrigin)
+        {
+            return DomainResult.Failure<RedirectTargetAssessment>(
+                DomainErrorCode.InsecureTransportRejected);
+        }
+
         RedirectTargetAssessment assessment = new(
             target.Value!,
             sameOrigin ? RedirectOriginRelation.SameOrigin : RedirectOriginRelation.CrossOrigin,

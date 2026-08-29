@@ -54,7 +54,7 @@
   <data name="Errors.Source.NameRequired" xml:space="preserve"><value>Enter a name for the source.</value></data>
   <data name="Errors.Source.NameInvalid" xml:space="preserve"><value>The source name contains unsupported characters.</value></data>
   <data name="Errors.Source.NameTooLong" xml:space="preserve"><value>The source name is too long.</value></data>
-  <data name="Errors.Endpoint.Required" xml:space="preserve"><value>Enter the HTTPS URL for the source.</value></data>
+  <data name="Errors.Endpoint.Required" xml:space="preserve"><value>Enter the URL for the source.</value></data>
   <data name="Errors.Endpoint.Malformed" xml:space="preserve"><value>The source URL is not valid.</value></data>
   <data name="Errors.Endpoint.TooLong" xml:space="preserve"><value>The source URL is too long.</value></data>
   <data name="Errors.Endpoint.SchemeUnsupported" xml:space="preserve"><value>The source URL uses an unsupported scheme.</value></data>
@@ -71,12 +71,26 @@
   <data name="Errors.Authentication.Rejected" xml:space="preserve"><value>The source rejected the sign-in details. Check them and try again.</value></data>
   <data name="Errors.Playlist.DownloadFailed" xml:space="preserve"><value>The playlist could not be downloaded. Try again.</value></data>
   <data name="Errors.Playlist.UnsupportedFormat" xml:space="preserve"><value>This playlist format is not supported.</value></data>
+  <data name="Errors.Playlist.ResponseAddressRejected" xml:space="preserve"><value>The playlist response address was rejected by the app's URL safety policy.</value></data>
+  <data name="Errors.Playlist.HeaderInvalid" xml:space="preserve"><value>The response is not an extended M3U playlist. The #EXTM3U header is missing or invalid.</value></data>
+  <data name="Errors.Playlist.TextEncodingInvalid" xml:space="preserve"><value>The playlist text is not valid UTF-8.</value></data>
+  <data name="Errors.Playlist.SafeLimitExceeded" xml:space="preserve"><value>The playlist exceeds the app's safe parsing limits.</value></data>
+  <data name="Errors.Playlist.LineLimitExceeded" xml:space="preserve"><value>The playlist contains a line longer than the app can safely process.</value></data>
+  <data name="Errors.Playlist.TotalLimitExceeded" xml:space="preserve"><value>The playlist text exceeds the app's safe total size limit.</value></data>
+  <data name="Errors.Playlist.EntryLimitExceeded" xml:space="preserve"><value>The playlist contains more valid entries than this import path can safely process.</value></data>
+  <data name="Errors.Playlist.StructureInvalid" xml:space="preserve"><value>The playlist mixes incompatible M3U or HLS structures.</value></data>
+  <data name="Errors.Playlist.NoUsableEntries" xml:space="preserve"><value>The playlist does not contain any usable channel entries.</value></data>
+  <data name="Errors.Playlist.EntriesRejectedByAddressPolicy" xml:space="preserve"><value>None of the playlist's channel addresses passed the app's URL safety policy.</value></data>
+  <data name="Errors.Playlist.HlsManifestUnsupported" xml:space="preserve"><value>This address returns an HLS media manifest instead of an importable channel catalog.</value></data>
   <data name="Errors.Network.RequestTimedOut" xml:space="preserve"><value>The source took too long to respond. Try again.</value></data>
   <data name="Errors.Network.TlsValidationFailed" xml:space="preserve"><value>A secure connection to the source could not be verified.</value></data>
   <data name="Errors.Playback.StartFailed" xml:space="preserve"><value>Playback could not start. Try again.</value></data>
   <data name="Errors.Playback.ControlFailed" xml:space="preserve"><value>The playback control could not be applied. Try again.</value></data>
   <data name="Errors.Playback.StreamInterrupted" xml:space="preserve"><value>Playback was interrupted.</value></data>
   <data name="Errors.Playback.ReconnectExhausted" xml:space="preserve"><value>Playback could not reconnect. Check your connection and retry.</value></data>
+  <data name="Errors.Playback.NetworkFailed" xml:space="preserve"><value>The player reported a network problem. The source may be temporarily unavailable.</value></data>
+  <data name="Errors.Playback.SourceUnsupported" xml:space="preserve"><value>The player could not use this source format. Its media type or container may not be supported.</value></data>
+  <data name="Errors.Playback.DecodingFailed" xml:space="preserve"><value>The media could not be decoded. Its codec, encoding settings, or stream data may be incompatible.</value></data>
   <data name="Errors.Storage.Unavailable" xml:space="preserve"><value>Local app data is unavailable. Try again.</value></data>
   <data name="Errors.Operation.Cancelled" xml:space="preserve"><value>The operation was cancelled.</value></data>
   <data name="Errors.Network.ResourceNotFound" xml:space="preserve"><value>The requested source could not be found.</value></data>

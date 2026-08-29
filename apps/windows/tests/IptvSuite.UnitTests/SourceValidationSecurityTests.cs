@@ -8,7 +8,7 @@ namespace IptvSuite.UnitTests;
 public sealed class SourceValidationSecurityTests
 {
     private static readonly string[] ExpectedPublicValidatorMethods =
-        ["PrepareRemotePlaylist", "PrepareXtream"];
+        ["PrepareRemotePlaylist", "PrepareRemotePlaylistAllowingInsecureHttp", "PrepareXtream"];
 
     [TestMethod]
     public void SafeEndpointPublicStateContainsOnlySchemeHostAndEffectivePort()
@@ -138,6 +138,37 @@ public sealed class SourceValidationSecurityTests
             SourceConfigurationValidator.PrepareRemotePlaylist(
                 "Source",
                 "http://example.test/list"),
+            DomainErrorCode.InsecureTransportRejected);
+    }
+
+    [TestMethod]
+    public void ExplicitRemotePlaylistHttpCompatibilityIsBoundedAndDoesNotApplyToXtream()
+    {
+        DomainResult<PreparedRemotePlaylistSourceDraft> remote =
+            SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Source",
+                "http://example.test/list.m3u?token=synthetic");
+
+        Assert.IsTrue(remote.IsSuccess);
+        Assert.AreEqual(Uri.UriSchemeHttp, remote.Value!.SafeEndpoint.Scheme);
+        Assert.AreEqual("example.test", remote.Value.SafeEndpoint.Host);
+        Assert.AreEqual(80, remote.Value.SafeEndpoint.Port);
+        SecurityTestAssertions.IsFailure(
+            SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Source",
+                "http://user:synthetic@example.test/list.m3u"),
+            DomainErrorCode.EndpointUserInfoNotAllowed);
+        SecurityTestAssertions.IsFailure(
+            SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Source",
+                "https://user:synthetic@example.test/list.m3u"),
+            DomainErrorCode.EndpointUserInfoNotAllowed);
+        SecurityTestAssertions.IsFailure(
+            SourceConfigurationValidator.PrepareXtream(
+                "Source",
+                "http://example.test/player_api.php",
+                "synthetic-user",
+                "synthetic-password"),
             DomainErrorCode.InsecureTransportRejected);
     }
 

@@ -21,7 +21,7 @@ public sealed class SqlitePlaybackSourceResolverTests
         string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
         await InitializeDatabaseAsync(databasePath);
         byte[] locator =
-            "https://synthetic-user:synthetic-password@fixtures.invalid/live/channel.m3u8?opaque=canary-value"u8.ToArray();
+            "https://fixtures.invalid/live/channel.m3u8?opaque=canary-value&token=synthetic-password"u8.ToArray();
         ResolverBatch batch = await CreateBatchAsync(locator, "active");
         await ActivateAsync(databasePath, batch.Batch);
 
@@ -43,6 +43,52 @@ public sealed class SqlitePlaybackSourceResolverTests
         }
 
         Assert.ThrowsExactly<ObjectDisposedException>(() => _ = lease.Value);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task HttpRemoteSourceAllowsOnlySameOriginHttpOrHttpsChannelLocators()
+    {
+        (string Locator, bool ExpectedSuccess)[] cases =
+        [
+            ("http://fixtures.invalid/live/same-origin.m3u8?stream=synthetic", true),
+            ("http://other.invalid/live/cross-origin.m3u8", false),
+            ("https://media.invalid/live/secure-upgrade.m3u8", true),
+        ];
+
+        for (int index = 0; index < cases.Length; index++)
+        {
+            using TemporaryDirectory temporary = TemporaryDirectory.Create(
+                $"http-playback-origin-{index}");
+            string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+            await InitializeDatabaseAsync(databasePath);
+            using var sourceStore = new M4InMemorySecretStore();
+            ContentSource source = await CreateSourceAsync(
+                sourceStore,
+                $"http-{index}",
+                "http://fixtures.invalid/catalog/list.m3u?token=synthetic",
+                allowInsecureHttp: true);
+            ResolverBatch batch = await CreateBatchAsync(
+                Encoding.UTF8.GetBytes(cases[index].Locator),
+                $"http-{index}",
+                source);
+            await ActivateAsync(databasePath, batch.Batch);
+
+            ResolvedSource resolved = await ResolveAsync(
+                databasePath,
+                new PlaybackSelection(source.Id, batch.ChannelId));
+
+            if (!cases[index].ExpectedSuccess)
+            {
+                Assert.AreEqual("InvalidLocator", resolved.Failure);
+                Assert.IsNull(resolved.Lease);
+                continue;
+            }
+
+            Assert.AreEqual("None", resolved.Failure);
+            using SecretLease lease = resolved.Lease!;
+            Assert.AreEqual(cases[index].Locator, Encoding.UTF8.GetString(lease.Value.Span));
+        }
     }
 
     [TestMethod]
@@ -358,6 +404,7 @@ public sealed class SqlitePlaybackSourceResolverTests
         [
             [0xc3, 0x28],
             "http://fixtures.invalid/live/channel.m3u8"u8.ToArray(),
+            "https://synthetic-user:synthetic-password@fixtures.invalid/live/channel.m3u8"u8.ToArray(),
             "https://fixtures.invalid/live/channel.m3u8#fragment"u8.ToArray(),
             Encoding.UTF8.GetBytes(
                 $"https://fixtures.invalid/{new string('a', SourceConfigurationValidator.MaxLocatorUnicodeScalars)}"),
@@ -601,13 +648,20 @@ public sealed class SqlitePlaybackSourceResolverTests
 
     private static async Task<ContentSource> CreateSourceAsync(
         M4InMemorySecretStore store,
-        string suffix)
+        string suffix,
+        string? locator = null,
+        bool allowInsecureHttp = false)
     {
-        DomainResult<ValidatedSourceDraft> draft = await new SourceDraftProtectionService(store)
-            .ProtectRemotePlaylistAsync(
+        var protection = new SourceDraftProtectionService(store);
+        DomainResult<ValidatedSourceDraft> draft = allowInsecureHttp
+            ? await protection.ProtectRemotePlaylistAllowingInsecureHttpAsync(
                 SourceId.Generate(),
                 $"Synthetic {suffix}",
-                $"https://fixtures.invalid/catalog/{suffix}.m3u");
+                locator ?? $"https://fixtures.invalid/catalog/{suffix}.m3u")
+            : await protection.ProtectRemotePlaylistAsync(
+                SourceId.Generate(),
+                $"Synthetic {suffix}",
+                locator ?? $"https://fixtures.invalid/catalog/{suffix}.m3u");
         Assert.IsTrue(draft.IsSuccess);
         DateTimeOffset now = new(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
         DomainResult<ContentSource> source = ContentSource.Create(

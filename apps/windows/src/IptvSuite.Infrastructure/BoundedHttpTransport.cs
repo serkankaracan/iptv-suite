@@ -93,7 +93,8 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        using CancellationTokenSource timeoutSource = new(_requestTimeout);
+        TimeSpan requestTimeout = request.RequestTimeoutOverride ?? _requestTimeout;
+        using CancellationTokenSource timeoutSource = new(requestTimeout);
         using CancellationTokenSource linkedSource =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
 
@@ -300,7 +301,8 @@ public sealed class BoundedHttpTransport : IHttpTransport, IStreamingHttpTranspo
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var timeoutSource = new CancellationTokenSource(_requestTimeout);
+        TimeSpan requestTimeout = request.RequestTimeoutOverride ?? _requestTimeout;
+        var timeoutSource = new CancellationTokenSource(requestTimeout);
         var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             timeoutSource.Token);

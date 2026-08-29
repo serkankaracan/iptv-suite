@@ -55,6 +55,36 @@ public sealed class RedirectTargetPolicyTests
     }
 
     [TestMethod]
+    public void HttpRedirectsStayOnOriginOrUpgradeToHttps()
+    {
+        SafeEndpoint source = GetEndpoint(
+            "http://example.test/base",
+            allowInsecureHttp: true);
+
+        DomainResult<RedirectTargetAssessment> sameOrigin = RedirectTargetPolicy.Evaluate(
+            source,
+            "http://example.test:80/next?token=synthetic");
+        DomainResult<RedirectTargetAssessment> crossOriginHttp = RedirectTargetPolicy.Evaluate(
+            source,
+            "http://other.test/next");
+        DomainResult<RedirectTargetAssessment> httpsUpgrade = RedirectTargetPolicy.Evaluate(
+            source,
+            "https://other.test/next");
+
+        Assert.IsTrue(sameOrigin.IsSuccess);
+        Assert.AreEqual(RedirectOriginRelation.SameOrigin, sameOrigin.Value!.OriginRelation);
+        Assert.AreEqual(
+            RedirectCredentialPolicy.PreserveForSameOrigin,
+            sameOrigin.Value.CredentialPolicy);
+        SecurityTestAssertions.IsFailure(
+            crossOriginHttp,
+            DomainErrorCode.InsecureTransportRejected);
+        Assert.IsTrue(httpsUpgrade.IsSuccess);
+        Assert.AreEqual(RedirectOriginRelation.CrossOrigin, httpsUpgrade.Value!.OriginRelation);
+        Assert.AreEqual(RedirectCredentialPolicy.Strip, httpsUpgrade.Value.CredentialPolicy);
+    }
+
+    [TestMethod]
     public void DowngradeUnsupportedSchemeUserInfoAndFragmentAreRejected()
     {
         SafeEndpoint source = GetEndpoint("https://example.test/base");
@@ -83,10 +113,16 @@ public sealed class RedirectTargetPolicyTests
         SecurityTestAssertions.DoesNotContainSensitive(fragment.ToString(), sensitiveValue);
     }
 
-    private static SafeEndpoint GetEndpoint(string locator)
+    private static SafeEndpoint GetEndpoint(
+        string locator,
+        bool allowInsecureHttp = false)
     {
         DomainResult<PreparedRemotePlaylistSourceDraft> result =
-            SourceConfigurationValidator.PrepareRemotePlaylist("Source", locator);
+            allowInsecureHttp
+                ? SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                    "Source",
+                    locator)
+                : SourceConfigurationValidator.PrepareRemotePlaylist("Source", locator);
         Assert.IsTrue(result.IsSuccess, "A redirect source fixture was rejected.");
         return result.Value!.SafeEndpoint;
     }

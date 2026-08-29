@@ -2,9 +2,11 @@
 
 **Güncel M8 sonucu (2026-08-21):** same-SQLite-transaction protected catalog, durable source lifecycle/reconciliation, 50k component bütçeleri ve gerçek process-crash recovery tamamlanmış; ADR-003 `Accepted`dır. Aşağıdaki M4 zaman çizelgesindeki `Proposed`/uygulanmamış/açık M8 ifadeleri tarihsel bağlamdır ve bu kaydı geçersiz kılmaz. Production PFN/Store identity/repair M15'te açık kalır.
 
+**Remote M3U HTTP successor kararı (2026-08-29):** ADR-008, HTTPS'i varsayılan tutarak yalnız açık UI onaylı `RemotePlaylist` source için query/token taşıyabilen cleartext HTTP locator'ı kabul eder. HTTP catalog ilk 50.000 geçerli entry ile bounded tutulur; doğrulanan tail atlanır ve kullanıcıya truncation uyarısı gösterilir. User-info, Xtream HTTP, HTTP logo, HTTP request'te `Authorization`/`Cookie`/`Referer`, cross-origin HTTP redirect ve HTTPS→HTTP downgrade reddedilir. At-rest protection transit confidentiality/integrity sağlamaz; Store/hukuk sonucu `UNVERIFIED`dır. Bu successor production değişikliği önceki M15/M16 hosted closure'larını yeni aday için stale bırakır; yeni hosted `VERIFIED` iddiası yoktur.
+
 **Tarih:** 2026-08-09
 
-**Durum:** M3 validation/redaction contract'ı, M4 CurrentUser protected-storage foundation ve M8 transactional layout/process-crash recovery `COMPLETED`; M15 production package lifecycle acceptance pending
+**Durum:** M3 validation/redaction contract'ı, M4 CurrentUser protected-storage foundation ve M8 transactional layout/process-crash recovery `COMPLETED`; ADR-008 Remote M3U cleartext exception kararı `ACCEPTED`; M15/M16 successor hosted acceptance pending
 
 **Kapsam:** Windows MVP; platformlar aynı ilkeleri kendi güvenli API'leriyle uygular
 
@@ -15,7 +17,7 @@ Uygulama yalnız kullanıcının yetkili source'u ile cihazdan doğrudan haberle
 Baseline hedefleri:
 
 - secret hiçbir zaman source code, Git, plaintext DB/config, log, telemetry, UI error veya test artifact'ına girmez;
-- credential-bearing trafik doğrulanmış TLS olmadan çıkmaz;
+- credential-bearing trafik doğrulanmış TLS kullanır; tek istisna ADR-008 kapsamındaki açık-onaylı Remote M3U HTTP locator/query zinciridir ve transit güvenli sayılmaz;
 - dış input bounded ve cancellation-aware işlenir;
 - local data minimum süre tutulur, kullanıcı tarafından silinebilir ve migration sırasında açığa çıkmaz;
 - exact native/OSS dependency seti izlenir ve güvenlik güncellemesi alır;
@@ -24,6 +26,16 @@ Baseline hedefleri:
 M3 local kabulü; raw locator/credential döndürmeyen source validation, scheme+IDNA host+effective port ile sınırlı `SafeEndpoint`, random opaque references, registry-only stable safe errors ve provider host'unu default gizleyen pure URI/header/untrusted-text redaction contract'ını 105 testlik iki-run gate içinde doğrulamıştır. M3 kapsamı production persistence veya log sink implementation'ı içermiyordu; sonradan eklenen M4 protected-storage foundation aşağıda ayrı kanıt ve sınırlarıyla kaydedilir. Wrong-user, source deletion/reconciliation, DB/WAL/SHM taraması ve retention enforcement hâlâ `UNVERIFIED` durumdadır.
 
 M3 opaque reference'ın temsilini doğrular, fakat protected record binding'ini kanıtlamaz. M4 foundation store-owned issuance ile kriptografik source/purpose/reference context binding'ini ekler. Owner-bound v2 dilimi ayrıca source credential/remote playlist kaydını fresh `SourceConfigurationId`ye; stream/logo kaydını `ChannelId`ye bağlar. Exact owner kind/ID hem store key, filename digest ve DPAPI entropy'de hem encrypted envelope context'inde doğrulanır; same-source/same-purpose cross-owner read/update fail-closed, yanlış-owner delete doğru kayda dokunmadan idempotent success'tir. Owner integrity context'idir, authorization principal değildir. Güncel source-draft application operation'ı validation'ı store mutation'ından önce tamamlar; protected create başarısından sonra exact store-issued reference, `SourceId` ve configuration owner'ı validated draft'a birlikte bağlar. Doğrudan await edilen çağrıda commit sonrası cancellation yeniden gözlenmez ve reference başarılı sonuçla döner. Bu davranış caller abandonment/retry, aynı `SourceId` için yinelenen create, process crash/OOM, metadata/configuration persistence, update rollback, deletion veya reconciliation atomikliği sağlamaz. M5'te resolve edilen locator yeniden HTTPS validation'dan geçirilip beklenen endpoint/source ile eşleştirilir. Owner+reference+endpoint tuple'ının birlikte değiştirilmesi, missing-reference ve origin equality geçmeden opaque ID/owner tek başına authorization veya origin kanıtı sayılmaz.
+
+ADR-008 successor'ında son cümledeki M5 HTTPS-only kaydı tarihsel kalır: Xtream yine HTTPS doğrular; Remote M3U ise persisted source scheme'i ve explicit cleartext admission'ı üzerinden `http`/`https` doğrular. Scheme, IDNA host ve effective port origin equality'nin parçasıdır; HTTP onayı başka source, configuration veya origin'e taşınmaz.
+
+Remote M3U onboarding, HTTP/HTTPS ayrımı olmadan preliminary full-body probe yapmaz; local validation — HTTP için ayrıca açık onay — sonrasında owner-bound protected staging ve tek bounded streaming import isteği kullanır. Açık `NotCommitted` sonuçta exact staging kaydı cancellation'dan bağımsız silinir; indeterminate commit recovery için korunur. HTTP tarafında bu azaltım tek cleartext request'e confidentiality/integrity kazandırmaz. Remote M3U decompressed body `128 MiB`, total request iki dakika ile bounded kalır; genel HTTP/Xtream `4 MiB`/varsayılan 15 saniye sınırı genişlemez.
+
+Incremental Remote M3U reader'ın fiziksel satır hard cap'i `65.536` UTF-16 kod birimidir. Bu bounded compatibility düzeltmesi semantik sınırları büyütmez: locator ve generic metadata değeri `4.096`, `tvg-id` `512`, channel/group name `256` ile sınırlı; decoded toplam `128 Mi` UTF-16 kod birimi ve decompressed response `128 MiB` bütçeleri değişmeden kalır. Cap üzerindeki satır tüm importu raw içerik yayımlamadan fail-closed durdurur.
+
+Açık-onaylı HTTP compatibility kaynağında persistence 50.000 geçerli entry ile sınırlıdır. Limit sonrası entry'ler protected locator veya DB row üretmeden sayılır; stream strict UTF-8/line/body denetimleri için sonuna kadar tüketilir. `EntryLimitReached` ve skipped-warning toplamı yalnız sayısal/güvenli durum taşır, raw locator veya provider metni taşımaz; UI ilk 50.000 kaydın alındığını açıkça bildirir. Bu truncation cleartext güvenlik riskini azaltmaz ve provider-order değişiminin katalog içeriğini değiştirebilmesi residual product/data riskidir. HTTPS/direct fail-closed matrisi değişmez; zero-usable katalog commit edilmez.
+
+Remote M3U failure diagnosis yalnız append-only stable error code taşır: response/header, invalid UTF-8, fiziksel satır (`PlaylistLineLimitExceeded`), decoded toplam (`PlaylistTotalLimitExceeded`), entry (`PlaylistEntryLimitExceeded`), structure/HLS, zero-usable ve channel-address policy. Raw response, playlist satırı, URL/host/query, credential veya exception metni bu zincire eklenmez. Ekrandaki opaque Operation ID recorder/log/telemetry ile bağlı değildir; kullanıcıdan credential-bearing locator istemek veya ID'yi ham içeriğe geri bağlamak için kullanılamaz.
 
 Exact configuration-record deletion primitive'i yalnız durable olarak `DeletionPending` olduğu varsayılan `ContentSource` aggregate'inden owner/purpose/reference tuple'ını türetir ve o tek credential veya remote-playlist locator kaydını idempotent siler. Caller-supplied key parçaları, source-wide enumeration ya da daha zayıf fallback kullanmaz. Bu primitive source durumunu persist etmez, yeni kullanım admission'ını kapatıp in-flight lease'leri drain etmez; channel kayıtlarını, metadata/cache'i ve kayıp referanslı orphan'ları temizlemez. Dolayısıyla source deletion/reconciliation hard-gate'i açık kalır.
 
@@ -63,7 +75,7 @@ Run number `#22` UI kaydı, bu threat-model kararı ve production `asInvoker` / 
 | Malicious logo/image | Decompression bomb, malformed codec, local-network probing, cache abuse | MIME+magic validation, byte/pixel/dimension cap, bounded decode/concurrency, address policy, LRU |
 | Malicious/broken stream | Native parser exploit, hang, endless buffer/retry, secret echo | Patched engine, bounded open/retry, adapter isolation boundary, sanitized logs, corpus/fuzz/soak |
 | Credential leak | Query/user-info/header, exception, crash dump, clipboard, screenshot | Opaque refs, central sanitizer, no full memory dump support artifact, scan tests |
-| Network attacker | HTTP sniffing, invalid certificate, downgrade, redirect theft | HTTPS credential gate, OS trust validation, no bypass, manual redirect, no cross-origin auth |
+| Network attacker | HTTP sniffing/tamper, invalid certificate, downgrade, redirect theft | HTTPS default, OS trust validation, no bypass, manual redirect, no cross-origin auth; ADR-008 HTTP exception'ında disclosure/tamper açık residual risk ve kalıcı warning |
 | Local DB theft | Channel preferences visible; protected secrets targeted | DPAPI CurrentUser blobs, app-data ACL, minimization, deletion; acknowledge same-user threat |
 | Same-user malicious process | Can read app files/process memory under desktop threat model | DPAPI reduces at-rest theft but is not process sandbox; OS account security and short secret lifetime |
 | Supply-chain compromise | Native DLL/plugin or NuGet update | Exact lock, official source, hashes/signatures where supplied, SBOM, license/CVE review |
@@ -87,7 +99,7 @@ Not protected against: fully compromised Windows user/admin/kernel, screen captu
 - Xtream stream URL'si mümkünse provider key + source secret'tan just-in-time oluşturulur;
 - M3U stream locator'ı protected reference ile çözülür.
 
-M7 loader remote-playlist locator'ını yalnız authoritative configuration owner/purpose/reference tuple'ıyla protected store'dan okur; lease operation sonunda dispose edilir. Streaming transport ve parser response'u tek string'e dönüştürmez. Relative locator yalnız final authorized HTTPS URI'ye resolve edilir; HTTP, user-info ve fragment skip edilir. Raw locator public result, diagnostic veya log yüzeyine verilmez; production loader accepted entry'yi zorunlu internal sink'e tek tek aktarır. Sink'in raw locator'ı protected opaque reference'a dönüştüren durable implementation'ı M8 transaction sınırına aittir.
+M7 loader remote-playlist locator'ını yalnız authoritative configuration owner/purpose/reference tuple'ıyla protected store'dan okur; lease operation sonunda dispose edilir. Streaming transport ve parser response'u tek string'e dönüştürmez. M7'nin tarihsel kabulünde relative locator yalnız final authorized HTTPS URI'ye resolve edilir. ADR-008 successor'ında HTTP source'taki relative veya absolute initial HTTP channel locator yalnız source'un exact scheme + IDNA host + effective port origin'iyle aynıysa kabul edilir; HTTPS channel initial URI/scheme validation ile kabul edilir. HTTPS-source→HTTP, cross-origin initial HTTP, user-info, fragment ve HTTP logo reddedilir. Raw locator public result, diagnostic veya log yüzeyine verilmez; production loader accepted entry'yi zorunlu internal sink'e tek tek aktarır. Sink raw locator'ı protected opaque reference'a dönüştürür; bu at-rest koruma transit HTTP'yi güvenli yapmaz. Initial locator native `MediaSource`'a verildikten sonraki HLS/media alt-kaynak ve player-internal redirect zinciri uygulamanın `EndpointAddressPolicy` denetiminden geçmez; aynı-origin enforcement burada `UNVERIFIED` ve release blocker'dır.
 
 Credential Locker primary değildir: roaming/bulk-locator uyumsuzluğuna ek olarak full-trust non-AppContainer process'te user locker isolation'ı beklenmemelidir. Belgelenen 20-record sınırı UWP/AppContainer desktop bağlamına özgüdür; mevcut full-trust package için otomatik gerekçe sayılmaz ve 20/21 probe'u açık kalır. `LocalMachine` kapsamı kullanılmaz. Kendi master-key/crypto formatı tasarlanmaz.
 
@@ -159,27 +171,31 @@ Response body, playlist satırı, player command line, environment ve full excep
 - Production transport OS/environment proxy'sini kullanmaz (`UseProxy=false`); connect callback her request'te bağlanan IDNA-canonical exact host + effective port authority ile gerçek socket authority'sini eşleştirmeden DNS/connect yapmaz; geçersiz IDN fail-closed reddedilir.
 - Retry yalnız safe/idempotent GET ve transient sınıflarda; exponential backoff + jitter + `Retry-After` cap. Auth, TLS, validation ve parse error retry edilmez.
 - DNS sonucu connect öncesi address policy'ye, redirect sonrası tekrar policy'ye tabi olur; mixed public/private cevap ile special-use adresler (en az `192.88.99.0/24`, `2001::/23`, `2002::/16`, `3fff::/20`) fail-closed reddedilir.
+- Direct cleartext HTTP yalnız ADR-008'e göre source admission sırasında açıkça onaylanmış `RemotePlaylist` configuration'ında kullanılabilir. Genel transport factory, Xtream, logo veya başka feature için HTTP fallback açmaz.
 
-### 6.2 HTTP-only provider kararı
+### 6.2 Remote M3U cleartext HTTP kararı
 
-Credential, token veya kişisel playlist locator'ı taşıyan HTTP **reddedilir**; kullanıcı uyarısı trafiği şifrelemez. Anonymous media için HTTP compatibility ticari gereksinim haline gelirse:
+ADR-008 yalnız `RemotePlaylist` source için dar bir compatibility exception kabul eder [S135]:
 
-- ayrı ADR/threat/Store review,
-- açık per-source opt-in ve kalıcı warning,
-- hiçbir sensitive header, cookie, user-info veya query değeri olmaması,
-- HTTPS'ten sessiz downgrade olmaması,
-- UI'da güvenli/güvensiz durumun açık ayrımı
+- HTTPS varsayılandır; HTTP locator ağ isteğinden önce scheme-specific açık UI onayı ister.
+- HTTP locator query/token taşıyabilir, fakat user-info taşıyamaz. Full locator yalnız protected store'da tutulur; query dahil request, playlist body ve HTTP channel trafiğinin ağda görünür/değiştirilebilir olduğu kalıcı warning ile gösterilir.
+- HTTP request'e `Authorization`, `Cookie` veya `Referer` eklenmez. At-rest encryption transit encryption diye sunulmaz.
+- HTTP source'taki initial HTTP channel yalnız exact `SafeEndpoint` origin'inde kabul edilir. HTTPS channel initial URI/scheme validation ile kabul edilir; HTTPS source'tan HTTP channel ve HTTP logo reddedilir. Native player'ın sonraki HLS/media alt-kaynak ve redirect isteklerinde aynı-origin/address enforcement iddia edilmez.
+- Same-origin HTTP redirect bounded olabilir; cross-origin HTTP redirect ve HTTPS→HTTP downgrade reddedilir. HTTP→HTTPS redirect target yeniden origin/address validation'dan geçerek upgrade olabilir.
+- Source kaydı/restart HTTP uyarısını ortadan kaldırmaz. Cleartext source güvenli diye etiketlenmez ve onay başka source/origin'e miras kalmaz.
 
-olmadan açılmaz.
+`INFERENCE`: Bu dar exception HTTPS sunmayan yetkili playlist'lerle compatibility sağlar. Microsoft Store Policies 7.19'un security ve modern-cryptography hükümlerinin belirli query token'ına uygulanması ile certification/hukuk sonucu `UNVERIFIED`dır [S10]. Bu karar hukuki görüş veya Store kabulü değildir.
+
+`UNVERIFIED / HIGH RESIDUAL / RELEASE BLOCKER`: Same-origin kontrolü yalnız initial channel locator admission'ında uygulanır. Native `MediaSource` HLS/media alt-kaynaklarını ve player-internal redirect zincirini uygulamanın source-download transport'u dışında açar; uygulama bunları güvenilir biçimde gözlemleyip `EndpointAddressPolicy` veya same-origin policy ile enforce edemez. Release öncesi bu yüzeyi denetleyen bir mimari kontrol ya da açık Product/Security/Privacy/Legal risk kabulü ve adversarial packaged-device kanıtı gerekir.
 
 ### 6.3 Image ve local-network policy
 
 Logo fetch player request'inden ayrıdır:
 
-- yalnız `http/https`; `file/data/javascript/ftp/smb` reddedilir;
+- yalnız `https`; HTTP logo ile `file/data/javascript/ftp/smb` reddedilir;
 - credential, Cookie, Authorization ve Referer verilmez;
 - logo/image isteğinde loopback, link-local, multicast, unspecified ve private address her zaman `PublicOnly` policy ile reddedilir;
-- kullanıcı onboarding ekranında private/local kaynak erişimini açıkça onayladıysa yalnız yetkilendirilmiş Remote M3U veya kalıcı Xtream source probe/import/catalog isteğinin exact HTTPS host + effective port origin'i private/local policy ile değerlendirilebilir; bu opt-in logo/image isteğine veya cross-origin redirect'e taşınmaz;
+- kullanıcı onboarding ekranında private/local kaynak erişimini açıkça onayladıysa yalnız yetkilendirilmiş Remote M3U source'un exact approved `http`/`https` scheme + host + effective port origin'i veya kalıcı Xtream source'un exact HTTPS origin'i probe/import/catalog isteğinde private/local policy ile değerlendirilebilir; bu opt-in logo/image isteğine veya cross-origin redirect'e taşınmaz;
 - Bu pre-release modelde desteklenen legacy upgrade yoktur: kalıcı source kaydının varlığı, kaydın clean-install onboarding'deki aynı exact-origin private/local onay yolundan üretildiğinin kanıtıdır. Xtream production composition'a bağlanmadan önce de aynı açık consent UI/contract yolu zorunlu kılınmalı ve packaged acceptance ile doğrulanmalıdır; aksi durumda private/local opt-in verilemez.
 - DNS rebinding/redirect'te final IP tekrar kontrol edilir;
 - exact Content-Type ile bounded image header signature/dimension/pixel metadata doğrulanır ve byte sınırı uygulanır; bu kontrol tam bitstream geçerliliğini veya decode-time bütçesini kanıtlamaz, OS image decoder'ın codec karmaşıklığı/failure maliyeti residual risk olarak kalır;
@@ -208,7 +224,8 @@ Snapshot retention provisional olarak active + bir önceki complete snapshot'tı
 
 ### Parser/API
 
-- Response body, JSON depth/string/array, M3U line/attribute/item ve total byte cap.
+- Response body, JSON depth/string/array, M3U line/attribute/item ve total byte cap. Remote M3U fiziksel satırı `65.536` UTF-16 kod biriminde hard-bounded; locator/generic metadata `4.096` ve mevcut daha dar ID/name/group semantik cap'leri ayrıdır.
+- Fiziksel satır, decoded toplam ve entry budget aşımı sırasıyla append-only `PlaylistLineLimitExceeded`, `PlaylistTotalLimitExceeded` ve `PlaylistEntryLimitExceeded` üretir; generic safety-limit mesajında birleştirilmez.
 - UTF-8/BOM; legacy fallback yalnız explicit warning ve corpus kanıtıyla.
 - Unicode NFC, control removal, length cap; display string SQL/log/markup olarak yorumlanmaz.
 - Unknown directive ignored + bounded count; unbounded diagnostics yok.
@@ -275,7 +292,7 @@ KVKK'da saklama ve koruma veri işleme kapsamına girebilir. Aydınlatma ile aç
 |---|---|---|
 | Redaction | Canary secret table tests + log/artifact binary scan | M3–M5, her release |
 | Protected storage | Packaged create/read/update/delete + reset/uninstall/reinstall/repair; per-record bulk locator düzeni reddedildi; test-only immutable-container comparative `Decision` tamamlandı; production SQLite state machine uygulanmadı ve end-to-end 50k/crash kanıtı açık | M4/M8/M15 |
-| Transport | TLS fail, downgrade, cross-origin redirect, timeout, cancellation, oversize | M5 |
+| Transport | TLS fail; explicit HTTP admission/warning; initial same-origin HTTP ve HTTP→HTTPS upgrade; cross-origin HTTP/HTTPS→HTTP reddi; header/cookie/referer yokluğu; native HLS/media subresource + player redirect origin/address residual'ı; timeout, cancellation, oversize | M5/M16 successor; native residual release blocker |
 | Hostile input | Parser/API/image malformed and budget corpus | M6–M8 |
 | Native player | Codec/network/malformed corpus, diagnostics scan, SBOM/CVE | M10 |
 | Data deletion | Source delete, clear-all, orphan reconciliation, migration fault injection | M4/M8/M15 |
@@ -296,8 +313,8 @@ KVKK'da saklama ve koruma veri işleme kapsamına girebilir. Aydınlatma ile aç
 - Microsoft/Samsung Store'un genel BYO IPTV acceptance sonucu.
 - Codec patent sonucu ve exact license obligations.
 - KVKK role/transfer sonucu.
-- Backend, telemetry, crash SDK, ads, sync, export, DRM, recording/download veya anonymous HTTP scope'a girerse bu belge ve ilgili ADR'ler yeniden açılır.
+- Backend, telemetry, crash SDK, ads, sync, export, DRM, recording/download veya ADR-008'den daha geniş HTTP scope'u girerse bu belge ve ilgili ADR'ler yeniden açılır.
 
 ## Kaynaklar
 
-[S10–S13, S21, S27, S30, S33–S41, S47, S51–S52, S60–S65, S96–S106](../research/SOURCES.md)
+[S10–S13, S21, S27, S30, S33–S41, S47, S51–S52, S60–S65, S96–S106, S135](../research/SOURCES.md)

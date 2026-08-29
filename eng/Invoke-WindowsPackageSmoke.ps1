@@ -4730,13 +4730,13 @@ try {
             $onboardingRoot `
             "RemotePlaylistLocatorTextBox" `
             ([System.Windows.Automation.ControlType]::Edit) `
-            "Secure playlist URL"
+            "HTTP or HTTPS playlist URL"
         # Windows PowerShell 5.1 reads BOM-less UTF-8 script literals through the
         # active ANSI code page, so decode the localized exact name from ASCII.
         $onboardingAuthorizationAccessibleName =
             [System.Text.Encoding]::UTF8.GetString(
                 [System.Convert]::FromBase64String(
-                    "S2F5bmFrIGVyacWfaW0gdmUgw7Z6ZWwgdmV5YSB5ZXJlbCBhxJ8gZ8O8dmVuaW5pIG9uYXlsYQ=="))
+                    "S2F5bmFrIGVyacWfaW1pbmkgdmUgSFRUUCBhw6fEsWsgbWV0aW4vTUlUTSByaXNraW5pIG9uYXlsYQ=="))
         $onboardingAuthorization = Get-RequiredAutomationElement `
             $onboardingRoot `
             "RemotePlaylistAuthorizationCheckBox" `

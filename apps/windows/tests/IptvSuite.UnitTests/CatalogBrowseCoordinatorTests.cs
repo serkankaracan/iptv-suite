@@ -9,6 +9,47 @@ namespace IptvSuite.UnitTests;
 public sealed class CatalogBrowseCoordinatorTests
 {
     [TestMethod]
+    public async Task CategoryInheritedFromAnotherSourceIsClearedBeforeChannelQuery()
+    {
+        CategoryId currentSourceCategoryId = CategoryId.Generate();
+        CategoryId previousSourceCategoryId = CategoryId.Generate();
+        var browser = new CategoryAdmissionBrowser(currentSourceCategoryId);
+        using var coordinator = new CatalogBrowseCoordinator(browser);
+
+        CatalogBrowseResult? result = await coordinator.BrowseAsync(
+            SourceId.Generate(),
+            previousSourceCategoryId,
+            searchText: null,
+            offset: 0,
+            limit: 50,
+            debounce: false);
+
+        Assert.IsNotNull(result);
+        Assert.IsNull(result.SelectedCategoryId);
+        Assert.IsNull(browser.RequestedCategoryId);
+    }
+
+    [TestMethod]
+    public async Task CategoryAvailableInTheCurrentSourceRemainsSelected()
+    {
+        CategoryId currentSourceCategoryId = CategoryId.Generate();
+        var browser = new CategoryAdmissionBrowser(currentSourceCategoryId);
+        using var coordinator = new CatalogBrowseCoordinator(browser);
+
+        CatalogBrowseResult? result = await coordinator.BrowseAsync(
+            SourceId.Generate(),
+            currentSourceCategoryId,
+            searchText: null,
+            offset: 0,
+            limit: 50,
+            debounce: false);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(currentSourceCategoryId, result.SelectedCategoryId);
+        Assert.AreEqual(currentSourceCategoryId, browser.RequestedCategoryId);
+    }
+
+    [TestMethod]
     public async Task NewBrowseCancelsAndSuppressesThePreviousResult()
     {
         var browser = new ControlledBrowser();
@@ -201,6 +242,33 @@ public sealed class CatalogBrowseCoordinatorTests
         await browser.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         coordinator.Dispose();
         Assert.IsNull(await pending.WaitAsync(TimeSpan.FromSeconds(2)));
+    }
+
+    private sealed class CategoryAdmissionBrowser(CategoryId availableCategoryId) : ICatalogBrowser
+    {
+        internal CategoryId? RequestedCategoryId { get; private set; }
+
+        public ValueTask<IReadOnlyList<CatalogSourceItem>> ReadSourcesAsync(
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<IReadOnlyList<CatalogSourceItem>>([]);
+
+        public ValueTask<IReadOnlyList<CatalogCategoryItem>> ReadCategoriesAsync(
+            SourceId sourceId,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<IReadOnlyList<CatalogCategoryItem>>(
+                [new CatalogCategoryItem(availableCategoryId, "Current source", 0)]);
+
+        public ValueTask<CatalogChannelPage> ReadChannelsAsync(
+            SourceId sourceId,
+            CategoryId? categoryId,
+            string? searchText,
+            int offset,
+            int limit,
+            CancellationToken cancellationToken = default)
+        {
+            RequestedCategoryId = categoryId;
+            return ValueTask.FromResult(new CatalogChannelPage([], offset, 0));
+        }
     }
 
     private sealed class ControlledBrowser : ICatalogBrowser

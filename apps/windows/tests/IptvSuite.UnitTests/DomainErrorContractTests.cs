@@ -42,6 +42,20 @@ public sealed class DomainErrorContractTests
         new(DomainErrorCode.RequestRateLimited, DomainRetryability.BoundedTransient, "Errors.Network.RateLimited"),
         new(DomainErrorCode.RemoteServiceUnavailable, DomainRetryability.BoundedTransient, "Errors.Network.ServiceUnavailable"),
         new(DomainErrorCode.RemoteResponseTooLarge, DomainRetryability.Never, "Errors.Network.ResponseTooLarge"),
+        new(DomainErrorCode.PlaylistResponseAddressRejected, DomainRetryability.Never, "Errors.Playlist.ResponseAddressRejected"),
+        new(DomainErrorCode.PlaylistHeaderInvalid, DomainRetryability.Never, "Errors.Playlist.HeaderInvalid"),
+        new(DomainErrorCode.PlaylistTextEncodingInvalid, DomainRetryability.Never, "Errors.Playlist.TextEncodingInvalid"),
+        new(DomainErrorCode.PlaylistSafeLimitExceeded, DomainRetryability.Never, "Errors.Playlist.SafeLimitExceeded"),
+        new(DomainErrorCode.PlaylistStructureInvalid, DomainRetryability.Never, "Errors.Playlist.StructureInvalid"),
+        new(DomainErrorCode.PlaylistNoUsableEntries, DomainRetryability.Never, "Errors.Playlist.NoUsableEntries"),
+        new(DomainErrorCode.PlaylistEntriesRejectedByAddressPolicy, DomainRetryability.Never, "Errors.Playlist.EntriesRejectedByAddressPolicy"),
+        new(DomainErrorCode.PlaylistHlsManifestUnsupported, DomainRetryability.Never, "Errors.Playlist.HlsManifestUnsupported"),
+        new(DomainErrorCode.PlaylistLineLimitExceeded, DomainRetryability.Never, "Errors.Playlist.LineLimitExceeded"),
+        new(DomainErrorCode.PlaylistTotalLimitExceeded, DomainRetryability.Never, "Errors.Playlist.TotalLimitExceeded"),
+        new(DomainErrorCode.PlaylistEntryLimitExceeded, DomainRetryability.Never, "Errors.Playlist.EntryLimitExceeded"),
+        new(DomainErrorCode.PlaybackNetworkFailed, DomainRetryability.BoundedTransient, "Errors.Playback.NetworkFailed"),
+        new(DomainErrorCode.PlaybackSourceUnsupported, DomainRetryability.Never, "Errors.Playback.SourceUnsupported"),
+        new(DomainErrorCode.PlaybackDecodingFailed, DomainRetryability.Never, "Errors.Playback.DecodingFailed"),
     ];
 
     [TestMethod]

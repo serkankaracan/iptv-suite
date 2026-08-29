@@ -17,7 +17,10 @@ public sealed class SqliteReadyCatalogAdmissionTests
         using TemporaryDirectory temporary = TemporaryDirectory.Create("m12-ready-catalog-query");
         string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
         await InitializeDatabaseAsync(databasePath);
-        CatalogGraph ready = CatalogGraph.Create("Ready source", ContentSourceStatus.Ready);
+        CatalogGraph ready = CatalogGraph.Create(
+            "Ready source",
+            ContentSourceStatus.Ready,
+            usesInsecureHttp: true);
         CatalogGraph pending = CatalogGraph.Create("Pending source", ContentSourceStatus.DeletionPending);
         await InsertGraphAsync(databasePath, ready);
         await InsertGraphAsync(databasePath, pending);
@@ -41,6 +44,7 @@ public sealed class SqliteReadyCatalogAdmissionTests
 
         Assert.AreEqual(1, sources.Count);
         Assert.AreEqual(ready.SourceId, sources[0].SourceId);
+        Assert.IsTrue(sources[0].UsesInsecureHttp);
         Assert.AreEqual(1, readyCategories.Count);
         Assert.AreEqual(ready.CategoryId, readyCategories[0].CategoryId);
         Assert.AreEqual(1, readyChannels.TotalCount);
@@ -48,6 +52,29 @@ public sealed class SqliteReadyCatalogAdmissionTests
         Assert.AreEqual(0, pendingCategories.Count);
         Assert.AreEqual(0, pendingChannels.TotalCount);
         Assert.AreEqual(0, pendingChannels.Items.Count);
+    }
+
+    [TestMethod]
+    public async Task ReadyCatalogWithMissingEndpointSchemeFailsWithStableDataError()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create("catalog-null-endpoint-scheme");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        await InitializeDatabaseAsync(databasePath);
+        CatalogGraph ready = CatalogGraph.Create("Ready source", ContentSourceStatus.Ready);
+        await InsertGraphAsync(databasePath, ready);
+        await using (var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "UPDATE sources SET endpoint_scheme = NULL WHERE source_id = $source;";
+            command.Parameters.AddWithValue("$source", Id(ready.SourceId.Value));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var query = new SqliteCatalogQuery(databasePath);
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+            await query.ReadSourcesAsync());
     }
 
     [TestMethod]
@@ -127,8 +154,8 @@ public sealed class SqliteReadyCatalogAdmissionTests
                 source_id, configuration_id, source_kind, display_name, endpoint_scheme,
                 endpoint_host, endpoint_port, configuration_reference, status, active_snapshot_id,
                 created_utc, updated_utc, last_error_code)
-            VALUES ($source, $configuration, $sourceKind, $displayName, 'https',
-                'fixtures.invalid', 443, $configurationReference, $status, $snapshot,
+            VALUES ($source, $configuration, $sourceKind, $displayName, $endpointScheme,
+                'fixtures.invalid', $endpointPort, $configurationReference, $status, $snapshot,
                 '2026-08-24T00:00:00.0000000+00:00', '2026-08-24T00:00:00.0000000+00:00', NULL);
             INSERT INTO snapshots(
                 snapshot_id, source_id, retrieved_utc, content_hash, parser_version,
@@ -158,6 +185,10 @@ public sealed class SqliteReadyCatalogAdmissionTests
         command.Parameters.AddWithValue("$configuration", Id(Guid.NewGuid()));
         command.Parameters.AddWithValue("$sourceKind", (int)SourceKind.RemotePlaylist);
         command.Parameters.AddWithValue("$displayName", graph.DisplayName);
+        command.Parameters.AddWithValue(
+            "$endpointScheme",
+            graph.UsesInsecureHttp ? Uri.UriSchemeHttp : Uri.UriSchemeHttps);
+        command.Parameters.AddWithValue("$endpointPort", graph.UsesInsecureHttp ? 80 : 443);
         command.Parameters.AddWithValue("$configurationReference", $"locator-ref-v1:{Guid.NewGuid():N}");
         command.Parameters.AddWithValue("$status", (int)ContentSourceStatus.Ready);
         command.Parameters.AddWithValue("$snapshot", Id(graph.SnapshotId.Value));
@@ -262,9 +293,13 @@ public sealed class SqliteReadyCatalogAdmissionTests
         string StreamReference,
         string LogoReference,
         string DisplayName,
-        ContentSourceStatus Status)
+        ContentSourceStatus Status,
+        bool UsesInsecureHttp)
     {
-        internal static CatalogGraph Create(string displayName, ContentSourceStatus status) =>
+        internal static CatalogGraph Create(
+            string displayName,
+            ContentSourceStatus status,
+            bool usesInsecureHttp = false) =>
             new(
                 SourceId.Generate(),
                 SnapshotId.Generate(),
@@ -273,7 +308,8 @@ public sealed class SqliteReadyCatalogAdmissionTests
                 $"locator-ref-v1:{Guid.NewGuid():N}",
                 $"locator-ref-v1:{Guid.NewGuid():N}",
                 displayName,
-                status);
+                status,
+                usesInsecureHttp);
     }
 
     private sealed class RejectingTransport : IHttpTransport

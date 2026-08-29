@@ -25,9 +25,15 @@ public sealed class SafeEndpoint : IEquatable<SafeEndpoint>
         ArgumentNullException.ThrowIfNull(uri);
 
         endpoint = null;
-        if (!uri.IsAbsoluteUri ||
-            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(uri.Host))
+        bool isHttps = string.Equals(
+            uri.Scheme,
+            Uri.UriSchemeHttps,
+            StringComparison.OrdinalIgnoreCase);
+        bool isHttp = string.Equals(
+            uri.Scheme,
+            Uri.UriSchemeHttp,
+            StringComparison.OrdinalIgnoreCase);
+        if (!uri.IsAbsoluteUri || (!isHttps && !isHttp) || string.IsNullOrWhiteSpace(uri.Host))
         {
             return false;
         }
@@ -37,13 +43,15 @@ public sealed class SafeEndpoint : IEquatable<SafeEndpoint>
             return false;
         }
 
-        int port = uri.IsDefaultPort ? 443 : uri.Port;
+        int port = uri.IsDefaultPort
+            ? isHttps ? 443 : 80
+            : uri.Port;
         if (port is < 1 or > 65535)
         {
             return false;
         }
 
-        endpoint = new SafeEndpoint(Uri.UriSchemeHttps, host, port);
+        endpoint = new SafeEndpoint(isHttps ? Uri.UriSchemeHttps : Uri.UriSchemeHttp, host, port);
         return true;
     }
 

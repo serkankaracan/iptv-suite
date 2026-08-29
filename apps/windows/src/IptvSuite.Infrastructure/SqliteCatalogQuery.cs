@@ -28,7 +28,7 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
             .ConfigureAwait(false);
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT source_id, display_name
+            SELECT source_id, display_name, endpoint_scheme
             FROM sources
             WHERE status = $ready
               AND active_snapshot_id IS NOT NULL
@@ -57,7 +57,25 @@ public sealed class SqliteCatalogQuery : ICatalogBrowser
                 throw new InvalidDataException("Catalog identifier is invalid.");
             }
 
-            rows.Add(new(sourceId.Value, reader.GetString(1)));
+            if (reader.IsDBNull(2))
+            {
+                throw new InvalidDataException("Catalog endpoint scheme is invalid.");
+            }
+
+            string endpointScheme = reader.GetString(2);
+            if (!string.Equals(endpointScheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
+                !string.Equals(endpointScheme, Uri.UriSchemeHttp, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("Catalog endpoint scheme is invalid.");
+            }
+
+            rows.Add(new(
+                sourceId.Value,
+                reader.GetString(1),
+                UsesInsecureHttp: string.Equals(
+                    endpointScheme,
+                    Uri.UriSchemeHttp,
+                    StringComparison.Ordinal)));
         }
 
         return rows;

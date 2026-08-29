@@ -66,13 +66,15 @@ public sealed class HttpTransportRequest : IDisposable
         SafeEndpoint expectedEndpoint,
         int maximumResponseBytes,
         byte[] authorizationValue,
-        HttpEndpointAddressPolicy endpointAddressPolicy)
+        HttpEndpointAddressPolicy endpointAddressPolicy,
+        TimeSpan? requestTimeoutOverride)
     {
         RequestUri = requestUri;
         ExpectedEndpoint = expectedEndpoint;
         MaximumResponseBytes = maximumResponseBytes;
         _authorizationValue = authorizationValue;
         EndpointAddressPolicy = endpointAddressPolicy;
+        RequestTimeoutOverride = requestTimeoutOverride;
     }
 
     internal Uri RequestUri { get; }
@@ -80,6 +82,8 @@ public sealed class HttpTransportRequest : IDisposable
     internal SafeEndpoint ExpectedEndpoint { get; }
 
     internal HttpEndpointAddressPolicy EndpointAddressPolicy { get; }
+
+    internal TimeSpan? RequestTimeoutOverride { get; }
 
     public int MaximumResponseBytes { get; }
 
@@ -110,7 +114,10 @@ public sealed class HttpTransportRequest : IDisposable
             requestUri,
             expectedEndpoint,
             maximumResponseBytes,
-            HttpEndpointAddressPolicy.PublicOnly);
+            HttpEndpointAddressPolicy.PublicOnly,
+            allowInsecureHttp: false,
+            maximumPermittedResponseBytes: HttpTransportLimits.MaximumAllowedResponseBytes,
+            requestTimeoutOverride: null);
     }
 
     internal static HttpTransportRequest CreateForExplicitPrivateSourceOrigin(
@@ -122,32 +129,66 @@ public sealed class HttpTransportRequest : IDisposable
             requestUri,
             expectedEndpoint,
             maximumResponseBytes,
-            HttpEndpointAddressPolicy.ExplicitPrivateSourceOrigin);
+            HttpEndpointAddressPolicy.ExplicitPrivateSourceOrigin,
+            allowInsecureHttp: false,
+            maximumPermittedResponseBytes: HttpTransportLimits.MaximumAllowedResponseBytes,
+            requestTimeoutOverride: null);
+    }
+
+    internal static HttpTransportRequest CreateForExplicitRemotePlaylistSourceOrigin(
+        Uri requestUri,
+        SafeEndpoint expectedEndpoint)
+    {
+        return CreateCore(
+            requestUri,
+            expectedEndpoint,
+            RemotePlaylistTransportLimits.MaximumResponseBytes,
+            HttpEndpointAddressPolicy.ExplicitPrivateSourceOrigin,
+            allowInsecureHttp: true,
+            maximumPermittedResponseBytes: RemotePlaylistTransportLimits.MaximumResponseBytes,
+            requestTimeoutOverride: RemotePlaylistTransportLimits.RequestTimeout);
     }
 
     private static HttpTransportRequest CreateCore(
         Uri requestUri,
         SafeEndpoint expectedEndpoint,
         int maximumResponseBytes,
-        HttpEndpointAddressPolicy endpointAddressPolicy)
+        HttpEndpointAddressPolicy endpointAddressPolicy,
+        bool allowInsecureHttp,
+        int maximumPermittedResponseBytes,
+        TimeSpan? requestTimeoutOverride)
     {
         ArgumentNullException.ThrowIfNull(requestUri);
         ArgumentNullException.ThrowIfNull(expectedEndpoint);
-        if (!requestUri.IsAbsoluteUri ||
-            !string.Equals(requestUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+        bool isHttps = string.Equals(
+            requestUri.Scheme,
+            Uri.UriSchemeHttps,
+            StringComparison.OrdinalIgnoreCase);
+        bool isAllowedHttp = allowInsecureHttp && string.Equals(
+            requestUri.Scheme,
+            Uri.UriSchemeHttp,
+            StringComparison.OrdinalIgnoreCase);
+        if (!requestUri.IsAbsoluteUri || (!isHttps && !isAllowedHttp) ||
             !string.IsNullOrEmpty(requestUri.UserInfo) ||
             !string.IsNullOrEmpty(requestUri.Fragment) ||
             !SafeEndpoint.TryCreate(requestUri, out SafeEndpoint? actualEndpoint) ||
             !expectedEndpoint.Equals(actualEndpoint))
         {
             throw new ArgumentException(
-                "The request URI must be an absolute HTTPS URI bound to the expected endpoint.",
+                "The request URI must use an allowed web scheme and match the expected endpoint.",
                 nameof(requestUri));
         }
 
-        if (maximumResponseBytes <= 0 || maximumResponseBytes > HttpTransportLimits.MaximumAllowedResponseBytes)
+        if (maximumResponseBytes <= 0 || maximumResponseBytes > maximumPermittedResponseBytes)
         {
             throw new ArgumentOutOfRangeException(nameof(maximumResponseBytes));
+        }
+
+        if (requestTimeoutOverride.HasValue &&
+            (requestTimeoutOverride.Value <= TimeSpan.Zero ||
+             requestTimeoutOverride.Value > TimeSpan.FromMinutes(2)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(requestTimeoutOverride));
         }
 
         return new HttpTransportRequest(
@@ -155,7 +196,8 @@ public sealed class HttpTransportRequest : IDisposable
             expectedEndpoint,
             maximumResponseBytes,
             [],
-            endpointAddressPolicy);
+            endpointAddressPolicy,
+            requestTimeoutOverride);
     }
 
     public static HttpTransportRequest CreateWithAuthorization(
@@ -210,6 +252,12 @@ public static class HttpTransportLimits
 {
     public const int MaximumAllowedResponseBytes = 4 * 1024 * 1024;
     public const int MaximumRedirects = 5;
+}
+
+internal static class RemotePlaylistTransportLimits
+{
+    internal const int MaximumResponseBytes = 128 * 1024 * 1024;
+    internal static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(2);
 }
 
 public sealed class HttpResponseLease : IDisposable

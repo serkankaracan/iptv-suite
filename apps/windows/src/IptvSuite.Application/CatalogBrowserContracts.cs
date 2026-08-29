@@ -4,7 +4,10 @@ namespace IptvSuite.Application;
 
 public sealed record CatalogCategoryItem(CategoryId CategoryId, string Name, int SortOrder);
 
-public sealed record CatalogSourceItem(SourceId SourceId, string Name);
+public sealed record CatalogSourceItem(
+    SourceId SourceId,
+    string Name,
+    bool UsesInsecureHttp = false);
 
 public sealed record CatalogChannelItem(
     ChannelId ChannelId,

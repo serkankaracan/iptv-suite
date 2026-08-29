@@ -62,10 +62,9 @@ internal sealed class RemotePlaylistCatalogLoader
         HttpTransportRequest request;
         try
         {
-            request = HttpTransportRequest.CreateForExplicitPrivateSourceOrigin(
+            request = HttpTransportRequest.CreateForExplicitRemotePlaylistSourceOrigin(
                 requestUri,
-                configuration.SafeEndpoint,
-                HttpTransportLimits.MaximumAllowedResponseBytes);
+                configuration.SafeEndpoint);
         }
         catch (ArgumentException)
         {
@@ -94,19 +93,26 @@ internal sealed class RemotePlaylistCatalogLoader
 
             try
             {
-                DomainResult<RemoteM3uParseResult> parsed = await RemoteM3uPlaylistParser.ParseToSinkAsync(
+                DomainResult<RemoteM3uParseResult> parsed = await RemoteM3uPlaylistParser.ParseToSinkForSourceAsync(
                     responseLease.Content,
                     responseLease.EffectiveUri,
+                    configuration.SafeEndpoint,
                     _sink,
                     cancellationToken).ConfigureAwait(false);
-                if (!parsed.IsSuccess || parsed.Value!.ContentKind != PlaylistContentKind.ExtendedM3uCatalog)
+                if (!parsed.IsSuccess)
                 {
                     await _sink.AbortAsync(CancellationToken.None).ConfigureAwait(false);
-                    return !parsed.IsSuccess &&
-                           parsed.Error!.Code == DomainErrorCode.OperationCancelled &&
+                    return parsed.Error!.Code == DomainErrorCode.OperationCancelled &&
                            !cancellationToken.IsCancellationRequested
                         ? DomainResult.Failure<RemoteM3uParseResult>(DomainErrorCode.RequestTimedOut)
                         : parsed;
+                }
+
+                if (parsed.Value!.ContentKind != PlaylistContentKind.ExtendedM3uCatalog)
+                {
+                    await _sink.AbortAsync(CancellationToken.None).ConfigureAwait(false);
+                    return DomainResult.Failure<RemoteM3uParseResult>(
+                        DomainErrorCode.PlaylistHlsManifestUnsupported);
                 }
 
                 DomainResult<bool> completed = await _sink.CompleteAsync(parsed.Value, cancellationToken)

@@ -53,15 +53,18 @@ internal sealed class DomainErrorPresenter
     {
         ArgumentNullException.ThrowIfNull(error);
 
-        string message = GetLocalizedMessage(error);
-        string? hint = connectivityHint switch
-        {
-            NetworkAvailabilityHint.Offline =>
-                GetString(OfflineHintResourceKey, OfflineHintFallback),
-            NetworkAvailabilityHint.Online =>
-                GetString(OnlineHintResourceKey, OnlineHintFallback),
-            _ => null,
-        };
+        DomainError? canonical = GetCanonicalError(error);
+        string message = GetLocalizedMessage(canonical);
+        string? hint = canonical is not null && IsConnectivityRelated(canonical.Code)
+            ? connectivityHint switch
+            {
+                NetworkAvailabilityHint.Offline =>
+                    GetString(OfflineHintResourceKey, OfflineHintFallback),
+                NetworkAvailabilityHint.Online =>
+                    GetString(OnlineHintResourceKey, OnlineHintFallback),
+                _ => null,
+            }
+            : null;
 
         return new DomainErrorPresentation(
             message,
@@ -70,19 +73,22 @@ internal sealed class DomainErrorPresenter
             hint);
     }
 
-    private string GetLocalizedMessage(DomainError error)
+    private static DomainError? GetCanonicalError(DomainError error)
     {
-        DomainError canonical;
         try
         {
-            canonical = DomainError.Create(error.Code);
+            DomainError canonical = DomainError.Create(error.Code);
+            return canonical == error ? canonical : null;
         }
         catch (ArgumentOutOfRangeException)
         {
-            return GetString(GenericResourceKey, GenericFallback);
+            return null;
         }
+    }
 
-        if (canonical != error)
+    private string GetLocalizedMessage(DomainError? canonical)
+    {
+        if (canonical is null)
         {
             return GetString(GenericResourceKey, GenericFallback);
         }
@@ -92,11 +98,19 @@ internal sealed class DomainErrorPresenter
             GetString(GenericResourceKey, GenericFallback));
     }
 
+    private static bool IsConnectivityRelated(DomainErrorCode code) => code is
+        DomainErrorCode.NetworkUnreachable or
+        DomainErrorCode.PlaylistDownloadFailed or
+        DomainErrorCode.RequestTimedOut or
+        DomainErrorCode.TlsValidationFailed or
+        DomainErrorCode.PlaybackNetworkFailed or
+        DomainErrorCode.RemoteServiceUnavailable;
+
     private string GetString(string resourceKey, string fallback)
     {
         try
         {
-            string value = _resources.GetString(resourceKey);
+            string value = _resources.GetString(ToPriResourcePath(resourceKey));
             return string.IsNullOrWhiteSpace(value) ? fallback : value;
         }
         catch (Exception exception) when (IsRecoverable(exception))
@@ -104,6 +118,9 @@ internal sealed class DomainErrorPresenter
             return fallback;
         }
     }
+
+    private static string ToPriResourcePath(string resourceKey) =>
+        resourceKey.Replace('.', '/');
 
     private static bool IsRecoverable(Exception exception) =>
         exception is not OutOfMemoryException and

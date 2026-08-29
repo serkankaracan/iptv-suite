@@ -16,11 +16,13 @@ public sealed class RemotePlaylistCatalogImportResult
         CatalogImportCommitDisposition disposition,
         int? importedChannelCount,
         int? warningCount,
+        bool entryLimitReached,
         DomainError? error)
     {
         Disposition = disposition;
         ImportedChannelCount = importedChannelCount;
         WarningCount = warningCount;
+        EntryLimitReached = entryLimitReached;
         Error = error;
     }
 
@@ -30,11 +32,14 @@ public sealed class RemotePlaylistCatalogImportResult
 
     public int? WarningCount { get; }
 
+    public bool EntryLimitReached { get; }
+
     public DomainError? Error { get; }
 
     public static RemotePlaylistCatalogImportResult Committed(
         int importedChannelCount,
-        int warningCount)
+        int warningCount,
+        bool entryLimitReached = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(importedChannelCount);
         ArgumentOutOfRangeException.ThrowIfNegative(warningCount);
@@ -43,6 +48,7 @@ public sealed class RemotePlaylistCatalogImportResult
             CatalogImportCommitDisposition.Committed,
             importedChannelCount,
             warningCount,
+            entryLimitReached,
             null);
     }
 
@@ -53,7 +59,8 @@ public sealed class RemotePlaylistCatalogImportResult
             CatalogImportCommitDisposition.NotCommitted,
             null,
             null,
-            error);
+            entryLimitReached: false,
+            error: error);
     }
 
     public static RemotePlaylistCatalogImportResult Indeterminate(DomainError error)
@@ -63,7 +70,8 @@ public sealed class RemotePlaylistCatalogImportResult
             CatalogImportCommitDisposition.Indeterminate,
             null,
             null,
-            error);
+            entryLimitReached: false,
+            error: error);
     }
 
     public override string ToString() => "[REMOTE-PLAYLIST-CATALOG-IMPORT-RESULT]";
@@ -82,7 +90,8 @@ public sealed class RemotePlaylistSourceOnboardingResult
     internal RemotePlaylistSourceOnboardingResult(
         SourceId sourceId,
         int importedChannelCount,
-        int warningCount)
+        int warningCount,
+        bool entryLimitReached)
     {
         if (sourceId.IsEmpty)
         {
@@ -95,6 +104,7 @@ public sealed class RemotePlaylistSourceOnboardingResult
         SourceId = sourceId;
         ImportedChannelCount = importedChannelCount;
         WarningCount = warningCount;
+        EntryLimitReached = entryLimitReached;
     }
 
     public SourceId SourceId { get; }
@@ -103,37 +113,60 @@ public sealed class RemotePlaylistSourceOnboardingResult
 
     public int WarningCount { get; }
 
+    public bool EntryLimitReached { get; }
+
     public override string ToString() => "[REMOTE-PLAYLIST-SOURCE-ONBOARDING-RESULT]";
 }
 
 public sealed class RemotePlaylistSourceOnboardingService
 {
     private readonly ISecretStore _secretStore;
-    private readonly ConnectionProbeService _probeService;
     private readonly IRemotePlaylistCatalogImporter _importer;
     private readonly TimeProvider _timeProvider;
 
     public RemotePlaylistSourceOnboardingService(
         ISecretStore secretStore,
-        IHttpTransport transport,
         IRemotePlaylistCatalogImporter importer,
         TimeProvider timeProvider)
     {
         _secretStore = secretStore ?? throw new ArgumentNullException(nameof(secretStore));
-        _probeService = new ConnectionProbeService(
-            transport ?? throw new ArgumentNullException(nameof(transport)));
         _importer = importer ?? throw new ArgumentNullException(nameof(importer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
-    public async ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddAsync(
+    public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddAsync(
         string? displayName,
         string? locator,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        AddCoreAsync(
+            displayName,
+            locator,
+            allowInsecureHttp: false,
+            cancellationToken: cancellationToken);
+
+    public ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>>
+        AddAllowingInsecureHttpAsync(
+            string? displayName,
+            string? locator,
+            CancellationToken cancellationToken = default) =>
+        AddCoreAsync(
+            displayName,
+            locator,
+            allowInsecureHttp: true,
+            cancellationToken: cancellationToken);
+
+    private async ValueTask<DomainResult<RemotePlaylistSourceOnboardingResult>> AddCoreAsync(
+        string? displayName,
+        string? locator,
+        bool allowInsecureHttp,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
-            SourceConfigurationValidator.PrepareRemotePlaylist(displayName, locator);
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared = allowInsecureHttp
+            ? SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                displayName,
+                locator)
+            : SourceConfigurationValidator.PrepareRemotePlaylist(displayName, locator);
         if (!prepared.IsSuccess)
         {
             return DomainResult.Failure<RemotePlaylistSourceOnboardingResult>(prepared.Error!);
@@ -149,29 +182,6 @@ public sealed class RemotePlaylistSourceOnboardingService
         {
             return DomainResult.Failure<RemotePlaylistSourceOnboardingResult>(
                 DomainErrorCode.EndpointUserInfoNotAllowed);
-        }
-
-        try
-        {
-            using HttpTransportRequest request = HttpTransportRequest.CreateForExplicitPrivateSourceOrigin(
-                requestUri,
-                prepared.Value!.SafeEndpoint,
-                HttpTransportLimits.MaximumAllowedResponseBytes);
-            DomainResult<ConnectionProbeResult> probe = await _probeService.ProbeAsync(
-                request,
-                cancellationToken).ConfigureAwait(false);
-            if (!probe.IsSuccess)
-            {
-                return DomainResult.Failure<RemotePlaylistSourceOnboardingResult>(probe.Error!);
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception) when (IsRecoverable(exception))
-        {
-            return StorageUnavailable();
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -194,13 +204,20 @@ public sealed class RemotePlaylistSourceOnboardingService
         DomainResult<ValidatedSourceDraft> protectedDraft;
         try
         {
-            protectedDraft = await new SourceDraftProtectionService(_secretStore)
-                .ProtectRemotePlaylistAsync(
+            var protection = new SourceDraftProtectionService(_secretStore);
+            ValueTask<DomainResult<ValidatedSourceDraft>> protectionOperation =
+                allowInsecureHttp
+                ? protection.ProtectRemotePlaylistAllowingInsecureHttpAsync(
                     sourceId,
                     prepared.Value!.NormalizedDisplayName,
                     locator,
                     cancellationToken)
-                .ConfigureAwait(false);
+                : protection.ProtectRemotePlaylistAsync(
+                    sourceId,
+                    prepared.Value!.NormalizedDisplayName,
+                    locator,
+                    cancellationToken);
+            protectedDraft = await protectionOperation.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -251,7 +268,8 @@ public sealed class RemotePlaylistSourceOnboardingService
                 new RemotePlaylistSourceOnboardingResult(
                     sourceId,
                     import.ImportedChannelCount!.Value,
-                    import.WarningCount!.Value));
+                    import.WarningCount!.Value,
+                    import.EntryLimitReached));
         }
 
         if (import.Disposition is CatalogImportCommitDisposition.Indeterminate)

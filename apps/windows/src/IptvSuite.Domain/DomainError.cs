@@ -38,6 +38,20 @@ public enum DomainErrorCode
     RequestRateLimited,
     RemoteServiceUnavailable,
     RemoteResponseTooLarge,
+    PlaylistResponseAddressRejected,
+    PlaylistHeaderInvalid,
+    PlaylistTextEncodingInvalid,
+    PlaylistSafeLimitExceeded,
+    PlaylistStructureInvalid,
+    PlaylistNoUsableEntries,
+    PlaylistEntriesRejectedByAddressPolicy,
+    PlaylistHlsManifestUnsupported,
+    PlaylistLineLimitExceeded,
+    PlaylistTotalLimitExceeded,
+    PlaylistEntryLimitExceeded,
+    PlaybackNetworkFailed,
+    PlaybackSourceUnsupported,
+    PlaybackDecodingFailed,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<DomainRetryability>))]
@@ -101,6 +115,33 @@ public sealed record DomainError
         DomainErrorCode.RequestRateLimited => Transient(code, "Errors.Network.RateLimited"),
         DomainErrorCode.RemoteServiceUnavailable => Transient(code, "Errors.Network.ServiceUnavailable"),
         DomainErrorCode.RemoteResponseTooLarge => Never(code, "Errors.Network.ResponseTooLarge"),
+        DomainErrorCode.PlaylistResponseAddressRejected =>
+            Never(code, "Errors.Playlist.ResponseAddressRejected"),
+        DomainErrorCode.PlaylistHeaderInvalid => Never(code, "Errors.Playlist.HeaderInvalid"),
+        DomainErrorCode.PlaylistTextEncodingInvalid =>
+            Never(code, "Errors.Playlist.TextEncodingInvalid"),
+        DomainErrorCode.PlaylistSafeLimitExceeded =>
+            Never(code, "Errors.Playlist.SafeLimitExceeded"),
+        DomainErrorCode.PlaylistStructureInvalid =>
+            Never(code, "Errors.Playlist.StructureInvalid"),
+        DomainErrorCode.PlaylistNoUsableEntries =>
+            Never(code, "Errors.Playlist.NoUsableEntries"),
+        DomainErrorCode.PlaylistEntriesRejectedByAddressPolicy =>
+            Never(code, "Errors.Playlist.EntriesRejectedByAddressPolicy"),
+        DomainErrorCode.PlaylistHlsManifestUnsupported =>
+            Never(code, "Errors.Playlist.HlsManifestUnsupported"),
+        DomainErrorCode.PlaylistLineLimitExceeded =>
+            Never(code, "Errors.Playlist.LineLimitExceeded"),
+        DomainErrorCode.PlaylistTotalLimitExceeded =>
+            Never(code, "Errors.Playlist.TotalLimitExceeded"),
+        DomainErrorCode.PlaylistEntryLimitExceeded =>
+            Never(code, "Errors.Playlist.EntryLimitExceeded"),
+        DomainErrorCode.PlaybackNetworkFailed =>
+            Transient(code, "Errors.Playback.NetworkFailed"),
+        DomainErrorCode.PlaybackSourceUnsupported =>
+            Never(code, "Errors.Playback.SourceUnsupported"),
+        DomainErrorCode.PlaybackDecodingFailed =>
+            Never(code, "Errors.Playback.DecodingFailed"),
         _ => throw new ArgumentOutOfRangeException(nameof(code), code, "Unknown domain error code."),
     };
 

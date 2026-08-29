@@ -8,26 +8,22 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
 {
     private static readonly DateTimeOffset FixedInstant =
         new(2026, 8, 26, 12, 0, 0, TimeSpan.Zero);
-    private static readonly string[] ProbeOnlyEvents = ["probe"];
-    private static readonly string[] SuccessfulEvents = ["probe", "create", "import"];
-    private static readonly string[] CleanupEvents = ["probe", "create", "import", "delete"];
+    private static readonly string[] SuccessfulEvents = ["create", "import"];
+    private static readonly string[] CleanupEvents = ["create", "import", "delete"];
 
     [TestMethod]
     public void ConstructorRequiresEveryDependency()
     {
         var store = new OnboardingSecretStore();
-        var transport = new OnboardingTransport();
         var importer = new OnboardingImporter(RemotePlaylistCatalogImportResult.Committed(1, 0));
         var time = new FixedTimeProvider(FixedInstant);
 
         Assert.ThrowsExactly<ArgumentNullException>(() =>
-            new RemotePlaylistSourceOnboardingService(null!, transport, importer, time));
+            new RemotePlaylistSourceOnboardingService(null!, importer, time));
         Assert.ThrowsExactly<ArgumentNullException>(() =>
-            new RemotePlaylistSourceOnboardingService(store, null!, importer, time));
+            new RemotePlaylistSourceOnboardingService(store, null!, time));
         Assert.ThrowsExactly<ArgumentNullException>(() =>
-            new RemotePlaylistSourceOnboardingService(store, transport, null!, time));
-        Assert.ThrowsExactly<ArgumentNullException>(() =>
-            new RemotePlaylistSourceOnboardingService(store, transport, importer, null!));
+            new RemotePlaylistSourceOnboardingService(store, importer, null!));
     }
 
     [TestMethod]
@@ -35,7 +31,9 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
     {
         DomainError error = DomainError.Create(DomainErrorCode.UnsupportedPlaylistFormat);
         RemotePlaylistCatalogImportResult committed =
-            RemotePlaylistCatalogImportResult.Committed(12, 3);
+            RemotePlaylistCatalogImportResult.Committed(12, 3, entryLimitReached: true);
+        RemotePlaylistCatalogImportResult completeCatalog =
+            RemotePlaylistCatalogImportResult.Committed(1, 0);
         RemotePlaylistCatalogImportResult notCommitted =
             RemotePlaylistCatalogImportResult.NotCommitted(error);
         RemotePlaylistCatalogImportResult indeterminate =
@@ -44,14 +42,18 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
         Assert.AreEqual(CatalogImportCommitDisposition.Committed, committed.Disposition);
         Assert.AreEqual(12, committed.ImportedChannelCount);
         Assert.AreEqual(3, committed.WarningCount);
+        Assert.IsTrue(committed.EntryLimitReached);
+        Assert.IsFalse(completeCatalog.EntryLimitReached);
         Assert.IsNull(committed.Error);
         Assert.AreEqual(CatalogImportCommitDisposition.NotCommitted, notCommitted.Disposition);
         Assert.IsNull(notCommitted.ImportedChannelCount);
         Assert.IsNull(notCommitted.WarningCount);
+        Assert.IsFalse(notCommitted.EntryLimitReached);
         Assert.AreSame(error, notCommitted.Error);
         Assert.AreEqual(CatalogImportCommitDisposition.Indeterminate, indeterminate.Disposition);
         Assert.IsNull(indeterminate.ImportedChannelCount);
         Assert.IsNull(indeterminate.WarningCount);
+        Assert.IsFalse(indeterminate.EntryLimitReached);
         Assert.AreSame(error, indeterminate.Error);
         Assert.AreEqual("[REMOTE-PLAYLIST-CATALOG-IMPORT-RESULT]", committed.ToString());
         Assert.AreEqual("[REMOTE-PLAYLIST-CATALOG-IMPORT-RESULT]", notCommitted.ToString());
@@ -68,16 +70,15 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
     }
 
     [TestMethod]
-    public async Task InvalidUserInfoIsRejectedBeforeProbeOrStoreMutation()
+    public async Task InvalidUserInfoIsRejectedBeforeStoreMutation()
     {
         string sensitive = SecurityTestAssertions.CreateSensitiveValue("ONBOARDING-USERINFO");
         var events = new List<string>();
         var store = new OnboardingSecretStore(events);
-        var transport = new OnboardingTransport(events);
         var importer = new OnboardingImporter(
             RemotePlaylistCatalogImportResult.Committed(1, 0),
             events);
-        RemotePlaylistSourceOnboardingService service = CreateService(store, transport, importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
             "Synthetic Source",
@@ -89,43 +90,16 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
     }
 
     [TestMethod]
-    public async Task ProbeFailurePrecedesAndPreventsEveryStoreMutation()
-    {
-        var events = new List<string>();
-        var store = new OnboardingSecretStore(events);
-        var transport = new OnboardingTransport(events)
-        {
-            Failure = HttpTransportFailure.TlsValidationFailed,
-        };
-        var importer = new OnboardingImporter(
-            RemotePlaylistCatalogImportResult.Committed(1, 0),
-            events);
-        RemotePlaylistSourceOnboardingService service = CreateService(store, transport, importer);
-
-        DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
-            "Synthetic Source",
-            "https://example.test/list.m3u");
-
-        SecurityTestAssertions.IsFailure(result, DomainErrorCode.TlsValidationFailed);
-        CollectionAssert.AreEqual(ProbeOnlyEvents, events);
-        Assert.AreEqual(HttpTransportLimits.MaximumAllowedResponseBytes, transport.MaximumResponseBytes);
-        Assert.AreEqual(0, store.CreateLocatorCount);
-        Assert.AreEqual(0, store.DeleteLocatorCount);
-        Assert.AreEqual(0, importer.CallCount);
-    }
-
-    [TestMethod]
-    public async Task SuccessfulAddProbesProtectsAndCommitsInOrder()
+    public async Task SuccessfulHttpsAddProtectsThenStreamsOneImportWithoutPreliminaryProbe()
     {
         string sensitive = SecurityTestAssertions.CreateSensitiveValue("ONBOARDING-LOCATOR");
         string locator = $"https://example.test/private/list.m3u?token={sensitive}";
         var events = new List<string>();
         var store = new OnboardingSecretStore(events);
-        var transport = new OnboardingTransport(events);
         var importer = new OnboardingImporter(
             RemotePlaylistCatalogImportResult.Committed(42, 5),
             events);
-        RemotePlaylistSourceOnboardingService service = CreateService(store, transport, importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
             "  Synthetic Source  ",
@@ -135,9 +109,9 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
         Assert.IsFalse(result.Value!.SourceId.IsEmpty);
         Assert.AreEqual(42, result.Value.ImportedChannelCount);
         Assert.AreEqual(5, result.Value.WarningCount);
+        Assert.IsFalse(result.Value.EntryLimitReached);
         Assert.AreEqual("[REMOTE-PLAYLIST-SOURCE-ONBOARDING-RESULT]", result.Value.ToString());
         CollectionAssert.AreEqual(SuccessfulEvents, events);
-        Assert.AreEqual(HttpTransportLimits.MaximumAllowedResponseBytes, transport.MaximumResponseBytes);
         Assert.AreEqual(1, store.CreateLocatorCount);
         Assert.AreEqual(0, store.DeleteLocatorCount);
         Assert.AreEqual(1, importer.CallCount);
@@ -155,12 +129,80 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
     }
 
     [TestMethod]
+    public async Task HttpAddRequiresExplicitOptInAndPreservesTheSafeWorkflow()
+    {
+        string sensitive = SecurityTestAssertions.CreateSensitiveValue(
+            "ONBOARDING-HTTP-LOCATOR");
+        string locator = $"http://example.test/private/list.m3u?token={sensitive}";
+        var events = new List<string>();
+        var store = new OnboardingSecretStore(events);
+        var importer = new OnboardingImporter(
+            RemotePlaylistCatalogImportResult.Committed(
+                8,
+                1,
+                entryLimitReached: true),
+            events);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
+
+        DomainResult<RemotePlaylistSourceOnboardingResult> rejected = await service.AddAsync(
+            "Synthetic HTTP Source",
+            locator);
+
+        SecurityTestAssertions.IsFailure(
+            rejected,
+            DomainErrorCode.InsecureTransportRejected);
+        Assert.IsEmpty(events);
+
+        DomainResult<RemotePlaylistSourceOnboardingResult> accepted =
+            await service.AddAllowingInsecureHttpAsync(
+            "Synthetic HTTP Source",
+            locator);
+
+        Assert.IsTrue(accepted.IsSuccess);
+        Assert.IsTrue(accepted.Value!.EntryLimitReached);
+        CollectionAssert.AreEqual(SuccessfulEvents, events);
+        Assert.AreEqual(1, store.CreateLocatorCount);
+        Assert.AreEqual(1, importer.CallCount);
+        Assert.IsNotNull(importer.Source);
+        Assert.AreEqual(Uri.UriSchemeHttp, importer.Source.SafeEndpoint.Scheme);
+        Assert.AreEqual(80, importer.Source.SafeEndpoint.Port);
+        SecurityTestAssertions.DoesNotContainSensitive(
+            string.Join('|', accepted, JsonSerializer.Serialize(accepted)),
+            sensitive,
+            locator);
+    }
+
+    [TestMethod]
+    public async Task HttpNotCommittedImportSkipsProbeAndDeletesTheStagedLocator()
+    {
+        var events = new List<string>();
+        var store = new OnboardingSecretStore(events);
+        var importer = new OnboardingImporter(
+            RemotePlaylistCatalogImportResult.NotCommitted(
+                DomainError.Create(DomainErrorCode.UnsupportedPlaylistFormat)),
+            events);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
+
+        DomainResult<RemotePlaylistSourceOnboardingResult> result =
+            await service.AddAllowingInsecureHttpAsync(
+                "Synthetic HTTP Source",
+                "http://example.test/get.php?username=synthetic&password=synthetic&type=m3u_plus&output=ts");
+
+        SecurityTestAssertions.IsFailure(result, DomainErrorCode.UnsupportedPlaylistFormat);
+        string[] expectedEvents = ["create", "import", "delete"];
+        CollectionAssert.AreEqual(expectedEvents, events);
+        Assert.AreEqual(1, importer.CallCount);
+        Assert.AreEqual(1, store.CreateLocatorCount);
+        Assert.AreEqual(1, store.DeleteLocatorCount);
+        Assert.IsFalse(store.DeleteCancellationCanBeCanceled);
+    }
+
+    [TestMethod]
     public async Task NotCommittedImportDeletesExactProtectedRecordWithoutCallerCancellation()
     {
         var events = new List<string>();
         using CancellationTokenSource cancellation = new();
         var store = new OnboardingSecretStore(events);
-        var transport = new OnboardingTransport(events);
         DomainError importError = DomainError.Create(DomainErrorCode.UnsupportedPlaylistFormat);
         var importer = new OnboardingImporter(
             RemotePlaylistCatalogImportResult.NotCommitted(importError),
@@ -168,7 +210,7 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
         {
             CancellationToSignal = cancellation,
         };
-        RemotePlaylistSourceOnboardingService service = CreateService(store, transport, importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
             "Synthetic Source",
@@ -197,10 +239,7 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
         var importer = new OnboardingImporter(
             RemotePlaylistCatalogImportResult.NotCommitted(
                 DomainError.Create(DomainErrorCode.UnsupportedPlaylistFormat)));
-        RemotePlaylistSourceOnboardingService service = CreateService(
-            store,
-            new OnboardingTransport(),
-            importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
             "Synthetic Source",
@@ -217,10 +256,7 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
         var importer = new OnboardingImporter(
             RemotePlaylistCatalogImportResult.Indeterminate(
                 DomainError.Create(DomainErrorCode.PlaylistDownloadFailed)));
-        RemotePlaylistSourceOnboardingService service = CreateService(
-            store,
-            new OnboardingTransport(),
-            importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
             "Synthetic Source",
@@ -240,10 +276,7 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
         {
             ExceptionToThrow = new InvalidOperationException("untrusted provider detail"),
         };
-        RemotePlaylistSourceOnboardingService service = CreateService(
-            store,
-            new OnboardingTransport(),
-            importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
             "Synthetic Source",
@@ -259,10 +292,7 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
     {
         var store = new OnboardingSecretStore();
         var importer = new OnboardingImporter(null);
-        RemotePlaylistSourceOnboardingService service = CreateService(
-            store,
-            new OnboardingTransport(),
-            importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
             "Synthetic Source",
@@ -282,10 +312,7 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
         {
             ExceptionToThrow = new CatastrophicTestException(),
         };
-        RemotePlaylistSourceOnboardingService service = CreateService(
-            store,
-            new OnboardingTransport(),
-            importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         await Assert.ThrowsExactlyAsync<CatastrophicTestException>(async () =>
             await service.AddAsync(
@@ -306,10 +333,7 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
         {
             CancellationToSignal = cancellation,
         };
-        RemotePlaylistSourceOnboardingService service = CreateService(
-            store,
-            new OnboardingTransport(),
-            importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
 
         DomainResult<RemotePlaylistSourceOnboardingResult> result = await service.AddAsync(
             "Synthetic Source",
@@ -327,11 +351,10 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
     {
         var events = new List<string>();
         var store = new OnboardingSecretStore(events);
-        var transport = new OnboardingTransport(events);
         var importer = new OnboardingImporter(
             RemotePlaylistCatalogImportResult.Committed(1, 0),
             events);
-        RemotePlaylistSourceOnboardingService service = CreateService(store, transport, importer);
+        RemotePlaylistSourceOnboardingService service = CreateService(store, importer);
         using CancellationTokenSource cancellation = new();
         cancellation.Cancel();
 
@@ -346,10 +369,8 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
 
     private static RemotePlaylistSourceOnboardingService CreateService(
         OnboardingSecretStore store,
-        OnboardingTransport transport,
         OnboardingImporter importer) => new(
             store,
-            transport,
             importer,
             new FixedTimeProvider(FixedInstant));
 
@@ -360,28 +381,6 @@ public sealed class RemotePlaylistSourceOnboardingServiceTests
 
     private sealed class CatastrophicTestException : OutOfMemoryException
     {
-    }
-
-    private sealed class OnboardingTransport(List<string>? events = null) : IHttpTransport
-    {
-        internal HttpTransportFailure? Failure { get; init; }
-
-        internal int MaximumResponseBytes { get; private set; }
-
-        public ValueTask<HttpTransportResult> GetAsync(
-            HttpTransportRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            cancellationToken.ThrowIfCancellationRequested();
-            events?.Add("probe");
-            MaximumResponseBytes = request.MaximumResponseBytes;
-            return ValueTask.FromResult(Failure.HasValue
-                ? HttpTransportResult.Failed(Failure.Value, HttpTransportRetryability.Never)
-                : HttpTransportResult.Success(
-                    200,
-                    HttpResponseLease.CopyFrom("#EXTM3U"u8)));
-        }
     }
 
     private sealed class OnboardingImporter(

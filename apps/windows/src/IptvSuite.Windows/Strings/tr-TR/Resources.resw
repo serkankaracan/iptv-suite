@@ -54,7 +54,7 @@
   <data name="Errors.Source.NameRequired" xml:space="preserve"><value>Kaynak için bir ad girin.</value></data>
   <data name="Errors.Source.NameInvalid" xml:space="preserve"><value>Kaynak adı desteklenmeyen karakterler içeriyor.</value></data>
   <data name="Errors.Source.NameTooLong" xml:space="preserve"><value>Kaynak adı çok uzun.</value></data>
-  <data name="Errors.Endpoint.Required" xml:space="preserve"><value>Kaynağın HTTPS adresini girin.</value></data>
+  <data name="Errors.Endpoint.Required" xml:space="preserve"><value>Kaynağın adresini girin.</value></data>
   <data name="Errors.Endpoint.Malformed" xml:space="preserve"><value>Kaynak adresi geçerli değil.</value></data>
   <data name="Errors.Endpoint.TooLong" xml:space="preserve"><value>Kaynak adresi çok uzun.</value></data>
   <data name="Errors.Endpoint.SchemeUnsupported" xml:space="preserve"><value>Kaynak adresi desteklenmeyen bir şema kullanıyor.</value></data>
@@ -71,12 +71,26 @@
   <data name="Errors.Authentication.Rejected" xml:space="preserve"><value>Kaynak oturum açma bilgilerini reddetti. Bilgileri denetleyip yeniden deneyin.</value></data>
   <data name="Errors.Playlist.DownloadFailed" xml:space="preserve"><value>Oynatma listesi indirilemedi. Yeniden deneyin.</value></data>
   <data name="Errors.Playlist.UnsupportedFormat" xml:space="preserve"><value>Bu oynatma listesi biçimi desteklenmiyor.</value></data>
+  <data name="Errors.Playlist.ResponseAddressRejected" xml:space="preserve"><value>Oynatma listesi yanıt adresi uygulamanın URL güvenlik ilkesi tarafından reddedildi.</value></data>
+  <data name="Errors.Playlist.HeaderInvalid" xml:space="preserve"><value>Yanıt, genişletilmiş bir M3U oynatma listesi değil. #EXTM3U başlığı eksik veya geçersiz.</value></data>
+  <data name="Errors.Playlist.TextEncodingInvalid" xml:space="preserve"><value>Oynatma listesi metni geçerli UTF-8 değil.</value></data>
+  <data name="Errors.Playlist.SafeLimitExceeded" xml:space="preserve"><value>Oynatma listesi uygulamanın güvenli ayrıştırma sınırlarını aşıyor.</value></data>
+  <data name="Errors.Playlist.LineLimitExceeded" xml:space="preserve"><value>Oynatma listesi, uygulamanın güvenle işleyebileceğinden daha uzun bir satır içeriyor.</value></data>
+  <data name="Errors.Playlist.TotalLimitExceeded" xml:space="preserve"><value>Oynatma listesi metni uygulamanın güvenli toplam boyut sınırını aşıyor.</value></data>
+  <data name="Errors.Playlist.EntryLimitExceeded" xml:space="preserve"><value>Oynatma listesi, bu içe aktarma yolunun güvenle işleyebileceğinden daha fazla geçerli kayıt içeriyor.</value></data>
+  <data name="Errors.Playlist.StructureInvalid" xml:space="preserve"><value>Oynatma listesi birbiriyle uyumsuz M3U veya HLS yapılarını karıştırıyor.</value></data>
+  <data name="Errors.Playlist.NoUsableEntries" xml:space="preserve"><value>Oynatma listesinde kullanılabilir kanal kaydı bulunamadı.</value></data>
+  <data name="Errors.Playlist.EntriesRejectedByAddressPolicy" xml:space="preserve"><value>Oynatma listesindeki kanal adreslerinin hiçbiri uygulamanın URL güvenlik ilkesini geçemedi.</value></data>
+  <data name="Errors.Playlist.HlsManifestUnsupported" xml:space="preserve"><value>Bu adres, içe aktarılabilir kanal kataloğu yerine bir HLS medya manifesti döndürüyor.</value></data>
   <data name="Errors.Network.RequestTimedOut" xml:space="preserve"><value>Kaynak zamanında yanıt vermedi. Yeniden deneyin.</value></data>
   <data name="Errors.Network.TlsValidationFailed" xml:space="preserve"><value>Kaynakla güvenli bağlantı doğrulanamadı.</value></data>
   <data name="Errors.Playback.StartFailed" xml:space="preserve"><value>Oynatma başlatılamadı. Yeniden deneyin.</value></data>
   <data name="Errors.Playback.ControlFailed" xml:space="preserve"><value>Oynatma denetimi uygulanamadı. Yeniden deneyin.</value></data>
   <data name="Errors.Playback.StreamInterrupted" xml:space="preserve"><value>Oynatma kesintiye uğradı.</value></data>
   <data name="Errors.Playback.ReconnectExhausted" xml:space="preserve"><value>Oynatma yeniden bağlanamadı. Bağlantınızı denetleyip yeniden deneyin.</value></data>
+  <data name="Errors.Playback.NetworkFailed" xml:space="preserve"><value>Oynatıcı bir ağ sorunu bildirdi. Kaynak geçici olarak kullanılamıyor olabilir.</value></data>
+  <data name="Errors.Playback.SourceUnsupported" xml:space="preserve"><value>Oynatıcı bu kaynak biçimini kullanamadı. Medya türü veya kapsayıcı desteklenmiyor olabilir.</value></data>
+  <data name="Errors.Playback.DecodingFailed" xml:space="preserve"><value>Medya çözümlenemedi. Codec, kodlama ayarları veya akış verisi uyumsuz olabilir.</value></data>
   <data name="Errors.Storage.Unavailable" xml:space="preserve"><value>Yerel uygulama verilerine erişilemiyor. Yeniden deneyin.</value></data>
   <data name="Errors.Operation.Cancelled" xml:space="preserve"><value>İşlem iptal edildi.</value></data>
   <data name="Errors.Network.ResourceNotFound" xml:space="preserve"><value>İstenen kaynak bulunamadı.</value></data>

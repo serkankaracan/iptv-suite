@@ -71,16 +71,45 @@ public sealed class SourceDraftProtectionService
         }
     }
 
-    public async ValueTask<DomainResult<ValidatedSourceDraft>> ProtectRemotePlaylistAsync(
+    public ValueTask<DomainResult<ValidatedSourceDraft>> ProtectRemotePlaylistAsync(
         SourceId sourceId,
         string? displayName,
         string? locator,
+        CancellationToken cancellationToken = default) =>
+        ProtectRemotePlaylistCoreAsync(
+            sourceId,
+            displayName,
+            locator,
+            allowInsecureHttp: false,
+            cancellationToken: cancellationToken);
+
+    public ValueTask<DomainResult<ValidatedSourceDraft>>
+        ProtectRemotePlaylistAllowingInsecureHttpAsync(
+            SourceId sourceId,
+            string? displayName,
+            string? locator,
+            CancellationToken cancellationToken = default) =>
+        ProtectRemotePlaylistCoreAsync(
+            sourceId,
+            displayName,
+            locator,
+            allowInsecureHttp: true,
+            cancellationToken: cancellationToken);
+
+    private async ValueTask<DomainResult<ValidatedSourceDraft>> ProtectRemotePlaylistCoreAsync(
+        SourceId sourceId,
+        string? displayName,
+        string? locator,
+        bool allowInsecureHttp,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateSource(sourceId);
-        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
-            SourceConfigurationValidator.PrepareRemotePlaylist(displayName, locator);
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared = allowInsecureHttp
+            ? SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                displayName,
+                locator)
+            : SourceConfigurationValidator.PrepareRemotePlaylist(displayName, locator);
         if (!prepared.IsSuccess)
         {
             return DomainResult.Failure<ValidatedSourceDraft>(prepared.Error!);

@@ -132,7 +132,8 @@ public sealed class SqliteRemotePlaylistCatalogImporter : IRemotePlaylistCatalog
 
         return RemotePlaylistCatalogImportResult.Committed(
             sink.CommittedChannelCount.Value,
-            sink.CommittedWarningCount.Value);
+            sink.CommittedWarningCount.Value,
+            sink.CommittedEntryLimitReached);
     }
 
     private static RemotePlaylistCatalogImportResult MapFailure(

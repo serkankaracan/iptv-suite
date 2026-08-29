@@ -168,9 +168,24 @@ public sealed class PlaybackFaultWatchdog : IDisposable
                             break;
 
                         case PlaybackState.Playing:
-                        case PlaybackState.Paused:
                             _playableObserved = true;
                             deadlineToCancel ??= DetachDeadlineLocked();
+                            break;
+
+                        case PlaybackState.Paused:
+                            // Paused is only proof of a healthy session after Playing was observed.
+                            if (_playableObserved)
+                            {
+                                deadlineToCancel ??= DetachDeadlineLocked();
+                            }
+                            else if (_activeDeadline is null)
+                            {
+                                deadlineToStart = ArmDeadlineLocked(
+                                    PlaybackFaultWatchdogFailureKind.StartupTimeout,
+                                    _options.StartupTimeout,
+                                    observationTimestamp);
+                            }
+
                             break;
                     }
                 }

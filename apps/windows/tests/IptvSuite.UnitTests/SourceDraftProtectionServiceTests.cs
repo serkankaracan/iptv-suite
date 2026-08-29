@@ -202,6 +202,74 @@ public sealed class SourceDraftProtectionServiceTests
     }
 
     [TestMethod]
+    public async Task RemotePlaylistHttpOptInRejectsHttpsUserInfoBeforeStoreMutation()
+    {
+        var store = new NonConformingPayloadProbeSecretStore();
+        var service = new SourceDraftProtectionService(store);
+
+        DomainResult<ValidatedSourceDraft> result =
+            await service.ProtectRemotePlaylistAllowingInsecureHttpAsync(
+                SourceId.Generate(),
+                "Remote Source",
+                "https://synthetic-user:synthetic-password@example.test/list.m3u");
+
+        SecurityTestAssertions.IsFailure(
+            result,
+            DomainErrorCode.EndpointUserInfoNotAllowed);
+        Assert.AreEqual(0, store.LocatorCreateCount);
+    }
+
+    [TestMethod]
+    public async Task RemotePlaylistHttpProtectionRequiresExplicitOptInAndBindsPort80()
+    {
+        var store = new NonConformingPayloadProbeSecretStore();
+        var service = new SourceDraftProtectionService(store);
+        SourceId sourceId = SourceId.Generate();
+        string locatorSecret = SecurityTestAssertions.CreateSensitiveValue(
+            "SOURCE-DRAFT-REMOTE-HTTP-LOCATOR");
+        string locator = $"http://example.test/private/list.m3u?key={locatorSecret}";
+        byte[] expectedPayload = BuildExpectedLocatorPayload(locator);
+
+        try
+        {
+            DomainResult<ValidatedSourceDraft> rejected =
+                await service.ProtectRemotePlaylistAsync(
+                    sourceId,
+                    "Remote HTTP Source",
+                    locator);
+
+            SecurityTestAssertions.IsFailure(
+                rejected,
+                DomainErrorCode.InsecureTransportRejected);
+            Assert.AreEqual(0, store.LocatorCreateCount);
+
+            DomainResult<ValidatedSourceDraft> accepted =
+                await service.ProtectRemotePlaylistAllowingInsecureHttpAsync(
+                    sourceId,
+                    "Remote HTTP Source",
+                    locator);
+
+            Assert.IsTrue(accepted.IsSuccess);
+            Assert.AreEqual(1, store.LocatorCreateCount);
+            var configuration = accepted.Value!.Configuration as RemotePlaylistSourceConfiguration;
+            Assert.IsNotNull(configuration);
+            Assert.AreEqual(Uri.UriSchemeHttp, configuration.SafeEndpoint.Scheme);
+            Assert.AreEqual(80, configuration.SafeEndpoint.Port);
+            Assert.IsTrue(Matches(expectedPayload, store.PayloadSnapshots.Single()));
+            Assert.IsTrue(store.BorrowedPayloads.All(IsZeroed));
+            SecurityTestAssertions.DoesNotContainSensitive(
+                string.Join('|', accepted, JsonSerializer.Serialize(accepted)),
+                locatorSecret,
+                locator);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(expectedPayload);
+            store.ZeroSnapshots();
+        }
+    }
+
+    [TestMethod]
     [DataRow(SecretStoreFailure.ProtectedRecordUnavailable)]
     [DataRow(SecretStoreFailure.StorageUnavailable)]
     public async Task StoreCreateFailuresMapToSafeStorageErrorAndZeroPayload(

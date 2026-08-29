@@ -22,7 +22,6 @@ public sealed class M16SyntheticEndToEndJourneyTests
     private static readonly string[] ExpectedRequests =
     [
         "GET /catalog.m3u",
-        "GET /catalog.m3u",
         "GET /media/recovery.ts",
         "GET /media/recovery.ts",
     ];
@@ -65,7 +64,6 @@ public sealed class M16SyntheticEndToEndJourneyTests
         var importer = new SqliteRemotePlaylistCatalogImporter(databasePath, store, transport);
         var onboarding = new RemotePlaylistSourceOnboardingService(
             store,
-            transport,
             importer,
             time);
 
@@ -276,9 +274,9 @@ public sealed class M16SyntheticEndToEndJourneyTests
         CollectionAssert.AreEqual(
             ExpectedRequests,
             server.Requests.Select(static request => $"{request.Method} {request.Path}").ToArray());
-        Assert.AreEqual(4, server.RequestCount);
-        Assert.AreEqual(4, server.CompletedResponseCount);
-        Assert.AreEqual((playlist.Length * 2L) + (recoveryMedia.Length * 2L), server.CompletedBodyBytes);
+        Assert.AreEqual(3, server.RequestCount);
+        Assert.AreEqual(3, server.CompletedResponseCount);
+        Assert.AreEqual(playlist.Length + (recoveryMedia.Length * 2L), server.CompletedBodyBytes);
         Assert.AreEqual(0, server.FailureCount);
         await AssertDatabaseExcludesAsync(databasePath, sourceLocator, recoveryLocator, otherLocator);
         string observable = string.Join('|',

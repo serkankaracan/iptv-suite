@@ -78,7 +78,11 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
                 RetryPendingSourceCleanupAsync,
                 DeleteSourceAsync);
             _mainPage.ConfigureSourceOnboarding(
-                _catalogServices.Onboarding.AddAsync);
+                (displayName, locator, cancellationToken) =>
+                    _catalogServices.Onboarding.AddAllowingInsecureHttpAsync(
+                        displayName,
+                        locator,
+                        cancellationToken: cancellationToken));
             _mainPage.FullscreenToggleRequested += MainPage_FullscreenToggleRequested;
             AppWindow.Changed += AppWindow_Changed;
             AppWindow.Closing += AppWindow_Closing;

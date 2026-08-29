@@ -38,6 +38,91 @@ public sealed class BoundedHttpTransportTests
     }
 
     [TestMethod]
+    public void RemotePlaylistFactoryUsesDedicatedBudgetAndTimeoutOnly()
+    {
+        using HttpTransportRequest general = CreateRequest(
+            "https://example.test/general",
+            HttpTransportLimits.MaximumAllowedResponseBytes);
+        using HttpTransportRequest remoteHttps = CreateRemotePlaylistSourceRequest(
+            "https://example.test/catalog.m3u");
+        using HttpTransportRequest remoteHttp = CreateRemotePlaylistSourceRequest(
+            "http://example.test/catalog.m3u?token=synthetic");
+
+        Assert.AreEqual(HttpTransportLimits.MaximumAllowedResponseBytes, general.MaximumResponseBytes);
+        Assert.IsNull(ReadRequestTimeoutOverride(general));
+        Assert.AreEqual(128 * 1024 * 1024, remoteHttps.MaximumResponseBytes);
+        Assert.AreEqual(TimeSpan.FromMinutes(2), ReadRequestTimeoutOverride(remoteHttps));
+        Assert.AreEqual(128 * 1024 * 1024, remoteHttp.MaximumResponseBytes);
+        Assert.AreEqual(TimeSpan.FromMinutes(2), ReadRequestTimeoutOverride(remoteHttp));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => CreateRequest(
+            "https://example.test/general-oversized",
+            HttpTransportLimits.MaximumAllowedResponseBytes + 1));
+    }
+
+    [TestMethod]
+    public async Task RemotePlaylistBudgetAcceptsStreamingBodyBeyondGeneralLimit()
+    {
+        byte[] payload = new byte[HttpTransportLimits.MaximumAllowedResponseBytes + 1];
+        payload[0] = (byte)'#';
+
+        using StubHandler streamingHandler = new((_, _) =>
+            Task.FromResult(Response(HttpStatusCode.OK, payload)));
+        using BoundedHttpTransport streamingTransport = CreateTransport(
+            streamingHandler,
+            TimeSpan.FromSeconds(1));
+        using HttpTransportRequest streamingRequest = CreateRemotePlaylistSourceRequest(
+            "http://example.test/catalog.m3u?token=synthetic");
+
+        HttpStreamingResult streaming = await streamingTransport.GetStreamAsync(streamingRequest);
+
+        Assert.IsTrue(streaming.IsSuccess);
+        using (HttpStreamingResponseLease response = streaming.Response!)
+        {
+            await response.Content.CopyToAsync(Stream.Null);
+        }
+    }
+
+    [TestMethod]
+    public async Task RemotePlaylistBudgetRejectsDeclaredBodyAboveDedicatedLimit()
+    {
+        using StubHandler handler = new((_, _) =>
+        {
+            HttpResponseMessage response = Response(HttpStatusCode.OK, [1]);
+            response.Content.Headers.ContentLength = (128L * 1024 * 1024) + 1;
+            return Task.FromResult(response);
+        });
+        using BoundedHttpTransport transport = CreateTransport(
+            handler,
+            TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateRemotePlaylistSourceRequest(
+            "http://example.test/catalog.m3u?token=synthetic");
+
+        HttpStreamingResult result = await transport.GetStreamAsync(request);
+
+        Assert.AreEqual(HttpTransportFailure.ResponseTooLarge, result.Failure);
+    }
+
+    [TestMethod]
+    public async Task RemotePlaylistTimeoutOverridesTheGeneralTransportDefault()
+    {
+        using StubHandler handler = new(async (_, cancellationToken) =>
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(75), cancellationToken);
+            return Response(HttpStatusCode.OK, "#EXTM3U\n"u8.ToArray());
+        });
+        using BoundedHttpTransport transport = CreateTransport(
+            handler,
+            TimeSpan.FromMilliseconds(20));
+        using HttpTransportRequest request = CreateRemotePlaylistSourceRequest(
+            "https://example.test/catalog.m3u");
+
+        HttpStreamingResult result = await transport.GetStreamAsync(request);
+
+        Assert.IsTrue(result.IsSuccess);
+        result.Response!.Dispose();
+    }
+
+    [TestMethod]
     public async Task RelativeHttpsRedirectIsFollowedManually()
     {
         using StubHandler handler = new((request, _) =>
@@ -77,6 +162,167 @@ public sealed class BoundedHttpTransportTests
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(HttpTransportFailure.RedirectRejected, result.Failure);
         Assert.HasCount(1, handler.RequestUris);
+    }
+
+    [TestMethod]
+    public async Task ExplicitHttpSourceFollowsOnlySameOriginHttpRedirects()
+    {
+        using StubHandler handler = new((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/start")
+            {
+                HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+                redirect.Headers.Location = new Uri("/final", UriKind.Relative);
+                return Task.FromResult(redirect);
+            }
+
+            return Task.FromResult(Response(HttpStatusCode.OK, [1]));
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateRemotePlaylistSourceRequest(
+            "http://example.test/start");
+
+        HttpTransportResult result = await transport.GetAsync(request);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(2, handler.RequestUris);
+        Assert.AreEqual("http://example.test/final", handler.RequestUris[1].AbsoluteUri);
+        result.Response!.Dispose();
+    }
+
+    [TestMethod]
+    [Timeout(15_000)]
+    public async Task ProductionTransportSupportsHttpSourceWithExplicitPortAndXtreamStyleQuery()
+    {
+        byte[] payload = "#EXTM3U\n#EXTINF:-1,Synthetic\nhttp://127.0.0.1/live.ts\n"u8.ToArray();
+        Dictionary<string, FixtureHttpResponse> routes = new(StringComparer.Ordinal)
+        {
+            ["/get.php"] = new FixtureHttpResponse(200, "audio/x-mpegurl", payload),
+        };
+
+        await using LocalHttpFixtureServer server = await LocalHttpFixtureServer.StartAsync(routes);
+        Uri locator = new(
+            server.BaseAddress,
+            "get.php?username=synthetic-user&password=synthetic-password&type=m3u_plus&output=ts");
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
+            SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Synthetic",
+                locator.AbsoluteUri);
+        Assert.IsTrue(prepared.IsSuccess);
+
+        using var transport = new BoundedHttpTransport();
+        using HttpTransportRequest request = CreateRemotePlaylistSourceRequest(
+            locator.AbsoluteUri);
+        HttpTransportResult result = await transport.GetAsync(request);
+
+        Assert.IsTrue(result.IsSuccess);
+        using HttpResponseLease response = result.Response!;
+        CollectionAssert.AreEqual(payload, response.Content.ToArray());
+        Assert.HasCount(1, server.Requests);
+        Assert.AreEqual("/get.php", server.Requests[0].Path);
+    }
+
+    [TestMethod]
+    public async Task ExplicitHttpSourceRejectsCrossOriginHttpRedirectWithoutSecondRequest()
+    {
+        using StubHandler handler = new((_, _) =>
+        {
+            HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+            redirect.Headers.Location = new Uri("http://other.test/final");
+            return Task.FromResult(redirect);
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateRemotePlaylistSourceRequest(
+            "http://example.test/start");
+
+        HttpTransportResult result = await transport.GetAsync(request);
+
+        Assert.AreEqual(HttpTransportFailure.RedirectRejected, result.Failure);
+        Assert.HasCount(1, handler.RequestUris);
+    }
+
+    [TestMethod]
+    public async Task StreamingHttpSourceAllowsSameOriginRedirectAndHttpsUpgradeWithoutHeaders()
+    {
+        var sensitiveHeadersSeen = new List<bool>();
+        using StubHandler handler = new((request, _) =>
+        {
+            sensitiveHeadersSeen.Add(
+                request.Headers.Authorization is not null ||
+                request.Headers.Referrer is not null ||
+                request.Headers.Contains("Cookie"));
+            if (request.RequestUri!.AbsolutePath == "/start")
+            {
+                HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+                redirect.Headers.Location = new Uri("/middle", UriKind.Relative);
+                return Task.FromResult(redirect);
+            }
+
+            if (request.RequestUri.Scheme == Uri.UriSchemeHttp)
+            {
+                HttpResponseMessage upgrade = Response(HttpStatusCode.Redirect, []);
+                upgrade.Headers.Location = new Uri("https://secure.test/final");
+                return Task.FromResult(upgrade);
+            }
+
+            return Task.FromResult(Response(HttpStatusCode.OK, "#EXTM3U\n"u8.ToArray()));
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateRemotePlaylistSourceRequest(
+            "http://example.test/start?token=synthetic");
+
+        HttpStreamingResult result = await transport.GetStreamAsync(request);
+
+        Assert.IsTrue(result.IsSuccess);
+        using HttpStreamingResponseLease response = result.Response!;
+        Assert.HasCount(3, handler.RequestUris);
+        Assert.AreEqual("http://example.test/middle", handler.RequestUris[1].AbsoluteUri);
+        Assert.AreEqual("https://secure.test/final", handler.RequestUris[2].AbsoluteUri);
+        Assert.IsTrue(sensitiveHeadersSeen.All(seen => !seen));
+    }
+
+    [TestMethod]
+    public async Task StreamingHttpsUpgradeCannotDowngradeBackToHttp()
+    {
+        using StubHandler handler = new((request, _) =>
+        {
+            HttpResponseMessage redirect = Response(HttpStatusCode.Redirect, []);
+            redirect.Headers.Location = request.RequestUri!.Scheme == Uri.UriSchemeHttp
+                ? new Uri("https://secure.test/final")
+                : new Uri("http://secure.test/downgrade");
+            return Task.FromResult(redirect);
+        });
+        using BoundedHttpTransport transport = CreateTransport(handler, TimeSpan.FromSeconds(1));
+        using HttpTransportRequest request = CreateRemotePlaylistSourceRequest(
+            "http://example.test/start");
+
+        HttpStreamingResult result = await transport.GetStreamAsync(request);
+
+        Assert.AreEqual(HttpTransportFailure.RedirectRejected, result.Failure);
+        Assert.HasCount(2, handler.RequestUris);
+    }
+
+    [TestMethod]
+    public void GeneralAndAuthorizedRequestFactoriesRejectHttp()
+    {
+        const string locator = "http://example.test/list.m3u?token=synthetic";
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
+            SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Synthetic",
+                locator);
+        Assert.IsTrue(prepared.IsSuccess);
+        var uri = new Uri(locator);
+
+        Assert.ThrowsExactly<ArgumentException>(() =>
+            HttpTransportRequest.Create(uri, prepared.Value!.SafeEndpoint, 64));
+        Assert.ThrowsExactly<ArgumentException>(() =>
+        {
+            using HttpTransportRequest _ = HttpTransportRequest.CreateWithAuthorization(
+                uri,
+                prepared.Value!.SafeEndpoint,
+                64,
+                "Bearer synthetic"u8);
+        });
     }
 
     [TestMethod]
@@ -655,6 +901,31 @@ public sealed class BoundedHttpTransportTests
         return (HttpTransportRequest)factory.Invoke(
             null,
             [requestUri, expectedEndpoint, maximumBytes])!;
+    }
+
+    private static HttpTransportRequest CreateRemotePlaylistSourceRequest(string locator)
+    {
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
+            SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Synthetic",
+                locator);
+        Assert.IsTrue(prepared.IsSuccess);
+        MethodInfo factory = typeof(HttpTransportRequest).GetMethod(
+            "CreateForExplicitRemotePlaylistSourceOrigin",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The explicit remote-playlist request factory is unavailable.");
+        return (HttpTransportRequest)factory.Invoke(
+            null,
+            [new Uri(locator), prepared.Value!.SafeEndpoint])!;
+    }
+
+    private static TimeSpan? ReadRequestTimeoutOverride(HttpTransportRequest request)
+    {
+        PropertyInfo property = typeof(HttpTransportRequest).GetProperty(
+            "RequestTimeoutOverride",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The request timeout override is unavailable.");
+        return (TimeSpan?)property.GetValue(request);
     }
 
     private static string BindAddressPolicy(

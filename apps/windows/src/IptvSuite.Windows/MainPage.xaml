@@ -7,7 +7,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -25,38 +24,42 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <ComboBox x:Name="SourceSelector" TabIndex="0" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSourceSelector" AutomationProperties.Name="Playlist source" DisplayMemberPath="Name" SelectionChanged="SourceSelector_SelectionChanged" />
+            <ComboBox x:Name="SourceSelector" MinWidth="240" HorizontalAlignment="Stretch" TabIndex="0" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSourceSelector" AutomationProperties.Name="Playlist source" DisplayMemberPath="Name" Header="Playlist source" SelectionChanged="SourceSelector_SelectionChanged" />
             <ComboBox x:Name="CategorySelector" Grid.Column="1" TabIndex="1" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogCategorySelector" AutomationProperties.Name="Channel category" DisplayMemberPath="Name" SelectionChanged="CategorySelector_SelectionChanged" />
             <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" TabIndex="2" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSearchBox" AutomationProperties.Name="Search channels" PlaceholderText="Search channels" QuerySubmitted="SearchBox_QuerySubmitted" TextChanged="SearchBox_TextChanged" />
             <Button x:Name="AddRemotePlaylistButton" Grid.Column="3" TabIndex="3" IsEnabled="False" AutomationProperties.AutomationId="CatalogAddSourceButton" AutomationProperties.Name="Add authorized remote M3U catalog" Click="AddRemotePlaylistButton_Click" Content="Add Remote M3U" />
             <Button x:Name="DeleteSourceButton" Grid.Column="4" TabIndex="9" IsEnabled="False" AutomationProperties.AutomationId="CatalogDeleteSourceButton" AutomationProperties.Name="Delete selected playlist source" Click="DeleteSourceButton_Click" Content="Delete source" />
         </Grid>
-        <Border x:Name="RemotePlaylistOnboardingPanel" Grid.Row="2" Padding="16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Visibility="Collapsed">
-            <StackPanel Spacing="10">
-                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Add an authorized Remote M3U catalog" />
-                <TextBlock Text="Use only a playlist you are authorized to access. The full URL is protected for this Windows user and is never shown in diagnostics." TextWrapping="Wrap" />
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="2*" />
-                        <ColumnDefinition Width="3*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="RemotePlaylistSourceNameTextBox" TabIndex="4" MaxLength="100" AutomationProperties.AutomationId="RemotePlaylistSourceNameTextBox" AutomationProperties.Name="Source name" Header="Source name" PlaceholderText="My authorized playlist" />
-                    <TextBox x:Name="RemotePlaylistLocatorTextBox" Grid.Column="1" TabIndex="5" MaxLength="4096" IsSpellCheckEnabled="False" AutomationProperties.AutomationId="RemotePlaylistLocatorTextBox" AutomationProperties.Name="Secure playlist URL" Header="HTTPS playlist URL" PlaceholderText="https://" />
-                </Grid>
-                <CheckBox x:Name="RemotePlaylistAuthorizationCheckBox" TabIndex="6" AutomationProperties.AutomationId="RemotePlaylistAuthorizationCheckBox" AutomationProperties.Name="Kaynak erişim ve özel veya yerel ağ güvenini onayla" Checked="RemotePlaylistAuthorizationCheckBox_Changed" Unchecked="RemotePlaylistAuthorizationCheckBox_Changed" Content="Bu kaynağa erişim yetkim olduğunu; özel/yerel ağdaysa yalnızca bu tam sunucu ve porta güvendiğimi onaylıyorum." />
-                <Grid ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Button x:Name="RemotePlaylistAddButton" TabIndex="7" IsEnabled="False" AutomationProperties.AutomationId="RemotePlaylistAddButton" AutomationProperties.Name="Validate and add source" Click="RemotePlaylistAddButton_Click" Content="Validate and add" />
-                    <Button x:Name="RemotePlaylistCancelButton" Grid.Column="1" TabIndex="8" AutomationProperties.AutomationId="RemotePlaylistCancelButton" AutomationProperties.Name="Cancel source onboarding" Click="RemotePlaylistCancelButton_Click" Content="Cancel" />
-                    <TextBlock x:Name="RemotePlaylistStatusText" Grid.Column="2" VerticalAlignment="Center" AutomationProperties.AutomationId="RemotePlaylistStatusText" AutomationProperties.LiveSetting="Polite" TextWrapping="Wrap" />
-                </Grid>
-            </StackPanel>
-        </Border>
-        <Grid x:Name="ContentPanel" Grid.Row="3" ColumnSpacing="16">
+        <Grid x:Name="RemotePlaylistOnboardingPanel" Grid.Row="2" Canvas.ZIndex="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" Visibility="Collapsed">
+            <Border Margin="16" Padding="16" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                <StackPanel Spacing="10">
+                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Add an authorized Remote M3U catalog" />
+                    <TextBlock Text="Use only a playlist you are authorized to access. The full URL is protected for this Windows user and is never shown in diagnostics." TextWrapping="Wrap" />
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" />
+                            <ColumnDefinition Width="3*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="RemotePlaylistSourceNameTextBox" TabIndex="4" MaxLength="100" AutomationProperties.AutomationId="RemotePlaylistSourceNameTextBox" AutomationProperties.Name="Source name" Header="Source name" PlaceholderText="My authorized playlist" />
+                        <TextBox x:Name="RemotePlaylistLocatorTextBox" Grid.Column="1" TabIndex="5" MaxLength="4096" IsSpellCheckEnabled="False" AutomationProperties.AutomationId="RemotePlaylistLocatorTextBox" AutomationProperties.Name="HTTP or HTTPS playlist URL" Header="HTTP or HTTPS playlist URL" PlaceholderText="https:// or http://" />
+                    </Grid>
+                    <CheckBox x:Name="RemotePlaylistAuthorizationCheckBox" TabIndex="6" AutomationProperties.AutomationId="RemotePlaylistAuthorizationCheckBox" AutomationProperties.Name="Kaynak erişimini ve HTTP açık metin/MITM riskini onayla" Checked="RemotePlaylistAuthorizationCheckBox_Changed" Unchecked="RemotePlaylistAuthorizationCheckBox_Changed" Content="Bu kaynağa erişim yetkim olduğunu; özel/yerel ağdaysa yalnızca bu tam sunucu ve porta güvendiğimi; HTTP kullanırsam trafiğin şifrelenmeden açık metin taşınacağını ve ağdaki kişilerce görülebileceğini veya değiştirilebileceğini (MITM) kabul ediyorum." />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="RemotePlaylistAddButton" TabIndex="7" IsEnabled="False" AutomationProperties.AutomationId="RemotePlaylistAddButton" AutomationProperties.Name="Validate and add source" Click="RemotePlaylistAddButton_Click" Content="Validate and add" />
+                        <Button x:Name="RemotePlaylistCancelButton" Grid.Column="1" TabIndex="8" AutomationProperties.AutomationId="RemotePlaylistCancelButton" AutomationProperties.Name="Cancel source onboarding" Click="RemotePlaylistCancelButton_Click" Content="Cancel" />
+                        <ProgressRing x:Name="RemotePlaylistProgressRing" Grid.Column="2" Width="20" Height="20" VerticalAlignment="Center" IsActive="False" Visibility="Collapsed" AutomationProperties.AutomationId="RemotePlaylistProgressRing" AutomationProperties.Name="Validating and importing remote playlist" />
+                        <TextBlock x:Name="RemotePlaylistStatusText" Grid.Column="3" VerticalAlignment="Center" AutomationProperties.AutomationId="RemotePlaylistStatusText" AutomationProperties.LiveSetting="Polite" TextWrapping="Wrap" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+        <Grid x:Name="ContentPanel" Grid.Row="2" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="2*" />
                 <ColumnDefinition Width="3*" />
@@ -86,7 +89,7 @@
                 <Border Background="Black" CornerRadius="8">
                     <MediaPlayerElement x:Name="PlaybackSurface" AutomationProperties.AutomationId="PlaybackSurface" AutomationProperties.Name="Live TV playback surface" AreTransportControlsEnabled="False" Stretch="Uniform" />
                 </Border>
-                <Grid Grid.Row="1" ColumnSpacing="8" RowSpacing="8">
+                <Grid x:Name="PlaybackControlsPanel" Grid.Row="1" ColumnSpacing="8" RowSpacing="8" AutomationProperties.AutomationId="PlaybackControlsPanel" AutomationProperties.Name="Playback controls">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -125,7 +128,7 @@
                 </Grid>
             </Grid>
         </Grid>
-        <Grid x:Name="CatalogStatusPanel" Grid.Row="4">
+        <Grid x:Name="CatalogStatusPanel" Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -135,7 +138,7 @@
             <Button x:Name="RetryPendingDeletionButton" Grid.Column="1" Margin="12,0" IsEnabled="False" Visibility="Collapsed" AutomationProperties.AutomationId="CatalogRetryPendingDeletionButton" AutomationProperties.Name="Retry pending source cleanup" Click="RetryPendingDeletionButton_Click" Content="Retry cleanup" />
             <ProgressRing x:Name="LoadingIndicator" Grid.Column="2" HorizontalAlignment="Right" AutomationProperties.Name="Loading catalog" IsActive="False" />
         </Grid>
-        <StackPanel x:Name="CatalogPagingPanel" Grid.Row="5" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
+        <StackPanel x:Name="CatalogPagingPanel" Grid.Row="4" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
             <Button x:Name="PreviousButton" IsEnabled="False" AutomationProperties.AutomationId="CatalogPreviousPage" AutomationProperties.Name="Previous channel page" Click="PreviousButton_Click" Content="Previous" />
             <Button x:Name="NextButton" IsEnabled="False" AutomationProperties.AutomationId="CatalogNextPage" AutomationProperties.Name="Next channel page" Click="NextButton_Click" Content="Next" />
         </StackPanel>

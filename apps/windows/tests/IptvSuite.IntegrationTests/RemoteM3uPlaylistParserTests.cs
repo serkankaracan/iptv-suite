@@ -30,15 +30,171 @@ public sealed class RemoteM3uPlaylistParserTests
     }
 
     [TestMethod]
+    [DataRow("#EXTM3U url-tvg=\"https://guide.invalid/epg.xml\"")]
+    [DataRow("#EXTM3U\tx-tvg-url=\"https://guide.invalid/epg.xml\"")]
+    public async Task CommonExtendedHeaderAttributesAreAcceptedAfterWhitespace(string header)
+    {
+        string playlist = $"{header}\n#EXTINF:-1,Synthetic\nhttps://fixtures.invalid/live.ts\n";
+
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(1, result.Entries);
+        Assert.AreEqual("Synthetic", result.Entries[0].Name);
+    }
+
+    [TestMethod]
+    [DataRow("#EXTM3UX")]
+    [DataRow("#EXTM3U-PLUS")]
+    [DataRow("#EXTM3Uurl-tvg=\"https://guide.invalid/epg.xml\"")]
+    public async Task ExtendedHeaderLookalikesWithoutWhitespaceAreRejected(string header)
+    {
+        string playlist = $"{header}\n#EXTINF:-1,Synthetic\nhttps://fixtures.invalid/live.ts\n";
+
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+
+        Assert.AreEqual(DomainErrorCode.PlaylistHeaderInvalid, result.ErrorCode);
+    }
+
+    [TestMethod]
+    public async Task EmptyResponseReturnsSafeHeaderReason()
+    {
+        ParseSnapshot result = await ParseAsync([]);
+
+        Assert.AreEqual(DomainErrorCode.PlaylistHeaderInvalid, result.ErrorCode);
+    }
+
+    [TestMethod]
+    public async Task MetadataBoundsMatchDownstreamDomainAndOversizedEntriesAreSkippedIndividually()
+    {
+        int maximumTvgIdCharacters = Math.Min(
+            LiveChannel.MaximumProviderKeyLength,
+            ChannelStableKeyBuilder.MaximumProviderIdentifierLength);
+        int maximumGroupCharacters = Math.Min(
+            ChannelCategory.MaximumProviderKeyLength,
+            ChannelCategory.MaximumNameLength);
+        string maximumTvgId = new('i', maximumTvgIdCharacters);
+        string maximumGroup = new('g', maximumGroupCharacters);
+        string oversizedTvgId = new('i', maximumTvgIdCharacters + 1);
+        string oversizedGroup = new('g', maximumGroupCharacters + 1);
+        string playlist = "#EXTM3U\n" +
+            $"#EXTINF:-1 tvg-id=\"{oversizedTvgId}\" group-title=\"News\",Oversized identifier\n" +
+            "https://fixtures.invalid/oversized-id.ts\n" +
+            $"#EXTINF:-1 tvg-id=\"group-overflow\" group-title=\"{oversizedGroup}\",Oversized group\n" +
+            "https://fixtures.invalid/oversized-group.ts\n" +
+            $"#EXTINF:-1 tvg-id=\"{maximumTvgId}\" group-title=\"{maximumGroup}\",Boundary channel\n" +
+            "https://fixtures.invalid/boundary.ts\n";
+
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(1, result.Entries);
+        Assert.AreEqual(2, result.SkippedEntryCount);
+        Assert.AreEqual("Boundary channel", result.Entries[0].Name);
+        Assert.AreEqual(maximumTvgId, result.Entries[0].TvgId);
+        Assert.AreEqual(maximumGroup, result.Entries[0].GroupTitle);
+    }
+
+    [TestMethod]
     [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttp://fixtures.invalid/live.ts")]
     [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttps://user:pass@fixtures.invalid/live.ts")]
     [DataRow("#EXTM3U\n#EXTINF:-1,Synthetic\nhttps://fixtures.invalid/live.ts#fragment")]
     public async Task UnsafeLocatorIsSkipped(string playlist)
     {
-        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+        string catalog = playlist +
+            "\n#EXTINF:-1,Accepted\nhttps://fixtures.invalid/accepted.ts\n";
+
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(catalog));
+
         Assert.IsTrue(result.IsSuccess);
-        Assert.IsEmpty(result.Entries);
+        Assert.HasCount(1, result.Entries);
         Assert.AreEqual(1, result.SkippedEntryCount);
+        Assert.IsFalse(result.EntryLimitReached);
+    }
+
+    [TestMethod]
+    [DataRow("#EXTM3U\n", DomainErrorCode.PlaylistNoUsableEntries)]
+    [DataRow(
+        "#EXTM3U\n#EXTINF:-1,Synthetic\nhttp://fixtures.invalid/live.ts\n",
+        DomainErrorCode.PlaylistEntriesRejectedByAddressPolicy)]
+    [DataRow(
+        "#EXTM3U\n#EXTINF:-1 malformed\nhttps://fixtures.invalid/live.ts\n",
+        DomainErrorCode.PlaylistNoUsableEntries)]
+    public async Task CatalogWithoutAcceptedEntriesReturnsSafeReason(
+        string playlist,
+        DomainErrorCode expectedError)
+    {
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+
+        Assert.AreEqual(expectedError, result.ErrorCode);
+    }
+
+    [TestMethod]
+    public async Task HttpSourceAcceptsOnlyExactOriginHttpEntriesWhileHttpsRemainsAllowed()
+    {
+        const string playlist = "#EXTM3U\n" +
+            "#EXTINF:-1 tvg-logo=\"http://fixtures.invalid:8080/logo.png\",Synthetic relative\nlive/relative.ts\n" +
+            "#EXTINF:-1 tvg-logo=\"https://fixtures.invalid:8080/logo.png\",Synthetic exact\nhttp://fixtures.invalid:8080/live/exact.ts\n" +
+            "#EXTINF:-1,Synthetic secure\nhttps://media.invalid/live/secure.ts\n" +
+            "#EXTINF:-1,Synthetic other host\nhttp://other.invalid:8080/live/rejected.ts\n" +
+            "#EXTINF:-1,Synthetic other port\nhttp://fixtures.invalid:8081/live/rejected.ts\n" +
+            "#EXTINF:-1,Synthetic user info\nhttp://user:pass@fixtures.invalid:8080/live/rejected.ts\n" +
+            "#EXTINF:-1,Synthetic fragment\nhttp://fixtures.invalid:8080/live/rejected.ts#fragment\n";
+
+        ParseSnapshot result = await ParseForSourceAsync(
+            Encoding.UTF8.GetBytes(playlist),
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            "http://fixtures.invalid:8080/catalog/final/list.m3u");
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(3, result.Entries);
+        Assert.AreEqual(
+            "http://fixtures.invalid:8080/catalog/final/live/relative.ts",
+            result.Entries[0].Locator);
+        Assert.IsNull(result.Entries[0].Logo);
+        Assert.AreEqual("http://fixtures.invalid:8080/live/exact.ts", result.Entries[1].Locator);
+        Assert.IsNull(result.Entries[1].Logo);
+        Assert.AreEqual("https://media.invalid/live/secure.ts", result.Entries[2].Locator);
+        Assert.AreEqual(4, result.SkippedEntryCount);
+    }
+
+    [TestMethod]
+    public async Task HttpSourceFinalCatalogRequiresExactHttpOriginButAllowsHttpsUpgrade()
+    {
+        byte[] playlist = Encoding.UTF8.GetBytes(
+            "#EXTM3U\n#EXTINF:-1,Synthetic\nhttps://media.invalid/live/secure.ts\n");
+
+        ParseSnapshot sameOrigin = await ParseForSourceAsync(
+            playlist,
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            "http://fixtures.invalid:8080/catalog/final/list.m3u");
+        ParseSnapshot otherHttpOrigin = await ParseForSourceAsync(
+            playlist,
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            "http://redirect.invalid:8080/catalog/final/list.m3u");
+        ParseSnapshot httpsUpgrade = await ParseForSourceAsync(
+            playlist,
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            "https://redirect.invalid/catalog/final/list.m3u");
+        ParseSnapshot httpsSourceDowngrade = await ParseForSourceAsync(
+            playlist,
+            "https://fixtures.invalid/catalog/list.m3u",
+            "http://fixtures.invalid/catalog/final/list.m3u");
+        ParseSnapshot httpFinalUserInfo = await ParseForSourceAsync(
+            playlist,
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            "http://user:pass@fixtures.invalid:8080/catalog/final/list.m3u");
+        ParseSnapshot httpsFinalFragment = await ParseForSourceAsync(
+            playlist,
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            "https://redirect.invalid/catalog/final/list.m3u#fragment");
+
+        Assert.IsTrue(sameOrigin.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.PlaylistResponseAddressRejected, otherHttpOrigin.ErrorCode);
+        Assert.IsTrue(httpsUpgrade.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.PlaylistResponseAddressRejected, httpsSourceDowngrade.ErrorCode);
+        Assert.AreEqual(DomainErrorCode.PlaylistResponseAddressRejected, httpFinalUserInfo.ErrorCode);
+        Assert.AreEqual(DomainErrorCode.PlaylistResponseAddressRejected, httpsFinalFragment.ErrorCode);
     }
 
     [TestMethod]
@@ -57,12 +213,67 @@ public sealed class RemoteM3uPlaylistParserTests
     public async Task InvalidUtf8AndCancellationReturnTypedFailures()
     {
         ParseSnapshot invalid = await ParseAsync([.. Encoding.UTF8.GetBytes("#EXTM3U\n"), 0xC3, 0x28]);
-        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, invalid.ErrorCode);
+        Assert.AreEqual(DomainErrorCode.PlaylistTextEncodingInvalid, invalid.ErrorCode);
 
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         ParseSnapshot cancelled = await ParseAsync(Encoding.UTF8.GetBytes("#EXTM3U\n"), cancellation.Token);
         Assert.AreEqual(DomainErrorCode.OperationCancelled, cancelled.ErrorCode);
+    }
+
+    [TestMethod]
+    public async Task PhysicalLinesAboveLegacyBoundRemainCompatibleWithinCurrentBound()
+    {
+        var metadata = new StringBuilder("#EXTINF:-1 tvg-id=\"long-line\" group-title=\"Synthetic\"");
+        for (int index = 0; index < 700; index++)
+        {
+            metadata.Append(" x-").Append(index).Append("=\"synthetic-value\"");
+        }
+
+        metadata.Append(",Long metadata channel");
+        Assert.IsGreaterThan(8_192, metadata.Length);
+        Assert.IsLessThanOrEqualTo(64 * 1024, metadata.Length);
+        string playlist = $"#EXTM3U\r\n{metadata}\r\nstream/long.ts\r\n";
+
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(1, result.Entries);
+        Assert.AreEqual("Long metadata channel", result.Entries[0].Name);
+        Assert.AreEqual("long-line", result.Entries[0].TvgId);
+        Assert.AreEqual("Synthetic", result.Entries[0].GroupTitle);
+        Assert.AreEqual("https://fixtures.invalid/catalog/stream/long.ts", result.Entries[0].Locator);
+    }
+
+    [TestMethod]
+    public async Task PhysicalLineBoundAndMixedStructureReturnDistinctSafeReasons()
+    {
+        byte[] oversizedLine = Encoding.UTF8.GetBytes(
+            $"#EXTM3U\n#{new string('x', 64 * 1024)}");
+        const string mixedStructure = "#EXTM3U\n" +
+            "#EXTINF:-1,Synthetic\nhttps://fixtures.invalid/live.ts\n" +
+            "#EXT-X-ENDLIST\n";
+
+        ParseSnapshot limit = await ParseAsync(oversizedLine);
+        ParseSnapshot structure = await ParseAsync(Encoding.UTF8.GetBytes(mixedStructure));
+
+        Assert.AreEqual(DomainErrorCode.PlaylistLineLimitExceeded, limit.ErrorCode);
+        Assert.AreEqual(DomainErrorCode.PlaylistStructureInvalid, structure.ErrorCode);
+    }
+
+    [TestMethod]
+    public async Task ExactPhysicalLineBoundAndCrLfAcrossReaderBufferRemainSupported()
+    {
+        string exactBoundComment = $"#{new string('x', (64 * 1024) - 1)}";
+        string crLfBoundaryComment = $"#{new string('x', 4_085)}";
+        string playlist = "#EXTM3U\r\n" + crLfBoundaryComment + "\r\n" +
+            exactBoundComment + "\r\n#EXTINF:-1,Synthetic\r\nstream/live.ts\r\n";
+
+        ParseSnapshot result = await ParseAsync(Encoding.UTF8.GetBytes(playlist));
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(1, result.Entries);
+        Assert.AreEqual("Synthetic", result.Entries[0].Name);
     }
 
     [TestMethod]
@@ -83,14 +294,51 @@ public sealed class RemoteM3uPlaylistParserTests
     }
 
     [TestMethod]
-    public async Task ExactMaximumEntryCountSucceedsAndLimitPlusOneFailsClosed()
+    public async Task ExactMaximumEntryCountSucceedsAndHttpsPathsRemainFailClosedAtLimitPlusOne()
     {
         ParseSnapshot success = await ParseAsync(Encoding.UTF8.GetBytes(CreatePlaylist(50_000)));
         Assert.IsTrue(success.IsSuccess);
         Assert.HasCount(50_000, success.Entries);
+        Assert.IsFalse(success.EntryLimitReached);
 
-        ParseSnapshot failure = await ParseAsync(Encoding.UTF8.GetBytes(CreatePlaylist(50_001)));
-        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, failure.ErrorCode);
+        byte[] overflow = Encoding.UTF8.GetBytes(CreatePlaylist(50_001));
+        ParseSnapshot directFailure = await ParseAsync(overflow);
+        ParseSnapshot configuredHttpsFailure = await ParseForSourceAsync(
+            overflow,
+            "https://fixtures.invalid/catalog/list.m3u",
+            "https://fixtures.invalid/catalog/final/list.m3u");
+
+        Assert.AreEqual(DomainErrorCode.PlaylistEntryLimitExceeded, directFailure.ErrorCode);
+        Assert.AreEqual(DomainErrorCode.PlaylistEntryLimitExceeded, configuredHttpsFailure.ErrorCode);
+    }
+
+    [TestMethod]
+    public async Task ExplicitHttpSourceKeepsFirstMaximumEntriesAndMarksTruncatedTail()
+    {
+        ParseSnapshot result = await ParseForSourceAsync(
+            Encoding.UTF8.GetBytes(CreatePlaylist(50_001)),
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            "http://fixtures.invalid:8080/catalog/final/list.m3u");
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.HasCount(50_000, result.Entries);
+        Assert.AreEqual(1, result.SkippedEntryCount);
+        Assert.IsTrue(result.EntryLimitReached);
+        Assert.AreEqual("Channel 49999", result.Entries[^1].Name);
+    }
+
+    [TestMethod]
+    public async Task ExplicitHttpSourceStillRejectsInvalidUtf8AfterTruncatedTail()
+    {
+        byte[] validPrefix = Encoding.UTF8.GetBytes(CreatePlaylist(50_001));
+        byte[] payload = [.. validPrefix, 0xC3, 0x28];
+
+        ParseSnapshot result = await ParseForSourceAsync(
+            payload,
+            "http://fixtures.invalid:8080/catalog/list.m3u",
+            "http://fixtures.invalid:8080/catalog/final/list.m3u");
+
+        Assert.AreEqual(DomainErrorCode.PlaylistTextEncodingInvalid, result.ErrorCode);
     }
 
     [TestMethod]
@@ -162,6 +410,25 @@ public sealed class RemoteM3uPlaylistParserTests
         return await InvokeParserAsync(stream, cancellationToken);
     }
 
+    private static async Task<ParseSnapshot> ParseForSourceAsync(
+        byte[] payload,
+        string sourceLocator,
+        string finalLocator,
+        CancellationToken cancellationToken = default)
+    {
+        DomainResult<PreparedRemotePlaylistSourceDraft> prepared =
+            SourceConfigurationValidator.PrepareRemotePlaylistAllowingInsecureHttp(
+                "Synthetic source",
+                sourceLocator);
+        Assert.IsTrue(prepared.IsSuccess);
+        await using var stream = new MemoryStream(payload, writable: false);
+        return await InvokeParserForSourceAsync(
+            stream,
+            new Uri(finalLocator),
+            prepared.Value!.SafeEndpoint,
+            cancellationToken);
+    }
+
     private static async Task<ParserOutcome> ParseOutcomeAsync(
         byte[] payload,
         CancellationToken cancellationToken = default)
@@ -199,6 +466,29 @@ public sealed class RemoteM3uPlaylistParserTests
         Type parserType = typeof(BoundedHttpTransport).Assembly.GetType("IptvSuite.Infrastructure.RemoteM3uPlaylistParser", true)!;
         MethodInfo method = parserType.GetMethod("ParseAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
         object valueTask = method.Invoke(null, [stream, new Uri("https://fixtures.invalid/catalog/list.m3u"), cancellationToken])!;
+        return await ReadParseSnapshotAsync(valueTask);
+    }
+
+    private static async Task<ParseSnapshot> InvokeParserForSourceAsync(
+        Stream stream,
+        Uri finalPlaylistUri,
+        SafeEndpoint configuredSourceEndpoint,
+        CancellationToken cancellationToken)
+    {
+        Type parserType = typeof(BoundedHttpTransport).Assembly.GetType(
+            "IptvSuite.Infrastructure.RemoteM3uPlaylistParser",
+            true)!;
+        MethodInfo method = parserType.GetMethod(
+            "ParseForSourceAsync",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        object valueTask = method.Invoke(
+            null,
+            [stream, finalPlaylistUri, configuredSourceEndpoint, cancellationToken])!;
+        return await ReadParseSnapshotAsync(valueTask);
+    }
+
+    private static async Task<ParseSnapshot> ReadParseSnapshotAsync(object valueTask)
+    {
         Task task = (Task)valueTask.GetType().GetMethod("AsTask")!.Invoke(valueTask, null)!;
         await task;
         object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
@@ -207,7 +497,7 @@ public sealed class RemoteM3uPlaylistParserTests
         {
             object error = result.GetType().GetProperty("Error")!.GetValue(result)!;
             var code = (DomainErrorCode)error.GetType().GetProperty("Code")!.GetValue(error)!;
-            return new(false, code, PlaylistContentKind.Unknown, [], 0, null);
+            return new(false, code, PlaylistContentKind.Unknown, [], 0, false, null);
         }
 
         object parsed = result.GetType().GetProperty("Value")!.GetValue(result)!;
@@ -227,6 +517,7 @@ public sealed class RemoteM3uPlaylistParserTests
             (PlaylistContentKind)GetProperty(parsed, "ContentKind")!,
             entries,
             (int)GetProperty(parsed, "SkippedEntryCount")!,
+            (bool)GetProperty(parsed, "EntryLimitReached")!,
             (string?)GetProperty(parsed, "HlsLocator"));
     }
 
@@ -257,6 +548,7 @@ public sealed class RemoteM3uPlaylistParserTests
         PlaylistContentKind ContentKind,
         IReadOnlyList<EntrySnapshot> Entries,
         int SkippedEntryCount,
+        bool EntryLimitReached,
         string? HlsLocator);
     private sealed record ParserOutcome(
         bool IsSuccess,
