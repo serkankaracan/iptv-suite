@@ -91,6 +91,91 @@ public sealed class PostMvpContentExperienceContractTests
     }
 
     [TestMethod]
+    public void M20SignalSlateShellFoundationIsAdaptiveAndKeepsPlannedItemsDisabled()
+    {
+        string windowsRoot = WindowsSourceRoot();
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        XDocument appMarkup = LoadMarkup(windowsRoot, "App.xaml");
+        XDocument windowMarkup = LoadMarkup(windowsRoot, "MainWindow.xaml");
+        XDocument homeMarkup = LoadMarkup(windowsRoot, "HomePage.xaml");
+        string windowCode = File.ReadAllText(Path.Combine(windowsRoot, "MainWindow.xaml.cs"));
+        string homeCode = File.ReadAllText(Path.Combine(windowsRoot, "HomePage.xaml.cs"));
+
+        HashSet<string> resourceKeys = appMarkup
+            .Descendants()
+            .Select(element => element.Attribute(x + "Key")?.Value)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Select(key => key!)
+            .ToHashSet(StringComparer.Ordinal);
+        string[] requiredResources =
+        [
+            "ShellWindowBrush",
+            "ShellNavigationBrush",
+            "ShellContentBrush",
+            "ShellCardBrush",
+            "ShellAccentBrush",
+            "LiveDashboardBrush",
+            "MovieDashboardBrush",
+            "SeriesDashboardBrush",
+        ];
+        foreach (string resourceKey in requiredResources)
+        {
+            Assert.IsTrue(
+                resourceKeys.Contains(resourceKey),
+                $"The shell resource {resourceKey} must remain defined.");
+        }
+
+        XElement navigation = RequiredNamedElement(windowMarkup, x, "AppNavigation");
+        Assert.AreEqual("Auto", navigation.Attribute("PaneDisplayMode")?.Value);
+        Assert.AreEqual("True", navigation.Attribute("IsPaneOpen")?.Value);
+        Assert.AreEqual("False", navigation.Attribute("AlwaysShowHeader")?.Value);
+        Assert.AreEqual("64", navigation.Attribute("CompactPaneLength")?.Value);
+        Assert.AreEqual("244", navigation.Attribute("OpenPaneLength")?.Value);
+        _ = RequiredNamedElement(windowMarkup, x, "ShellContentFrame");
+
+        XElement[] plannedItems = windowMarkup
+            .Descendants()
+            .Where(element =>
+                element.Attribute("Content")?.Value.Contains(
+                    "coming soon",
+                    StringComparison.OrdinalIgnoreCase) == true)
+            .ToArray();
+        Assert.IsTrue(plannedItems.Length >= 5);
+        foreach (XElement plannedItem in plannedItems)
+        {
+            Assert.AreEqual("False", plannedItem.Attribute("IsEnabled")?.Value);
+        }
+
+        foreach (string countName in new[]
+                 {
+                     "LiveTvCountText",
+                     "MovieCountText",
+                     "SeriesCountText",
+                     "TotalCountText",
+                 })
+        {
+            Assert.AreEqual(
+                "Polite",
+                RequiredNamedElement(homeMarkup, x, countName)
+                    .Attribute("AutomationProperties.LiveSetting")?.Value);
+        }
+
+        StringAssert.Contains(homeCode, ">= 1180 => HomeLayoutState.Wide");
+        StringAssert.Contains(homeCode, ">= 820 => HomeLayoutState.Standard");
+        StringAssert.Contains(homeCode, ">= 620 => HomeLayoutState.Narrow");
+        StringAssert.Contains(homeCode, "HeroActions.Orientation");
+        StringAssert.Contains(windowCode, "UpdateShellFullscreenLayout(isFullscreen);");
+        StringAssert.Contains(windowCode, "ShellContentFrame.Margin = isFullscreen");
+        StringAssert.Contains(windowCode, "ShellContentFrame.CornerRadius = isFullscreen");
+        StringAssert.Contains(windowCode, "ShellContentFrame.BorderThickness = isFullscreen");
+
+        string shellMarkup = string.Concat(appMarkup, windowMarkup, homeMarkup);
+        Assert.IsFalse(
+            shellMarkup.Contains("IPTVnator", StringComparison.OrdinalIgnoreCase),
+            "The original shell must not carry the reference product's trademark.");
+    }
+
+    [TestMethod]
     public void M17SourceManagerIsSeparateCrudSurfaceAndDoesNotRedisplaySecrets()
     {
         string windowsRoot = WindowsSourceRoot();

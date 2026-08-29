@@ -2,101 +2,368 @@
 <Page
     x:Class="IptvSuite.Windows.HomePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <ScrollViewer>
-        <Grid Padding="32" RowSpacing="20">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Transparent"
+    Loaded="HomePage_Loaded"
+    SizeChanged="HomePage_SizeChanged">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <Grid x:Name="HomeLayoutGrid" MaxWidth="1680" Padding="36,28,36,40"
+              HorizontalAlignment="Stretch" RowSpacing="24">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <StackPanel Spacing="4">
-                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Home" />
-                <TextBlock Text="Choose what you want to watch or manage your authorized sources." TextWrapping="Wrap" />
-            </StackPanel>
-
-            <Grid Grid.Row="1" ColumnSpacing="16">
+            <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+                <StackPanel Spacing="4">
+                    <TextBlock Style="{StaticResource ShellEyebrowTextStyle}"
+                               Text="HOME" />
+                    <TextBlock Style="{StaticResource ShellPageTitleStyle}"
+                               AutomationProperties.HeadingLevel="Level1"
+                               Text="Your authorized media, organized." />
+                    <TextBlock Style="{StaticResource ShellSecondaryTextStyle}"
+                               Text="Move between live channels, movies, series and source management without losing your place." />
+                </StackPanel>
+                <Border x:Name="LocalWorkspaceBadge" Grid.Column="1" Padding="12,7" VerticalAlignment="Center"
+                        Background="{StaticResource ShellAccentMutedBrush}"
+                        BorderBrush="{StaticResource ShellAccentBrush}"
+                        BorderThickness="1" CornerRadius="999">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                 Fill="{StaticResource ShellAccentBrush}" />
+                        <TextBlock FontSize="12" FontWeight="SemiBold"
+                                   Text="LOCAL WORKSPACE" />
+                    </StackPanel>
+                </Border>
+            </Grid>
 
-                <Button x:Name="LiveTvCard" MinHeight="210" HorizontalAlignment="Stretch"
+            <Border x:Name="HeroCard" Grid.Row="1" Padding="32"
+                    Background="{StaticResource HeroDashboardBrush}"
+                    BorderBrush="#3DFFFFFF" BorderThickness="1" CornerRadius="24">
+                <Grid ColumnSpacing="24">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="HeroVisualColumn" Width="280" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel MaxWidth="760" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                Spacing="14">
+                        <Border Padding="10,5" HorizontalAlignment="Left"
+                                Background="#1FFFFFFF" CornerRadius="999">
+                            <TextBlock FontSize="12" FontWeight="SemiBold"
+                                       Text="BRING YOUR OWN AUTHORIZED SOURCE" />
+                        </Border>
+                        <TextBlock FontFamily="Segoe UI Variable Display" FontSize="34"
+                                   FontWeight="SemiBold" TextWrapping="Wrap"
+                                   Text="One calm place for every screen." />
+                        <TextBlock MaxWidth="690" Foreground="#D9FFFFFF" FontSize="15"
+                                   TextWrapping="Wrap"
+                                   Text="Your catalog is separated into Live TV, Movies and Series when the source provides authoritative content types. Credentials remain protected for this Windows user." />
+                        <StackPanel x:Name="HeroActions" Orientation="Horizontal" Spacing="10">
+                            <Button x:Name="HeroLiveButton"
+                                    Style="{StaticResource ShellPrimaryButtonStyle}"
+                                    AutomationProperties.AutomationId="HomeBrowseLiveButton"
+                                    AutomationProperties.Name="Browse Live TV"
+                                    Click="LiveTvCard_Click" Content="Browse Live TV" />
+                            <Button x:Name="HeroSourcesButton"
+                                    Style="{StaticResource ShellSecondaryButtonStyle}"
+                                    AutomationProperties.AutomationId="HomeHeroManageSourcesButton"
+                                    AutomationProperties.Name="Manage playlist sources"
+                                    Click="SourcesCard_Click" Content="Manage sources" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Grid x:Name="HeroVisual" Grid.Column="1" Width="252" Height="188"
+                          HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Ellipse Width="170" Height="170" HorizontalAlignment="Right"
+                                 Fill="#18FFFFFF" Stroke="#2EFFFFFF" StrokeThickness="1" />
+                        <Ellipse Width="112" Height="112" Margin="0,58,116,0"
+                                 HorizontalAlignment="Left" VerticalAlignment="Top"
+                                 Fill="#1821C7A8" Stroke="#5C21C7A8" StrokeThickness="1" />
+                        <Border Width="112" Height="112" HorizontalAlignment="Right"
+                                VerticalAlignment="Center" Background="#CC0B1119"
+                                BorderBrush="#52FFFFFF" BorderThickness="1" CornerRadius="28">
+                            <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      Foreground="White" FontSize="46" Glyph="&#xE768;" />
+                        </Border>
+                        <Border Padding="11,6" Margin="0,0,72,14" HorizontalAlignment="Left"
+                                VerticalAlignment="Bottom" Background="#E61A2736"
+                                BorderBrush="#4DFFFFFF" BorderThickness="1" CornerRadius="999">
+                            <TextBlock FontSize="11" FontWeight="SemiBold"
+                                       Text="LIVE &#x00B7; VOD &#x00B7; SERIES" />
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2" Margin="0,4,0,0" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="3">
+                    <TextBlock Style="{StaticResource ShellSectionTitleStyle}"
+                               Text="Choose a library" />
+                    <TextBlock Style="{StaticResource ShellSecondaryTextStyle}"
+                               Text="Counts come from the active snapshots of ready sources." />
+                </StackPanel>
+                <TextBlock x:Name="PrimaryInstructionText" Grid.Column="1"
+                           VerticalAlignment="Bottom"
+                           Foreground="{StaticResource ShellSecondaryTextBrush}"
+                           FontSize="12" Text="SELECT A CARD TO OPEN" />
+            </Grid>
+
+            <Grid x:Name="PrimaryCardGrid" Grid.Row="3" ColumnSpacing="18" RowSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="PrimaryColumn0" Width="*" />
+                    <ColumnDefinition x:Name="PrimaryColumn1" Width="*" />
+                    <ColumnDefinition x:Name="PrimaryColumn2" Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="PrimaryRow0" Height="Auto" />
+                    <RowDefinition x:Name="PrimaryRow1" Height="0" />
+                    <RowDefinition x:Name="PrimaryRow2" Height="0" />
+                </Grid.RowDefinitions>
+
+                <Button x:Name="LiveTvCard" Style="{StaticResource DashboardCardButtonStyle}"
                         AutomationProperties.AutomationId="HomeLiveTvCard"
                         AutomationProperties.Name="Open Live TV"
                         Click="LiveTvCard_Click">
-                    <Grid Padding="16" RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="56" Glyph="&#xE7F4;" />
-                        <TextBlock Grid.Row="1" HorizontalAlignment="Center" Style="{StaticResource SubtitleTextBlockStyle}" Text="Live TV" />
-                        <TextBlock x:Name="LiveTvCountText" Grid.Row="2" HorizontalAlignment="Center" Text="0 channels" />
-                    </Grid>
+                    <Border Padding="24" Background="{StaticResource LiveDashboardBrush}"
+                            CornerRadius="20">
+                        <Grid RowSpacing="18">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Border Width="48" Height="48" HorizontalAlignment="Left"
+                                        Background="#2BFFFFFF" CornerRadius="14">
+                                    <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              FontSize="24" Glyph="&#xE7F4;" />
+                                </Border>
+                                <Border Padding="9,5" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Background="#26000000" CornerRadius="999">
+                                    <TextBlock FontSize="11" FontWeight="SemiBold" Text="LIVE" />
+                                </Border>
+                            </Grid>
+                            <StackPanel Grid.Row="1" VerticalAlignment="Bottom" Spacing="4">
+                                <TextBlock FontFamily="Segoe UI Variable Display" FontSize="28"
+                                           FontWeight="SemiBold" Text="Live TV" />
+                                <TextBlock x:Name="LiveTvCountText" Foreground="#E6FFFFFF"
+                                           AutomationProperties.LiveSetting="Polite"
+                                           FontSize="14" Text="0 channels" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="2" FontWeight="SemiBold"
+                                       Text="Browse channels  &#x2192;" />
+                        </Grid>
+                    </Border>
                 </Button>
 
-                <Button x:Name="MoviesCard" Grid.Column="1" MinHeight="210" HorizontalAlignment="Stretch"
+                <Button x:Name="MoviesCard" Grid.Column="1"
+                        Style="{StaticResource DashboardCardButtonStyle}"
                         AutomationProperties.AutomationId="HomeMoviesCard"
                         AutomationProperties.Name="Open movies"
                         Click="MoviesCard_Click">
-                    <Grid Padding="16" RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="56" Glyph="&#xE714;" />
-                        <TextBlock Grid.Row="1" HorizontalAlignment="Center" Style="{StaticResource SubtitleTextBlockStyle}" Text="Movies" />
-                        <TextBlock x:Name="MovieCountText" Grid.Row="2" HorizontalAlignment="Center" Text="0 movies" />
-                    </Grid>
+                    <Border Padding="24" Background="{StaticResource MovieDashboardBrush}"
+                            CornerRadius="20">
+                        <Grid RowSpacing="18">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Border Width="48" Height="48" HorizontalAlignment="Left"
+                                        Background="#2BFFFFFF" CornerRadius="14">
+                                    <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              FontSize="24" Glyph="&#xE714;" />
+                                </Border>
+                                <Border Padding="9,5" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Background="#26000000" CornerRadius="999">
+                                    <TextBlock FontSize="11" FontWeight="SemiBold" Text="ON DEMAND" />
+                                </Border>
+                            </Grid>
+                            <StackPanel Grid.Row="1" VerticalAlignment="Bottom" Spacing="4">
+                                <TextBlock FontFamily="Segoe UI Variable Display" FontSize="28"
+                                           FontWeight="SemiBold" Text="Movies" />
+                                <TextBlock x:Name="MovieCountText" Foreground="#E6FFFFFF"
+                                           AutomationProperties.LiveSetting="Polite"
+                                           FontSize="14" Text="0 movies" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="2" FontWeight="SemiBold"
+                                       Text="Browse movies  &#x2192;" />
+                        </Grid>
+                    </Border>
                 </Button>
 
-                <Button x:Name="SeriesCard" Grid.Column="2" MinHeight="210" HorizontalAlignment="Stretch"
+                <Button x:Name="SeriesCard" Grid.Column="2"
+                        Style="{StaticResource DashboardCardButtonStyle}"
                         AutomationProperties.AutomationId="HomeSeriesCard"
                         AutomationProperties.Name="Open series"
                         Click="SeriesCard_Click">
-                    <Grid Padding="16" RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="56" Glyph="&#xE8B2;" />
-                        <TextBlock Grid.Row="1" HorizontalAlignment="Center" Style="{StaticResource SubtitleTextBlockStyle}" Text="Series" />
-                        <TextBlock x:Name="SeriesCountText" Grid.Row="2" HorizontalAlignment="Center" Text="0 series" />
-                    </Grid>
+                    <Border Padding="24" Background="{StaticResource SeriesDashboardBrush}"
+                            CornerRadius="20">
+                        <Grid RowSpacing="18">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Border Width="48" Height="48" HorizontalAlignment="Left"
+                                        Background="#2BFFFFFF" CornerRadius="14">
+                                    <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              FontSize="24" Glyph="&#xE8B2;" />
+                                </Border>
+                                <Border Padding="9,5" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Background="#26000000" CornerRadius="999">
+                                    <TextBlock FontSize="11" FontWeight="SemiBold" Text="EPISODIC" />
+                                </Border>
+                            </Grid>
+                            <StackPanel Grid.Row="1" VerticalAlignment="Bottom" Spacing="4">
+                                <TextBlock FontFamily="Segoe UI Variable Display" FontSize="28"
+                                           FontWeight="SemiBold" Text="Series" />
+                                <TextBlock x:Name="SeriesCountText" Foreground="#E6FFFFFF"
+                                           AutomationProperties.LiveSetting="Polite"
+                                           FontSize="14" Text="0 series" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="2" FontWeight="SemiBold"
+                                       Text="Browse series  &#x2192;" />
+                        </Grid>
+                    </Border>
                 </Button>
             </Grid>
 
-            <Grid Grid.Row="2" ColumnSpacing="16">
+            <TextBlock Grid.Row="4" Margin="0,4,0,0"
+                       Style="{StaticResource ShellSectionTitleStyle}"
+                       Text="Workspace" />
+
+            <Grid x:Name="WorkspaceGrid" Grid.Row="5" ColumnSpacing="18" RowSpacing="14">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition x:Name="WorkspaceColumn0" Width="2*" />
+                    <ColumnDefinition x:Name="WorkspaceColumn1" Width="*" />
                 </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="WorkspaceRow0" Height="Auto" />
+                    <RowDefinition x:Name="WorkspaceRow1" Height="0" />
+                </Grid.RowDefinitions>
 
-                <Border Padding="20" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                    <StackPanel Spacing="6">
-                        <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Catalog total" />
-                        <TextBlock x:Name="TotalCountText" FontSize="32" Text="0" />
-                        <TextBlock Text="Usable items in active snapshots of ready sources." TextWrapping="Wrap" />
-                    </StackPanel>
-                </Border>
-
-                <Button Grid.Column="1" HorizontalAlignment="Stretch"
+                <Button x:Name="ManageSourcesCard" MinHeight="172" HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                        Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="16"
                         AutomationProperties.AutomationId="HomeManageSourcesCard"
                         AutomationProperties.Name="Manage playlist sources"
                         Click="SourcesCard_Click">
-                    <StackPanel Padding="16" HorizontalAlignment="Center" Spacing="8">
-                        <FontIcon FontSize="36" Glyph="&#xE838;" />
-                        <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Manage sources" />
-                        <TextBlock Text="Add, rename, refresh, replace or delete an authorized source." TextAlignment="Center" TextWrapping="Wrap" />
-                    </StackPanel>
+                    <Border Padding="24" Style="{StaticResource ShellSurfaceBorderStyle}">
+                        <Grid ColumnSpacing="20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="64" Height="64" VerticalAlignment="Center"
+                                    Background="{StaticResource ShellAccentMutedBrush}" CornerRadius="18">
+                                <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Foreground="{StaticResource ShellAccentBrush}"
+                                          FontSize="28" Glyph="&#xE838;" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
+                                <TextBlock Style="{StaticResource ShellSectionTitleStyle}"
+                                           Text="Manage sources" />
+                                <TextBlock Style="{StaticResource ShellSecondaryTextStyle}"
+                                           Text="Add, rename, refresh, replace or delete an authorized playlist or Xtream account." />
+                            </StackPanel>
+                            <FontIcon Grid.Column="2" VerticalAlignment="Center"
+                                      Foreground="{StaticResource ShellSecondaryTextBrush}"
+                                      FontSize="18" Glyph="&#xE72A;" />
+                        </Grid>
+                    </Border>
                 </Button>
+
+                <Border x:Name="CatalogTotalCard" Grid.Column="1" MinHeight="172" Padding="24"
+                        Style="{StaticResource ShellSurfaceBorderStyle}">
+                    <Grid>
+                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                            <TextBlock Style="{StaticResource ShellEyebrowTextStyle}"
+                                       Text="CATALOG TOTAL" />
+                            <TextBlock x:Name="TotalCountText" FontFamily="Segoe UI Variable Display"
+                                       AutomationProperties.LiveSetting="Polite"
+                                       FontSize="38" FontWeight="SemiBold" Text="0" />
+                            <TextBlock Style="{StaticResource ShellSecondaryTextStyle}"
+                                       Text="Top-level playable items" />
+                        </StackPanel>
+                        <Ellipse Width="54" Height="54" HorizontalAlignment="Right"
+                                 VerticalAlignment="Top" Fill="#1421C7A8" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Grid x:Name="PlannedGrid" Grid.Row="6" Margin="0,4,0,0"
+                  ColumnSpacing="12" RowSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="PlannedColumn0" Width="*" />
+                    <ColumnDefinition x:Name="PlannedColumn1" Width="*" />
+                    <ColumnDefinition x:Name="PlannedColumn2" Width="*" />
+                    <ColumnDefinition x:Name="PlannedColumn3" Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="PlannedRow0" Height="Auto" />
+                    <RowDefinition x:Name="PlannedRow1" Height="0" />
+                    <RowDefinition x:Name="PlannedRow2" Height="0" />
+                    <RowDefinition x:Name="PlannedRow3" Height="0" />
+                </Grid.RowDefinitions>
+
+                <Border x:Name="PlannedFavoritesCard" Padding="18"
+                        Style="{StaticResource ShellSurfaceBorderStyle}">
+                    <StackPanel Spacing="7">
+                        <FontIcon HorizontalAlignment="Left" Foreground="{StaticResource ShellLiveBrush}"
+                                  FontSize="22" Glyph="&#xE734;" />
+                        <TextBlock FontWeight="SemiBold" Text="Favorites" />
+                        <TextBlock Style="{StaticResource ShellSecondaryTextStyle}"
+                                   FontSize="12" Text="Planned feature" />
+                    </StackPanel>
+                </Border>
+                <Border x:Name="PlannedGuideCard" Grid.Column="1" Padding="18"
+                        Style="{StaticResource ShellSurfaceBorderStyle}">
+                    <StackPanel Spacing="7">
+                        <FontIcon HorizontalAlignment="Left" Foreground="#FFFFB454"
+                                  FontSize="22" Glyph="&#xE787;" />
+                        <TextBlock FontWeight="SemiBold" Text="TV guide" />
+                        <TextBlock Style="{StaticResource ShellSecondaryTextStyle}"
+                                   FontSize="12" Text="Planned feature" />
+                    </StackPanel>
+                </Border>
+                <Border x:Name="PlannedContinueCard" Grid.Column="2" Padding="18"
+                        Style="{StaticResource ShellSurfaceBorderStyle}">
+                    <StackPanel Spacing="7">
+                        <FontIcon HorizontalAlignment="Left" Foreground="#FF9C8CFF"
+                                  FontSize="22" Glyph="&#xE896;" />
+                        <TextBlock FontWeight="SemiBold" Text="Continue watching" />
+                        <TextBlock Style="{StaticResource ShellSecondaryTextStyle}"
+                                   FontSize="12" Text="Planned feature" />
+                    </StackPanel>
+                </Border>
+                <Border x:Name="PlannedDownloadsCard" Grid.Column="3" Padding="18"
+                        Style="{StaticResource ShellSurfaceBorderStyle}">
+                    <StackPanel Spacing="7">
+                        <FontIcon HorizontalAlignment="Left" Foreground="{StaticResource ShellAccentBrush}"
+                                  FontSize="22" Glyph="&#xE896;" />
+                        <TextBlock FontWeight="SemiBold" Text="Downloads" />
+                        <TextBlock Style="{StaticResource ShellSecondaryTextStyle}"
+                                   FontSize="12" Text="Planned feature" />
+                    </StackPanel>
+                </Border>
             </Grid>
         </Grid>
     </ScrollViewer>

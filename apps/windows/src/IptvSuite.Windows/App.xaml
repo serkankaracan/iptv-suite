@@ -8,6 +8,103 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- Signal Slate is an original WinUI-first development theme. -->
+            <Color x:Key="ShellWindowColor">#FF0B1119</Color>
+            <Color x:Key="ShellNavigationColor">#FF0E1722</Color>
+            <Color x:Key="ShellContentColor">#FF141E2B</Color>
+            <Color x:Key="ShellCardColor">#FF1A2736</Color>
+            <Color x:Key="ShellCardHoverColor">#FF223346</Color>
+            <Color x:Key="ShellBorderColor">#FF2A3B4E</Color>
+            <Color x:Key="ShellSecondaryTextColor">#FF9FB0C0</Color>
+            <Color x:Key="ShellAccentColor">#FF21C7A8</Color>
+            <Color x:Key="ShellAccentMutedColor">#FF173D39</Color>
+            <Color x:Key="ShellLiveColor">#FFFF5C7A</Color>
+
+            <SolidColorBrush x:Key="ShellWindowBrush" Color="{StaticResource ShellWindowColor}" />
+            <SolidColorBrush x:Key="ShellNavigationBrush" Color="{StaticResource ShellNavigationColor}" />
+            <SolidColorBrush x:Key="ShellContentBrush" Color="{StaticResource ShellContentColor}" />
+            <SolidColorBrush x:Key="ShellCardBrush" Color="{StaticResource ShellCardColor}" />
+            <SolidColorBrush x:Key="ShellCardHoverBrush" Color="{StaticResource ShellCardHoverColor}" />
+            <SolidColorBrush x:Key="ShellBorderBrush" Color="{StaticResource ShellBorderColor}" />
+            <SolidColorBrush x:Key="ShellSecondaryTextBrush" Color="{StaticResource ShellSecondaryTextColor}" />
+            <SolidColorBrush x:Key="ShellAccentBrush" Color="{StaticResource ShellAccentColor}" />
+            <SolidColorBrush x:Key="ShellAccentMutedBrush" Color="{StaticResource ShellAccentMutedColor}" />
+            <SolidColorBrush x:Key="ShellLiveBrush" Color="{StaticResource ShellLiveColor}" />
+
+            <LinearGradientBrush x:Key="LiveDashboardBrush" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#FF8F2743" Offset="0" />
+                <GradientStop Color="#FFB5364A" Offset="1" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="MovieDashboardBrush" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#FF5131A5" Offset="0" />
+                <GradientStop Color="#FF713080" Offset="1" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="SeriesDashboardBrush" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#FF075A63" Offset="0" />
+                <GradientStop Color="#FF087267" Offset="1" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="HeroDashboardBrush" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#FF13283A" Offset="0" />
+                <GradientStop Color="#FF173D39" Offset="0.58" />
+                <GradientStop Color="#FF24304C" Offset="1" />
+            </LinearGradientBrush>
+
+            <Style x:Key="ShellPageTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Segoe UI Variable Display" />
+                <Setter Property="FontSize" Value="30" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+            <Style x:Key="ShellSectionTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Segoe UI Variable Display" />
+                <Setter Property="FontSize" Value="20" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="ShellSecondaryTextStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource ShellSecondaryTextBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+            <Style x:Key="ShellEyebrowTextStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource ShellAccentBrush}" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="CharacterSpacing" Value="80" />
+            </Style>
+            <Style x:Key="DashboardCardButtonStyle" TargetType="Button">
+                <Setter Property="MinHeight" Value="228" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="20" />
+            </Style>
+            <Style x:Key="ShellPrimaryButtonStyle" TargetType="Button">
+                <Setter Property="MinHeight" Value="42" />
+                <Setter Property="Padding" Value="18,8" />
+                <Setter Property="Background" Value="{StaticResource ShellAccentBrush}" />
+                <Setter Property="Foreground" Value="#FF071713" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="ShellSecondaryButtonStyle" TargetType="Button">
+                <Setter Property="MinHeight" Value="42" />
+                <Setter Property="Padding" Value="18,8" />
+                <Setter Property="Background" Value="#1AFFFFFF" />
+                <Setter Property="BorderBrush" Value="#3DFFFFFF" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="ShellSurfaceBorderStyle" TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource ShellCardBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource ShellBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="16" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

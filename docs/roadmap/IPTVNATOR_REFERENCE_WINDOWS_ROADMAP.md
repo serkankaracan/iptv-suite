@@ -77,7 +77,22 @@ Bağımsız dallar paralel tasarlanabilir; bir sonraki milestone'a geçmek önce
 
 ## M20 — Özgün adaptive workspace shell ve design system
 
-**Durum:** `PLANNED / NOT STARTED`
+**Durum:** `IN PROGRESS / SHELL FOUNDATION IMPLEMENTED / ACCEPTANCE PENDING`
+
+**Implementation checkpoint — 2026-08-29:** Windows istemcisinde bağımsız
+“Signal Slate” koyu tema token'ları, `NavigationView` tabanlı açık/compact navigation,
+adaptive Home yerleşimi ve mevcut Live TV/Movie/Series/Sources destination'larını
+koruyan yeni shell uygulanmıştır. Favorites, TV guide, Continue Watching ve Downloads
+yalnız açıkça `coming soon` / `planned feature` olarak görünen etkisiz presentation
+placeholder'larıdır; veri modeli, persistence, network veya capability iddiası oluşturmaz.
+IPTVnator kodu, CSS'i, ekran görüntüsü, adı, logo/icon/artwork'ü veya medya asset'i
+taşınmamıştır. Bu checkpoint yeni dependency ya da güvenlik ödünü eklememiş; mevcut
+credential masking, consent ve source ayrımı sözleşmelerini değiştirmemiştir.
+
+Light/system/high-contrast token matrisi, settings surface, context pane/drawer,
+320–2560 effective-pixel tam matrisi, text-scale/Narrator ve packaged navigation smoke
+henüz tamamlanmadığından M20 acceptance açık kalır. M21/M22 kullanıcı durumu ve gerçek
+dashboard rail implementation'ı başlamış sayılmaz.
 
 ### Kapsam
 

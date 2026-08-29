@@ -125,8 +125,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
                 AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen);
             bool startsFullscreen =
                 AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
-            AppNavigation.IsPaneVisible = !startsFullscreen;
-            AppNavigation.IsPaneToggleButtonVisible = !startsFullscreen;
+            UpdateShellFullscreenLayout(startsFullscreen);
             _powerLifecycle = new PlaybackPowerLifecycleCoordinator(playback.StopAsync);
             PowerManager.SystemSuspendStatusChanged += PowerManager_SystemSuspendStatusChanged;
             _powerLifecycleSubscribed = 1;
@@ -1024,13 +1023,27 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
         bool isFullscreen =
             sender.Presenter.Kind == AppWindowPresenterKind.FullScreen;
+        UpdateShellFullscreenLayout(isFullscreen);
+        UpdateOnDemandFullscreenLayout(isFullscreen);
+        _mainPage.SetFullscreenState(isFullscreen);
+    }
+
+    private void UpdateShellFullscreenLayout(bool isFullscreen)
+    {
         AppTitleBar.Visibility = isFullscreen
             ? Visibility.Collapsed
             : Visibility.Visible;
         AppNavigation.IsPaneVisible = !isFullscreen;
         AppNavigation.IsPaneToggleButtonVisible = !isFullscreen;
-        UpdateOnDemandFullscreenLayout(isFullscreen);
-        _mainPage.SetFullscreenState(isFullscreen);
+        ShellContentFrame.Margin = isFullscreen
+            ? new Thickness(0)
+            : new Thickness(0, 0, 12, 12);
+        ShellContentFrame.CornerRadius = isFullscreen
+            ? new CornerRadius(0)
+            : new CornerRadius(20);
+        ShellContentFrame.BorderThickness = isFullscreen
+            ? new Thickness(0)
+            : new Thickness(1);
     }
 
     private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
