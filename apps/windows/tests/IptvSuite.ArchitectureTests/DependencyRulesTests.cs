@@ -9537,6 +9537,9 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(harness, "CryptographicOperations.ZeroMemory(locator);");
         StringAssert.Contains(harness, "PlaylistRequestCount:");
         StringAssert.Contains(harness, "MediaRequestCount:");
+        StringAssert.Contains(harness, "server.RequestCount != 1");
+        StringAssert.Contains(harness, "playlistRequestCount != 1");
+        StringAssert.Contains(harness, "server.CompletedResponseCount != 1");
         Assert.IsFalse(
             Regex.IsMatch(
                 harness,
@@ -9700,6 +9703,16 @@ public sealed class DependencyRulesTests
                     RegexOptions.CultureInvariant),
                 $"PS5.1 JSON counter {counter} must accept both Int32 and Int64.");
         }
+
+        StringAssert.Contains(
+            onboardingResultValidation,
+            "[int]$onboardingResult.RequestCount -ne 1");
+        StringAssert.Contains(
+            onboardingResultValidation,
+            "[int]$onboardingResult.CompletedResponseCount -ne 1");
+        StringAssert.Contains(
+            onboardingResultValidation,
+            "[int]$onboardingResult.PlaylistRequestCount -ne 1");
 
         string statePathBinding = ExtractRequiredBlock(
             packageSmoke,

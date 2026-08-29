@@ -5142,10 +5142,10 @@ try {
         -not $onboardingResult.StoppedGracefully -or
         $onboardingResult.CertificateThumbprint -cne
             $onboardingLoopbackCertificateThumbprint -or
-        [int]$onboardingResult.RequestCount -ne 2 -or
-        [int]$onboardingResult.CompletedResponseCount -ne 2 -or
+        [int]$onboardingResult.RequestCount -ne 1 -or
+        [int]$onboardingResult.CompletedResponseCount -ne 1 -or
         [int]$onboardingResult.FailureCount -ne 0 -or
-        [int]$onboardingResult.PlaylistRequestCount -ne 2 -or
+        [int]$onboardingResult.PlaylistRequestCount -ne 1 -or
         [int]$onboardingResult.MediaRequestCount -ne 0) {
         throw "The clean-install onboarding acceptance result is invalid."
     }

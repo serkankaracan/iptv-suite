@@ -242,10 +242,10 @@ internal static class Program
             int mediaRequestCount = requests.Count(request =>
                 string.Equals(request.Path, MediaRouteA, StringComparison.Ordinal) ||
                 string.Equals(request.Path, MediaRouteB, StringComparison.Ordinal));
-            if (server.RequestCount != 2 ||
-                playlistRequestCount != 2 ||
+            if (server.RequestCount != 1 ||
+                playlistRequestCount != 1 ||
                 mediaRequestCount != 0 ||
-                server.CompletedResponseCount != 2 ||
+                server.CompletedResponseCount != 1 ||
                 server.FailureCount != 0)
             {
                 throw new InvalidDataException(
