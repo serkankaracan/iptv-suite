@@ -130,7 +130,7 @@ Commit `c686424ea43be3a01b5fb364b2115cc84319b242` üzerindeki schema-v5 predeces
 
 ADR-008/ADR-009 sonrası güncel package-bound kabul için clean `507e8f2c429759acf98d1a18477c994985ee357c` üzerinde [Windows package SBOM producer run `#19` (`33255219751`)](https://github.com/serkankaracan/iptv-suite/actions/runs/33255219751), job `99107625427` ile `2026-08-29T13:39:50Z` zamanında `success` tamamlandı. Artifact `9715695474`, `7.834` byte ve digest `e0d73fa1ab4a5829cf2000e62de9f7878f8e1bba3f409aadab9897551a3caa6e`; application MSIX SHA-256 `8db265a06e7f79eab76fe20af5575677f3db3004bbf62b47f3cacee4e7478997`, package evidence `last-success.json` SHA-256 `15b5b1f7f5ca6fc868921cc7dd6305275ede2f7af148c54c8a672049f9443ce0`, SBOM summary SHA-256 `8d34980626c45ba67863537bcdcde01726ab9c151d51e154a1cfd6d4dde6bc87` ve SPDX SHA-256 `e86b6173bd62465e173e9410a00379b8e8f04a956e9117ccd12ce337c6ac4a27`dır. Acceptance ledger raw SHA-256 `d8d777bec30ef2657c161ea0be905bbe0ed0474ffcbd818a8a64c0bf982f8da9`; exact `138` dosyalık current package-producing snapshot `92618f91a4bdfd4323843a65f4371f92f710dc5b07dbb0baeb8b5729d8b99e47` ve exact yedi-file contract `90be27c83f7bedd3ff3f0d9fc7ec1f2f0f762a43f10a6ecfdad9f274766e6afe` ile fail-closed bağlıdır. Official ve strict SBOM validation birlikte `PASS`tir.
 
-Önceki SBOM ledger raw SHA-256 `a1a6fbb24e2ece1884995264eb375982242f4b86d5bd743b7ee572b93fc50f8d` değerine zincirlenen [known-vulnerability producer run `#88` (`33143833495`)](https://github.com/serkankaracan/iptv-suite/actions/runs/33143833495) tarihsel olarak geçerlidir, fakat yeni accepted SBOM ledger'ına bağlı değildir. Bu nedenle successor CVE artifact'ı üretilip kabul edilene kadar `CveReviewPending` açık ve M15 teknik zinciri eksiktir; eski `0/0/0` sonucu yeni package closure için yeniden kullanılamaz.
+Exact accepted SBOM ledger raw SHA-256 `d8d777bec30ef2657c161ea0be905bbe0ed0474ffcbd818a8a64c0bf982f8da9` değerine zincirlenen clean `cc8073b48a340aabb8e30b28fe427d89669402e0` üzerindeki [known-vulnerability producer run `#98` (`33255965631`)](https://github.com/serkankaracan/iptv-suite/actions/runs/33255965631), job `99109605782` ile `2026-08-29T13:52:01Z` zamanında `success` tamamlandı. Artifact `9715841802`, `1.122` byte ve digest `f0f6ed6e7047d06f5a085e337778b8d8848ade7a1d4912f25b098fc45a90a634`; tek `last-success.json` üyesi `2.403` byte ve SHA-256 `c7527936b72d0cfcb078016af68b946c3a0ba4b890efc8b37831de6e4f1feb87`dır. Exact `4/0/4` audited restore, `2 + 21 = 23` package graph ve direct/transitive/toplam `0/0/0` bilinen vulnerability sonucu official+strict validation'dan geçti. CVE acceptance ledger raw SHA-256 `d82ef70df7a381b7a3e44bad1699aa40d13828b5e1f3632a3181b0d6acd68576`; yedi günlük teknik freshness sonu `2026-09-05T13:52:01Z`, ayrı final-release freshness sınırı inclusive `2026-08-30T13:52:01Z`dir. Bu teknik yenileme M15 completion, hukuk/Store/signing ya da genel “CVE-free” iddiası değildir.
 
 ## Development identity WACK preflight — EXECUTED / TEST FAILED
 
@@ -179,14 +179,15 @@ Aşağıdaki 12 kod, final-release CVE freshness geçerliyken current evidence't
 11. `SupportUrlPending`
 12. `WackPending`
 
-## ADR-008/ADR-009 sonrası successor SBOM/CVE kapanışı — SBOM PASS / CVE OPEN
+## ADR-008/ADR-009 sonrası successor SBOM/CVE kapanışı — TECHNICAL PASS
 
 M17–M19 production kaynakları ile package-smoke sözleşmesinin değiştirdiği exact closure,
 run `#19` ve artifact `9715695474` ile yeniden üretildi; SBOM acceptance ledger'ı ve fail-closed
-validator pin'leri bu kanıta bağlandı. Bu ara checkpoint'te `SbomPending` successor teknik
-zincirde kapanabilir, fakat eski CVE ledger'ı yeni SBOM ledger raw hash'ine bağlı olmadığı için
-`CveReviewPending` açıktır ve `technicalBaselinePassed=false` kalır. İki geçişli snapshot,
-contract source ve repository-stability kontrolleri yayım öncesinde değişimi reddetmeye devam eder.
+validator pin'leri bu kanıta bağlandı. Ardından run `#98` exact yeni SBOM ledger raw hash'ine
+zincirlenerek fresh CVE acceptance üretti. Böylece `SbomPending` teknik zincirde, final-release
+freshness geçerliyken `CveReviewPending` release blocker setinde kapanır; Store, signing, hukuk ve
+operator blocker'ları açık kalır. İki geçişli snapshot, contract source ve repository-stability
+kontrolleri yayım öncesinde değişimi reddetmeye devam eder.
 
 Successor teknik closure sırası şöyledir:
 
@@ -199,13 +200,17 @@ Successor teknik closure sırası şöyledir:
    `eng/windows-package-sbom-acceptance.json`, validator pin'leri, offline self-test pin'leri
    ve bu checkpoint kaydı birlikte yenilenir; eski run numarası yeni kaynak için tekrar
    kullanılamaz.
-5. **OPEN:** SBOM acceptance commit'i push edildikten sonra `Windows known-vulnerability producer`
+5. **PASS:** SBOM acceptance commit'i push edildikten sonra `Windows known-vulnerability producer`
    exact yeni SBOM-ledger hash'i üzerinde yeniden çalıştırılır. Başarılı artifact
    doğrulanarak CVE acceptance ledger/validator pin'leri yenilenir. Final-release için
    24 saatlik freshness sınırı ayrıca geçmelidir.
-6. Windows PowerShell 5.1 adversarial self-test, Release x64 build ve architecture suite
+6. **PASS:** Windows PowerShell 5.1 adversarial self-test, Release x64 build ve architecture suite
    yeniden çalıştırılır. Bu teknik zincir geçse bile aşağıdaki Store, signing, hukuk ve
    operator blocker'ları ayrıca kapanmadan M15 `COMPLETED` olmaz.
+
+Bu successor checkpoint'te iki PowerShell 5.1 self-test'i `PASS`, schema-v7 validator
+`technicalBaselinePassed=true` / `releaseReady=false`, Release x64 build `0` warning / `0` error
+ve ArchitectureTests `86/86 PASS` sonucunu verdi.
 
 Yerelde elevated development package smoke ve offline SBOM self-test yapılabilir; bunlar
 hosted Actions run/job/artifact provenance'i üretmediği için successor ledger'ı tek başına

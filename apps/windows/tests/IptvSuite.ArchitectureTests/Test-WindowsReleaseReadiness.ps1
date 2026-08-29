@@ -599,15 +599,15 @@ function Read-AndAssertEvidence {
         -Message "the package vulnerability acceptance evidence schema changed."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.ledgerSha256 -ceq
-            "290f1e57eecd8c9b30093644af87fdd83d4fe338b0151691b9de62ef8310e126" -and
+            "d82ef70df7a381b7a3e44bad1699aa40d13828b5e1f3632a3181b0d6acd68576" -and
          $packageVulnerabilityAcceptance.decision -ceq
             "AcceptTechnicalKnownVulnerabilityReview" -and
          $packageVulnerabilityAcceptance.scope -ceq
             "ProductionWindowsLeafKnownVulnerabilityReviewOnly" -and
          $packageVulnerabilityAcceptance.runCompletedAtUtc -ceq
-            "2026-08-28T05:09:29Z" -and
+            "2026-08-29T13:52:01Z" -and
          $packageVulnerabilityAcceptance.freshThroughUtc -ceq
-            "2026-09-04T05:09:29Z" -and
+            "2026-09-05T13:52:01Z" -and
          $packageVulnerabilityAcceptance.freshnessPolicy -ceq
             "RunCompletionPlus7Days" -and
          $packageVulnerabilityAcceptance.maximumAgeDays -eq 7 -and
@@ -639,30 +639,30 @@ function Read-AndAssertEvidence {
          $packageVulnerabilityAcceptance.workflowName -ceq
             "Windows known-vulnerability producer" -and
          $packageVulnerabilityAcceptance.workflowId -eq 342499403 -and
-         $packageVulnerabilityAcceptance.runId -eq 33143833495 -and
-         $packageVulnerabilityAcceptance.runNumber -eq 88 -and
+         $packageVulnerabilityAcceptance.runId -eq 33255965631 -and
+         $packageVulnerabilityAcceptance.runNumber -eq 98 -and
          $packageVulnerabilityAcceptance.runAttempt -eq 1 -and
          $packageVulnerabilityAcceptance.runHeadSha -ceq
-            "1c7ae00298414fb7707ad6097e151fc39aa38c03" -and
+            "cc8073b48a340aabb8e30b28fe427d89669402e0" -and
          $packageVulnerabilityAcceptance.runConclusion -ceq "success" -and
-         $packageVulnerabilityAcceptance.jobId -eq 98760427129 -and
+         $packageVulnerabilityAcceptance.jobId -eq 99109605782 -and
          $packageVulnerabilityAcceptance.jobName -ceq
             "Known-vulnerability producer gate" -and
          $packageVulnerabilityAcceptance.jobConclusion -ceq "success" -and
-         $packageVulnerabilityAcceptance.artifactId -eq 9675011337 -and
+         $packageVulnerabilityAcceptance.artifactId -eq 9715841802 -and
          $packageVulnerabilityAcceptance.artifactName -ceq
             "windows-cve-review-evidence" -and
          $packageVulnerabilityAcceptance.artifactDigestSha256 -ceq
-            "1b1954bce5c7c80dcdc895e57e4359df6acdedf0de2534470ca175131c2e9792" -and
+            "f0f6ed6e7047d06f5a085e337778b8d8848ade7a1d4912f25b098fc45a90a634" -and
          $packageVulnerabilityAcceptance.lastSuccessMemberLength -eq 2403 -and
          $packageVulnerabilityAcceptance.lastSuccessMemberSha256 -ceq
-            "625d3fe47e1d23c79e349c1c653e2362f70d3cbea1864636555e06b26fd8d4f3" -and
+            "c7527936b72d0cfcb078016af68b946c3a0ba4b890efc8b37831de6e4f1feb87" -and
          $packageVulnerabilityAcceptance.packageSbomAcceptanceSha256 -ceq
-            "a1a6fbb24e2ece1884995264eb375982242f4b86d5bd743b7ee572b93fc50f8d" -and
+            "d8d777bec30ef2657c161ea0be905bbe0ed0474ffcbd818a8a64c0bf982f8da9" -and
          $packageVulnerabilityAcceptance.observedAtUtc -ceq
-            "2026-08-28T05:09:13.0584345Z" -and
+            "2026-08-29T13:51:47.2639947Z" -and
          $packageVulnerabilityAcceptance.producerRepositoryCommitSha -ceq
-            "1c7ae00298414fb7707ad6097e151fc39aa38c03") `
+            "cc8073b48a340aabb8e30b28fe427d89669402e0") `
         "the hosted package vulnerability workflow or artifact evidence changed."
     Assert-TestCondition `
         ($packageVulnerabilityAcceptance.restoreProjectCount -eq 4 -and
@@ -857,7 +857,7 @@ try {
     Read-AndAssertEvidence `
         -EvidencePath $actualEvidencePath `
         -ForbiddenRoot $script:repositoryRoot `
-        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
+        -ExpectedSbomCurrentAtEvaluation $true | Out-Null
 
     Assert-AuditFailure `
         -Root $script:repositoryRoot `
@@ -871,7 +871,7 @@ try {
     Read-AndAssertEvidence `
         -EvidencePath $fixtureEvidencePath `
         -ForbiddenRoot $script:fixtureRoot `
-        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
+        -ExpectedSbomCurrentAtEvaluation $true | Out-Null
 
     $assetProvenanceRelativePath =
         "eng\windows-production-asset-provenance.json"
@@ -1074,13 +1074,13 @@ try {
         "the package vulnerability evaluation clock contract changed."
     $staleValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 9, 4, 5, 9, 30, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 9, 5, 13, 52, 2, [TimeSpan]::Zero)')
     Assert-TestCondition ($staleValidatorText -cne $validatorText) `
         "the deterministic stale validator mutation was not applied."
 
     $finalReleaseBoundaryValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 29, 5, 9, 29, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 30, 13, 52, 1, [TimeSpan]::Zero)')
     Assert-TestCondition `
         ($finalReleaseBoundaryValidatorText -cne $validatorText) `
         "the exact final-release freshness boundary mutation was not applied."
@@ -1101,16 +1101,16 @@ try {
             -EvidencePath $finalReleaseBoundaryEvidencePath `
             -ForbiddenRoot $script:fixtureRoot `
             -ExpectedFinalReleaseFreshAtEvaluation $true `
-            -ExpectedSbomCurrentAtEvaluation $false
+            -ExpectedSbomCurrentAtEvaluation $true
         Assert-TestCondition `
             ($finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $finalReleaseBoundaryEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
                 "CveReviewPending" -and
-             @($finalReleaseBoundaryEvidence.blockers).Count -eq 13 -and
+             @($finalReleaseBoundaryEvidence.blockers).Count -eq 12 -and
              @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "CveReviewPending" -and
-             @($finalReleaseBoundaryEvidence.blockers) -ccontains "SbomPending") `
-            "the exact 24-hour final-release boundary did not preserve the stale SBOM blocker."
+             @($finalReleaseBoundaryEvidence.blockers) -cnotcontains "SbomPending") `
+            "the exact 24-hour final-release boundary did not preserve the technical closures."
     }
     finally {
         Remove-Item `
@@ -1121,7 +1121,7 @@ try {
 
     $finalReleaseExpiredValidatorText = $validatorText.Replace(
         $evaluationClockExpression,
-        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 29, 5, 9, 30, [TimeSpan]::Zero)')
+        '$evaluationUtcNow = [DateTimeOffset]::new(2026, 8, 30, 13, 52, 2, [TimeSpan]::Zero)')
     Assert-TestCondition `
         ($finalReleaseExpiredValidatorText -cne $validatorText) `
         "the final-release freshness plus-one-second mutation was not applied."
@@ -1142,15 +1142,15 @@ try {
             -EvidencePath $finalReleaseExpiredEvidencePath `
             -ForbiddenRoot $script:fixtureRoot `
             -ExpectedFinalReleaseFreshAtEvaluation $false `
-            -ExpectedSbomCurrentAtEvaluation $false
+            -ExpectedSbomCurrentAtEvaluation $true
         Assert-TestCondition `
             ($finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              -not $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $finalReleaseExpiredEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq
                 "None" -and
-             @($finalReleaseExpiredEvidence.blockers).Count -eq 14 -and
+             @($finalReleaseExpiredEvidence.blockers).Count -eq 13 -and
              @($finalReleaseExpiredEvidence.blockers) -ccontains "CveReviewPending" -and
-             @($finalReleaseExpiredEvidence.blockers) -ccontains "SbomPending") `
+             @($finalReleaseExpiredEvidence.blockers) -cnotcontains "SbomPending") `
             "the final-release blocker did not reopen at 24 hours plus one second."
     }
     finally {
@@ -1172,15 +1172,15 @@ try {
             -EvidencePath $staleEvidencePath `
             -ForbiddenRoot $script:fixtureRoot `
             -ExpectedFinalReleaseFreshAtEvaluation $false `
-            -ExpectedSbomCurrentAtEvaluation $false
+            -ExpectedSbomCurrentAtEvaluation $true
         Assert-TestCondition `
             (-not $staleEvidence.packageVulnerabilityAcceptance.freshAtEvaluation -and
              -not $staleEvidence.packageVulnerabilityAcceptance.finalReleaseFreshAtEvaluation -and
              $staleEvidence.packageVulnerabilityAcceptance.effectiveClosedBlocker -ceq "None" -and
-             @($staleEvidence.blockers).Count -eq 14 -and
+             @($staleEvidence.blockers).Count -eq 13 -and
              @($staleEvidence.blockers) -ccontains "CveReviewPending" -and
-             @($staleEvidence.blockers) -ccontains "SbomPending") `
-            "stale package vulnerability acceptance did not preserve both technical blockers."
+             @($staleEvidence.blockers) -cnotcontains "SbomPending") `
+            "stale package vulnerability acceptance did not reopen only the CVE blocker."
     }
     finally {
         Remove-Item -LiteralPath $staleValidatorPath -Force -ErrorAction SilentlyContinue
@@ -1288,7 +1288,7 @@ try {
     $tamperedVulnerabilityAcceptanceSha256 = Get-TestFileSha256 `
         -Path $vulnerabilityAcceptancePath
     $semanticValidatorText = $validatorText.Replace(
-        "290f1e57eecd8c9b30093644af87fdd83d4fe338b0151691b9de62ef8310e126",
+        "d82ef70df7a381b7a3e44bad1699aa40d13828b5e1f3632a3181b0d6acd68576",
         $tamperedVulnerabilityAcceptanceSha256)
     Assert-TestCondition ($semanticValidatorText -cne $validatorText) `
         "package vulnerability semantic validator mutation was not applied."
@@ -1778,7 +1778,7 @@ try {
     Read-AndAssertEvidence `
         -EvidencePath $restoredEvidencePath `
         -ForbiddenRoot $script:fixtureRoot `
-        -ExpectedSbomCurrentAtEvaluation $false | Out-Null
+        -ExpectedSbomCurrentAtEvaluation $true | Out-Null
 
     Write-Output "M15 Windows release-readiness self-test passed."
 }
