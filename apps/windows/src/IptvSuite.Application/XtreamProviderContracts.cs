@@ -11,11 +11,16 @@ public sealed record XtreamAccountStatus(bool IsAuthenticated)
 [DebuggerDisplay("[XTREAM-PROVIDER-PAGE]")]
 public sealed class XtreamProviderPage<T>
 {
-    internal XtreamProviderPage(IReadOnlyList<T> items, int skippedItemCount, int duplicateIdentifierCount)
+    internal XtreamProviderPage(
+        IReadOnlyList<T> items,
+        int skippedItemCount,
+        int duplicateIdentifierCount,
+        bool isCompatibilityEmptySentinel = false)
     {
         Items = items ?? throw new ArgumentNullException(nameof(items));
         SkippedItemCount = skippedItemCount;
         DuplicateIdentifierCount = duplicateIdentifierCount;
+        IsCompatibilityEmptySentinel = isCompatibilityEmptySentinel;
     }
 
     public IReadOnlyList<T> Items { get; }
@@ -23,6 +28,8 @@ public sealed class XtreamProviderPage<T>
     public int SkippedItemCount { get; }
 
     public int DuplicateIdentifierCount { get; }
+
+    public bool IsCompatibilityEmptySentinel { get; }
 
     public override string ToString() => "[XTREAM-PROVIDER-PAGE]";
 }

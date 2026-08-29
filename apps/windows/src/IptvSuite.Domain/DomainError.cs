@@ -52,6 +52,10 @@ public enum DomainErrorCode
     PlaybackNetworkFailed,
     PlaybackSourceUnsupported,
     PlaybackDecodingFailed,
+    XtreamAccountResponseUnsupported,
+    XtreamLiveCatalogResponseUnsupported,
+    XtreamMovieCatalogResponseUnsupported,
+    XtreamSeriesCatalogResponseUnsupported,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<DomainRetryability>))]
@@ -142,6 +146,14 @@ public sealed record DomainError
             Never(code, "Errors.Playback.SourceUnsupported"),
         DomainErrorCode.PlaybackDecodingFailed =>
             Never(code, "Errors.Playback.DecodingFailed"),
+        DomainErrorCode.XtreamAccountResponseUnsupported =>
+            Never(code, "Errors.Xtream.AccountResponseUnsupported"),
+        DomainErrorCode.XtreamLiveCatalogResponseUnsupported =>
+            Never(code, "Errors.Xtream.LiveCatalogResponseUnsupported"),
+        DomainErrorCode.XtreamMovieCatalogResponseUnsupported =>
+            Never(code, "Errors.Xtream.MovieCatalogResponseUnsupported"),
+        DomainErrorCode.XtreamSeriesCatalogResponseUnsupported =>
+            Never(code, "Errors.Xtream.SeriesCatalogResponseUnsupported"),
         _ => throw new ArgumentOutOfRangeException(nameof(code), code, "Unknown domain error code."),
     };
 

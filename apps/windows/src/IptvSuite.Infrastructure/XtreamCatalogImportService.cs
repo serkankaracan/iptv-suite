@@ -79,6 +79,23 @@ public sealed class XtreamCatalogImportService : IXtreamCatalogImportService
             return XtreamCatalogImportResult.NotCommitted(loaded.Error!);
         }
 
+        DomainResult<ContentCatalogCounts> existingCounts = await ReadExistingCountsAsync(
+            source.Id,
+            cancellationToken).ConfigureAwait(false);
+        if (!existingCounts.IsSuccess)
+        {
+            return XtreamCatalogImportResult.NotCommitted(existingCounts.Error!);
+        }
+
+        DomainErrorCode? suspiciousEmptyStage = FindSuspiciousEmptyReplacement(
+            loaded.Value!,
+            existingCounts.Value!);
+        if (suspiciousEmptyStage.HasValue)
+        {
+            return XtreamCatalogImportResult.NotCommitted(
+                DomainError.Create(suspiciousEmptyStage.Value));
+        }
+
         DateTimeOffset retrievedAt = _utcNow().ToUniversalTime();
         if (retrievedAt == default)
         {
@@ -246,6 +263,55 @@ public sealed class XtreamCatalogImportService : IXtreamCatalogImportService
             return DomainResult.Failure<ContentSource>(DomainErrorCode.StorageUnavailable);
         }
     }
+
+    private async ValueTask<DomainResult<ContentCatalogCounts>> ReadExistingCountsAsync(
+        SourceId sourceId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var catalog = new SqliteContentCatalog(_databasePath);
+            return DomainResult.Success(await catalog.ReadCountsAsync(
+                sourceId,
+                cancellationToken).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return DomainResult.Failure<ContentCatalogCounts>(
+                DomainErrorCode.OperationCancelled);
+        }
+        catch (Exception exception) when (exception is SqliteException or IOException)
+        {
+            return DomainResult.Failure<ContentCatalogCounts>(
+                DomainErrorCode.StorageUnavailable);
+        }
+    }
+
+    private static DomainErrorCode? FindSuspiciousEmptyReplacement(
+        XtreamContentCatalog catalog,
+        ContentCatalogCounts existingCounts)
+    {
+        if (existingCounts.LiveTvCount > 0 && IsSuspiciousEmpty(catalog.LiveStreams))
+        {
+            return DomainErrorCode.XtreamLiveCatalogResponseUnsupported;
+        }
+
+        if (existingCounts.MovieCount > 0 && IsSuspiciousEmpty(catalog.Movies))
+        {
+            return DomainErrorCode.XtreamMovieCatalogResponseUnsupported;
+        }
+
+        if (existingCounts.SeriesCount > 0 && IsSuspiciousEmpty(catalog.Series))
+        {
+            return DomainErrorCode.XtreamSeriesCatalogResponseUnsupported;
+        }
+
+        return null;
+    }
+
+    private static bool IsSuspiciousEmpty<T>(XtreamProviderPage<T> page) =>
+        page.Items.Count == 0 &&
+        (page.IsCompatibilityEmptySentinel || page.SkippedItemCount > 0);
 
     private static DomainResult<LiveCatalogMapping> MapLiveCatalog(
         SourceId sourceId,

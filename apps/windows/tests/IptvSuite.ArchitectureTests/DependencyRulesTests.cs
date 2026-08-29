@@ -2091,6 +2091,13 @@ public sealed class DependencyRulesTests
             "src",
             "IptvSuite.Infrastructure",
             "XtreamProviderClient.cs"));
+        string importSource = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "apps",
+            "windows",
+            "src",
+            "IptvSuite.Infrastructure",
+            "XtreamCatalogImportService.cs"));
         string transportContract = File.ReadAllText(Path.Combine(
             RepositoryRoot,
             "apps",
@@ -2103,7 +2110,17 @@ public sealed class DependencyRulesTests
         StringAssert.Contains(parserSource, "MaximumStreamCount = 50_000");
         StringAssert.Contains(parserSource, "MaximumSeasonCount = 100");
         StringAssert.Contains(parserSource, "MaximumEpisodeCount = 5_000");
-        StringAssert.Contains(parserSource, "document.RootElement.ValueKind != JsonValueKind.Array");
+        StringAssert.Contains(parserSource, "TryValidateProviderCollection(");
+        StringAssert.Contains(parserSource, "DomainErrorCode.PlaylistEntryLimitExceeded");
+        StringAssert.Contains(parserSource, "IsBoundedNumericCollectionKey(");
+        StringAssert.Contains(parserSource, "bytes[0] == 0xef");
+        StringAssert.Contains(clientSource, "[\"get_account_info\", null, \"get_profile\"]");
+        StringAssert.Contains(clientSource, "IsAccountCompatibilityFallbackError(");
+        StringAssert.Contains(parserSource, "rawSeasonGroupCount > MaximumSeasonCount");
+        StringAssert.Contains(parserSource, "rawEpisodeCount > MaximumEpisodeCount");
+        StringAssert.Contains(parserSource, "TryGetBoundedDisplayName(");
+        StringAssert.Contains(importSource, "FindSuspiciousEmptyReplacement(");
+        StringAssert.Contains(importSource, "page.IsCompatibilityEmptySentinel");
         StringAssert.Contains(parserSource, "HashSet<string> identifiers = new(StringComparer.Ordinal)");
         StringAssert.Contains(parserSource, "ParseCategories(content, ContentKind.LiveTv)");
         StringAssert.Contains(parserSource, "ParseMovies(");
@@ -8105,6 +8122,10 @@ public sealed class DependencyRulesTests
             "Errors.Playback.NetworkFailed",
             "Errors.Playback.SourceUnsupported",
             "Errors.Playback.DecodingFailed",
+            "Errors.Xtream.AccountResponseUnsupported",
+            "Errors.Xtream.LiveCatalogResponseUnsupported",
+            "Errors.Xtream.MovieCatalogResponseUnsupported",
+            "Errors.Xtream.SeriesCatalogResponseUnsupported",
             "Errors.Storage.Unavailable",
             "Errors.Operation.Cancelled",
             "Errors.Network.ResourceNotFound",

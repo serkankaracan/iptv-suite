@@ -29,11 +29,8 @@ public sealed class XtreamProviderClient : IXtreamProviderClient
         }
 
         using XtreamSourceRequestContext requestContext = context.Value!;
-        DomainResult<XtreamAccountStatus> account = await GetAndParseAsync(
+        DomainResult<XtreamAccountStatus> account = await GetAccountStatusAsync(
             requestContext,
-            null,
-            XtreamTransportLimits.MaximumAccountResponseBytes,
-            XtreamProviderJsonParser.ParseAccountStatus,
             cancellationToken).ConfigureAwait(false);
         if (!account.IsSuccess)
         {
@@ -75,11 +72,8 @@ public sealed class XtreamProviderClient : IXtreamProviderClient
         }
 
         using XtreamSourceRequestContext requestContext = context.Value!;
-        DomainResult<XtreamAccountStatus> account = await GetAndParseAsync(
+        DomainResult<XtreamAccountStatus> account = await GetAccountStatusAsync(
             requestContext,
-            null,
-            XtreamTransportLimits.MaximumAccountResponseBytes,
-            XtreamProviderJsonParser.ParseAccountStatus,
             cancellationToken).ConfigureAwait(false);
         if (!account.IsSuccess)
         {
@@ -267,8 +261,56 @@ public sealed class XtreamProviderClient : IXtreamProviderClient
         }
 
         using HttpResponseLease lease = response.Response!;
-        return parser(lease.Content);
+        DomainResult<T> parsed = parser(lease.Content);
+        if (!parsed.IsSuccess &&
+            parsed.Error!.Code == DomainErrorCode.UnsupportedPlaylistFormat)
+        {
+            return DomainResult.Failure<T>(MapUnsupportedProviderResponse(action));
+        }
+
+        return parsed;
     }
+
+    private async ValueTask<DomainResult<XtreamAccountStatus>> GetAccountStatusAsync(
+        XtreamSourceRequestContext requestContext,
+        CancellationToken cancellationToken)
+    {
+        string?[] actions = ["get_account_info", null, "get_profile"];
+        DomainError? lastFallbackError = null;
+        foreach (string? action in actions)
+        {
+            DomainResult<XtreamAccountStatus> result = await GetAndParseAsync(
+                requestContext,
+                action,
+                XtreamTransportLimits.MaximumAccountResponseBytes,
+                XtreamProviderJsonParser.ParseAccountStatus,
+                cancellationToken).ConfigureAwait(false);
+            if (result.IsSuccess || !IsAccountCompatibilityFallbackError(result.Error!.Code))
+            {
+                return result;
+            }
+
+            lastFallbackError = result.Error;
+        }
+
+        return DomainResult.Failure<XtreamAccountStatus>(lastFallbackError!);
+    }
+
+    private static bool IsAccountCompatibilityFallbackError(DomainErrorCode errorCode) =>
+        errorCode == DomainErrorCode.XtreamAccountResponseUnsupported;
+
+    private static DomainErrorCode MapUnsupportedProviderResponse(string? action) => action switch
+    {
+        null or "get_account_info" or "get_profile" =>
+            DomainErrorCode.XtreamAccountResponseUnsupported,
+        "get_live_categories" or "get_live_streams" =>
+            DomainErrorCode.XtreamLiveCatalogResponseUnsupported,
+        "get_vod_categories" or "get_vod_streams" =>
+            DomainErrorCode.XtreamMovieCatalogResponseUnsupported,
+        "get_series_categories" or "get_series" or "get_series_info" =>
+            DomainErrorCode.XtreamSeriesCatalogResponseUnsupported,
+        _ => DomainErrorCode.UnsupportedPlaylistFormat,
+    };
 
     private static bool IsLocatorCompatible(
         ReadOnlyMemory<byte> credentialPayload,

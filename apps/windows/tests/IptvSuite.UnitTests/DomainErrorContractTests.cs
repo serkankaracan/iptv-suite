@@ -56,6 +56,10 @@ public sealed class DomainErrorContractTests
         new(DomainErrorCode.PlaybackNetworkFailed, DomainRetryability.BoundedTransient, "Errors.Playback.NetworkFailed"),
         new(DomainErrorCode.PlaybackSourceUnsupported, DomainRetryability.Never, "Errors.Playback.SourceUnsupported"),
         new(DomainErrorCode.PlaybackDecodingFailed, DomainRetryability.Never, "Errors.Playback.DecodingFailed"),
+        new(DomainErrorCode.XtreamAccountResponseUnsupported, DomainRetryability.Never, "Errors.Xtream.AccountResponseUnsupported"),
+        new(DomainErrorCode.XtreamLiveCatalogResponseUnsupported, DomainRetryability.Never, "Errors.Xtream.LiveCatalogResponseUnsupported"),
+        new(DomainErrorCode.XtreamMovieCatalogResponseUnsupported, DomainRetryability.Never, "Errors.Xtream.MovieCatalogResponseUnsupported"),
+        new(DomainErrorCode.XtreamSeriesCatalogResponseUnsupported, DomainRetryability.Never, "Errors.Xtream.SeriesCatalogResponseUnsupported"),
     ];
 
     [TestMethod]

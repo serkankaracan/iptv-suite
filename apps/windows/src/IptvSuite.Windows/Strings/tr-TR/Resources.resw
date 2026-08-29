@@ -77,7 +77,7 @@
   <data name="Errors.Playlist.SafeLimitExceeded" xml:space="preserve"><value>Oynatma listesi uygulamanın güvenli ayrıştırma sınırlarını aşıyor.</value></data>
   <data name="Errors.Playlist.LineLimitExceeded" xml:space="preserve"><value>Oynatma listesi, uygulamanın güvenle işleyebileceğinden daha uzun bir satır içeriyor.</value></data>
   <data name="Errors.Playlist.TotalLimitExceeded" xml:space="preserve"><value>Oynatma listesi metni uygulamanın güvenli toplam boyut sınırını aşıyor.</value></data>
-  <data name="Errors.Playlist.EntryLimitExceeded" xml:space="preserve"><value>Oynatma listesi, bu içe aktarma yolunun güvenle işleyebileceğinden daha fazla geçerli kayıt içeriyor.</value></data>
+  <data name="Errors.Playlist.EntryLimitExceeded" xml:space="preserve"><value>Kaynak, bu içe aktarma yolunun güvenle işleyebileceğinden daha fazla geçerli kayıt içeriyor.</value></data>
   <data name="Errors.Playlist.StructureInvalid" xml:space="preserve"><value>Oynatma listesi birbiriyle uyumsuz M3U veya HLS yapılarını karıştırıyor.</value></data>
   <data name="Errors.Playlist.NoUsableEntries" xml:space="preserve"><value>Oynatma listesinde kullanılabilir kanal kaydı bulunamadı.</value></data>
   <data name="Errors.Playlist.EntriesRejectedByAddressPolicy" xml:space="preserve"><value>Oynatma listesindeki kanal adreslerinin hiçbiri uygulamanın URL güvenlik ilkesini geçemedi.</value></data>
@@ -91,6 +91,10 @@
   <data name="Errors.Playback.NetworkFailed" xml:space="preserve"><value>Oynatıcı bir ağ sorunu bildirdi. Kaynak geçici olarak kullanılamıyor olabilir.</value></data>
   <data name="Errors.Playback.SourceUnsupported" xml:space="preserve"><value>Oynatıcı bu kaynak biçimini kullanamadı. Medya türü veya kapsayıcı desteklenmiyor olabilir.</value></data>
   <data name="Errors.Playback.DecodingFailed" xml:space="preserve"><value>Medya çözümlenemedi. Codec, kodlama ayarları veya akış verisi uyumsuz olabilir.</value></data>
+  <data name="Errors.Xtream.AccountResponseUnsupported" xml:space="preserve"><value>Xtream hesap uç noktası desteklenmeyen bir yanıt döndürdü.</value></data>
+  <data name="Errors.Xtream.LiveCatalogResponseUnsupported" xml:space="preserve"><value>Xtream Canlı TV uç noktası desteklenmeyen bir katalog yanıtı döndürdü.</value></data>
+  <data name="Errors.Xtream.MovieCatalogResponseUnsupported" xml:space="preserve"><value>Xtream Filmler uç noktası desteklenmeyen bir katalog yanıtı döndürdü.</value></data>
+  <data name="Errors.Xtream.SeriesCatalogResponseUnsupported" xml:space="preserve"><value>Xtream Diziler uç noktası desteklenmeyen bir katalog yanıtı döndürdü.</value></data>
   <data name="Errors.Storage.Unavailable" xml:space="preserve"><value>Yerel uygulama verilerine erişilemiyor. Yeniden deneyin.</value></data>
   <data name="Errors.Operation.Cancelled" xml:space="preserve"><value>İşlem iptal edildi.</value></data>
   <data name="Errors.Network.ResourceNotFound" xml:space="preserve"><value>İstenen kaynak bulunamadı.</value></data>

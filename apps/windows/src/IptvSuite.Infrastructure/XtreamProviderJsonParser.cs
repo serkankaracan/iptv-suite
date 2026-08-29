@@ -57,22 +57,24 @@ public static class XtreamProviderJsonParser
             using JsonDocument document = ParseDocument(
                 content,
                 XtreamTransportLimits.MaximumCategoryResponseBytes);
-            if (document.RootElement.ValueKind != JsonValueKind.Array ||
-                document.RootElement.GetArrayLength() > MaximumCategoryCount)
+            if (!TryValidateProviderCollection(
+                    document.RootElement,
+                    MaximumCategoryCount,
+                    out DomainErrorCode collectionError))
             {
                 return DomainResult.Failure<XtreamProviderPage<XtreamCategoryInput>>(
-                    DomainErrorCode.UnsupportedPlaylistFormat);
+                    collectionError);
             }
 
             List<XtreamCategoryInput> items = [];
             HashSet<string> identifiers = new(StringComparer.Ordinal);
             int skipped = 0;
             int duplicates = 0;
-            foreach (JsonElement element in document.RootElement.EnumerateArray())
+            foreach (JsonElement element in EnumerateProviderCollection(document.RootElement))
             {
                 if (element.ValueKind != JsonValueKind.Object ||
                     !TryGetBoundedScalar(element, "category_id", 512, out string? identifier) ||
-                    !TryGetBoundedScalar(element, "category_name", 256, out string? name))
+                    !TryGetBoundedString(element, "category_name", 256, out string? name))
                 {
                     skipped++;
                     continue;
@@ -88,7 +90,11 @@ public static class XtreamProviderJsonParser
             }
 
             return DomainResult.Success<XtreamProviderPage<XtreamCategoryInput>>(
-                new XtreamProviderPage<XtreamCategoryInput>(items, skipped, duplicates));
+                new XtreamProviderPage<XtreamCategoryInput>(
+                    items,
+                    skipped,
+                    duplicates,
+                    IsCompatibilityEmptySentinel(document.RootElement)));
         }
         catch (JsonException)
         {
@@ -105,22 +111,29 @@ public static class XtreamProviderJsonParser
             using JsonDocument document = ParseDocument(
                 content,
                 XtreamTransportLimits.MaximumCatalogResponseBytes);
-            if (document.RootElement.ValueKind != JsonValueKind.Array ||
-                document.RootElement.GetArrayLength() > MaximumStreamCount)
+            if (!TryValidateProviderCollection(
+                    document.RootElement,
+                    MaximumStreamCount,
+                    out DomainErrorCode collectionError))
             {
                 return DomainResult.Failure<XtreamProviderPage<XtreamStreamInput>>(
-                    DomainErrorCode.UnsupportedPlaylistFormat);
+                    collectionError);
             }
 
             List<XtreamStreamInput> items = [];
             HashSet<string> identifiers = new(StringComparer.Ordinal);
             int skipped = 0;
             int duplicates = 0;
-            foreach (JsonElement element in document.RootElement.EnumerateArray())
+            foreach (JsonElement element in EnumerateProviderCollection(document.RootElement))
             {
                 if (element.ValueKind != JsonValueKind.Object ||
                     !TryGetBoundedScalar(element, "stream_id", 512, out string? identifier) ||
-                    !TryGetBoundedScalar(element, "name", 256, out string? name))
+                    !TryGetBoundedDisplayName(
+                        element,
+                        "name",
+                        "title",
+                        256,
+                        out string? name))
                 {
                     skipped++;
                     continue;
@@ -157,7 +170,11 @@ public static class XtreamProviderJsonParser
             }
 
             return DomainResult.Success<XtreamProviderPage<XtreamStreamInput>>(
-                new XtreamProviderPage<XtreamStreamInput>(items, skipped, duplicates));
+                new XtreamProviderPage<XtreamStreamInput>(
+                    items,
+                    skipped,
+                    duplicates,
+                    IsCompatibilityEmptySentinel(document.RootElement)));
         }
         catch (JsonException)
         {
@@ -174,22 +191,29 @@ public static class XtreamProviderJsonParser
             using JsonDocument document = ParseDocument(
                 content,
                 XtreamTransportLimits.MaximumCatalogResponseBytes);
-            if (document.RootElement.ValueKind != JsonValueKind.Array ||
-                document.RootElement.GetArrayLength() > MaximumStreamCount)
+            if (!TryValidateProviderCollection(
+                    document.RootElement,
+                    MaximumStreamCount,
+                    out DomainErrorCode collectionError))
             {
                 return DomainResult.Failure<XtreamProviderPage<XtreamMovieInput>>(
-                    DomainErrorCode.UnsupportedPlaylistFormat);
+                    collectionError);
             }
 
             List<XtreamMovieInput> items = [];
             HashSet<string> identifiers = new(StringComparer.Ordinal);
             int skipped = 0;
             int duplicates = 0;
-            foreach (JsonElement element in document.RootElement.EnumerateArray())
+            foreach (JsonElement element in EnumerateProviderCollection(document.RootElement))
             {
                 if (element.ValueKind != JsonValueKind.Object ||
                     !TryGetBoundedScalar(element, "stream_id", 512, out string? identifier) ||
-                    !TryGetBoundedScalar(element, "name", 256, out string? name))
+                    !TryGetBoundedDisplayName(
+                        element,
+                        "name",
+                        "title",
+                        256,
+                        out string? name))
                 {
                     skipped++;
                     continue;
@@ -222,7 +246,11 @@ public static class XtreamProviderJsonParser
             }
 
             return DomainResult.Success<XtreamProviderPage<XtreamMovieInput>>(
-                new XtreamProviderPage<XtreamMovieInput>(items, skipped, duplicates));
+                new XtreamProviderPage<XtreamMovieInput>(
+                    items,
+                    skipped,
+                    duplicates,
+                    IsCompatibilityEmptySentinel(document.RootElement)));
         }
         catch (JsonException)
         {
@@ -239,22 +267,29 @@ public static class XtreamProviderJsonParser
             using JsonDocument document = ParseDocument(
                 content,
                 XtreamTransportLimits.MaximumCatalogResponseBytes);
-            if (document.RootElement.ValueKind != JsonValueKind.Array ||
-                document.RootElement.GetArrayLength() > MaximumStreamCount)
+            if (!TryValidateProviderCollection(
+                    document.RootElement,
+                    MaximumStreamCount,
+                    out DomainErrorCode collectionError))
             {
                 return DomainResult.Failure<XtreamProviderPage<XtreamSeriesInput>>(
-                    DomainErrorCode.UnsupportedPlaylistFormat);
+                    collectionError);
             }
 
             List<XtreamSeriesInput> items = [];
             HashSet<string> identifiers = new(StringComparer.Ordinal);
             int skipped = 0;
             int duplicates = 0;
-            foreach (JsonElement element in document.RootElement.EnumerateArray())
+            foreach (JsonElement element in EnumerateProviderCollection(document.RootElement))
             {
                 if (element.ValueKind != JsonValueKind.Object ||
                     !TryGetBoundedScalar(element, "series_id", 512, out string? identifier) ||
-                    !TryGetBoundedScalar(element, "name", 256, out string? name))
+                    !TryGetBoundedDisplayName(
+                        element,
+                        "title",
+                        "name",
+                        256,
+                        out string? name))
                 {
                     skipped++;
                     continue;
@@ -285,7 +320,11 @@ public static class XtreamProviderJsonParser
             }
 
             return DomainResult.Success<XtreamProviderPage<XtreamSeriesInput>>(
-                new XtreamProviderPage<XtreamSeriesInput>(items, skipped, duplicates));
+                new XtreamProviderPage<XtreamSeriesInput>(
+                    items,
+                    skipped,
+                    duplicates,
+                    IsCompatibilityEmptySentinel(document.RootElement)));
         }
         catch (JsonException)
         {
@@ -303,9 +342,6 @@ public static class XtreamProviderJsonParser
                 XtreamTransportLimits.MaximumSeriesDetailsResponseBytes);
             JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object ||
-                !root.TryGetProperty("seasons", out JsonElement seasonsElement) ||
-                seasonsElement.ValueKind != JsonValueKind.Array ||
-                seasonsElement.GetArrayLength() > MaximumSeasonCount ||
                 !root.TryGetProperty("episodes", out JsonElement episodesElement) ||
                 episodesElement.ValueKind != JsonValueKind.Object)
             {
@@ -315,46 +351,80 @@ public static class XtreamProviderJsonParser
 
             var seasons = new List<XtreamSeasonInput>();
             var seasonNumbers = new HashSet<int>();
-            foreach (JsonElement element in seasonsElement.EnumerateArray())
+            if (root.TryGetProperty("seasons", out JsonElement seasonsElement) &&
+                seasonsElement.ValueKind != JsonValueKind.Null)
             {
-                if (element.ValueKind != JsonValueKind.Object ||
-                    !TryGetInt32(element, "season_number", out int number) ||
-                    number < 0 || !seasonNumbers.Add(number))
+                if (seasonsElement.ValueKind != JsonValueKind.Array ||
+                    seasonsElement.GetArrayLength() > MaximumSeasonCount)
                 {
-                    continue;
+                    return DomainResult.Failure<XtreamSeriesDetails>(
+                        seasonsElement.ValueKind == JsonValueKind.Array
+                            ? DomainErrorCode.PlaylistEntryLimitExceeded
+                            : DomainErrorCode.UnsupportedPlaylistFormat);
                 }
 
-                _ = TryGetOptionalBoundedScalar(element, "id", 512, out string? identifier);
-                _ = TryGetOptionalBoundedScalar(element, "name", 256, out string? name);
-                ProviderItemKey? providerKey = identifier is null
-                    ? null
-                    : ProviderItemKey.Create(identifier).Value;
-                seasons.Add(new XtreamSeasonInput(
-                    providerKey,
-                    number,
-                    name ?? $"Season {number.ToString(CultureInfo.InvariantCulture)}"));
+                foreach (JsonElement element in seasonsElement.EnumerateArray())
+                {
+                    if (element.ValueKind != JsonValueKind.Object ||
+                        !TryGetInt32(element, "season_number", out int number) ||
+                        number < 0 || !seasonNumbers.Add(number))
+                    {
+                        continue;
+                    }
+
+                    _ = TryGetOptionalBoundedScalar(element, "id", 512, out string? identifier);
+                    _ = TryGetOptionalBoundedScalar(element, "name", 256, out string? name);
+                    ProviderItemKey? providerKey = identifier is null
+                        ? null
+                        : ProviderItemKey.Create(identifier).Value;
+                    seasons.Add(new XtreamSeasonInput(
+                        providerKey,
+                        number,
+                        name ?? $"Season {number.ToString(CultureInfo.InvariantCulture)}"));
+                }
             }
 
             var episodes = new List<XtreamEpisodeInput>();
             var episodeKeys = new HashSet<string>(StringComparer.Ordinal);
+            var episodeSeasonKeys = new HashSet<string>(StringComparer.Ordinal);
+            var combinedSeasonNumbers = new HashSet<int>(seasonNumbers);
+            int rawSeasonGroupCount = 0;
+            int rawEpisodeCount = 0;
             foreach (JsonProperty seasonProperty in episodesElement.EnumerateObject())
             {
-                if (!int.TryParse(
+                rawSeasonGroupCount++;
+                if (rawSeasonGroupCount > MaximumSeasonCount)
+                {
+                    return DomainResult.Failure<XtreamSeriesDetails>(
+                        DomainErrorCode.PlaylistEntryLimitExceeded);
+                }
+
+                if (!episodeSeasonKeys.Add(seasonProperty.Name) ||
+                    !int.TryParse(
                         seasonProperty.Name,
                         NumberStyles.None,
                         CultureInfo.InvariantCulture,
                         out int seasonNumber) ||
                     seasonNumber < 0 || seasonProperty.Value.ValueKind != JsonValueKind.Array)
                 {
-                    continue;
+                    return DomainResult.Failure<XtreamSeriesDetails>(
+                        DomainErrorCode.UnsupportedPlaylistFormat);
+                }
+
+                if (combinedSeasonNumbers.Add(seasonNumber) &&
+                    combinedSeasonNumbers.Count > MaximumSeasonCount)
+                {
+                    return DomainResult.Failure<XtreamSeriesDetails>(
+                        DomainErrorCode.PlaylistEntryLimitExceeded);
                 }
 
                 foreach (JsonElement element in seasonProperty.Value.EnumerateArray())
                 {
-                    if (episodes.Count == MaximumEpisodeCount)
+                    rawEpisodeCount++;
+                    if (rawEpisodeCount > MaximumEpisodeCount)
                     {
                         return DomainResult.Failure<XtreamSeriesDetails>(
-                            DomainErrorCode.UnsupportedPlaylistFormat);
+                            DomainErrorCode.PlaylistEntryLimitExceeded);
                     }
 
                     if (element.ValueKind != JsonValueKind.Object ||
@@ -418,12 +488,135 @@ public static class XtreamProviderJsonParser
             throw new JsonException("The provider document is outside the bounded input contract.");
         }
 
+        ReadOnlySpan<byte> bytes = content.Span;
+        if (bytes.Length >= 3 &&
+            bytes[0] == 0xef &&
+            bytes[1] == 0xbb &&
+            bytes[2] == 0xbf)
+        {
+            content = content[3..];
+            if (content.IsEmpty)
+            {
+                throw new JsonException("The provider document is empty after its UTF-8 preamble.");
+            }
+        }
+
         return JsonDocument.Parse(content, new JsonDocumentOptions
         {
             AllowTrailingCommas = false,
             CommentHandling = JsonCommentHandling.Disallow,
             MaxDepth = 32,
         });
+    }
+
+    private static bool TryValidateProviderCollection(
+        JsonElement root,
+        int maximumCount,
+        out DomainErrorCode errorCode)
+    {
+        errorCode = default;
+        if (root.ValueKind is JsonValueKind.Null or JsonValueKind.False)
+        {
+            return true;
+        }
+
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            if (root.GetArrayLength() <= maximumCount)
+            {
+                return true;
+            }
+
+            errorCode = DomainErrorCode.PlaylistEntryLimitExceeded;
+            return false;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            errorCode = DomainErrorCode.UnsupportedPlaylistFormat;
+            return false;
+        }
+
+        int count = 0;
+        HashSet<string> collectionKeys = new(StringComparer.Ordinal);
+        foreach (JsonProperty property in root.EnumerateObject())
+        {
+            if (!IsBoundedNumericCollectionKey(property.Name) ||
+                !collectionKeys.Add(property.Name) ||
+                property.Value.ValueKind is not (JsonValueKind.Object or JsonValueKind.Null))
+            {
+                errorCode = DomainErrorCode.UnsupportedPlaylistFormat;
+                return false;
+            }
+
+            count++;
+            if (count > maximumCount)
+            {
+                errorCode = DomainErrorCode.PlaylistEntryLimitExceeded;
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateProviderCollection(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement element in root.EnumerateArray())
+            {
+                yield return element;
+            }
+
+            yield break;
+        }
+
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in root.EnumerateObject())
+            {
+                yield return property.Value;
+            }
+        }
+    }
+
+    private static bool IsCompatibilityEmptySentinel(JsonElement root)
+    {
+        if (root.ValueKind is JsonValueKind.Null or JsonValueKind.False)
+        {
+            return true;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (JsonProperty _ in root.EnumerateObject())
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsBoundedNumericCollectionKey(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 20)
+        {
+            return false;
+        }
+
+        foreach (char character in value)
+        {
+            if (character is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryGetBoundedScalar(
@@ -435,6 +628,33 @@ public static class XtreamProviderJsonParser
         value = null;
         return element.TryGetProperty(propertyName, out JsonElement property) &&
             TryNormalizeScalar(property, maximumLength, out value);
+    }
+
+    private static bool TryGetBoundedDisplayName(
+        JsonElement element,
+        string preferredPropertyName,
+        string fallbackPropertyName,
+        int maximumLength,
+        out string? value) =>
+        TryGetBoundedString(element, preferredPropertyName, maximumLength, out value) ||
+        TryGetBoundedString(element, fallbackPropertyName, maximumLength, out value);
+
+    private static bool TryGetBoundedString(
+        JsonElement element,
+        string propertyName,
+        int maximumLength,
+        out string? value)
+    {
+        value = null;
+        if (!element.TryGetProperty(propertyName, out JsonElement property) ||
+            property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString()?.Normalize().Trim();
+        return !string.IsNullOrEmpty(value) && value.Length <= maximumLength &&
+            !value.Any(char.IsControl);
     }
 
     private static bool TryGetOptionalBoundedScalar(

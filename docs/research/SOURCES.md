@@ -1,8 +1,8 @@
 # Araştırma kaynakları
 
-**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency ve VS packaged-launch yeniden doğrulaması 2026-08-10; packaged activation/update, protected-catalog/AEAD ve gerçek Windows user-boundary incelemesi yeniden doğrulaması 2026-08-14; Remote M3U HTTP semantics ve Store policy yeniden doğrulaması 2026-08-28
+**Araştırma tarihi / son erişim:** 2026-08-09; M4 storage/dependency ve VS packaged-launch yeniden doğrulaması 2026-08-10; packaged activation/update, protected-catalog/AEAD ve gerçek Windows user-boundary incelemesi yeniden doğrulaması 2026-08-14; Remote M3U HTTP semantics ve Store policy yeniden doğrulaması 2026-08-28; IPTVnator exact-source feature/UI/lisans referans incelemesi 2026-08-29
 
-**Kapsam:** Phase 0 mimari, playback, güvenlik, mağaza ve platform kararları
+**Kapsam:** Phase 0 mimari, playback, güvenlik, mağaza ve platform kararları; post-MVP M20–M36 referans uygulama kapsamlandırması
 
 ## Kanıt kullanma yöntemi
 
@@ -196,6 +196,15 @@
 | S63 | 6698 sayılı KVKK | KVKK | [Kanun](https://www.kvkk.gov.tr/Icerik/6649/Personal-Data-Protection-Law) | Saklama/korumanın işleme olması; aydınlatma, güvenlik ve silme yükümlülükleri | Kabul 2016-03-24 | 2026-08-09 |
 | S64 | Aydınlatma ve imha düzenlemeleri | KVKK | [Aydınlatma Tebliği](https://www.kvkk.gov.tr/Icerik/4132/aydinlatma-yukumlulugunun-yerine-getirilmesinde-uyulacak-usul-ve-esaslar-hakkinda-teblig), [silme yönetmeliği](https://www.kvkk.gov.tr/Icerik/5441/KISISEL-VERILERIN-SILINMESI-YOK-EDILMESI-VEYA-ANONIM-HALE-GETIRILMESI-HAKKINDA-YONETMELIK) | Aydınlatma, retention ve imha süreçleri | Güncel | 2026-08-09 |
 | S65 | Açık rıza ve aydınlatmanın ayrılması | KVKK | [2026/347 İlke Kararı](https://www.kvkk.gov.tr/Icerik/8710/veri-sorumlulari-tarafindan-acik-riza-ve-aydinlatma-metinlerinin-ayri-ayri-duzenlenmesi-gerektigi-hakkinda-kisisel-verileri-koruma-kurulunun-18-02-2026-tarihli-ve-2026-347-sayili-ilke-kararina-iliskin-kamuoyu-duyurusu) | Aydınlatma ve açık rıza süreçlerinin ayrı tutulması | 2026-02-18 | 2026-08-09 |
+
+## Referans uygulama incelemesi
+
+| ID | Kaynak | Kurum/proje | Bağlantı | Kararı destekleyen bilgi | Sürüm/tarih | Erişim |
+|---|---|---|---|---|---|---|
+| S142 | IPTVnator repository ve feature listesi | 4gray / IPTVnator | [README, exact commit](https://github.com/4gray/iptvnator/blob/29ca94aa4371e9a71e24ccac4c529bd62f6fabd5/README.md), [source tree](https://github.com/4gray/iptvnator/tree/29ca94aa4371e9a71e24ccac4c529bd62f6fabd5) | M3U/Xtream/Stalker, workspace/dashboard, EPG, VOD/Series, playback, favorites/history, download, remote, PWA ve platform feature envanteri. Bu, IPTV Suite'te aynı feature'ların çalıştığını kanıtlamaz | `0.23.0`; commit `29ca94aa4371e9a71e24ccac4c529bd62f6fabd5`, 2026-08-29 | 2026-08-29 |
+| S143 | IPTVnator mimari sözleşmeleri | 4gray / IPTVnator | [Architecture docs](https://github.com/4gray/iptvnator/tree/29ca94aa4371e9a71e24ccac4c529bd62f6fabd5/docs/architecture) | Workspace shell/dashboard, player controls, M3U/Xtream/Stalker, XMLTV EPG, download/recording, remote-control, backup/restore, TMDB ve multi-source VOD implementation sınırları. Electron/Angular kararları WinUI için doğrudan mimari onay değildir | Exact commit snapshot | 2026-08-29 |
+| S144 | IPTVnator MIT lisansı | 4gray / IPTVnator | [LICENSE.md](https://github.com/4gray/iptvnator/blob/29ca94aa4371e9a71e24ccac4c529bd62f6fabd5/LICENSE.md) | Yazılımın kullanım/değiştirme/dağıtım izni; copyright ve permission notice'ın kopyalarda veya önemli bölümlerde korunması gerekir. Hukuki görüş değildir | Copyright 2020–2021; exact commit snapshot | 2026-08-29 |
+| S145 | IPTVnator trademark notice | 4gray / IPTVnator | [TRADEMARK.md](https://github.com/4gray/iptvnator/blob/29ca94aa4371e9a71e24ccac4c529bd62f6fabd5/TRADEMARK.md) | IPTVnator adı, logo/icon/artwork yazılım lisansı kapsamında değildir; fork/ürün farklı ad ve görsel kimlik kullanmalıdır | Exact commit snapshot | 2026-08-29 |
 
 ## Araştırmanın karar üretmediği alanlar
 

@@ -12,6 +12,24 @@ namespace IptvSuite.IntegrationTests;
 [TestClass]
 public sealed class XtreamProviderClientTests
 {
+    private static readonly string[] AccountLiveCatalogActions =
+        ["get_account_info", "get_live_categories", "get_live_streams"];
+    private static readonly string[] ContentCatalogActions =
+    [
+        "get_account_info",
+        "get_live_categories",
+        "get_live_streams",
+        "get_vod_categories",
+        "get_vod_streams",
+        "get_series_categories",
+        "get_series",
+    ];
+    private static readonly string[] ContentCatalogAndSeriesDetailsActions =
+        [.. ContentCatalogActions, "get_series_info"];
+    private static readonly string[] AccountOnlyActions = ["get_account_info"];
+    private static readonly string[] AccountAndLiveCategoryActions =
+        ["get_account_info", "get_live_categories"];
+
     [TestMethod]
     public async Task ProtectedCredentialsProduceOnlyAccountAndLiveCatalogRequests()
     {
@@ -29,7 +47,7 @@ public sealed class XtreamProviderClientTests
         Assert.HasCount(1, result.Value!.Categories.Items);
         Assert.HasCount(1, result.Value.Streams.Items);
         CollectionAssert.AreEqual(
-            new[] { string.Empty, "get_live_categories", "get_live_streams" },
+            AccountLiveCatalogActions,
             transport.Actions);
         Assert.IsTrue(transport.AllRequestsUsedHttps);
         Assert.IsTrue(transport.AllRequestsUsedPlayerApi);
@@ -60,16 +78,7 @@ public sealed class XtreamProviderClientTests
 
         Assert.IsTrue(result.IsSuccess);
         CollectionAssert.AreEqual(
-            new[]
-            {
-                string.Empty,
-                "get_live_categories",
-                "get_live_streams",
-                "get_vod_categories",
-                "get_vod_streams",
-                "get_series_categories",
-                "get_series",
-            },
+            ContentCatalogActions,
             transport.Actions);
         Assert.AreEqual(ContentKind.LiveTv, result.Value!.LiveCategories.Items.Single().ContentKind);
         Assert.AreEqual(ContentKind.Movie, result.Value.MovieCategories.Items.Single().ContentKind);
@@ -116,17 +125,7 @@ public sealed class XtreamProviderClientTests
             },
             transport.MaximumResponseBytes);
         CollectionAssert.AreEqual(
-            new[]
-            {
-                string.Empty,
-                "get_live_categories",
-                "get_live_streams",
-                "get_vod_categories",
-                "get_vod_streams",
-                "get_series_categories",
-                "get_series",
-                "get_series_info",
-            },
+            ContentCatalogAndSeriesDetailsActions,
             transport.Actions);
     }
 
@@ -176,7 +175,7 @@ public sealed class XtreamProviderClientTests
         DomainResult<XtreamLiveCatalog> result = await client.LoadLiveCatalogAsync(source);
 
         Assert.IsFalse(result.IsSuccess);
-        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, result.Error!.Code);
+        Assert.AreEqual(DomainErrorCode.XtreamLiveCatalogResponseUnsupported, result.Error!.Code);
         Assert.HasCount(2, server.Requests);
         Assert.IsTrue(server.Requests.All(request => request.Path == "/player_api.php"));
     }
@@ -261,20 +260,91 @@ public sealed class XtreamProviderClientTests
         Assert.AreEqual("Series", seriesCategories[0].Name);
         CollectionAssert.AreEqual(
             Enumerable.Repeat(
-                    new[]
-                    {
-                        string.Empty,
-                        "get_live_categories",
-                        "get_live_streams",
-                        "get_vod_categories",
-                        "get_vod_streams",
-                        "get_series_categories",
-                        "get_series",
-                    },
+                    ContentCatalogActions,
                     2)
                 .SelectMany(actions => actions)
                 .ToArray(),
             transport.Actions);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    [SupportedOSPlatform("windows")]
+    public async Task SuspiciousEmptyRefreshKeepsLastGoodSnapshotWhileCanonicalEmptyCanReplaceIt()
+    {
+        using TemporaryDirectory temporary = TemporaryDirectory.Create(
+            "post-mvp-xtream-last-good");
+        string databasePath = Path.Combine(temporary.FullPath, "catalog.db");
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        string[] populated =
+        [
+            """{"user_info":{"auth":1}}""",
+            """[{"category_id":"1","category_name":"Live"}]""",
+            """[{"stream_id":"2","name":"Channel","category_id":"1"}]""",
+            """[{"category_id":"3","category_name":"Movies"}]""",
+            """[{"stream_id":"4","name":"Movie","category_id":"3"}]""",
+            """[{"category_id":"5","category_name":"Series"}]""",
+            """[{"series_id":"6","name":"Series","category_id":"5"}]""",
+        ];
+        string[] liveSentinel =
+        [
+            """{"user_info":{"auth":1}}""",
+            "[]",
+            "false",
+            "[]",
+            "[]",
+            "[]",
+            "[]",
+        ];
+        string[] allInvalidMovies =
+        [
+            """{"user_info":{"auth":1}}""",
+            "[]",
+            """[{"stream_id":"2","name":"Channel"}]""",
+            "[]",
+            "[{}]",
+            "[]",
+            "[]",
+        ];
+        string[] canonicalEmpty =
+        [
+            """{"user_info":{"auth":1}}""",
+            "[]",
+            "[]",
+            "[]",
+            "[]",
+            "[]",
+            "[]",
+        ];
+        var transport = new ScriptedTransport(
+            [.. populated, .. liveSentinel, .. allInvalidMovies, .. canonicalEmpty]);
+        var importer = new XtreamCatalogImportService(databasePath, store, transport);
+        var catalog = new SqliteContentCatalog(databasePath);
+
+        DomainResult<ContentCatalogCounts> imported = await importer.ImportAsync(source);
+        DomainResult<ContentCatalogCounts> rejectedSentinel =
+            await importer.RefreshFromStoredConfigurationAsync(source.Id);
+        ContentCatalogCounts afterSentinel = await catalog.ReadCountsAsync(source.Id);
+        DomainResult<ContentCatalogCounts> rejectedInvalid =
+            await importer.RefreshFromStoredConfigurationAsync(source.Id);
+        ContentCatalogCounts afterInvalid = await catalog.ReadCountsAsync(source.Id);
+        DomainResult<ContentCatalogCounts> emptied =
+            await importer.RefreshFromStoredConfigurationAsync(source.Id);
+
+        Assert.AreEqual(new ContentCatalogCounts(1, 1, 1, 0), imported.Value);
+        Assert.IsFalse(rejectedSentinel.IsSuccess);
+        Assert.AreEqual(
+            DomainErrorCode.XtreamLiveCatalogResponseUnsupported,
+            rejectedSentinel.Error!.Code);
+        Assert.AreEqual(imported.Value, afterSentinel);
+        Assert.IsFalse(rejectedInvalid.IsSuccess);
+        Assert.AreEqual(
+            DomainErrorCode.XtreamMovieCatalogResponseUnsupported,
+            rejectedInvalid.Error!.Code);
+        Assert.AreEqual(imported.Value, afterInvalid);
+        Assert.IsTrue(emptied.IsSuccess);
+        Assert.AreEqual(new ContentCatalogCounts(0, 0, 0, 0), emptied.Value);
     }
 
     [TestMethod]
@@ -370,7 +440,6 @@ public sealed class XtreamProviderClientTests
             """,
             """
             {
-              "seasons":[],
               "episodes":{
                 "2":[{
                   "id":"episode-201",
@@ -431,7 +500,38 @@ public sealed class XtreamProviderClientTests
 
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(DomainErrorCode.AuthenticationRejected, result.Error!.Code);
-        CollectionAssert.AreEqual(new[] { string.Empty }, transport.Actions);
+        CollectionAssert.AreEqual(AccountOnlyActions, transport.Actions);
+    }
+
+    [TestMethod]
+    public async Task AccountCompatibilityProfileFallsBackInABoundedExactOrder()
+    {
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        const string unsupported = """{"provider_message":"synthetic"}""";
+        var transport = new ScriptedTransport(
+            unsupported,
+            unsupported,
+            """{"user_info":{"auth":1}}""",
+            "[]",
+            "[]");
+        var client = new XtreamProviderClient(store, transport);
+
+        DomainResult<XtreamLiveCatalog> result = await client.LoadLiveCatalogAsync(source);
+
+        Assert.IsTrue(result.IsSuccess);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "get_account_info",
+                string.Empty,
+                "get_profile",
+                "get_live_categories",
+                "get_live_streams",
+            },
+            transport.Actions);
+        Assert.IsTrue(transport.AllRequestsUsedExplicitPrivateSourcePolicy);
+        Assert.IsTrue(transport.AllRequestsRejectRedirects);
     }
 
     [TestMethod]
@@ -513,10 +613,103 @@ public sealed class XtreamProviderClientTests
         DomainResult<XtreamLiveCatalog> malformed =
             await malformedClient.LoadLiveCatalogAsync(malformedSource);
         Assert.IsFalse(malformed.IsSuccess);
-        Assert.AreEqual(DomainErrorCode.UnsupportedPlaylistFormat, malformed.Error!.Code);
+        Assert.AreEqual(
+            DomainErrorCode.XtreamLiveCatalogResponseUnsupported,
+            malformed.Error!.Code);
         CollectionAssert.AreEqual(
-            new[] { string.Empty, "get_live_categories" },
+            AccountAndLiveCategoryActions,
             malformedTransport.Actions);
+    }
+
+    [TestMethod]
+    public async Task AuthenticatedEmptyProviderSentinelsDoNotHideAvailableTypedFamilies()
+    {
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        var transport = new ScriptedTransport(
+            """{"user_info":{"auth":true}}""",
+            "{}",
+            "false",
+            "[]",
+            """[{"stream_id":"movie-4","name":"Synthetic movie"}]""",
+            "null",
+            "[]");
+        var client = new XtreamProviderClient(store, transport);
+
+        DomainResult<XtreamContentCatalog> result =
+            await client.LoadContentCatalogAsync(source);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.IsEmpty(result.Value!.LiveCategories.Items);
+        Assert.IsEmpty(result.Value.LiveStreams.Items);
+        Assert.IsEmpty(result.Value.MovieCategories.Items);
+        Assert.HasCount(1, result.Value.Movies.Items);
+        Assert.IsEmpty(result.Value.SeriesCategories.Items);
+        Assert.IsEmpty(result.Value.Series.Items);
+        CollectionAssert.AreEqual(
+            ContentCatalogActions,
+            transport.Actions);
+    }
+
+    [TestMethod]
+    public async Task UnsupportedResponsesExposeOnlyTheSafeXtreamCatalogStage()
+    {
+        const string account = """{"user_info":{"auth":true}}""";
+        const string unsupported = """{"provider_message":"credential-canary"}""";
+        (string[] Responses, DomainErrorCode Expected)[] cases =
+        [
+            ([unsupported, unsupported, unsupported],
+                DomainErrorCode.XtreamAccountResponseUnsupported),
+            ([account, unsupported], DomainErrorCode.XtreamLiveCatalogResponseUnsupported),
+            ([account, "[]", "[]", unsupported],
+                DomainErrorCode.XtreamMovieCatalogResponseUnsupported),
+            ([account, "[]", "[]", "[]", "[]", unsupported],
+                DomainErrorCode.XtreamSeriesCatalogResponseUnsupported),
+        ];
+
+        foreach ((string[] responses, DomainErrorCode expected) in cases)
+        {
+            using var store = new CredentialMemoryStore();
+            ContentSource source = await CreateSourceAsync(store);
+            var client = new XtreamProviderClient(store, new ScriptedTransport(responses));
+
+            DomainResult<XtreamContentCatalog> result =
+                await client.LoadContentCatalogAsync(source);
+
+            Assert.IsFalse(result.IsSuccess);
+            Assert.AreEqual(expected, result.Error!.Code);
+            Assert.IsFalse(
+                result.ToString().Contains("credential-canary", StringComparison.Ordinal));
+            Assert.IsFalse(
+                result.Error.ResourceKey.Contains("credential-canary", StringComparison.Ordinal));
+        }
+    }
+
+    [TestMethod]
+    public async Task XtreamItemLimitFailureIsNotCollapsedIntoAFormatError()
+    {
+        string oversizedCatalog = string.Concat(
+            "[",
+            string.Join(
+                ',',
+                Enumerable.Repeat(
+                    "{}",
+                    XtreamProviderJsonParser.MaximumStreamCount + 1)),
+            "]");
+        using var store = new CredentialMemoryStore();
+        ContentSource source = await CreateSourceAsync(store);
+        var client = new XtreamProviderClient(
+            store,
+            new ScriptedTransport(
+                """{"user_info":{"auth":true}}""",
+                "[]",
+                oversizedCatalog));
+
+        DomainResult<XtreamLiveCatalog> result =
+            await client.LoadLiveCatalogAsync(source);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(DomainErrorCode.PlaylistEntryLimitExceeded, result.Error!.Code);
     }
 
     [TestMethod]
