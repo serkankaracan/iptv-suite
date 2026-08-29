@@ -19,26 +19,34 @@
             <TextBlock x:Name="SectionDescriptionText" Style="{StaticResource ShellSecondaryTextStyle}" />
         </StackPanel>
 
-        <Grid Grid.Row="1" Padding="16" ColumnSpacing="12"
-              Background="{StaticResource ShellCardBrush}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="3*" />
-            </Grid.ColumnDefinitions>
-            <ComboBox x:Name="LibrarySourceSelector" Header="Playlist source"
-                      AutomationProperties.AutomationId="LibrarySourceSelector"
-                      DisplayMemberPath="Name"
-                      SelectionChanged="LibrarySourceSelector_SelectionChanged" />
-            <ComboBox x:Name="LibraryCategorySelector" Grid.Column="1" Header="Category"
-                      AutomationProperties.AutomationId="LibraryCategorySelector"
-                      DisplayMemberPath="Name" IsEnabled="False"
-                      SelectionChanged="LibraryCategorySelector_SelectionChanged" />
-            <AutoSuggestBox x:Name="LibrarySearchBox" Grid.Column="2" PlaceholderText="Search"
-                            AutomationProperties.AutomationId="LibrarySearchBox"
-                            QuerySubmitted="LibrarySearchBox_QuerySubmitted"
-                            TextChanged="LibrarySearchBox_TextChanged" />
-        </Grid>
+        <Border Grid.Row="1" Padding="18,14"
+                Background="{StaticResource ShellCardBrush}"
+                BorderBrush="{StaticResource ShellBorderBrush}"
+                BorderThickness="1" CornerRadius="16">
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.1*" />
+                    <ColumnDefinition Width="1*" />
+                    <ColumnDefinition Width="1.6*" />
+                </Grid.ColumnDefinitions>
+                <ComboBox x:Name="LibrarySourceSelector" Header="Playlist source"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
+                          AutomationProperties.AutomationId="LibrarySourceSelector"
+                          DisplayMemberPath="Name"
+                          SelectionChanged="LibrarySourceSelector_SelectionChanged" />
+                <ComboBox x:Name="LibraryCategorySelector" Grid.Column="1" Header="Category"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
+                          AutomationProperties.AutomationId="LibraryCategorySelector"
+                          DisplayMemberPath="Name" IsEnabled="False"
+                          SelectionChanged="LibraryCategorySelector_SelectionChanged" />
+                <AutoSuggestBox x:Name="LibrarySearchBox" Grid.Column="2" Header="Search"
+                                HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
+                                PlaceholderText="Title, season or episode"
+                                AutomationProperties.AutomationId="LibrarySearchBox"
+                                QuerySubmitted="LibrarySearchBox_QuerySubmitted"
+                                TextChanged="LibrarySearchBox_TextChanged" />
+            </Grid>
+        </Border>
 
         <Grid Grid.Row="2" ColumnSpacing="8">
             <Grid.ColumnDefinitions>

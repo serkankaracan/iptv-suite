@@ -132,6 +132,34 @@ public sealed class PostMvpContentExperienceContractTests
         Assert.AreEqual("64", navigation.Attribute("CompactPaneLength")?.Value);
         Assert.AreEqual("244", navigation.Attribute("OpenPaneLength")?.Value);
         _ = RequiredNamedElement(windowMarkup, x, "ShellContentFrame");
+        XElement pageHost = RequiredNamedElement(windowMarkup, x, "PageHost");
+        Assert.AreEqual("Stretch", pageHost.Attribute("HorizontalContentAlignment")?.Value);
+        Assert.AreEqual("Stretch", pageHost.Attribute("VerticalContentAlignment")?.Value);
+        XElement homeScrollViewer = homeMarkup
+            .Descendants()
+            .Single(element => element.Name.LocalName == "ScrollViewer");
+        Assert.AreEqual(
+            "Stretch",
+            homeScrollViewer.Attribute("HorizontalContentAlignment")?.Value);
+
+        XDocument liveMarkup = LoadMarkup(windowsRoot, "MainPage.xaml");
+        foreach ((string name, string header) in new[]
+                 {
+                     ("SourceSelector", "Playlist source"),
+                     ("CategorySelector", "Category"),
+                     ("SearchBox", "Search"),
+                 })
+        {
+            XElement filter = RequiredNamedElement(liveMarkup, x, name);
+            Assert.AreEqual(header, filter.Attribute("Header")?.Value);
+            Assert.AreEqual("Bottom", filter.Attribute("VerticalAlignment")?.Value);
+        }
+
+        XDocument libraryMarkup = LoadMarkup(windowsRoot, "ContentLibraryPage.xaml");
+        Assert.AreEqual(
+            "Search",
+            RequiredNamedElement(libraryMarkup, x, "LibrarySearchBox")
+                .Attribute("Header")?.Value);
 
         XElement[] plannedItems = windowMarkup
             .Descendants()

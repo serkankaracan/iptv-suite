@@ -6,9 +6,10 @@
     Background="Transparent"
     Loaded="HomePage_Loaded"
     SizeChanged="HomePage_SizeChanged">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+    <ScrollViewer HorizontalContentAlignment="Stretch"
+                  HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-        <Grid x:Name="HomeLayoutGrid" MaxWidth="1680" Padding="36,28,36,40"
+        <Grid x:Name="HomeLayoutGrid" Padding="36,28,36,40"
               HorizontalAlignment="Stretch" RowSpacing="24">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />

@@ -33,7 +33,7 @@
                         PaneDisplayMode="Auto"
                         SelectionChanged="AppNavigation_SelectionChanged">
             <NavigationView.PaneHeader>
-                <StackPanel Margin="4,10,8,16" Orientation="Horizontal" Spacing="12">
+                <StackPanel Margin="16,10,8,16" Orientation="Horizontal" Spacing="12">
                     <Border Width="40" Height="40" Background="{StaticResource ShellAccentMutedBrush}"
                             CornerRadius="12">
                         <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -99,7 +99,9 @@
                     Background="{StaticResource ShellContentBrush}"
                     BorderBrush="{StaticResource ShellBorderBrush}" BorderThickness="1"
                     CornerRadius="20">
-                <ContentControl x:Name="PageHost" />
+                <ContentControl x:Name="PageHost"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Stretch" />
             </Border>
         </NavigationView>
     </Grid>

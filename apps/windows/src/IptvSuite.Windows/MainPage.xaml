@@ -22,19 +22,23 @@
                            FontSize="11" AutomationProperties.AutomationId="PackageInfoText" />
             </StackPanel>
         </StackPanel>
-        <Grid x:Name="FilterPanel" Grid.Row="1" Padding="16" ColumnSpacing="12"
-              Background="{StaticResource ShellCardBrush}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="3*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <ComboBox x:Name="SourceSelector" MinWidth="240" HorizontalAlignment="Stretch" TabIndex="0" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSourceSelector" AutomationProperties.Name="Playlist source" DisplayMemberPath="Name" Header="Playlist source" SelectionChanged="SourceSelector_SelectionChanged" />
-            <ComboBox x:Name="CategorySelector" Grid.Column="1" TabIndex="1" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogCategorySelector" AutomationProperties.Name="Channel category" DisplayMemberPath="Name" SelectionChanged="CategorySelector_SelectionChanged" />
-            <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" TabIndex="2" IsTabStop="True" IsEnabled="False" AutomationProperties.AutomationId="CatalogSearchBox" AutomationProperties.Name="Search channels" PlaceholderText="Search channels" QuerySubmitted="SearchBox_QuerySubmitted" TextChanged="SearchBox_TextChanged" />
-            <Button x:Name="DeleteSourceButton" Grid.Column="3" TabIndex="3" IsEnabled="False" Visibility="Collapsed" AutomationProperties.AutomationId="CatalogDeleteSourceButton" AutomationProperties.Name="Delete selected playlist source" Click="DeleteSourceButton_Click" Content="Delete source" />
-        </Grid>
+        <Border x:Name="FilterPanel" Grid.Row="1" Padding="18,14"
+                Background="{StaticResource ShellCardBrush}"
+                BorderBrush="{StaticResource ShellBorderBrush}"
+                BorderThickness="1" CornerRadius="16">
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.1*" />
+                    <ColumnDefinition Width="1*" />
+                    <ColumnDefinition Width="1.6*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ComboBox x:Name="SourceSelector" MinWidth="240" HorizontalAlignment="Stretch" TabIndex="0" IsTabStop="True" IsEnabled="False" VerticalAlignment="Bottom" AutomationProperties.AutomationId="CatalogSourceSelector" AutomationProperties.Name="Playlist source" DisplayMemberPath="Name" Header="Playlist source" SelectionChanged="SourceSelector_SelectionChanged" />
+                <ComboBox x:Name="CategorySelector" Grid.Column="1" TabIndex="1" IsTabStop="True" IsEnabled="False" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" AutomationProperties.AutomationId="CatalogCategorySelector" AutomationProperties.Name="Channel category" DisplayMemberPath="Name" Header="Category" SelectionChanged="CategorySelector_SelectionChanged" />
+                <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" TabIndex="2" IsTabStop="True" IsEnabled="False" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" AutomationProperties.AutomationId="CatalogSearchBox" AutomationProperties.Name="Search channels" Header="Search" PlaceholderText="Name, number or category" QuerySubmitted="SearchBox_QuerySubmitted" TextChanged="SearchBox_TextChanged" />
+                <Button x:Name="DeleteSourceButton" Grid.Column="3" TabIndex="3" IsEnabled="False" Visibility="Collapsed" VerticalAlignment="Bottom" AutomationProperties.AutomationId="CatalogDeleteSourceButton" AutomationProperties.Name="Delete selected playlist source" Click="DeleteSourceButton_Click" Content="Delete source" />
+            </Grid>
+        </Border>
         <Grid x:Name="ContentPanel" Grid.Row="2" ColumnSpacing="20">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="2*" />
